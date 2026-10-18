@@ -4,6 +4,10 @@
 #   spectool -g packaging/rpm/stagerig.spec      # or put the tarball in ~/rpmbuild/SOURCES
 #   rpmbuild -ba packaging/rpm/stagerig.spec
 
+# Fedora has no clap-devel yet; the bundled CLAP headers are used unless
+# built with --with system_clap.
+%bcond system_clap 0
+
 Name:           stagerig
 Version:        0.1.57
 Release:        1%{?dist}
@@ -21,7 +25,9 @@ BuildRequires:  gcc-c++
 BuildRequires:  cmake
 BuildRequires:  ninja-build
 BuildRequires:  pkgconfig
+%if %{with system_clap}
 BuildRequires:  clap-devel
+%endif
 BuildRequires:  alsa-lib-devel
 BuildRequires:  pipewire-jack-audio-connection-kit-devel
 BuildRequires:  libX11-devel
@@ -40,6 +46,9 @@ BuildRequires:  xorg-x11-server-Xvfb
 # JUCE 8.0.15 is needed and is not packaged in Fedora; its own dependencies
 # come with it, inside the JUCE modules.
 Provides:       bundled(juce) = 8.0.15
+%if %{without system_clap}
+Provides:       bundled(clap)
+%endif
 Provides:       bundled(lilv)
 Provides:       bundled(serd)
 Provides:       bundled(sord)
@@ -84,7 +93,7 @@ only itself down. Audio goes through PipeWire or JACK at low latency.
 %cmake -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DSTAGERIG_VERSION=%{version} \
-    -DSTAGERIG_SYSTEM_CLAP=ON
+    -DSTAGERIG_SYSTEM_CLAP=%{?with_system_clap:ON}%{!?with_system_clap:OFF}
 %cmake_build
 
 %install
