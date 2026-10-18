@@ -738,6 +738,16 @@ and buffer size.
   clock to its own block size every few seconds; StageRig then shows *clock
   held by another app* in the status bar and cannot get its own block size.
 
+**A USB interface on the ALSA type.** An interface PipeWire does not manage
+(the Audio window offers it under the ALSA type) is driven by StageRig
+directly, and StageRig runs its audio thread at realtime priority for it. Two
+settings are easy to pick there and sound like a broken cable, so the status
+line and the status bar warn about them: a buffer below 128 samples (a
+full-speed USB interface cannot keep up with one USB packet per block; 256 is
+safe, 128 often works), and an input device different from the output device
+(two clocks, which drift and crackle -- use the same interface for both, or
+untick the input channels).
+
 *late N* in the status bar counts blocks where a plugin did not answer in time.
 A few during loading are normal. A number that climbs while you play means the
 block size is too small for the plugins in that program.
@@ -748,11 +758,18 @@ A setup is one `.stagerig.json` file holding every input, program, plugin and
 mapping, including each plugin's own state.
 
 - **Save** / **Save As...** write the file. The last file reopens next start.
-- Plugin state is captured whenever a program is unloaded and whenever you save,
-  so tweaks made inside a plugin GUI persist.
+  New saves use `.stagerig.json`; a `.performer.json` from before the rename
+  opens as before and keeps its name.
+- Plugin state is captured whenever you leave a program, close a plugin's
+  window, unload a program or save, so tweaks made inside a plugin GUI
+  persist.
 - StageRig autosaves about once a minute to
   `~/.config/StageRig/autosave.stagerig.json` and again on quit. If that file
-  is newer than the setup you open, the status bar tells you.
+  is newer than the setup you open, the status bar tells you. The autosave
+  asks only the plugins whose state may have changed since it was last read
+  -- asking a plugin for its state can stall its audio for a moment, and
+  asking twenty at once was audible -- so a quiet minute of playing costs
+  nothing. Save and quit ask every plugin, so press Save between songs.
 
 A setup file is plain JSON and safe to keep in version control.
 
@@ -829,6 +846,8 @@ blacklisting the plugin; scan again once the install has finished.
 | A plugin shows *Deactivated* in the Plugins window | It hung or crashed twice while being scanned. | Select it and press **Remove selected** to give it another chance. |
 | *late N* climbing while playing | Plugins are missing the block deadline. | Raise the block size in **Audio...**, or check realtime scheduling. |
 | *clock held by another app* | Another audio application forces the PipeWire block size. | Close it, or set its block size to match. |
+| Static or crackle on a USB interface under the ALSA type | The buffer is below 128 samples, or the input is on a different device from the output. | Set 256 (or 128) in **Audio...**, and the same interface for input and output; the status line says which it is. |
+| A few seconds of static about once a minute | A plugin stalling its audio while its state is read for the autosave. | Fixed in 0.1.56: only changed plugins are asked. Press **Save** between songs rather than mid-song. |
 | No sound, plugin loaded | Slot disabled, key or velocity range excludes what you play, gain at minimum, or wrong MIDI channel. | Check the slot's controls; the on-screen keyboard rules out the controller. |
 | A note hangs | A plugin missed a note-off. | Press **PANIC**. |
 | The parameter list seems endless | A VST3 with thousands of per-channel controller parameters. | Type in the search box; see the mapping section above. |
