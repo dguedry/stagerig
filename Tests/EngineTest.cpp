@@ -1422,6 +1422,16 @@ int main()
         engine.selectProgram (0, 50); settle();        // leaving 51 captures it
         engine.selectProgram (0, 51); settle();        // leaving 50 captures it
 
+        /* Captured once, a plugin is left alone by the autosave until
+           something could have changed it: it is the asking that costs. */
+        CHECK (! a->stateMayHaveChanged() && ! b->stateMayHaveChanged());
+        CHECK (b->setParameterValue (idx, 0.75f));
+        CHECK (b->stateMayHaveChanged() && ! a->stateMayHaveChanged());
+        engine.captureSetup (-1, true);
+        CHECK (! b->stateMayHaveChanged());
+        CHECK (b->setParameterValue (idx, 0.8f));
+        engine.selectProgram (0, 50); settle(); engine.selectProgram (0, 51); settle();
+
         TemporaryFile two (".stagerig.json");
         CHECK (engine.captureSetup().saveToFile (two.getFile()).wasOk());
         Setup rl;

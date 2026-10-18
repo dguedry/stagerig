@@ -87,8 +87,15 @@ public:
 
     // State / editor --------------------------------------------------------------------
     /** `timeoutMs` < 0 means the usual 30 s. A quit passes something short:
-        a host that has stopped answering must not hold the exit for long. */
+        a host that has stopped answering must not hold the exit for long.
+        A successful read marks the state as captured (see stateMayHaveChanged). */
     bool getState (juce::MemoryBlock&, int timeoutMs = -1);
+    /** True since the last getState()/setState() if anything could have
+        changed the plugin's state: a parameter moved (by us or by the plugin),
+        its window shown or closed, or a fresh load with no state restored.
+        Asking a plugin for its state is not free -- many stall their audio
+        while serialising -- so the autosave asks only those that say yes. */
+    bool stateMayHaveChanged() const                        { return stateDirty.load(); }
     bool setState (const juce::MemoryBlock&);
     bool showEditor (const juce::String& title);
     bool hideEditor();
@@ -163,7 +170,7 @@ private:
     mutable std::mutex errorMutex;
     std::map<uint32_t, Pending*> pending;
     std::atomic<uint32_t> nextRequestId { 1 };
-    std::atomic<bool> alive { false }, editorOpen { false };
+    std::atomic<bool> alive { false }, editorOpen { false }, stateDirty { true };
     juce::String lastError;
     Listener* listener = nullptr;
 

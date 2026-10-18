@@ -350,7 +350,7 @@ void Engine::loadSetup (Setup newSetup)
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
-Setup Engine::captureSetup (int budgetMs)
+Setup Engine::captureSetup (int budgetMs, bool onlyChanged)
 {
     const auto deadline = Time::getMillisecondCounter() + (uint32) jmax (0, budgetMs);
     for (int i = 0; i < (int) runtimes.size(); ++i)
@@ -363,7 +363,7 @@ Setup Engine::captureSetup (int budgetMs)
                 if (now >= deadline) continue;            // out of time: keep what we have
                 timeout = (int) jmin ((uint32) 30000, deadline - now);
             }
-            captureProgramState (i, *rt, timeout);
+            captureProgramState (i, *rt, timeout, onlyChanged);
         }
     for (int o = 0; o < (int) outputs.size(); ++o)
     {
@@ -374,7 +374,7 @@ Setup Engine::captureSetup (int budgetMs)
             if (now >= deadline) break;
             timeout = (int) jmin ((uint32) 30000, deadline - now);
         }
-        captureProgramState (outputAddress (o), outputs[(size_t) o]->chain, timeout);
+        captureProgramState (outputAddress (o), outputs[(size_t) o]->chain, timeout, onlyChanged);
     }
     return setup;
 }
@@ -1533,16 +1533,16 @@ void Engine::destroyNode (PluginNode* node, int patienceMs)
     node->plugin.reset();
 }
 
-bool Engine::captureProgramState (int inputIndex, ProgramRuntime& rt, int timeoutMs)
+bool Engine::captureProgramState (int inputIndex, ProgramRuntime& rt, int timeoutMs, bool onlyChanged)
 {
     auto* defPtr = defFor (inputIndex, rt.program);
     if (defPtr == nullptr) return false;
     auto& def = *defPtr;
 
     bool changed = false;
-    auto capture = [&changed, timeoutMs] (PluginNode& node, MemoryBlock& dest)
+    auto capture = [&changed, timeoutMs, onlyChanged] (PluginNode& node, MemoryBlock& dest)
     {
-        if (node.alive())
+        if (node.alive() && (! onlyChanged || node.plugin->stateMayHaveChanged()))
         {
             MemoryBlock mb;
             if (node.plugin->getState (mb, timeoutMs) && mb.getSize() > 0 && mb != dest)

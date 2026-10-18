@@ -2174,7 +2174,10 @@ void MainComponent::timerCallback()
         lastAutosaveTime = now;
         dirty = false;
 
-        const auto captured = engine.captureSetup();
+        /* Only the plugins that may have changed, and within a budget: this
+           runs mid-set, and a plugin that stalls its audio to serialise, or a
+           host that has stopped answering, must not take the music with it. */
+        const auto captured = engine.captureSetup (5000, true);
         const bool ok = captured.saveToFile (getAutosaveFile()).wasOk();
 
         if (currentFile != File() && currentFile.existsAsFile())

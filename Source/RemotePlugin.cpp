@@ -344,6 +344,7 @@ bool RemotePlugin::setParameterValue (int index, float value)
 {
     if (paramValues != nullptr && index >= 0 && index < (int) params.size())
         paramValues[(size_t) index].store (value);
+    stateDirty.store (true);
     MemoryOutputStream out;
     out.writeInt (index);
     out.writeFloat (value);
@@ -352,7 +353,11 @@ bool RemotePlugin::setParameterValue (int index, float value)
 
 bool RemotePlugin::getState (MemoryBlock& state, int timeoutMs)
 {
-    return request (ipc::Msg::getState, {}, timeoutMs < 0 ? kStateTimeoutMs : timeoutMs, &state, true);
+    // Clear first: a change arriving while the host serialises is a change after this snapshot.
+    stateDirty.store (false);
+    const bool ok = request (ipc::Msg::getState, {}, timeoutMs < 0 ? kStateTimeoutMs : timeoutMs, &state, true);
+    if (! ok) stateDirty.store (true);
+    return ok;
 }
 
 void RemotePlugin::requestQuit()
@@ -374,7 +379,9 @@ void RemotePlugin::requestQuit()
 
 bool RemotePlugin::setState (const MemoryBlock& state)
 {
-    return request (ipc::Msg::setState, state, kStateTimeoutMs, nullptr, true);
+    const bool ok = request (ipc::Msg::setState, state, kStateTimeoutMs, nullptr, true);
+    if (ok) stateDirty.store (false);          // the model and the plugin agree
+    return ok;
 }
 
 bool RemotePlugin::showEditor (const String& title)
@@ -382,7 +389,7 @@ bool RemotePlugin::showEditor (const String& title)
     MemoryOutputStream out;
     out.writeString (title);
     const bool ok = request (ipc::Msg::showEditor, out.getMemoryBlock(), kEditorTimeoutMs, nullptr, true);
-    if (ok) editorOpen.store (true);
+    if (ok) { editorOpen.store (true); stateDirty.store (true); }    // a window is where things get changed
     return ok;
 }
 
@@ -541,6 +548,7 @@ void RemotePlugin::handleNotification (const ipc::FrameHeader& header, const Mem
                               name.toRawUTF8(), index, value);
             if (paramValues != nullptr && index >= 0 && index < (int) params.size())
                 paramValues[(size_t) index].store (value);
+            stateDirty.store (true);
             if (listener != nullptr)
             {
                 if ((ipc::Msg) header.type == ipc::Msg::notifyParamTouched) listener->remoteParameterTouched (*this, index, value);
@@ -550,6 +558,7 @@ void RemotePlugin::handleNotification (const ipc::FrameHeader& header, const Mem
         }
         case ipc::Msg::notifyEditorClosed:
             editorOpen.store (false);
+            stateDirty.store (true);
             if (listener != nullptr) listener->remoteEditorClosed (*this);
             break;
         case ipc::Msg::notifyLog:
@@ -593,6 +602,7 @@ void RemotePlugin::queueParameterChange (int index, float value)
 {
     if (paramValues != nullptr && index >= 0 && index < (int) params.size())
         paramValues[(size_t) index].store (value);
+    stateDirty.store (true, std::memory_order_relaxed);
     if (pendingParamCount < ipc::kMaxParamChanges)
         pendingParams[pendingParamCount++] = { (uint32_t) index, value };
 }

@@ -79,7 +79,12 @@ public:
     /** `budgetMs` >= 0 bounds the whole capture: hosts that have stopped
         answering share one deadline instead of each costing a full wait. The
         model keeps whatever it last had for a plugin that does not answer. */
-    Setup captureSetup (int budgetMs = -1);
+    /** `onlyChanged` asks only the plugins whose state may have changed since
+        it was last read (RemotePlugin::stateMayHaveChanged): the autosave's
+        way, because asking nineteen plugins at once stalls the ones that
+        lock their audio to serialise -- a few seconds of static every
+        minute. A save or a quit asks everything. */
+    Setup captureSetup (int budgetMs = -1, bool onlyChanged = false);
     void setPreloadAllPrograms (bool);
     void setReleaseTailSeconds (double);
     /** Whether a program change leaves the outgoing program's held notes and
@@ -413,7 +418,7 @@ private:
     void unloadProgram (InputRuntime&, int program);
     void destroyProgramPlugins (ProgramRuntime&, int patienceMs = 3000);
     void destroyNode (PluginNode*, int patienceMs = 3000);
-    bool captureProgramState (int inputIndex, ProgramRuntime&, int timeoutMs = -1);   // true if anything changed
+    bool captureProgramState (int inputIndex, ProgramRuntime&, int timeoutMs = -1, bool onlyChanged = false);   // true if anything changed
     void resolveMappings (ProgramRuntime&, const ProgramDef&);
     void openMidiDevices();
     void housekeeping();
