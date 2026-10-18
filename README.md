@@ -10,7 +10,7 @@ with every knob, drawbar and menu live under your finger. Pull a drawbar on the
 tablet and the organ on stage moves.
 
 <p align="center">
-  <img src="docs/images/stagerig.png" alt="StageRig: songs with their tempos and chart markers, a set list, two keyboards as inputs, a program list grouped by kind, a SWAM Trumpet loaded with an exciter effect and its key and velocity ranges, and the on-screen keyboard with pitch and mod wheels" width="900">
+  <img src="docs/images/stagerig.png" alt="StageRig: songs and a set list with tempos and chart markers, two keyboards and an audio input with its level meter, a program list grouped by kind, a SWAM Alto Sax with its key and velocity ranges, and the on-screen keyboard with pitch and mod wheels" width="900">
 </p>
 
 StageRig exists because the live hosts keyboard players rely on -- MainStage,
