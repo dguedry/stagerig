@@ -1,0 +1,23 @@
+.TH STAGERIG-PLUGIN-HOST 1 "October 2026" "StageRig" "User Commands"
+.SH NAME
+stagerig\-plugin\-host \- runs one plugin for StageRig
+.SH SYNOPSIS
+.B stagerig\-plugin\-host
+.B \-\-serve
+.I shm\-name socket\-fd
+.br
+.B stagerig\-plugin\-host
+.B \-\-scan
+.I format file
+.SH DESCRIPTION
+A helper started by
+.BR StageRig (1),
+not meant to be run by hand. With
+.B \-\-serve
+it loads a single plugin and exchanges audio with StageRig through shared
+memory; with
+.B \-\-scan
+it probes a plugin file and prints its description, so that a plugin which
+crashes while being scanned cannot take StageRig down.
+.SH SEE ALSO
+.BR StageRig (1)

@@ -372,5 +372,10 @@ coverage.
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
 
-JUCE is included as a submodule and carries [its own licence](https://github.com/juce-framework/JUCE/blob/master/LICENSE.md);
-building this project under the GPL uses JUCE under the GPL.
+JUCE is included as a submodule and carries [its own licence](https://github.com/juce-framework/JUCE/blob/master/LICENSE.md):
+JUCE 8 is offered under the AGPLv3 or a commercial licence, and StageRig uses it
+under the AGPLv3. GPLv3 section 13 allows the two to be combined, so a StageRig
+binary is distributed under the GPLv3 for StageRig's own code and the AGPLv3 for
+JUCE's. The CLAP headers are MIT-licensed.
+
+Packaging for distributions: see [docs/PACKAGING.md](docs/PACKAGING.md).

@@ -1,0 +1,194 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: StageRig
+Upstream-Contact: Donnie Guedry <dguedry@gmail.com>
+Source: https://github.com/dguedry/stagerig
+Comment:
+ The release tarball (stagerig-VERSION.tar.xz, made by
+ scripts/make-source-tarball.sh) bundles the JUCE framework and the CLAP
+ headers as git submodules. JUCE 8.0.15 is bundled because StageRig needs that
+ release and the archive's juce-modules-source is older; the build uses the
+ system CLAP headers (libclap-dev) and the bundled copy is a fallback for
+ other distributions. The tarball leaves out JUCE's examples, tools and the
+ AAX and ASIO SDKs, none of which a Linux build uses.
+Files-Excluded:
+ external/JUCE/examples
+ external/JUCE/docs
+ external/JUCE/extras/AudioPerformanceTest
+ external/JUCE/extras/AudioPluginHost
+ external/JUCE/extras/BinaryBuilder
+ external/JUCE/extras/NetworkGraphicsDemo
+ external/JUCE/extras/Projucer
+ external/JUCE/extras/UnitTestRunner
+ external/JUCE/extras/WindowsDLL
+ external/JUCE/modules/juce_audio_plugin_client/AAX/SDK
+ external/JUCE/modules/juce_audio_devices/native/asio
+
+Files: *
+Copyright: 2026 Donnie Guedry <dguedry@gmail.com>
+License: GPL-3+
+
+Files: debian/*
+Copyright: 2026 Donnie Guedry <dguedry@gmail.com>
+License: GPL-3+
+
+Files: Resources/io.github.dguedry.StageRig.metainfo.xml
+Copyright: 2026 Donnie Guedry <dguedry@gmail.com>
+License: CC0-1.0
+
+Files: external/JUCE/*
+Copyright: Raw Material Software Limited
+License: AGPL-3
+Comment:
+ JUCE 8 is offered under the AGPLv3 or a commercial licence; StageRig uses it
+ under the AGPLv3. GPLv3 section 13 permits combining the GPLv3 StageRig code
+ with it.
+
+Files: external/JUCE/modules/juce_audio_formats/codecs/flac/*
+Copyright: 2000-2009 Josh Coalson
+           2011-2023 Xiph.Org Foundation
+License: BSD-3-clause
+
+Files: external/JUCE/modules/juce_audio_formats/codecs/oggvorbis/*
+Copyright: 1994-2020 Xiph.Org Foundation
+License: BSD-3-clause
+
+Files: external/JUCE/modules/juce_graphics/image_formats/jpglib/*
+Copyright: 1991-2018 Thomas G. Lane, Guido Vollbeding
+License: IJG
+
+Files: external/JUCE/modules/juce_graphics/image_formats/pnglib/*
+Copyright: 1995-2024 The PNG Reference Library Authors
+           1998-2018 Glenn Randers-Pehrson
+License: Zlib
+
+Files: external/JUCE/modules/juce_core/zip/zlib/*
+Copyright: 1995-2024 Jean-loup Gailly and Mark Adler
+License: Zlib
+
+Files: external/JUCE/modules/juce_box2d/box2d/*
+Copyright: 2006-2011 Erin Catto
+License: Zlib
+
+Files: external/JUCE/modules/juce_graphics/fonts/harfbuzz/*
+Copyright: 2009-2024 HarfBuzz authors (Behdad Esfahbod, Google, Red Hat, and others)
+License: MIT-old-harfbuzz
+
+Files: external/JUCE/modules/juce_graphics/unicode/sheenbidi/*
+       external/JUCE/modules/juce_audio_devices/native/oboe/*
+       external/JUCE/modules/juce_audio_plugin_client/AU/AudioUnitSDK/*
+Copyright: 2014-2024 Muhammad Tayyab Akram
+           2016-2024 The Android Open Source Project
+           2016-2024 Apple Inc.
+License: Apache-2.0
+
+Files: external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK/*
+Copyright: 2025 Steinberg Media Technologies GmbH
+License: Expat
+
+Files: external/JUCE/modules/juce_audio_processors_headless/format_types/LV2_SDK/*
+Copyright: 2006-2024 David Robillard <d@drobilla.net>
+           2006-2012 Steve Harris, Lars Luthman and others
+License: ISC
+
+Files: external/JUCE/modules/juce_javascript/choc/*
+Copyright: 2022-2024 Julian Storer
+           2017-2024 Fabrice Bellard and Charlie Gordon (QuickJS)
+License: ISC and Expat
+
+Files: external/JUCE/modules/juce_audio_processors_headless/format_types/pslextensions/*
+Copyright: none
+License: public-domain
+ The pslextensions header states that it is placed in the public domain.
+
+Files: external/clap/*
+Copyright: 2021-2024 Alexandre Bique and the CLAP contributors
+License: Expat
+
+License: GPL-3+
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation, either version 3 of the License, or (at your option) any
+ later version.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in "/usr/share/common-licenses/GPL-3".
+
+License: AGPL-3
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU Affero General Public License as published by the
+ Free Software Foundation, version 3.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ details.
+ .
+ The full text is at https://www.gnu.org/licenses/agpl-3.0.txt; Debian does
+ not ship it in /usr/share/common-licenses.
+
+License: Apache-2.0
+ Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ use this file except in compliance with the License.
+ .
+ On Debian systems, the complete text of the Apache License version 2.0 can be
+ found in "/usr/share/common-licenses/Apache-2.0".
+
+License: BSD-3-clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are met:
+ 1. Redistributions of source code must retain the above copyright notice,
+    this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+ 3. Neither the name of the copyright holder nor the names of its
+    contributors may be used to endorse or promote products derived from this
+    software without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ AND ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED.
+
+License: CC0-1.0
+ To the extent possible under law, the author has waived all copyright and
+ related or neighbouring rights to this work.
+ .
+ On Debian systems, the complete text of the CC0 1.0 Universal license can be
+ found in "/usr/share/common-licenses/CC0-1.0".
+
+License: Expat
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to
+ deal in the Software without restriction, including without limitation the
+ rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ sell copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+License: IJG
+ This software is based in part on the work of the Independent JPEG Group.
+ Permission is granted to use, copy, modify and distribute this software for
+ any purpose, without fee, subject to the conditions in the README file of the
+ IJG distribution, which is included with the bundled jpglib sources.
+
+License: ISC
+ Permission to use, copy, modify, and/or distribute this software for any
+ purpose with or without fee is hereby granted, provided that the above
+ copyright notice and this permission notice appear in all copies.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES.
+
+License: MIT-old-harfbuzz
+ Permission is hereby granted, without written agreement and without license
+ or royalty fees, to use, copy, modify, and distribute this software and its
+ documentation for any purpose, provided that the above copyright notice and
+ the following two paragraphs appear in all copies of this software.
+
+License: Zlib
+ This software is provided 'as-is', without any express or implied warranty.
+ Permission is granted to anyone to use this software for any purpose,
+ including commercial applications, and to alter it and redistribute it
+ freely, subject to the restrictions stated in the bundled sources.

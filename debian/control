@@ -1,0 +1,64 @@
+Source: stagerig
+Section: sound
+Priority: optional
+Maintainer: Donnie Guedry <dguedry@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ cmake,
+ ninja-build,
+ pkgconf,
+ libclap-dev,
+ libasound2-dev,
+ libjack-jackd2-dev,
+ libx11-dev,
+ libxrandr-dev,
+ libxinerama-dev,
+ libxcursor-dev,
+ libxext-dev,
+ libfreetype-dev,
+ libfontconfig-dev,
+ libgl-dev,
+ ladspa-sdk,
+ xvfb <!nocheck>,
+ xauth <!nocheck>,
+Standards-Version: 4.7.0
+Homepage: https://github.com/dguedry/stagerig
+Vcs-Browser: https://github.com/dguedry/stagerig
+Vcs-Git: https://github.com/dguedry/stagerig.git
+Rules-Requires-Root: no
+
+Package: stagerig
+Architecture: amd64 arm64
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ libx11-6,
+ libxext6,
+ libxrandr2,
+ libxinerama1,
+ libxcursor1,
+ libgl1,
+Recommends:
+ pipewire-jack | libjack-jackd2-0,
+ x11vnc,
+ websockify,
+ novnc,
+ xdotool,
+ poppler-utils,
+Suggests:
+ calf-plugins,
+ lsp-plugins-lv2,
+Description: live-performance plugin host for keyboard players
+ StageRig hosts instruments and effects for playing live. Each keyboard has
+ 128 programs selected by MIDI Program Change, each loading one or more
+ VST3, CLAP, LV2 or LADSPA instruments with key and velocity splits, insert
+ effects and MIDI controller mappings. Audio inputs carry effect chains, and
+ every input lands on an output with its own master effects.
+ .
+ Songs combine a program per keyboard with a tempo; set lists order the songs
+ for a footswitch to step through, with lead sheets and charts shown on a
+ tablet. A built-in web app lets a tablet or phone change programs and operate
+ any loaded plugin's own interface, mirrored over the network.
+ .
+ Every plugin runs in its own process, so a plugin that crashes or hangs
+ takes only itself down. Audio goes through PipeWire or JACK at low latency.

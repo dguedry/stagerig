@@ -1,0 +1,58 @@
+.TH STAGERIG 1 "October 2026" "StageRig" "User Commands"
+.SH NAME
+StageRig \- live\-performance plugin host
+.SH SYNOPSIS
+.B StageRig
+.RI [ setup.stagerig.json ]
+.SH DESCRIPTION
+.B StageRig
+hosts VST3, CLAP, LV2 and LADSPA instruments and effects for playing live.
+Each keyboard (an
+.IR input )
+has 128 programs selected by MIDI Program Change; a program holds one or more
+instruments with key and velocity ranges, insert effects, and MIDI controller
+mappings. An input can also be an audio input, whose programs are effect
+chains. Songs combine a program per input with a tempo, and set lists order
+the songs for a footswitch to step through.
+.PP
+A built\-in web app lets a tablet or phone on the same network change programs,
+follow the set list, show charts, and operate any loaded plugin's own
+interface.
+.PP
+Every plugin runs in its own
+.BR stagerig\-plugin\-host (1)
+process, so a plugin that crashes or hangs takes only itself down.
+.SH OPTIONS
+.TP
+.I setup.stagerig.json
+Open this setup instead of the one used last. Setups saved by earlier versions
+under the name Performer
+.RI ( *.performer.json )
+are accepted.
+.SH FILES
+.TP
+.I ~/.config/StageRig/StageRig.settings
+Window, audio device, plugin scan results and options.
+.TP
+.I ~/.config/StageRig/autosave.stagerig.json
+The rolling autosave of the open setup.
+.TP
+.I ~/.config/StageRig/mapping\-templates.json
+Saved per\-plugin MIDI mapping templates.
+.SH ENVIRONMENT
+.TP
+.B STAGERIG_PLUGIN_HOST
+Path of the plugin host executable, when it is not installed beside
+.BR StageRig .
+.SH NOTES
+Mirroring a plugin's interface to a tablet needs
+.BR x11vnc (1),
+.BR websockify (1),
+.BR xdotool (1)
+and noVNC. Charts in PDF form are prepared with
+.BR pdftoppm (1).
+The full manual is under Help in the application.
+.SH SEE ALSO
+.BR stagerig\-plugin\-host (1)
+.PP
+https://github.com/dguedry/stagerig

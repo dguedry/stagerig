@@ -145,13 +145,98 @@ jobs:
           name: stagerig-rpm
           path: build/*.x86_64.rpm
 
+  # The source release distributions build from: the tree with its submodules,
+  # which GitHub's own "Source code" archives leave out. Attached to every release.
+  source:
+    name: Source tarball
+    needs: [auto-tag]
+    if: always() && (needs.auto-tag.result == 'success' || needs.auto-tag.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.v }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          ref: ${{ needs.auto-tag.outputs.sha || github.sha }}
+      - name: Version
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "${{ needs.auto-tag.outputs.version }}" ]]; then V="${{ needs.auto-tag.outputs.version }}"
+          else V="$(sed -n 's/^set(STAGERIG_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"; fi
+          echo "v=$V" >> "$GITHUB_OUTPUT"
+      - name: Make the tarball
+        run: scripts/make-source-tarball.sh "${{ steps.ver.outputs.v }}" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stagerig-source
+          path: stagerig-*.tar.xz
+
+  # The packaging a distribution would use -- debian/ and the Fedora spec --
+  # built from the source tarball, as a buildd or Koji would. Not attached to
+  # releases (the CPack packages above are what users download); this keeps
+  # the distro packaging building and its tests passing.
+  distro-deb:
+    name: Debian packaging (dpkg-buildpackage)
+    needs: [source]
+    if: always() && needs.source.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: stagerig-source }
+      - name: Unpack
+        run: |
+          V="${{ needs.source.outputs.version }}"
+          cp "stagerig-$V.tar.xz" "stagerig_$V.orig.tar.xz"
+          tar -xJf "stagerig_$V.orig.tar.xz"
+          sed -i "1s/([^)]*)/($V-1)/" "stagerig-$V/debian/changelog"
+          # Ubuntu 24.04 has no libclap-dev (Debian and newer Ubuntu do); the
+          # bundled headers in the tarball are used instead.
+          sed -i '/libclap-dev/d' "stagerig-$V/debian/control"
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends devscripts equivs
+          cd "stagerig-${{ needs.source.outputs.version }}" && sudo mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
+      - name: Build and test
+        run: cd "stagerig-${{ needs.source.outputs.version }}" && DEB_BUILD_OPTIONS="parallel=4" dpkg-buildpackage -us -uc -b
+      - name: Inspect
+        run: |
+          dpkg-deb -I stagerig_*.deb
+          dpkg-deb -c stagerig_*.deb
+
+  distro-rpm:
+    name: Fedora packaging (rpmbuild)
+    needs: [source]
+    if: always() && needs.source.result == 'success'
+    runs-on: ubuntu-latest
+    container: fedora:41
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: stagerig-source }
+      - name: Tools
+        run: dnf install -y rpm-build rpmdevtools 'dnf-command(builddep)' tar xz
+      - name: Build and test
+        run: |
+          V="${{ needs.source.outputs.version }}"
+          rpmdev-setuptree
+          cp "stagerig-$V.tar.xz" ~/rpmbuild/SOURCES/
+          tar -xJf "stagerig-$V.tar.xz" "stagerig-$V/packaging/rpm/stagerig.spec"
+          SPEC="stagerig-$V/packaging/rpm/stagerig.spec"
+          sed -i "s/^Version:.*/Version:        $V/" "$SPEC"
+          dnf builddep -y "$SPEC"
+          rpmbuild -ba "$SPEC"
+          rpm -qlp ~/rpmbuild/RPMS/*/stagerig-*.rpm
+
   release:
     name: Attach packages to the release
     # Either a tag was pushed by hand, or auto-tag just cut one in this run.
     # Keying off the tag alone is what left the packages unpublished.
-    needs: [auto-tag, deb, rpm]
+    needs: [auto-tag, deb, rpm, source]
     if: |
-      always() && needs.deb.result == 'success' && needs.rpm.result == 'success'
+      always() && needs.deb.result == 'success' && needs.rpm.result == 'success' && needs.source.result == 'success'
       && (startsWith(github.ref, 'refs/tags/v') || needs.auto-tag.outputs.version != '')
     runs-on: ubuntu-latest
     steps:

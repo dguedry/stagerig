@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Donnie Guedry -->
+<component type="desktop-application">
+  <id>io.github.dguedry.StageRig</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later AND AGPL-3.0-only</project_license>
+  <name>StageRig</name>
+  <summary>Live-performance plugin host for keyboard players</summary>
+  <developer id="io.github.dguedry">
+    <name>Donnie Guedry</name>
+  </developer>
+  <description>
+    <p>
+      StageRig hosts instruments and effects for playing live. Point your
+      keyboards at it, build a program for each sound in your set, and change
+      sounds from the keyboard while you play, or from a tablet on a music
+      stand with no app to install.
+    </p>
+    <ul>
+      <li>128 programs per keyboard, selected by MIDI Program Change; upper and lower manuals change independently</li>
+      <li>VST3, CLAP, LV2 and LADSPA instruments and effects, with splits, layers, velocity curves and insert effects</li>
+      <li>Songs and set lists stepped with a footswitch, with lead sheets and charts shown on the tablet</li>
+      <li>Any loaded plugin's own interface mirrored to a tablet or phone, fully operable</li>
+      <li>Audio inputs with effect chains, outputs with master effects, and level meters</li>
+      <li>Every plugin in its own process, so a crash takes only that plugin down</li>
+      <li>Low-latency PipeWire and JACK audio</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.dguedry.StageRig.desktop</launchable>
+  <icon type="stock">stagerig</icon>
+  <url type="homepage">https://github.com/dguedry/stagerig</url>
+  <url type="bugtracker">https://github.com/dguedry/stagerig/issues</url>
+  <url type="vcs-browser">https://github.com/dguedry/stagerig</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Music</category>
+  </categories>
+  <keywords>
+    <keyword>MIDI</keyword>
+    <keyword>VST3</keyword>
+    <keyword>LV2</keyword>
+    <keyword>CLAP</keyword>
+    <keyword>live</keyword>
+    <keyword>keyboard</keyword>
+  </keywords>
+  <provides>
+    <binary>StageRig</binary>
+  </provides>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Songs, inputs, programs and the plugins in a program</caption>
+      <image>https://raw.githubusercontent.com/dguedry/stagerig/main/docs/images/stagerig.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A plugin's own interface, mirrored to a tablet</caption>
+      <image>https://raw.githubusercontent.com/dguedry/stagerig/main/docs/images/tablet-plugin-gui.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The set list on a tablet</caption>
+      <image>https://raw.githubusercontent.com/dguedry/stagerig/main/docs/images/tablet-setlist.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+  <releases>
+    <release version="0.1.57" date="2026-10-18"/>
+  </releases>
+</component>

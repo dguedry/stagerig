@@ -19,8 +19,28 @@ juce_add_gui_app(StageRig
 # App icon, plus the user manual: embedding docs/MANUAL.md rather than copying it
 # means the in-app help cannot drift from the file in the repository.
 # CLAP is header-only: the SDK is just the C API the plugins implement.
+# Distributions ship it (libclap-dev, clap-devel) and prefer their own copy;
+# the submodule is the fallback. Version 1.2 or later is needed.
 add_library(ClapHeaders INTERFACE)
-target_include_directories(ClapHeaders INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external/clap/include)
+option(STAGERIG_SYSTEM_CLAP "Use the system's CLAP headers when they are new enough" ON)
+set(_clap_include "${CMAKE_CURRENT_SOURCE_DIR}/external/clap/include")
+if(STAGERIG_SYSTEM_CLAP)
+    find_path(SYSTEM_CLAP_INCLUDE_DIR clap/clap.h)
+    if(SYSTEM_CLAP_INCLUDE_DIR AND EXISTS "${SYSTEM_CLAP_INCLUDE_DIR}/clap/version.h")
+        file(STRINGS "${SYSTEM_CLAP_INCLUDE_DIR}/clap/version.h" _clap_major REGEX "#define CLAP_VERSION_MAJOR")
+        file(STRINGS "${SYSTEM_CLAP_INCLUDE_DIR}/clap/version.h" _clap_minor REGEX "#define CLAP_VERSION_MINOR")
+        string(REGEX MATCH "[0-9]+" _clap_major "${_clap_major}")
+        string(REGEX MATCH "[0-9]+" _clap_minor "${_clap_minor}")
+        if(_clap_major GREATER 1 OR (_clap_major EQUAL 1 AND _clap_minor GREATER_EQUAL 2))
+            set(_clap_include "${SYSTEM_CLAP_INCLUDE_DIR}")
+        endif()
+    endif()
+endif()
+if(NOT EXISTS "${_clap_include}/clap/clap.h")
+    message(FATAL_ERROR "CLAP headers not found: install libclap-dev / clap-devel, or check out the external/clap submodule")
+endif()
+message(STATUS "CLAP headers: ${_clap_include}")
+target_include_directories(ClapHeaders INTERFACE "${_clap_include}")
 
 juce_add_binary_data(StageRigAssets
     SOURCES Resources/stagerig-512.png Resources/stagerig-256.png Resources/stagerig-64.png
@@ -187,14 +207,19 @@ target_link_libraries(EngineTest PRIVATE
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 add_dependencies(EngineTest StageRigPluginHost)
 add_test(NAME EngineTest COMMAND EngineTest)
-set_tests_properties(EngineTest PROPERTIES ENVIRONMENT "STAGERIG_PLUGIN_HOST=$<TARGET_FILE:StageRigPluginHost>")
+# Without an LV2 instrument to play (Calf Monosynth) the engine test has nothing
+# to drive: it exits 77 and counts as skipped, so a distribution build without
+# Calf among its build dependencies still passes.
+set_tests_properties(EngineTest PROPERTIES ENVIRONMENT "STAGERIG_PLUGIN_HOST=$<TARGET_FILE:StageRigPluginHost>" SKIP_RETURN_CODE 77)
 
 #------------------------------------------------------------------------------
 # Install: `cmake --install build --prefix ~/.local` (or /usr/local) puts the two
 # binaries side by side (StageRig finds its helper next to itself), plus the
 # launcher entry and icon.
 install(TARGETS StageRig StageRigPluginHost RUNTIME DESTINATION bin)
-install(FILES Resources/stagerig.desktop DESTINATION share/applications)
+install(FILES Resources/io.github.dguedry.StageRig.desktop DESTINATION share/applications)
+install(FILES Resources/io.github.dguedry.StageRig.metainfo.xml DESTINATION share/metainfo)
+install(FILES docs/StageRig.1 docs/stagerig-plugin-host.1 DESTINATION share/man/man1)
 install(FILES Resources/stagerig.svg DESTINATION share/icons/hicolor/scalable/apps)
 foreach(size 16 24 32 48 64 128 256 512)
     install(FILES Resources/stagerig-${size}.png DESTINATION share/icons/hicolor/${size}x${size}/apps RENAME stagerig.png)

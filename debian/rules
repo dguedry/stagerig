@@ -1,0 +1,26 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/pkg-info.mk
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@ --buildsystem=cmake+ninja
+
+# The version comes from the package, not from CMakeLists.txt, so a
+# downstream revision builds what it says it is.
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DSTAGERIG_VERSION=$(DEB_VERSION_UPSTREAM) \
+		-DSTAGERIG_SYSTEM_CLAP=ON
+
+# The tests open JUCE's GUI classes, so they need a display. The engine test
+# reports itself skipped when no LV2 instrument is installed.
+override_dh_auto_test:
+	xvfb-run -a dh_auto_test
+
+# StageRig's own build also produces the test programs and a latency probe;
+# only the application, its helper and the data files are installed.
+override_dh_auto_install:
+	dh_auto_install --destdir=debian/stagerig

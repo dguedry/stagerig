@@ -16,6 +16,8 @@ int main()
     juce::ScopedJuceInitialiser_GUI init;
 
     Setup s = Setup::makeDefault();
+    // References into s.inputs are held while a third input is added below: room for it first.
+    s.inputs.reserve (3);
     s.preloadAllPrograms = true;
     s.releaseTailSeconds = 2.5;
     s.holdAcrossChange = false;

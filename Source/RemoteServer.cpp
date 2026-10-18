@@ -1497,6 +1497,47 @@ String RemoteServer::levelsJson() const
     return JSON::toString (var (root.get()), true);
 }
 
+String RemoteServer::healthJson() const
+{
+    DynamicObject::Ptr root (new DynamicObject());
+    root->setProperty ("lateBlocks", engine.getLateBlockCount());
+    root->setProperty ("blockSize", engine.getLastBlockSize());
+    root->setProperty ("sampleRate", engine.getSampleRate());
+    Array<var> plugins;
+    const auto& setup = engine.getSetup();
+    auto add = [&plugins] (const String& where, RemotePlugin* p)
+    {
+        if (p == nullptr) return;
+        DynamicObject::Ptr o (new DynamicObject());
+        o->setProperty ("where", where);
+        o->setProperty ("plugin", p->getName());
+        o->setProperty ("alive", p->isAlive());
+        o->setProperty ("missedBlocks", p->getMissedBlocks());
+        plugins.add (var (o.get()));
+    };
+    for (int i = 0; i < (int) setup.inputs.size(); ++i)
+    {
+        const auto& in = setup.inputs[(size_t) i];
+        for (int p = 0; p < InputDef::numPrograms; ++p)
+        {
+            if (! engine.isProgramLoaded (i, p)) continue;
+            const auto& def = in.programs[(size_t) p];
+            const auto tag = in.name + " " + String (p).paddedLeft ('0', 3) + (def.name.isNotEmpty() ? " " + def.name : String());
+            for (int s = 0; s < (int) def.slots.size(); ++s)
+            {
+                add (tag, engine.getPlugin (i, p, s, -1));
+                for (int e = 0; e < (int) def.slots[(size_t) s].effects.size(); ++e) add (tag + " > FX", engine.getPlugin (i, p, s, e));
+            }
+            for (int e = 0; e < (int) def.effects.size(); ++e) add (tag + " program FX", engine.getPlugin (i, p, -1, e));
+        }
+    }
+    for (int o = 0; o < (int) setup.outputs.size(); ++o)
+        for (int e = 0; e < (int) setup.outputs[(size_t) o].chain.effects.size(); ++e)
+            add ("Output " + setup.outputs[(size_t) o].name, engine.getPlugin (Engine::outputAddress (o), 0, -1, e));
+    root->setProperty ("plugins", plugins);
+    return JSON::toString (var (root.get()), true);
+}
+
 /** The current program's slots, so the tablet can offer a window onto each one.
 
     Grouped by slot because that is how the setup is built and how the desktop
@@ -1752,6 +1793,17 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
 
     
+    if (path.startsWith ("/api/health"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        String body;
+        if (produceOnMessageThread ([this] { return healthJson(); }, body, 2000))
+            sendResponse (sock, "200 OK", "application/json", body);
+        else
+            sendBusy (sock, sendResponse);
+        return;
+    }
+
     if (path.startsWith ("/api/levels"))
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
