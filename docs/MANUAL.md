@@ -494,6 +494,13 @@ Input travels back to the plugin, so the tablet works as a second screen and
 mouse rather than a remote with a fixed set of buttons -- and a laptop or phone
 on the same network does the same, because it is only a web page.
 
+What is mirrored is the region of the screen around the plugin's window, not
+the window alone, so the plugin's own menus, dialogs and file browsers -- which
+are separate windows -- show on the tablet too. A dialog that opens somewhere
+else on the screen widens the region to take it in; the tablet reconnects for
+a moment when that happens. StageRig keeps the plugin's window above the
+others while a tablet is looking at it, so the region shows the plugin.
+
 StageRig used to offer faders you picked per plugin and labelled by hand, and
 they are gone: what you get now is whatever the plugin shows, with nothing to
 set up first.
