@@ -1112,7 +1112,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
        longer mirrors -- closed on the computer, or its program swapped out.
        Saying so beats retrying into nothing for two minutes. */
     try {
-      const probe = await fetch(location.pathname.replace(/plugin\.html$/, 'package.json'), { cache: 'no-store' });
+      const probe = await fetch(location.pathname.replace(/plugin\.html$/, 'vnc.html'), { cache: 'no-store' });
       if (probe.status === 404) {
         msg.style.display = 'block';
         msg.textContent = 'The plugin window was closed. Press GUI on the main page to open it again.';
