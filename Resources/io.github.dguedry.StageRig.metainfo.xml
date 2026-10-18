@@ -5,23 +5,25 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later AND AGPL-3.0-only</project_license>
   <name>StageRig</name>
-  <summary>Live-performance plugin host for keyboard players</summary>
+  <summary>Live-performance plugin host for keyboards and audio</summary>
   <developer id="io.github.dguedry">
     <name>Donnie Guedry</name>
   </developer>
   <description>
     <p>
-      StageRig hosts instruments and effects for playing live. Point your
-      keyboards at it, build a program for each sound in your set, and change
-      sounds from the keyboard while you play, or from a tablet on a music
-      stand with no app to install.
+      StageRig hosts instruments and effects for playing live, for keyboards
+      and for audio. Keyboards play instruments; a microphone, a guitar or a
+      hardware synth plugged into the audio interface runs through effects.
+      Build a program for each sound in your set, and change sounds from the
+      keyboard, a footswitch, or a tablet on a music stand with no app to
+      install.
     </p>
     <ul>
-      <li>128 programs per keyboard, selected by MIDI Program Change; upper and lower manuals change independently</li>
+      <li>MIDI inputs and audio inputs side by side, each with 128 programs selected by MIDI Program Change</li>
       <li>VST3, CLAP, LV2 and LADSPA instruments and effects, with splits, layers, velocity curves and insert effects</li>
       <li>Songs and set lists stepped with a footswitch, with lead sheets and charts shown on the tablet</li>
       <li>Any loaded plugin's own interface mirrored to a tablet or phone, fully operable</li>
-      <li>Audio inputs with effect chains, outputs with master effects, and level meters</li>
+      <li>Audio inputs with effect chains and level meters; outputs on the interface's channels with master effects</li>
       <li>Every plugin in its own process, so a crash takes only that plugin down</li>
       <li>Low-latency PipeWire and JACK audio</li>
     </ul>

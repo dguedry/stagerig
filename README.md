@@ -1,8 +1,11 @@
 # StageRig
 
-**A live-performance plugin host for Linux.** Point your keyboards at it, build
-a program for each sound in your set, and change sounds from the keyboard while
-you play -- or from a tablet on a music stand, with no app to install.
+**A live-performance plugin host for Linux -- for keyboards and for audio.**
+Point your keyboards at it and it plays instruments; plug a microphone, a
+guitar or a hardware synth into your audio interface and it runs them through
+effects. Build a program for each sound in your set, and change sounds from
+the keyboard or a footswitch while you play -- or from a tablet on a music
+stand, with no app to install.
 
 And not just the sounds: any plugin you have loaded can be opened and **fully
 operated** from that tablet, laptop or phone -- its own interface, mirrored,
@@ -19,20 +22,24 @@ Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
 bridged with [yabridge](https://github.com/robbert-vdh/yabridge) work like any
 other plugin.
 
-- **A program per sound, 128 per keyboard**, selected by MIDI Program Change
-  while you play. Upper and Lower manuals change independently. Group them by
-  kind -- organs, strings, brass -- to find things quickly.
-- **Splits and layers** with per-slot key range, velocity range, velocity
-  curve, transpose, gain and pan.
+- **MIDI inputs and audio inputs, side by side.** An input is a keyboard (a
+  MIDI device and channel) or an audio source (one or two of the interface's
+  input channels). Each has its own 128 programs, selected by MIDI Program
+  Change while you play: Upper and Lower manuals change independently, and a
+  vocal mic or a guitar steps through its effect chains from a footswitch the
+  same way. Group programs by kind -- organs, strings, brass -- to find things
+  quickly.
+- **Keyboards play instruments**, with splits and layers: per-slot key range,
+  velocity range, velocity curve, transpose, gain and pan.
+- **Audio runs through effects.** An audio input's programs are effect chains
+  with an input trim -- reverb on the vocal for the ballad, drive on the guitar
+  for the solo -- and a level meter on the laptop and on the tablet. Effects
+  get MIDI too, so a vocoder or harmoniser plays from the keyboard.
 - **Insert effects** per instrument and per program.
-- **Audio inputs too.** A microphone, a guitar or a hardware synth comes in as
-  an input of its own, and each of its programs is an effects chain -- switched
-  by the same footswitch, songs and tablet as the keyboards, with a level meter
-  on the laptop and on the tablet.
-- **Outputs with a master chain.** Each input lands on an output -- a pair of
-  the interface's channels -- so the lower manual can reach the desk on its own
-  channels; every output has a master effects chain and a volume you can put
-  on a pedal.
+- **Outputs on the interface's channels.** Each input lands on an output -- a
+  pair of the interface's output channels -- so the keyboards, the vocal and
+  the guitar can reach the desk on separate channels; every output has a
+  master effects chain and a volume you can put on a pedal.
 - **MIDI learn** for any plugin parameter, with suggested mappings from
   parameter names and reusable per-plugin templates.
 - **Every plugin in its own process.** A plugin that crashes or hangs takes

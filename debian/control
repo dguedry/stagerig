@@ -48,12 +48,15 @@ Recommends:
 Suggests:
  calf-plugins,
  lsp-plugins-lv2,
-Description: live-performance plugin host for keyboard players
- StageRig hosts instruments and effects for playing live. Each keyboard has
- 128 programs selected by MIDI Program Change, each loading one or more
- VST3, CLAP, LV2 or LADSPA instruments with key and velocity splits, insert
- effects and MIDI controller mappings. Audio inputs carry effect chains, and
- every input lands on an output with its own master effects.
+Description: live-performance plugin host for keyboards and audio
+ StageRig hosts instruments and effects for playing live, for keyboards and
+ for audio. A keyboard input has 128 programs selected by MIDI Program Change,
+ each loading one or more VST3, CLAP, LV2 or LADSPA instruments with key and
+ velocity splits, insert effects and MIDI controller mappings. An audio input
+ -- a microphone, a guitar, a hardware synth on the audio interface -- has 128
+ programs too, each an effect chain switched the same way. Every input lands
+ on an output, a pair of the interface's channels, with its own master
+ effects.
  .
  Songs combine a program per keyboard with a tempo; set lists order the songs
  for a footswitch to step through, with lead sheets and charts shown on a

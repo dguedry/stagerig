@@ -6,13 +6,15 @@ StageRig \- live\-performance plugin host
 .RI [ setup.stagerig.json ]
 .SH DESCRIPTION
 .B StageRig
-hosts VST3, CLAP, LV2 and LADSPA instruments and effects for playing live.
-Each keyboard (an
-.IR input )
-has 128 programs selected by MIDI Program Change; a program holds one or more
-instruments with key and velocity ranges, insert effects, and MIDI controller
-mappings. An input can also be an audio input, whose programs are effect
-chains. Songs combine a program per input with a tempo, and set lists order
+hosts VST3, CLAP, LV2 and LADSPA instruments and effects for playing live,
+for keyboards and for audio. An
+.I input
+is either a keyboard (a MIDI device and channel) or an audio input (channels
+of the audio interface: a microphone, a guitar, a hardware synth). Each has 128
+programs selected by MIDI Program Change: on a keyboard a program holds one or
+more instruments with key and velocity ranges, insert effects and MIDI
+controller mappings; on an audio input it is an effect chain. Every input lands
+on an output, a pair of the interface's channels, with master effects. Songs combine a program per input with a tempo, and set lists order
 the songs for a footswitch to step through.
 .PP
 A built\-in web app lets a tablet or phone on the same network change programs,

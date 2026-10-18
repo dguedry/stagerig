@@ -1,8 +1,10 @@
 # StageRig user manual
 
-StageRig is a live-performance plugin host for Linux. You point your keyboards
-at it, build a program for each sound you need, and change sounds from the
-keyboard while you play.
+StageRig is a live-performance plugin host for Linux, for keyboards and for
+audio. Your keyboards play instruments; a microphone, a guitar or a hardware
+synth plugged into the audio interface runs through effects. You build a
+program for each sound you need, and change sounds from the keyboard, a
+footswitch or a tablet while you play.
 
 This manual covers everyday use. For building from source, the process model
 and the code layout, see the [README](../README.md).
@@ -10,16 +12,25 @@ and the code layout, see the [README](../README.md).
 - [The idea in one minute](#the-idea-in-one-minute)
 - [First run](#first-run)
 - [The main window](#the-main-window)
-- [Inputs: your keyboards](#inputs-your-keyboards)
+- [Inputs: keyboards, and audio](#inputs-keyboards-and-audio)
+  - [Audio inputs](#audio-inputs)
 - [Programs: your sounds](#programs-your-sounds)
+- [Songs and sets](#songs-and-sets)
+- [Charts on the stand](#charts-on-the-stand)
+- [Outputs and the master chain](#outputs-and-the-master-chain)
 - [Slots: instruments inside a program](#slots-instruments-inside-a-program)
 - [Splits and layers](#splits-and-layers)
 - [Effects](#effects)
 - [MIDI mappings: knobs and pedals](#midi-mappings-knobs-and-pedals)
+- [Reading the stage display](#reading-the-stage-display)
+- [Selecting programs from a tablet](#selecting-programs-from-a-tablet)
+- [Tempo](#tempo)
+- [Printing a program map](#printing-a-program-map)
 - [The on-screen keyboard](#the-on-screen-keyboard)
 - [Audio settings and latency](#audio-settings-and-latency)
 - [Saving, autosave and plugin state](#saving-autosave-and-plugin-state)
 - [Playing live](#playing-live)
+- [Plugin formats](#plugin-formats)
 - [Windows plugins](#windows-plugins)
 - [When something goes wrong](#when-something-goes-wrong)
 - [Files StageRig uses](#files-stagerig-uses)
@@ -27,20 +38,35 @@ and the code layout, see the [README](../README.md).
 
 ## The idea in one minute
 
-An **input** is a keyboard, or one MIDI channel of a keyboard. Each input holds
-**128 programs**. A program is one sound of your set: it contains one or more
-**slots**, each slot a plugin instrument with its own key range, velocity range,
-transpose, gain, pan and effects.
+An **input** is a source of sound or of notes, and there are two kinds:
 
-While you play, a Program Change message from the keyboard selects the program
-on that input. Upper and Lower change independently, so the left hand can stay
-on a bass while the right hand moves through leads.
+- a **keyboard** -- a MIDI device, or one MIDI channel of it -- which plays
+  instruments;
+- an **audio input** -- one or two of the audio interface's input channels: a
+  microphone, a guitar, a hardware synth -- which runs through effects.
+
+Each input holds **128 programs**. On a keyboard, a program is one sound of
+your set: one or more **slots**, each a plugin instrument with its own key
+range, velocity range, transpose, gain, pan and effects. On an audio input, a
+program is an **effect chain** with an input trim -- the clean vocal, the
+vocal with the long reverb, the vocoder.
+
+While you play, a Program Change message selects the program on that input --
+from the keyboard itself, or from a footswitch for an audio input. Every input
+changes independently, so the left hand can stay on a bass while the right
+hand moves through leads, and the vocal can go to its ballad reverb without
+touching either.
 
 ```
-Keyboard ──> Input "Upper" (ch 1) ──> Program 007 "Solo" ──> Slot 1  Lead synth   C4-C8
-                                                         └─> Slot 2  String pad   C4-C8, soft only
-Keyboard ──> Input "Lower" (ch 2) ──> Program 002 "Bass" ──> Slot 1  Electric bass C0-B3
+Keyboard ──> Input "Upper" (ch 1)    ──> Program 007 "Solo"   ──> Slot 1  Lead synth   C4-C8
+                                                              └─> Slot 2  String pad   C4-C8, soft only
+Keyboard ──> Input "Lower" (ch 2)    ──> Program 002 "Bass"   ──> Slot 1  Electric bass C0-B3
+Mic      ──> Input "Vocal" (in 1)    ──> Program 004 "Ballad" ──> EQ ──> Plate reverb
 ```
+
+Every input lands on an **output** -- a pair of the interface's output
+channels -- with its own master effects and volume, so the keyboards and the
+vocal can go to the desk on separate channels.
 
 ## First run
 
@@ -83,7 +109,7 @@ the panes are squeezed for the time being -- programs first, then inputs,
 then the set list -- and spread out again as the window grows; the right-hand
 side always keeps room for the mappings table.
 
-## Inputs: your keyboards -- and microphones, guitars, hardware synths
+## Inputs: keyboards, and audio
 
 An input is a keyboard, usually. **+ Add** also offers an **audio input**: a
 microphone, a guitar, a hardware synth or anything else plugged into the audio

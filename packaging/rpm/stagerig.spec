@@ -11,7 +11,7 @@
 Name:           stagerig
 Version:        0.1.57
 Release:        1%{?dist}
-Summary:        Live-performance plugin host for keyboard players
+Summary:        Live-performance plugin host for keyboards and audio
 
 # StageRig itself is GPL-3.0-or-later; the bundled JUCE 8 is used under
 # AGPL-3.0-only. The other bundled code is listed with bundled() below.
@@ -72,11 +72,13 @@ Recommends:     poppler-utils
 Suggests:       lv2-calf-plugins
 
 %description
-StageRig hosts instruments and effects for playing live. Each keyboard has
-128 programs selected by MIDI Program Change, each loading one or more VST3,
-CLAP, LV2 or LADSPA instruments with key and velocity splits, insert effects
-and MIDI controller mappings. Audio inputs carry effect chains, and every input
-lands on an output with its own master effects.
+StageRig hosts instruments and effects for playing live, for keyboards and
+for audio. A keyboard input has 128 programs selected by MIDI Program Change,
+each loading one or more VST3, CLAP, LV2 or LADSPA instruments with key and
+velocity splits, insert effects and MIDI controller mappings. An audio input --
+a microphone, a guitar, a hardware synth on the audio interface -- has 128
+programs too, each an effect chain switched the same way. Every input lands on
+an output, a pair of the interface's channels, with its own master effects.
 
 Songs combine a program per keyboard with a tempo; set lists order the songs
 for a footswitch to step through, with lead sheets and charts shown on a
