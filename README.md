@@ -243,9 +243,8 @@ and vstenv teaches `yabridge-host.exe` to read that record -- so the right wine
 is used whatever starts the plugin, with nothing on `PATH` and nothing set in
 the session. StageRig needs to do nothing special for it.
 
-StageRig does still accommodate the older convention, for a prefix set up by
-[nilinux](https://github.com/dguedry/nilinux) (which vstenv succeeds) or by
-hand: `~/.local/bin` goes first on a helper's `PATH` when a `wine` shim is
+For a prefix set up by hand, StageRig also follows the older convention:
+`~/.local/bin` goes first on a helper's `PATH` when a `wine` shim is
 there, and variables from `~/.config/environment.d/*.conf` (`WINELOADER`,
 `WINEFSYNC`) are applied when the session lacks them. That matters because a
 desktop launcher and a terminal do not always agree about the environment.

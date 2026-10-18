@@ -49,7 +49,7 @@ public:
         try to update the prefix and corrupt it. vstenv arranges this inside the
         prefix -- it records the loader there and teaches yabridge-host.exe to
         read it -- so nothing is needed from us. The older convention, which
-        nilinux used and a hand-built prefix may still use, puts a ~/.local/bin/wine
+        a hand-built prefix may still use, puts a ~/.local/bin/wine
         shim and WINELOADER/WINEFSYNC in the session, and a desktop launcher does
         not always have those. So they are applied here explicitly, which is
         harmless when the prefix does not need them.

@@ -864,9 +864,7 @@ to read that record, so the right Wine runs the plugin whatever started it. That
 matters because the wrong Wine version would try to update the prefix and
 corrupt it. StageRig needs to do nothing for this to work.
 
-For a prefix set up the older way -- by hand, or by
-[nilinux](https://github.com/dguedry/nilinux), which vstenv succeeds -- StageRig
-still follows the convention that relies on the session: it puts `~/.local/bin`
+For a prefix set up by hand, StageRig still follows the convention that relies on the session: it puts `~/.local/bin`
 first on a helper's PATH when a `wine` shim is there, and applies `WINELOADER`
 and `WINEFSYNC` from `~/.config/environment.d/*.conf`, since a desktop launcher
 and a terminal do not always agree about those.
