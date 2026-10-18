@@ -981,6 +981,17 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 </style>
 </head><body>
 <div id="msg">Connecting...</div>
+<script>
+  /* Before anything else: is this window still being mirrored? The module
+     below imports noVNC from under the mirror, and on a window that has
+     gone the import 404s and the module never runs -- so this check cannot
+     live inside it. The relay answers 404 for a mirror StageRig no longer
+     has (the window was closed on the computer, or its program swapped out). */
+  fetch(location.pathname.replace(/plugin\.html$/, 'vnc.html'), { cache: 'no-store' })
+    .then(r => { if (r.status === 404) { const m = document.getElementById('msg'); m.style.display = 'block';
+                 m.textContent = 'The plugin window was closed. Press GUI on the main page to open it again.'; } })
+    .catch(() => {});
+</script>
 <div id="screen"></div>
 <div id="bar"><button id="move">Move</button><button id="zoomout">-</button><button id="zoomin">+</button><button id="full">Full</button><button id="fit">Fit</button></div>
 <script type="module">
