@@ -126,8 +126,11 @@ An audio input has, in place of the instruments:
   that are open in **Audio...**; if it says no input is open, choose an input
   device and tick its channels there first.
 - **Control MIDI device**, **Channel** and the Program Change settings work as
-  for a keyboard, but carry only program changes and controllers -- a
-  footswitch or an expression pedal. Notes arriving here are ignored.
+  for a keyboard. Program changes step through the effect chains the way they
+  step through sounds on a keyboard; controllers drive mapped effect
+  parameters, the tap pedal, the song footswitches and an output's volume.
+  Notes are passed to the effects too -- a vocoder or harmoniser wants them --
+  though there is no instrument here to play them.
 - Each program has an **Input trim** (in the header of the effects panel) and
   an effects chain, added with **+ Add effect** on the chain. A program with no
   effects passes the signal straight through at its trim.
