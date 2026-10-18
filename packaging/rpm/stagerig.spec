@@ -102,8 +102,10 @@ only itself down. Audio goes through PipeWire or JACK at low latency.
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.dguedry.StageRig.desktop
 appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.dguedry.StageRig.metainfo.xml
+# The tests want a display. %%ctest expands to a compound command, which
+# xvfb-run cannot wrap, so ctest is called directly on the build directory.
 # The engine test reports itself skipped when no LV2 instrument is installed.
-xvfb-run -a %ctest
+xvfb-run -a ctest --test-dir %{__cmake_builddir} --output-on-failure
 
 %files
 %license LICENSE

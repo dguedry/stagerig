@@ -108,11 +108,12 @@ private:
     class PaneDivider : public juce::Component
     {
     public:
+        std::function<void()> onBegin;
         std::function<void (int deltaX)> onDrag;
         std::function<void()> onRelease;
         PaneDivider() { setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); setRepaintsOnMouseActivity (true); }
         void paint (juce::Graphics&) override;
-        void mouseDown (const juce::MouseEvent& e) override { lastX = e.getScreenX(); }
+        void mouseDown (const juce::MouseEvent& e) override { lastX = e.getScreenX(); if (onBegin != nullptr) onBegin(); }
         void mouseDrag (const juce::MouseEvent& e) override { const int x = e.getScreenX(); if (onDrag != nullptr && x != lastX) onDrag (x - lastX); lastX = x; }
         void mouseUp (const juce::MouseEvent&) override { if (onRelease != nullptr) onRelease(); }
     private:

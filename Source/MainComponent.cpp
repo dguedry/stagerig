@@ -1916,6 +1916,17 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     for (auto* d : { &songsDivider, &inputsDivider, &programsDivider })
     {
         addAndMakeVisible (d);
+        /* A drag works on what is on screen. After the window shrank, the
+           stored widths may be wider than the panes could be shown; dragging
+           from there changed a number nothing reflected, and the dividers
+           seemed stuck until the stored width had come back under the
+           limit. Start from the shown widths instead. */
+        d->onBegin = [this]
+        {
+            if (songsPanel != nullptr && songsPanel->isVisible()) songsWidth = songsPanel->getWidth();
+            inputsWidth   = inputsPanel->getWidth();
+            programsWidth = programsPanel->getWidth();
+        };
         d->onRelease = [this] { savePaneWidths(); };
     }
     // Clamped as dragged, so a width that cannot be shown is never stored.
