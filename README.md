@@ -54,7 +54,7 @@ other plugin.
   PDF pages a tap at a time and following the set from song to song. Files
   are kept in a folder beside the setup, so the two travel together.
 
-**[Read the user manual](docs/MANUAL.md)** for everyday use, or press **Help**
+**[Read the user manual](https://github.com/dguedry/stagerig/blob/main/docs/MANUAL.md)** for everyday use, or press **Help**
 in the toolbar to read the same manual inside the app. The rest of this
 file is for building from source and for how the program works inside.
 
@@ -139,7 +139,7 @@ cmake --install build --prefix ~/.local                  # optional: binaries, l
 
 ## Using it
 
-See the **[user manual](docs/MANUAL.md)**: inputs and keyboards, programs,
+See the **[user manual](https://github.com/dguedry/stagerig/blob/main/docs/MANUAL.md)**: inputs and keyboards, programs,
 slots, splits and layers, effects, MIDI mappings, the on-screen keyboard, audio
 settings and latency, live checklist, troubleshooting and the files StageRig
 uses.
@@ -218,7 +218,7 @@ sudo ufw allow from 172.16.0.0/12 to any port 7777 proto tcp
 No wifi at the venue? **Create a wifi network** makes the computer serve its
 own, which the tablet joins directly. StageRig asks once which wifi adapter to
 use and remembers it; a spare USB adapter lets the machine stay on its normal
-network at the same time. See the [manual](docs/MANUAL.md) for the details.
+network at the same time. See the [manual](https://github.com/dguedry/stagerig/blob/main/docs/MANUAL.md) for the details.
 
 ## Windows plugins via yabridge and vstenv
 
@@ -378,4 +378,4 @@ under the AGPLv3. GPLv3 section 13 allows the two to be combined, so a StageRig
 binary is distributed under the GPLv3 for StageRig's own code and the AGPLv3 for
 JUCE's. The CLAP headers are MIT-licensed.
 
-Packaging for distributions: see [docs/PACKAGING.md](docs/PACKAGING.md).
+Packaging for distributions: see [docs/PACKAGING.md](https://github.com/dguedry/stagerig/blob/main/docs/PACKAGING.md).
