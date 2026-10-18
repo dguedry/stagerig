@@ -1849,6 +1849,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         PopupMenu m;
         m.addItem (1, "Preload all programs", true, setup.preloadAllPrograms);
         m.addItem (2, "Hold notes across program changes", true, setup.holdAcrossChange);
+        m.addItem (6, "Show songs and set lists", true, songsPanel != nullptr && songsPanel->isVisible());
         m.addSeparator();
         m.addItem (5, "Outputs & master effects...");
         m.addItem (3, "Rescan MIDI devices");
@@ -1863,6 +1864,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
                 case 3: engine.refreshMidiDevices(); showStatus ("MIDI devices rescanned"); break;
                 case 4: printProgramMap(); break;
                 case 5: showOutputs(); break;
+                case 6: setSongsPanelShown (songsPanel == nullptr || ! songsPanel->isVisible()); break;
                 default: break;
             }
         });
@@ -1917,23 +1919,19 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         d->onRelease = [this] { savePaneWidths(); };
     }
     // Clamped as dragged, so a width that cannot be shown is never stored.
-    songsDivider.onDrag    = [this] (int dx) { songsWidth    = jlimit (SongsPanel::minimumWidth, 900, songsWidth + dx); resized(); };
+    songsDivider.onDrag    = [this] (int dx)
+    {
+        /* Dragged well past its minimum, the set list folds away -- the one
+           gesture for "I do not use this" -- and comes back from Options at
+           a usable width. */
+        if (songsWidth + dx < SongsPanel::minimumWidth - 50) { songsWidth = SongsPanel::preferredWidth; setSongsPanelShown (false, true); return; }
+        songsWidth = jlimit (SongsPanel::minimumWidth, 900, songsWidth + dx);
+        resized();
+    };
     inputsDivider.onDrag   = [this] (int dx) { inputsWidth   = jlimit (200, 900, inputsWidth + dx);   resized(); };
     programsDivider.onDrag = [this] (int dx) { programsWidth = jlimit (200, 900, programsWidth + dx); resized(); };
     addChildComponent (songsPanel.get());
-    addAndMakeVisible (songsBtn);
-    songsBtn.setClickingTogglesState (true);
-    songsBtn.setColour (TextButton::buttonOnColourId, accentDim);
-    songsBtn.setTooltip ("Group programs into songs, and songs into sets");
-    songsBtn.onClick = [this]
-    {
-        const bool show = songsBtn.getToggleState();
-        songsPanel->setVisible (show);
-        settings.setValue ("showSongs", show);
-        resized();
-    };
-    songsBtn.setToggleState (settings.getBoolValue ("showSongs", false), dontSendNotification);
-    songsPanel->setVisible (songsBtn.getToggleState());
+    songsPanel->setVisible (settings.getBoolValue ("showSongs", false));
 
 
     addAndMakeVisible (helpBtn);
@@ -2096,7 +2094,6 @@ void MainComponent::resized()
     panicBtn.setBounds (toolbar.removeFromRight (80));      toolbar.removeFromRight (6);
     keyboardBtn.setBounds (toolbar.removeFromRight (78));   toolbar.removeFromRight (4);
     stageBtn.setBounds (toolbar.removeFromRight (72));      toolbar.removeFromRight (4);
-    songsBtn.setBounds (toolbar.removeFromRight (66));     toolbar.removeFromRight (8);
     tailSlider.setBounds (toolbar.removeFromRight (60));    toolbar.removeFromRight (2);
     tailLabel.setBounds (toolbar.removeFromRight (26));     toolbar.removeFromRight (8);
     tapButton.setBounds (toolbar.removeFromRight (42));     toolbar.removeFromRight (2);
@@ -2170,6 +2167,17 @@ void MainComponent::PaneDivider::paint (Graphics& g)
     const float y = getHeight() * 0.5f;
     for (int i = -1; i <= 1; ++i)
         g.fillEllipse (x - 1.5f, y + 7.0f * (float) i - 1.5f, 3.0f, 3.0f);
+}
+
+void MainComponent::setSongsPanelShown (bool show, bool byDrag)
+{
+    if (songsPanel == nullptr) return;
+    songsPanel->setVisible (show);
+    settings.setValue ("showSongs", show);
+    settings.saveIfNeeded();
+    resized();
+    if (byDrag)
+        showStatus ("Songs and set lists hidden. Options > Show songs and set lists brings the panel back.");
 }
 
 void MainComponent::savePaneWidths()

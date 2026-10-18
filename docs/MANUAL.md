@@ -66,7 +66,7 @@ whichever section answers what you typed.
 
 | Area | What it does |
 |---|---|
-| **Toolbar** (top) | New / Open / Save / Save As, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options** (preload all programs, hold notes across program changes, outputs and master effects, rescan MIDI, print the program map), the tempo and **Tap**, release **Tail**, **Songs**, **Stage**, **Keyboard**, **PANIC**. |
+| **Toolbar** (top) | New / Open / Save / Save As, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options** (preload all programs, hold notes across program changes, show songs and set lists, outputs and master effects, rescan MIDI, print the program map), the tempo and **Tap**, release **Tail**, **Stage**, **Keyboard**, **PANIC**. |
 | **Inputs** (left) | Your keyboards. Select one to edit its programs; its device, channel and Program Change setting are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, **Copy**, **Paste** and **Clear** are below. |
 | **Plugins** (right, top) | The slots of the current program, each with its controls and effect chain, plus the program effect chain. |
@@ -196,7 +196,8 @@ program on each keyboard, at the right tempo. A **set** is the order the songs
 come in. Without this layer, starting a number means picking Upper 002, then
 Lower 001, then the tempo -- three actions, at the wrong moment.
 
-Press **Songs** in the toolbar. The panel has every song on top, and the running
+Turn on **Options ▸ Show songs and set lists**. The panel appears at the left,
+with every song on top and the running
 order of the chosen set below.
 
 ### Making a song

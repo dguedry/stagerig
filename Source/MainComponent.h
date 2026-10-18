@@ -127,7 +127,9 @@ private:
 
     // Tempo: a readout you can tap, because a tap tempo you cannot see is one
     // you cannot trust.
-    juce::TextButton songsBtn { "Songs" };
+    /** Shows or hides the songs and set list panel; under Options, and a
+        drag of its divider all the way left hides it too. */
+    void setSongsPanelShown (bool show, bool byDrag = false);
     juce::TextButton tapButton { "Tap" };
     juce::Label tempoLabel;
     juce::Label statusLabel, cpuLabel, fileLabel;
