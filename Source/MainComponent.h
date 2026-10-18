@@ -101,6 +101,26 @@ private:
     std::unique_ptr<KeyboardPanel> keyboardPanel;
     std::unique_ptr<StagePanel> stagePanel;
     std::unique_ptr<SongsPanel> songsPanel;
+
+    /** A thin bar between two panes; dragging it resizes the pane on its left.
+        The widths it sets are kept in the settings, so the window comes back
+        the way it was left. */
+    class PaneDivider : public juce::Component
+    {
+    public:
+        std::function<void (int deltaX)> onDrag;
+        std::function<void()> onRelease;
+        PaneDivider() { setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); setRepaintsOnMouseActivity (true); }
+        void paint (juce::Graphics&) override;
+        void mouseDown (const juce::MouseEvent& e) override { lastX = e.getScreenX(); }
+        void mouseDrag (const juce::MouseEvent& e) override { const int x = e.getScreenX(); if (onDrag != nullptr && x != lastX) onDrag (x - lastX); lastX = x; }
+        void mouseUp (const juce::MouseEvent&) override { if (onRelease != nullptr) onRelease(); }
+    private:
+        int lastX = 0;
+    };
+    PaneDivider songsDivider, inputsDivider, programsDivider;
+    int songsWidth = 230, inputsWidth = 260, programsWidth = 260;
+    void savePaneWidths();
     std::unique_ptr<RemoteServer> remote;
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;

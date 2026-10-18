@@ -1905,6 +1905,19 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
        panel you want while building a set and while playing one, and in the way
        the rest of the time. */
     songsPanel = std::make_unique<SongsPanel> (engine);
+
+    // Pane dividers: drag to give a pane more room; remembered across runs.
+    songsWidth    = settings.getIntValue ("paneSongsWidth",    SongsPanel::preferredWidth);
+    inputsWidth   = settings.getIntValue ("paneInputsWidth",   260);
+    programsWidth = settings.getIntValue ("paneProgramsWidth", 260);
+    for (auto* d : { &songsDivider, &inputsDivider, &programsDivider })
+    {
+        addAndMakeVisible (d);
+        d->onRelease = [this] { savePaneWidths(); };
+    }
+    songsDivider.onDrag    = [this] (int dx) { songsWidth    += dx; resized(); };
+    inputsDivider.onDrag   = [this] (int dx) { inputsWidth   += dx; resized(); };
+    programsDivider.onDrag = [this] (int dx) { programsWidth += dx; resized(); };
     addChildComponent (songsPanel.get());
     addAndMakeVisible (songsBtn);
     songsBtn.setClickingTogglesState (true);
@@ -2104,32 +2117,67 @@ void MainComponent::resized()
     }
 
     r.reduce (8, 0);
-    if (songsPanel != nullptr && songsPanel->isVisible())
+    /* The dividers live in the 8 px gaps between the panes. Each pane has a
+       width the player chose by dragging, within limits: the right side keeps
+       enough for the mappings table, whose columns collapse into "0..." and
+       "1..." when squeezed, and when the window cannot hold it all the songs
+       panel yields first -- a set list is readable much narrower than that
+       table is usable, and below its minimum it hides entirely until the
+       toggle turns it back on. */
+    const int gap = 8, rightMin = 420, paneMin = 200, paneMax = 600;
+    int inputsW   = jlimit (paneMin, paneMax, inputsWidth);
+    int programsW = jlimit (paneMin, paneMax, programsWidth);
+
+    const bool songsShown = songsPanel != nullptr && songsPanel->isVisible();
+    if (songsShown)
     {
-        /* Give it what is spare rather than a fixed width: the mappings table
-           on the right has columns that collapse into "0..." and "1..." when
-           squeezed, and a set list is readable much narrower than that table
-           is usable. Below its minimum the panel yields entirely -- being
-           unable to read the mappings is worse than scrolling the set. */
-        const int others = 260 + 8 + 260 + 8 + 420;      // inputs, programs, a usable right side
-        const int spare  = r.getWidth() - others;
+        const int spare = r.getWidth() - (inputsW + gap + programsW + gap + rightMin);
         if (spare >= SongsPanel::minimumWidth)
         {
-            songsPanel->setBounds (r.removeFromLeft (jmin (SongsPanel::preferredWidth, spare)));
-            r.removeFromLeft (8);
+            songsWidth = jlimit (SongsPanel::minimumWidth, jmax (SongsPanel::minimumWidth, spare), songsWidth);
+            songsPanel->setBounds (r.removeFromLeft (songsWidth));
+            songsDivider.setBounds (r.removeFromLeft (gap));
         }
         else
         {
             songsPanel->setVisible (false);   // no room; the toggle turns it back on when there is
         }
     }
-    inputsPanel->setBounds (r.removeFromLeft (260));
-    r.removeFromLeft (8);
-    programsPanel->setBounds (r.removeFromLeft (260));
-    r.removeFromLeft (8);
+    songsDivider.setVisible (songsPanel != nullptr && songsPanel->isVisible());
+
+    // Still too wide for the right side? Programs gives way first, then inputs.
+    int over = (inputsW + gap + programsW + gap + rightMin) - r.getWidth();
+    if (over > 0) { const int cut = jmin (over, programsW - paneMin); programsW -= cut; over -= cut; }
+    if (over > 0) { const int cut = jmin (over, inputsW - paneMin);   inputsW   -= cut; }
+    inputsWidth = inputsW;
+    programsWidth = programsW;
+
+    inputsPanel->setBounds (r.removeFromLeft (inputsW));
+    inputsDivider.setBounds (r.removeFromLeft (gap));
+    programsPanel->setBounds (r.removeFromLeft (programsW));
+    programsDivider.setBounds (r.removeFromLeft (gap));
     mappingsPanel->setBounds (r.removeFromBottom (jmax (200, r.getHeight() * 40 / 100)));
     r.removeFromBottom (8);
     slotsPanel->setBounds (r);
+}
+
+void MainComponent::PaneDivider::paint (Graphics& g)
+{
+    // A quiet grip: three dots in the gap, brighter under the mouse.
+    const auto c = (isMouseOver() || isMouseButtonDown()) ? accent : textDim.withAlpha (0.45f);
+    g.setColour (c);
+    const float x = getWidth() * 0.5f;
+    const float y = getHeight() * 0.5f;
+    for (int i = -1; i <= 1; ++i)
+        g.fillEllipse (x - 1.5f, y + 7.0f * (float) i - 1.5f, 3.0f, 3.0f);
+}
+
+void MainComponent::savePaneWidths()
+{
+    settings.setValue ("paneSongsWidth",    songsWidth);
+    settings.setValue ("paneInputsWidth",   inputsWidth);
+    settings.setValue ("paneProgramsWidth", programsWidth);
+    settings.saveIfNeeded();
 }
 
 void MainComponent::timerCallback()

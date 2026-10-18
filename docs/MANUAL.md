@@ -76,6 +76,12 @@ whichever section answers what you typed.
 
 **PANIC** sends all-notes-off to every loaded plugin. Use it if a note hangs.
 
+The panes are separated by thin dividers (three dots in the gap). Drag one to
+give a pane more room -- the set list wider when song names are long, say --
+and the widths are remembered. The right-hand side keeps enough room for the
+mappings table; when the window is too narrow for everything, the songs panel
+gives way first.
+
 ## Inputs: your keyboards -- and microphones, guitars, hardware synths
 
 An input is a keyboard, usually. **+ Add** also offers an **audio input**: a
