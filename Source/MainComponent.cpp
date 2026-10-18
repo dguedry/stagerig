@@ -522,7 +522,8 @@ public:
 
         // The group, dimmed and to the right of the name: visible when scanning
         // the list, never competing with the program's own name.
-        if (prog.group.isNotEmpty())
+        // Dropped when the pane is squeezed: the name is what the row is for.
+        if (prog.group.isNotEmpty() && w >= 240)
         {
             g.setColour (Colour (0xff7f8896));
             g.setFont (FontOptions (10.5f));
@@ -1915,9 +1916,10 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         addAndMakeVisible (d);
         d->onRelease = [this] { savePaneWidths(); };
     }
-    songsDivider.onDrag    = [this] (int dx) { songsWidth    += dx; resized(); };
-    inputsDivider.onDrag   = [this] (int dx) { inputsWidth   += dx; resized(); };
-    programsDivider.onDrag = [this] (int dx) { programsWidth += dx; resized(); };
+    // Clamped as dragged, so a width that cannot be shown is never stored.
+    songsDivider.onDrag    = [this] (int dx) { songsWidth    = jlimit (SongsPanel::minimumWidth, 900, songsWidth + dx); resized(); };
+    inputsDivider.onDrag   = [this] (int dx) { inputsWidth   = jlimit (200, 900, inputsWidth + dx);   resized(); };
+    programsDivider.onDrag = [this] (int dx) { programsWidth = jlimit (200, 900, programsWidth + dx); resized(); };
     addChildComponent (songsPanel.get());
     addAndMakeVisible (songsBtn);
     songsBtn.setClickingTogglesState (true);
@@ -2124,33 +2126,31 @@ void MainComponent::resized()
        panel yields first -- a set list is readable much narrower than that
        table is usable, and below its minimum it hides entirely until the
        toggle turns it back on. */
-    const int gap = 8, rightMin = 420, paneMin = 200, paneMax = 600;
+    /* The dragged widths are preferences, kept as dragged: when the window is
+       too narrow for them the panes are squeezed for this layout only --
+       programs first, then inputs, then the set list, each down to its
+       minimum -- and come back as the window grows. The right side keeps room
+       for the mappings table. At the window's minimum width everything fits
+       at its minimum, so nothing ever has to be hidden; a pane that vanished
+       when the window shrank, with nothing to bring it back, was worse than
+       a squeezed one. */
+    const int gap = 8, rightMin = 420, paneMin = 200, paneMax = 900;
+    const bool songsShown = songsPanel != nullptr && songsPanel->isVisible();
+    int songsW    = songsShown ? jlimit (SongsPanel::minimumWidth, paneMax, songsWidth) : 0;
     int inputsW   = jlimit (paneMin, paneMax, inputsWidth);
     int programsW = jlimit (paneMin, paneMax, programsWidth);
 
-    const bool songsShown = songsPanel != nullptr && songsPanel->isVisible();
+    int over = (songsW + (songsShown ? gap : 0) + inputsW + gap + programsW + gap + rightMin) - r.getWidth();
+    if (over > 0) { const int cut = jmin (over, programsW - paneMin); programsW -= cut; over -= cut; }
+    if (over > 0) { const int cut = jmin (over, inputsW - paneMin);   inputsW   -= cut; over -= cut; }
+    if (over > 0 && songsShown) { const int cut = jmin (over, songsW - SongsPanel::minimumWidth); songsW -= cut; }
+
+    songsDivider.setVisible (songsShown);
     if (songsShown)
     {
-        const int spare = r.getWidth() - (inputsW + gap + programsW + gap + rightMin);
-        if (spare >= SongsPanel::minimumWidth)
-        {
-            songsWidth = jlimit (SongsPanel::minimumWidth, jmax (SongsPanel::minimumWidth, spare), songsWidth);
-            songsPanel->setBounds (r.removeFromLeft (songsWidth));
-            songsDivider.setBounds (r.removeFromLeft (gap));
-        }
-        else
-        {
-            songsPanel->setVisible (false);   // no room; the toggle turns it back on when there is
-        }
+        songsPanel->setBounds (r.removeFromLeft (songsW));
+        songsDivider.setBounds (r.removeFromLeft (gap));
     }
-    songsDivider.setVisible (songsPanel != nullptr && songsPanel->isVisible());
-
-    // Still too wide for the right side? Programs gives way first, then inputs.
-    int over = (inputsW + gap + programsW + gap + rightMin) - r.getWidth();
-    if (over > 0) { const int cut = jmin (over, programsW - paneMin); programsW -= cut; over -= cut; }
-    if (over > 0) { const int cut = jmin (over, inputsW - paneMin);   inputsW   -= cut; }
-    inputsWidth = inputsW;
-    programsWidth = programsW;
 
     inputsPanel->setBounds (r.removeFromLeft (inputsW));
     inputsDivider.setBounds (r.removeFromLeft (gap));

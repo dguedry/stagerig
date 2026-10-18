@@ -78,9 +78,10 @@ whichever section answers what you typed.
 
 The panes are separated by thin dividers (three dots in the gap). Drag one to
 give a pane more room -- the set list wider when song names are long, say --
-and the widths are remembered. The right-hand side keeps enough room for the
-mappings table; when the window is too narrow for everything, the songs panel
-gives way first.
+and the widths are remembered. When the window is too narrow for them all,
+the panes are squeezed for the time being -- programs first, then inputs,
+then the set list -- and spread out again as the window grows; the right-hand
+side always keeps room for the mappings table.
 
 ## Inputs: your keyboards -- and microphones, guitars, hardware synths
 
