@@ -1106,8 +1106,19 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
      gives up after a couple of minutes -- by which point the window really has
      gone, and the main page's GUI button is the way back. */
   let retries = 0;
-  function connect() {
+  async function connect() {
     releaseAll();
+    /* Still being shown? The relay answers 404 for a window StageRig no
+       longer mirrors -- closed on the computer, or its program swapped out.
+       Saying so beats retrying into nothing for two minutes. */
+    try {
+      const probe = await fetch(location.pathname.replace(/plugin\.html$/, 'package.json'), { cache: 'no-store' });
+      if (probe.status === 404) {
+        msg.style.display = 'block';
+        msg.textContent = 'The plugin window was closed. Press GUI on the main page to open it again.';
+        return;
+      }
+    } catch (e) { /* no answer at all: let the reconnect below find out */ }
     /* noVNC's own viewport, which is what its input path expects: with
        clipping on it sizes the canvas to the container and keeps a viewport
        offset, and absX/absY add that offset to turn a click into a framebuffer
@@ -1755,6 +1766,17 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         const auto rest = path.fromFirstOccurrenceOf ("/view/", false, false);
         const int wanted = rest.upToFirstOccurrenceOf ("/", false, false).getIntValue();
 
+        /* Our own page, served whether or not the window is still shown: a
+           tablet that reloads it after the window closed should see the page
+           say so, not a bare 404. The page asks for a file under the mirror
+           to learn whether it is alive. Everything else goes to the bridge. */
+        if (rest.fromFirstOccurrenceOf ("/", false, false).startsWith ("plugin.html"))
+        {
+            sendBytes (sock, "200 OK", "text/html; charset=utf-8",
+                       kPluginViewHtml, (int) strlen (kPluginViewHtml));
+            return;
+        }
+
         bool known = false;
         for (const auto& s : PluginView::active())
             if (s.webPort == wanted) known = true;
@@ -1762,14 +1784,6 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         if (! known)
         {
             sendResponse (sock, "404 Not Found", "text/plain", "No plugin window is being shown.");
-            return;
-        }
-
-        // Our own page; everything else goes to the bridge untouched.
-        if (rest.fromFirstOccurrenceOf ("/", false, false).startsWith ("plugin.html"))
-        {
-            sendBytes (sock, "200 OK", "text/html; charset=utf-8",
-                       kPluginViewHtml, (int) strlen (kPluginViewHtml));
             return;
         }
 

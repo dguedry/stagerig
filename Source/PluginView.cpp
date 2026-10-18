@@ -124,7 +124,12 @@ bool PluginView::available (String& whatIsMissing)
     return true;
 }
 
-unsigned long PluginView::findWindow (const String& title)
+static unsigned long findWindowImpl (const String& title, bool visibleOnly);
+
+unsigned long PluginView::findWindow (const String& title)         { return findWindowImpl (title, false); }
+unsigned long PluginView::findVisibleWindow (const String& title)  { return findWindowImpl (title, true); }
+
+static unsigned long findWindowImpl (const String& title, bool visibleOnly)
 {
     /* Ask the window manager rather than the plugin: the editor belongs to a
        helper process, and its X window is not ours to look up directly. The
@@ -144,8 +149,11 @@ unsigned long PluginView::findWindow (const String& title)
         pattern << c;
     }
 
+    StringArray args { xdotool.getFullPathName(), "search" };
+    if (visibleOnly) args.add ("--onlyvisible");
+    args.addArray ({ "--name", pattern });
     ChildProcess p;
-    if (! p.start (StringArray { xdotool.getFullPathName(), "search", "--name", pattern }))
+    if (! p.start (args))
         return 0;
 
     const auto out = p.readAllProcessOutput();
@@ -345,10 +353,20 @@ void PluginView::sweepStrays()
 void PluginView::dropDeadSessions()
 {
     const ScopedLock sl (lock);
+    // Once a second: each look is an xdotool call per session.
+    static uint32 lastMs = 0;
+    const auto now = Time::getMillisecondCounter();
+    if (! sessions.isEmpty() && now - lastMs < 1000) return;
+    lastMs = now;
+
     for (int i = sessions.size(); --i >= 0;)
     {
         auto* r = sessions.getUnchecked (i);
-        if (findWindow (r->session.title) == r->session.windowId
+        /* The window must be on screen, not just exist: an editor closed on
+           the computer is hidden, and a mirror of it shows the last picture
+           while every tap lands on whatever is under it. Ending the session
+           lets the tablet page say the window was closed. GUI reopens it. */
+        if (findVisibleWindow (r->session.title) == r->session.windowId
             && r->vnc != nullptr && r->vnc->isRunning()
             && r->web != nullptr && r->web->isRunning())
             continue;

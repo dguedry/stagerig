@@ -37,6 +37,10 @@ public:
 
     /** Finds the X window of an editor StageRig opened with this title. */
     static unsigned long findWindow (const juce::String& title);
+    /** The same, but only if the window is on screen: a hidden editor is one
+        the player closed, and its mirror should end rather than show a stale
+        picture whose taps land on nothing. */
+    static unsigned long findVisibleWindow (const juce::String& title);
 
     /** Starts serving that window, or returns a session that is not valid with
         `error` set. Safe to call again for a window already being served. */
