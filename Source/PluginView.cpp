@@ -24,7 +24,6 @@ namespace
     {
         PluginView::Session session;
         std::unique_ptr<ChildProcess> vnc, web;
-        uint32 lastClipCheckMs = 0;
     };
 
     CriticalSection lock;
@@ -179,83 +178,6 @@ static void raiseWindow (unsigned long windowId)
     }
 }
 
-/** Runs a tool and returns its output, or an empty string. */
-static String runTool (const StringArray& args, int timeoutMs = 3000)
-{
-    ChildProcess p;
-    if (! p.start (args, ChildProcess::wantStdOut)) return {};
-    const auto out = p.readAllProcessOutput();
-    p.waitForProcessToFinish (timeoutMs);
-    return out;
-}
-
-/** A window's position and size in screen coordinates, or an empty rectangle. */
-static Rectangle<int> windowGeometry (unsigned long windowId)
-{
-    auto xdotool = findTool ("xdotool");
-    if (xdotool == File() || windowId == 0) return {};
-    const auto out = runTool ({ xdotool.getFullPathName(), "getwindowgeometry", "--shell", String ((int64) windowId) });
-    int x = 0, y = 0, w = 0, h = 0;
-    for (const auto& line : StringArray::fromLines (out))
-    {
-        if (line.startsWith ("X="))      x = line.fromFirstOccurrenceOf ("=", false, false).getIntValue();
-        if (line.startsWith ("Y="))      y = line.fromFirstOccurrenceOf ("=", false, false).getIntValue();
-        if (line.startsWith ("WIDTH="))  w = line.fromFirstOccurrenceOf ("=", false, false).getIntValue();
-        if (line.startsWith ("HEIGHT=")) h = line.fromFirstOccurrenceOf ("=", false, false).getIntValue();
-    }
-    return w > 0 && h > 0 ? Rectangle<int> (x, y, w, h) : Rectangle<int>();
-}
-
-static int windowPid (unsigned long windowId)
-{
-    auto xdotool = findTool ("xdotool");
-    if (xdotool == File() || windowId == 0) return 0;
-    return runTool ({ xdotool.getFullPathName(), "getwindowpid", String ((int64) windowId) }).trim().getIntValue();
-}
-
-static Rectangle<int> screenBounds()
-{
-    auto xdotool = findTool ("xdotool");
-    if (xdotool == File()) return { 0, 0, 1920, 1080 };
-    const auto out = runTool ({ xdotool.getFullPathName(), "getdisplaygeometry" }).trim();
-    const int w = out.upToFirstOccurrenceOf (" ", false, false).getIntValue();
-    const int h = out.fromFirstOccurrenceOf (" ", false, false).getIntValue();
-    return w > 0 && h > 0 ? Rectangle<int> (0, 0, w, h) : Rectangle<int> (0, 0, 1920, 1080);
-}
-
-/** The screen region a mirror of this plugin should cover: the editor window
-    and every other window its host process has on screen -- a file browser,
-    a dialog, a detached panel -- with a little margin for menus that hang off
-    the edge, clipped to the screen. */
-static Rectangle<int> regionFor (unsigned long windowId, int hostPid)
-{
-    auto region = windowGeometry (windowId);
-    if (region.isEmpty()) return {};
-
-    if (auto xdotool = findTool ("xdotool"); xdotool != File() && hostPid > 0)
-        for (const auto& line : StringArray::fromLines (runTool ({ xdotool.getFullPathName(), "search", "--onlyvisible", "--pid", String (hostPid) })))
-            if (const auto id = line.trim().getLargeIntValue(); id > 0 && (unsigned long) id != windowId)
-                if (auto g = windowGeometry ((unsigned long) id); ! g.isEmpty() && g.getWidth() >= 40 && g.getHeight() >= 40)
-                    region = region.getUnion (g);
-
-    return region.expanded (24).getIntersection (screenBounds());
-}
-
-static StringArray vncArguments (const Rectangle<int>& clip, int vncPort)
-{
-    /* -clip rather than -id: a region of the screen, so the plugin's menus,
-       dialogs and file browsers -- separate X windows, invisible to a mirror
-       of one window -- are in the picture. The editor is kept above other
-       windows while a tablet looks at it, so what is in the region is the
-       plugin. -localhost: the stream never leaves this machine; the tablet
-       talks to websockify through StageRig's own port, so there is one door.
-       -nopw is safe for the same reason. */
-    return { findTool ("x11vnc").getFullPathName(),
-             "-clip", String (clip.getWidth()) + "x" + String (clip.getHeight()) + "+" + String (clip.getX()) + "+" + String (clip.getY()),
-             "-localhost", "-rfbport", String (vncPort),
-             "-nopw", "-forever", "-shared", "-quiet", "-noxdamage" };
-}
-
 //==============================================================================
 PluginView::Session PluginView::start (const String& title, String& error)
 {
@@ -324,21 +246,17 @@ PluginView::Session PluginView::start (const String& title, String& error)
     }
 
     auto running = std::make_unique<Running>();
-    running->session.title = title;
-    running->session.windowId = window;
-    running->session.hostPid = windowPid (window);
-    running->session.clip = regionFor (window, running->session.hostPid);
-    running->session.vncPort = vncPort;
-    running->session.webPort = webPort;
-    running->lastClipCheckMs = Time::getMillisecondCounter();
-    if (running->session.clip.isEmpty())
-    {
-        error = "That plugin's window has no size on screen yet. Try again in a moment.";
-        return {};
-    }
+    running->session = { title, window, vncPort, webPort };
 
+    /* -localhost: the stream itself never leaves this machine. The tablet talks
+       to websockify, which is what we expose, so there is one door rather than
+       two. -nopw is safe for the same reason. */
     running->vnc = std::make_unique<ChildProcess>();
-    if (! running->vnc->start (vncArguments (running->session.clip, vncPort)))
+    if (! running->vnc->start (StringArray {
+            findTool ("x11vnc").getFullPathName(),
+            "-id", String ((int64) window),
+            "-localhost", "-rfbport", String (vncPort),
+            "-nopw", "-forever", "-shared", "-quiet", "-noxdamage" }))
     {
         error = "Could not start x11vnc.";
         return {};
@@ -415,8 +333,6 @@ void PluginView::sweepStrays()
     for (const String pattern : {
             "^\\S*x11vnc -id [0-9]+ -localhost -rfbport " + vncRange
                 + " -nopw -forever -shared -quiet -noxdamage$",
-            "^\\S*x11vnc -clip [0-9]+x[0-9]+\\+[0-9]+\\+[0-9]+ -localhost -rfbport " + vncRange
-                + " -nopw -forever -shared -quiet -noxdamage$",
             "^(\\S+ )?\\S*websockify --web=\\S+ 127\\.0\\.0\\.1:" + webRange
                 + " 127\\.0\\.0\\.1:" + vncRange + "$" })
     {
@@ -440,32 +356,6 @@ void PluginView::dropDeadSessions()
         endProcess (r->web);
         endProcess (r->vnc);
         sessions.remove (i);
-    }
-}
-
-void PluginView::tick()
-{
-    dropDeadSessions();
-
-    const ScopedLock sl (lock);
-    const auto now = Time::getMillisecondCounter();
-    for (auto* r : sessions)
-    {
-        // Once a second per session: each look is a few xdotool calls.
-        if (now - r->lastClipCheckMs < 1000) continue;
-        r->lastClipCheckMs = now;
-
-        const auto region = regionFor (r->session.windowId, r->session.hostPid);
-        if (region.isEmpty() || region == r->session.clip) continue;
-
-        /* The plugin opened or closed a window, or moved: mirror the new
-           region. x11vnc cannot change its clip while running, so it is
-           restarted on the same port; websockify keeps its connection
-           attempt going and the tablet page reconnects within a second. */
-        r->session.clip = region;
-        endProcess (r->vnc);
-        r->vnc = std::make_unique<ChildProcess>();
-        r->vnc->start (vncArguments (region, r->session.vncPort));
     }
 }
 

@@ -1,6 +1,5 @@
 #include "MainComponent.h"
 #include "LevelMeter.h"
-#include "PluginView.h"
 #include "QrCode.h"
 #include "MappingSuggestions.h"
 #include "PluginManagerComponent.h"
@@ -2202,8 +2201,6 @@ void MainComponent::savePaneWidths()
 
 void MainComponent::timerCallback()
 {
-    PluginView::tick();      // mirrored plugin windows: follow their dialogs, drop dead ones
-
     const auto now = Time::getMillisecondCounterHiRes();
     if (keyboardPanel != nullptr && keyboardPanel->isVisible()) keyboardPanel->refreshLabel();   // input name/channel may have been edited
     {

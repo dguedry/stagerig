@@ -1,7 +1,6 @@
 #pragma once
 
 #include <juce_core/juce_core.h>
-#include <juce_graphics/juce_graphics.h>
 
 namespace perf
 {
@@ -28,8 +27,6 @@ public:
     {
         juce::String title;        // the editor window's title, as StageRig set it
         unsigned long windowId = 0;
-        int hostPid = 0;           // the plugin host that owns the window, for finding its other windows
-        juce::Rectangle<int> clip; // the screen region being mirrored
         int vncPort = 0;
         int webPort = 0;
         bool isValid() const { return windowId != 0 && vncPort != 0 && webPort != 0; }
@@ -57,15 +54,6 @@ public:
 
     /** The sessions running right now. */
     static juce::Array<Session> active();
-
-    /** Housekeeping, called about once a second while the program runs: drops
-        sessions whose window has gone, and follows the plugin's windows. The
-        mirror is a screen region rather than one X window, so that menus,
-        dialogs and file browsers -- separate windows, which a single-window
-        mirror never showed -- are in the picture; when the plugin opens one
-        outside the region, or moves, the region is recomputed and the mirror
-        restarted on it. The tablet page reconnects by itself. */
-    static void tick();
 
     /** Drops any session whose window has gone. A plugin editor closes when its
         program is swapped out, and a bridge left pointing at a dead window
