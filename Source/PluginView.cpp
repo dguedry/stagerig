@@ -12,7 +12,10 @@ namespace perf
 static void endProcess (std::unique_ptr<juce::ChildProcess>& p)
 {
     if (p == nullptr) return;
-    p->kill();
+    /* Only a child still running is signalled: kill() uses the pid it
+       remembers, and once the child has been reaped that pid could belong to
+       someone else. */
+    if (p->isRunning()) p->kill();
     p->waitForProcessToFinish (2000);
     p.reset();
 }
