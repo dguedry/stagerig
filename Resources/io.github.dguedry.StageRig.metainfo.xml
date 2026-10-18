@@ -27,7 +27,6 @@
     </ul>
   </description>
   <launchable type="desktop-id">io.github.dguedry.StageRig.desktop</launchable>
-  <icon type="stock">stagerig</icon>
   <url type="homepage">https://github.com/dguedry/stagerig</url>
   <url type="bugtracker">https://github.com/dguedry/stagerig/issues</url>
   <url type="vcs-browser">https://github.com/dguedry/stagerig</url>

@@ -40,7 +40,7 @@ BuildRequires:  fontconfig-devel
 BuildRequires:  mesa-libGL-devel
 BuildRequires:  ladspa-devel
 BuildRequires:  desktop-file-utils
-BuildRequires:  libappstream-glib
+BuildRequires:  appstream
 BuildRequires:  xorg-x11-server-Xvfb
 
 # JUCE 8.0.15 is needed and is not packaged in Fedora; its own dependencies
@@ -101,7 +101,7 @@ only itself down. Audio goes through PipeWire or JACK at low latency.
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.dguedry.StageRig.desktop
-appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.dguedry.StageRig.metainfo.xml
+appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.dguedry.StageRig.metainfo.xml
 # The engine test reports itself skipped when no LV2 instrument is installed.
 xvfb-run -a %ctest
 
