@@ -56,6 +56,8 @@ private:
     juce::String stateJson() const;
     /** The audio inputs' meters, for the tablet to poll while a page shows them. */
     juce::String levelsJson() const;
+    /** The backing track of the song in play: whether there is one, running, where. */
+    juce::String transportJson() const;
     /** Where the time goes: blocks the rig missed, and per loaded plugin the
         blocks it did not answer in time. For finding the plugin that crackles. */
     juce::String healthJson() const;

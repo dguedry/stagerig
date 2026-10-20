@@ -1705,6 +1705,105 @@ int main()
         render (engine, 30);
     }
 
+    // --- backing tracks: stems from disk onto their outputs, a count-in, stop, end ----------
+    {
+        // A setup file of our own, so the track's folder is a scratch one.
+        const auto setupFile = scratchDir.getChildFile ("tracks.stagerig.json");
+        engine.setSetupFile (setupFile);
+        const auto folder = engine.getChartsFolder();
+        folder.createDirectory();
+
+        // A one-second 440 Hz stem at 44.1 kHz, so the player has to resample to the engine's rate.
+        auto writeTone = [] (const File& f, double seconds, double rate, float amp)
+        {
+            f.deleteFile();
+            WavAudioFormat wav;
+            std::unique_ptr<OutputStream> os (f.createOutputStream().release());
+            std::unique_ptr<AudioFormatWriter> w (wav.createWriterFor (os.get(), rate, 1, 16, {}, 0));
+            if (w == nullptr) return false;
+            os.release();
+            AudioBuffer<float> b (1, (int) (seconds * rate));
+            for (int i = 0; i < b.getNumSamples(); ++i) b.setSample (0, i, amp * (float) std::sin (MathConstants<double>::twoPi * 440.0 * i / rate));
+            return w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+        };
+        CHECK (writeTone (folder.getChildFile ("stem.wav"), 1.0, 44100.0, 0.5f));
+
+        const int click = engine.addOutput ("Click", 2, 3);
+        const int song = engine.addSong ("Backing");
+        engine.addSongStem (song, { "stem.wav", "Tone", 0, 0.0f });
+        engine.selectSong (song);
+        CHECK (engine.getTrackSong() == song && engine.hasTrack());
+        CHECK (! engine.isTrackRunning());
+        std::printf ("     track length %.2f s\n", engine.getTrackLength());
+        CHECK (std::abs (engine.getTrackLength() - 1.0) < 0.01);
+
+        AudioBuffer<float> out4 (4, kBlock);
+        auto levels = [&] (int blocks)
+        {
+            std::array<float, 4> peak {};
+            for (int b = 0; b < blocks; ++b)
+            {
+                out4.clear();
+                engine.renderBlockForTesting (out4.getArrayOfWritePointers(), 4, kBlock);
+                for (int c = 0; c < 4; ++c) peak[(size_t) c] = jmax (peak[(size_t) c], out4.getMagnitude (c, 0, kBlock));
+            }
+            return peak;
+        };
+
+        CHECK (levels (4)[0] < 1e-4f);                                   // armed, not playing: silent
+        engine.startTrack();
+        CHECK (engine.isTrackRunning());
+        const auto playing = levels (8);
+        std::printf ("     playing: main %.3f click %.3f\n", playing[0], playing[2]);
+        CHECK (playing[0] > 0.4f && playing[1] > 0.4f && playing[2] < 1e-4f);   // mono stem on both sides of Main
+        CHECK (engine.getTrackPosition() > 0.05);
+
+        // A level change takes effect while it plays.
+        engine.setSongStem (song, 0, { "stem.wav", "Tone", 0, -6.0f });
+        const auto quieter = levels (4);
+        std::printf ("     at -6 dB: main %.3f\n", quieter[0]);
+        CHECK (std::abs (quieter[0] - 0.25f) < 0.03f);
+
+        engine.stopTrack();
+        levels (4);                                                      // the fade
+        pump (50);
+        CHECK (! engine.isTrackRunning());
+        CHECK (levels (4)[0] < 1e-4f);
+
+        // Count-in: two beats at 120 bpm on the click output, then the stem on Main.
+        engine.setSongTempo (song, 120.0);
+        engine.setSongCountIn (song, 2, click);
+        engine.selectSong (song);
+        engine.startTrack();
+        CHECK (engine.isTrackCountingIn());
+        const auto countIn = levels (40);                                // 0.43 s at 48 kHz: inside the count-in
+        std::printf ("     count-in: main %.3f click %.3f\n", countIn[0], countIn[2]);
+        CHECK (countIn[2] > 0.2f && countIn[0] < 1e-4f);
+        const auto after = levels (80);                                  // past the second beat
+        std::printf ("     after the count-in: main %.3f\n", after[0]);
+        CHECK (after[0] > 0.1f);
+
+        // It ends by itself at the end of the file.
+        levels (120);
+        pump (50);
+        std::printf ("     ended: running %d\n", (int) engine.isTrackRunning());
+        CHECK (! engine.isTrackRunning());
+
+        // A song with no stems arms nothing.
+        const int bare = engine.addSong ("No track");
+        engine.selectSong (bare);
+        CHECK (! engine.hasTrack());
+
+        // Round trip through the setup file.
+        TemporaryFile tf (".stagerig.json");
+        CHECK (engine.captureSetup().saveToFile (tf.getFile()).wasOk());
+        Setup back;
+        CHECK (Setup::loadFromFile (tf.getFile(), back).wasOk());
+        CHECK (back.songs[(size_t) song].stems.size() == 1 && back.songs[(size_t) song].stems[0].file == "stem.wav");
+        CHECK (back.songs[(size_t) song].countInBeats == 2 && back.songs[(size_t) song].countInOutput == click);
+        engine.removeOutput (click);
+    }
+
     // CLAP has to be loadable by the synchronous API, because that is the one
     // the out-of-process host calls. A format claiming it needs an unblocked
     // message thread is refused outright by JUCE with "cannot be instantiated

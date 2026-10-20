@@ -114,6 +114,10 @@ public:
     /** The tempo reported to the plugin. Set from the message thread; the audio
         thread copies it into each block, so a change costs nothing per block. */
     void setTempo (double bpm, int timeSigNumerator, int timeSigDenominator);
+    /** Back to bar one, beat one, from the next block: a backing track has just
+        started, and a synced delay or arpeggiator should count from it.
+        Safe from any thread. */
+    void resetMusicalPosition()                             { positionReset.store (true, std::memory_order_relaxed); }
     /** Waits for the block until `deadline` (CLOCK_MONOTONIC). Returns false if the
         plugin is late or dead; the caller must then treat the output as silence. */
     bool finishProcess (float* outL, float* outR, const timespec& deadline);
@@ -185,6 +189,7 @@ private:
     std::atomic<double> tempoBpm { 120.0 };
     std::atomic<int> tempoNumerator { 4 }, tempoDenominator { 4 };
     double ppqPosition = 0.0;              // audio thread only
+    std::atomic<bool> positionReset { false };
     double currentSampleRate = 48000.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RemotePlugin)

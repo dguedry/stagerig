@@ -84,4 +84,14 @@ void prerenderPdfPagesAsync (const File& pdf)
     });
 }
 
+bool isTrackFile (const File& f)
+{
+    return f.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3");
+}
+
+String trackFilePatterns()
+{
+    return "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3";
+}
+
 } // namespace perf

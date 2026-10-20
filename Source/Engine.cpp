@@ -222,6 +222,10 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     }
     deviceManager.addMidiInputDeviceCallback ({}, this);
 
+    // Backing tracks: WAV, AIFF, FLAC, Ogg and MP3, read ahead on their own thread.
+    trackFormats.registerBasicFormats();
+    trackReader.startThread (Thread::Priority::high);
+
     /* Default from the machine rather than a fixed 4. Loading is mostly waiting
        -- Wine starting, a plugin reading its own files -- so the useful number
        is "how many can be in flight", not "how many cores are free". Measured
@@ -255,6 +259,12 @@ Engine::~Engine()
        that waits on every host that has stopped answering is a quit that
        takes minutes. */
     teardownRuntimes (false, 6000);
+
+    {
+        std::unique_ptr<SongPlayer> gone;
+        { const ScopedLock sl (lock); gone = std::move (player); }
+    }
+    trackReader.stopThread (2000);
 
     // Stop the loader: drop queued jobs, cut short a load in progress, join.
     {
@@ -333,6 +343,11 @@ void Engine::notifyContent (int inputIndex, int program)
 //==============================================================================
 void Engine::loadSetup (Setup newSetup)
 {
+    {
+        std::unique_ptr<SongPlayer> gone;
+        { const ScopedLock sl (lock); gone = std::move (player); }
+        trackSong = -1;
+    }
     teardownRuntimes();
     setup = std::move (newSetup);
     // A setup with an audio input needs the device's inputs; a keyboard rig does not pay for them.
@@ -345,6 +360,7 @@ void Engine::loadSetup (Setup newSetup)
     tapCC.store (jlimit (0, 127, setup.tapTempoCC), std::memory_order_relaxed);
     nextCC.store (jlimit (0, 127, setup.nextSongCC), std::memory_order_relaxed);
     prevCC.store (jlimit (0, 127, setup.prevSongCC), std::memory_order_relaxed);
+    transportCCAtomic.store (jlimit (0, 127, setup.transportCC), std::memory_order_relaxed);
     tapTimes.clear();
     rebuildRuntimes();
     listeners.call ([] (Listener& l) { l.setupChanged(); });
@@ -1073,7 +1089,142 @@ void Engine::selectSong (int songIndex)
         setTempoBpm (s.tempoBpm);
         resetTapTempo();
     }
+    // Its backing track is made ready, not started: starting is always on purpose.
+    armTrack (songIndex);
     listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+//==============================================================================
+// Backing tracks
+//==============================================================================
+void Engine::addSongStem (int songIndex, const StemDef& d)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.songs[(size_t) songIndex].stems.push_back (d);
+    if (songIndex == trackSong) armTrack (songIndex);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::removeSongStem (int songIndex, int stemIndex)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& stems = setup.songs[(size_t) songIndex].stems;
+    if (stemIndex < 0 || stemIndex >= (int) stems.size()) return;
+    stems.erase (stems.begin() + stemIndex);
+    if (songIndex == trackSong) armTrack (songIndex);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSongStem (int songIndex, int stemIndex, const StemDef& d)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& stems = setup.songs[(size_t) songIndex].stems;
+    if (stemIndex < 0 || stemIndex >= (int) stems.size()) return;
+    const bool fileChanged = stems[(size_t) stemIndex].file != d.file;
+    stems[(size_t) stemIndex] = d;
+    if (songIndex != trackSong) return;
+    /* A new output or level takes effect at once, even mid-song; only a
+       different file needs the track loaded again. */
+    if (! fileChanged && player != nullptr)
+        player->setStemMix (stemIndex, d.output, d.gainDb);
+    else
+        armTrack (songIndex);
+}
+
+void Engine::setSongCountIn (int songIndex, int beats, int output)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& s = setup.songs[(size_t) songIndex];
+    s.countInBeats = jlimit (0, 16, beats);
+    s.countInOutput = jmax (0, output);
+}
+
+void Engine::armTrack (int songIndex)
+{
+    // Whatever is playing stops first, with its short fade, so a change of song never clicks.
+    if (player != nullptr && player->isRunning())
+    {
+        player->stop();
+        for (int i = 0; i < 20 && player->isRunning(); ++i) Thread::sleep (5);
+    }
+
+    std::unique_ptr<SongPlayer> fresh;
+    if (songIndex >= 0 && songIndex < (int) setup.songs.size() && ! setup.songs[(size_t) songIndex].stems.empty())
+    {
+        StringArray problems;
+        fresh = std::make_unique<SongPlayer> (trackReader, trackFormats, getChartsFolder(),
+                                              setup.songs[(size_t) songIndex], sampleRate, blockSize, problems);
+        if (! problems.isEmpty())
+            listeners.call ([p = problems.joinIntoString ("; ")] (Listener& l) { l.statusMessage ("Backing track: " + p); });
+        if (! fresh->hasStems()) fresh.reset();
+    }
+
+    std::unique_ptr<SongPlayer> gone;
+    {
+        const ScopedLock sl (lock);
+        gone = std::move (player);
+        player = std::move (fresh);
+    }
+    trackSong = songIndex;
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+void Engine::startTrack()
+{
+    if (player == nullptr) return;
+    if (player->isRunning()) return;
+    player->rewind();
+    player->waitUntilReady (800);            // the first second is on disk until it is buffered
+
+    int beats = 0, output = 0;
+    double bpm = setup.tempoBpm > 0.0 ? setup.tempoBpm : 120.0;
+    if (trackSong >= 0 && trackSong < (int) setup.songs.size())
+    {
+        const auto& s = setup.songs[(size_t) trackSong];
+        beats = s.countInBeats;
+        output = s.countInOutput;
+        if (s.tempoBpm > 0.0) bpm = s.tempoBpm;
+    }
+    player->start (beats, 60.0 / bpm, output);
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+void Engine::stopTrack()
+{
+    if (player == nullptr || ! player->isRunning()) return;
+    player->stop();
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+void Engine::toggleTrack()
+{
+    if (isTrackRunning()) stopTrack(); else startTrack();
+}
+
+void Engine::setTransportCC (int cc)
+{
+    setup.transportCC = jlimit (0, 127, cc);
+    transportCCAtomic.store (setup.transportCC, std::memory_order_relaxed);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::resetPluginPositions()
+{
+    /* Bar one, beat one, for everything that could sync to the track: a
+       tempo-synced delay or arpeggiator then lands on the track's beat
+       rather than wherever its own count had wandered to. */
+    for (auto& in : runtimes)
+        for (auto& [prog, rt] : in->loaded)
+        {
+            for (auto& s : rt->slots)
+            {
+                if (s->plugin != nullptr) s->plugin->resetMusicalPosition();
+                for (auto& e : s->effects) if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
+            }
+            for (auto& e : rt->effects) if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
+        }
+    for (auto& o : outputs)
+        for (auto& e : o->chain.effects) if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
 }
 
 int Engine::addSet (const String& name)
@@ -2070,6 +2221,22 @@ void Engine::handleAsyncUpdate()
                 break;
             }
 
+            case Event::transportLearn:
+                setTransportCC (e.a);
+                listeners.call ([cc = e.a] (Listener& l) { l.statusMessage ("Backing track start/stop: CC " + String (cc)); });
+                break;
+
+            case Event::transport:
+                if (! hasTrack())
+                    listeners.call ([] (Listener& l) { l.statusMessage ("This song has no backing track."); });
+                else
+                    toggleTrack();
+                break;
+
+            case Event::trackFinished:
+                listeners.call ([] (Listener& l) { l.transportChanged(); });
+                break;
+
             case Event::songStep:
             {
                 if (setup.currentSet < 0)
@@ -2254,6 +2421,12 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
         postEvent ({ Event::songLearn, i, m.getControllerNumber(), 0, 0, 0 });
         return;
     }
+    if (transportLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
+    {
+        transportLearnArmed.store (false);
+        postEvent ({ Event::transportLearn, i, m.getControllerNumber(), 0, 0, 0 });
+        return;
+    }
 
     /* Stepping through the set, outside the channel filter and whatever is
        loaded -- a footswitch has to work all night. Only the press counts. */
@@ -2264,6 +2437,8 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
         { postEvent ({ Event::songStep, i, +1, 0, 0, 0 }); return; }
         if (const int p = prevCC.load (std::memory_order_relaxed); p > 0 && cc == p)
         { postEvent ({ Event::songStep, i, -1, 0, 0, 0 }); return; }
+        if (const int t = transportCCAtomic.load (std::memory_order_relaxed); t > 0 && cc == t)
+        { postEvent ({ Event::transport, i, 0, 0, 0, 0 }); return; }
     }
 
     /* Tap tempo, outside the channel filter: the tempo belongs to the rig, so a
@@ -2359,6 +2534,7 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
         for (auto& e : o->chain.effects)
             if (e->alive()) e->plugin->prepare (sampleRate, blockSize);
     }
+    if (player != nullptr) player->prepare (sampleRate, blockSize);
 }
 
 void Engine::audioDeviceStopped() {}
@@ -2422,6 +2598,24 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
             float* busOut[2] = { outputs[(size_t) idx]->mix.getWritePointer (0), outputs[(size_t) idx]->mix.getWritePointer (1) };
             processInput (*rt, inChunk, numIn, busOut, 2, n, panicNow);
         }
+
+        // The backing track, onto its outputs ahead of their master effects and volume.
+        if (player != nullptr)
+        {
+            float* trackOut[16][2];
+            const int numTrackOutputs = jmin ((int) outputs.size(), 16);
+            for (int o = 0; o < numTrackOutputs; ++o)
+            {
+                trackOut[o][0] = outputs[(size_t) o]->mix.getWritePointer (0);
+                trackOut[o][1] = outputs[(size_t) o]->mix.getWritePointer (1);
+            }
+            const auto happened = player->render (trackOut, numTrackOutputs, n);
+            if (happened == SongPlayer::Happened::stemsStarted)
+                resetPluginPositions();
+            else if (happened == SongPlayer::Happened::ended || happened == SongPlayer::Happened::stopped)
+                postEvent ({ Event::trackFinished, 0, 0, 0, 0, 0 });
+        }
+
         static const MidiBuffer noMidi;
         for (auto& o : outputs)
         {

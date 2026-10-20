@@ -54,9 +54,17 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     editBtn.onClick = [this] { editSelectedSong(); };
 
     addAndMakeVisible (chartBtn);
-    chartBtn.setTooltip ("Sheet music for this song, shown on the tablet: attach a PDF, an image, "
-                         "a text chart or a ChordPro file -- or drop one on the song");
+    chartBtn.setTooltip ("What this song brings with it: sheet music for the tablet (a PDF, an image, a text "
+                         "chart or a ChordPro file) and a backing track of audio stems. Or drop files on the song.");
     chartBtn.onClick = [this] { showChartMenu(); };
+
+    addAndMakeVisible (playBtn);
+    playBtn.setTooltip ("Start or stop the backing track of the song in play, after its count-in. "
+                        "A footswitch can do the same (Footswitches...).");
+    playBtn.onClick = [this] { engine.toggleTrack(); refreshTransport(); };
+    addAndMakeVisible (trackLabel);
+    trackLabel.setFont (FontOptions (12.0f));
+    trackLabel.setColour (Label::textColourId, textDim);
 
     addAndMakeVisible (toSetBtn);
     toSetBtn.setTooltip ("Put the selected song at the end of the set");
@@ -114,6 +122,11 @@ void SongsPanel::resized()
     auto top = r.removeFromTop (24);
     setBtn.setBounds (top.removeFromLeft (top.getWidth() / 2).reduced (1, 0));
     footBtn.setBounds (top.reduced (1, 0));
+    r.removeFromTop (4);
+    auto transport = r.removeFromTop (24);
+    playBtn.setBounds (transport.removeFromLeft (52).reduced (1, 0));
+    transport.removeFromLeft (4);
+    trackLabel.setBounds (transport);
     r.removeFromTop (6);
 
     // The set list is what you play from, so it gets the larger half.
@@ -205,6 +218,28 @@ void SongsPanel::timerCallback()
         lastSet = set; lastPos = pos; lastSongs = nSongs; lastSets = nSets;
         refresh();
     }
+    refreshTransport();
+}
+
+void SongsPanel::refreshTransport()
+{
+    auto mmss = [] (double s) { const int t = (int) s; return String (t / 60) + ":" + String (t % 60).paddedLeft ('0', 2); };
+    const int song = engine.getTrackSong();
+    const auto& songs = engine.getSongs();
+    const bool has = engine.hasTrack() && song >= 0 && song < (int) songs.size();
+
+    playBtn.setEnabled (has);
+    playBtn.setButtonText (engine.isTrackRunning() ? "Stop" : "Play");
+    playBtn.setColour (TextButton::buttonColourId, engine.isTrackRunning() ? accentDim : getLookAndFeel().findColour (TextButton::buttonColourId));
+
+    String text;
+    if (! has)
+        text = "No backing track";
+    else if (engine.isTrackCountingIn())
+        text = songs[(size_t) song].name + "  -- counting in";
+    else
+        text = songs[(size_t) song].name + "  " + mmss (engine.getTrackPosition()) + " / " + mmss (engine.getTrackLength());
+    if (trackLabel.getText() != text) trackLabel.setText (text, dontSendNotification);
 }
 
 //==============================================================================
@@ -610,7 +645,7 @@ void SongsPanel::showSetMenu()
 void SongsPanel::showFootswitchMenu()
 {
     PopupMenu m;
-    const int nextCC = engine.getNextSongCC(), prevCC = engine.getPrevSongCC();
+    const int nextCC = engine.getNextSongCC(), prevCC = engine.getPrevSongCC(), playCC = engine.getTransportCC();
 
     m.addSectionHeader ("Next song");
     m.addItem (1, "Learn: press the pedal...");
@@ -620,6 +655,10 @@ void SongsPanel::showFootswitchMenu()
     m.addItem (3, "Learn: press the pedal...");
     if (prevCC > 0) m.addItem (4, "Stop using CC " + String (prevCC));
 
+    m.addSectionHeader ("Backing track: start / stop");
+    m.addItem (5, "Learn: press the pedal...");
+    if (playCC > 0) m.addItem (6, "Stop using CC " + String (playCC));
+
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (footBtn), [this] (int choice)
     {
         switch (choice)
@@ -628,6 +667,8 @@ void SongsPanel::showFootswitchMenu()
             case 2: engine.setNextSongCC (0);    break;
             case 3: engine.armSongLearn (false); break;
             case 4: engine.setPrevSongCC (0);    break;
+            case 5: engine.armTransportLearn();  break;
+            case 6: engine.setTransportCC (0);   break;
             default: break;
         }
         refresh();
@@ -642,7 +683,8 @@ void SongsPanel::showChartMenu()
     const auto& sg = songs[(size_t) selectedSong];
 
     PopupMenu m;
-    m.addItem (1, "Attach a file...");
+    m.addItem (1, "Attach a chart...");
+    m.addItem (2, "Backing track..." + (sg.stems.empty() ? String() : "  (" + String ((int) sg.stems.size()) + (sg.stems.size() == 1 ? " stem)" : " stems)")));
     if (! sg.charts.empty())
     {
         m.addSectionHeader ("Attached");
@@ -663,6 +705,10 @@ void SongsPanel::showChartMenu()
             {
                 for (const auto& f : fc.getResults()) attachChartFile (f, idx);
             });
+        }
+        else if (r == 2)
+        {
+            showTracksDialog (idx);
         }
         else if (r >= 100)
         {
@@ -700,7 +746,7 @@ void SongsPanel::attachChartFile (const File& f, int songIndex)
 bool SongsPanel::isInterestedInFileDrag (const StringArray& files)
 {
     for (const auto& p : files)
-        if (isChartFile (File (p))) return true;
+        if (isChartFile (File (p)) || isTrackFile (File (p))) return true;
     return false;
 }
 
@@ -724,7 +770,210 @@ void SongsPanel::filesDropped (const StringArray& files, int x, int y)
     if (song < 0 || song >= (int) songs.size()) return;
 
     for (const auto& p : files)
-        attachChartFile (File (p), song);
+    {
+        const File f (p);
+        if (isTrackFile (f)) addTrackFile (f, song);
+        else                 attachChartFile (f, song);
+    }
+}
+
+//==============================================================================
+void SongsPanel::addTrackFile (const File& f, int songIndex)
+{
+    if (songIndex < 0 || songIndex >= (int) engine.getSongs().size()) return;
+    if (! f.existsAsFile() || ! isTrackFile (f)) return;
+    const auto folder = engine.getChartsFolder();
+    if (folder == File()) return;
+    folder.createDirectory();
+
+    // Copied beside the setup, like a chart, so the two travel together.
+    File dest = folder.getChildFile (f.getFileName());
+    if (dest.existsAsFile() && ! dest.hasIdenticalContentTo (f))
+        dest = folder.getNonexistentChildFile (f.getFileNameWithoutExtension(), f.getFileExtension(), true);
+    if (! dest.existsAsFile() && ! f.copyFileTo (dest)) return;
+
+    StemDef d;
+    d.file = dest.getFileName();
+    engine.addSongStem (songIndex, d);
+    refresh();
+}
+
+/** A song's backing track: its stems, each with an output and a level, and
+    the count-in. A window of its own, because it is set up once per song. */
+class TracksComponent : public Component,
+                        private Timer
+{
+public:
+    TracksComponent (Engine& e, SongsPanel& p, int song) : engine (e), panel (p), songIndex (song)
+    {
+        addAndMakeVisible (addBtn);
+        addBtn.onClick = [this]
+        {
+            chooser = std::make_unique<FileChooser> ("Add audio files to the backing track",
+                                                     File::getSpecialLocation (File::userHomeDirectory),
+                                                     trackFilePatterns());
+            chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles
+                                    | FileBrowserComponent::canSelectMultipleItems,
+                                  [this] (const FileChooser& fc)
+            {
+                for (const auto& f : fc.getResults()) panel.addTrackFile (f, songIndex);
+                rebuild();
+            });
+        };
+
+        addAndMakeVisible (countInLabel);
+        countInLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (countInBox);
+        countInBox.addItem ("No count-in", 1);
+        for (int b = 1; b <= 8; ++b) countInBox.addItem (String (b) + (b == 1 ? " beat" : " beats"), b + 1);
+        countInBox.onChange = [this] { applyCountIn(); };
+        addAndMakeVisible (countInOutLabel);
+        countInOutLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (countInOutBox);
+        countInOutBox.onChange = [this] { applyCountIn(); };
+
+        addAndMakeVisible (hint);
+        hint.setColour (Label::textColourId, textDim);
+        hint.setFont (FontOptions (12.0f));
+        hint.setJustificationType (Justification::topLeft);
+        hint.setText ("Each stem plays on its own output from the start of the song when the track is started "
+                      "-- Play in the songs panel, the tablet, or the start/stop footswitch. Put a click or cue "
+                      "stem on your in-ear output. The count-in clicks at the song's tempo.", dontSendNotification);
+
+        rebuild();
+        startTimerHz (2);
+    }
+
+    void rebuild()
+    {
+        rows.clear();
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+        const auto& sg = songs[(size_t) songIndex];
+
+        for (int i = 0; i < (int) sg.stems.size(); ++i)
+        {
+            auto row = std::make_unique<Row> (*this, i, sg.stems[(size_t) i]);
+            addAndMakeVisible (row.get());
+            rows.push_back (std::move (row));
+        }
+
+        fillOutputs (countInOutBox, sg.countInOutput);
+        countInBox.setSelectedId (sg.countInBeats + 1, dontSendNotification);
+        countInOutBox.setEnabled (sg.countInBeats > 0);
+        resized();
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (10);
+        for (auto& row : rows) row->setBounds (r.removeFromTop (30));
+        r.removeFromTop (6);
+        addBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
+        r.removeFromTop (12);
+        auto c = r.removeFromTop (24);
+        countInLabel.setBounds (c.removeFromLeft (70));
+        countInBox.setBounds (c.removeFromLeft (130));
+        c.removeFromLeft (12);
+        countInOutLabel.setBounds (c.removeFromLeft (30));
+        countInOutBox.setBounds (c.removeFromLeft (180));
+        r.removeFromTop (10);
+        hint.setBounds (r);
+    }
+
+private:
+    struct Row : public Component
+    {
+        Row (TracksComponent& o, int i, const StemDef& d) : owner (o), index (i), def (d)
+        {
+            addAndMakeVisible (name);
+            name.setText (d.displayName(), dontSendNotification);
+            name.setEditable (true);
+            name.setTooltip (d.file);
+            name.onTextChange = [this] { def.name = name.getText().trim(); owner.engine.setSongStem (owner.songIndex, index, def); };
+
+            addAndMakeVisible (output);
+            owner.fillOutputs (output, d.output);
+            output.onChange = [this] { def.output = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
+
+            addAndMakeVisible (gain);
+            gain.setRange (-60.0, 12.0, 0.5);
+            gain.setSliderStyle (Slider::LinearBar);
+            gain.setTextValueSuffix (" dB");
+            gain.setDoubleClickReturnValue (true, 0.0);
+            gain.setValue (d.gainDb, dontSendNotification);
+            gain.onValueChange = [this] { def.gainDb = (float) gain.getValue(); owner.engine.setSongStem (owner.songIndex, index, def); };
+
+            addAndMakeVisible (remove);
+            remove.setTooltip ("Take this stem off the song. The file stays in the setup's folder.");
+            remove.onClick = [this] { owner.engine.removeSongStem (owner.songIndex, index); MessageManager::callAsync ([o = &owner] { o->rebuild(); }); };
+        }
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (0, 2);
+            remove.setBounds (r.removeFromRight (28));     r.removeFromRight (6);
+            gain.setBounds (r.removeFromRight (110));      r.removeFromRight (6);
+            output.setBounds (r.removeFromRight (180));    r.removeFromRight (6);
+            name.setBounds (r);
+        }
+        TracksComponent& owner;
+        int index;
+        StemDef def;
+        Label name;
+        ComboBox output;
+        Slider gain;
+        TextButton remove { "X" };
+    };
+
+    void fillOutputs (ComboBox& box, int selected)
+    {
+        box.clear (dontSendNotification);
+        const auto& outs = engine.getSetup().outputs;
+        for (int o = 0; o < (int) outs.size(); ++o)
+            box.addItem (outs[(size_t) o].name + "  (" + String (outs[(size_t) o].left + 1)
+                           + (outs[(size_t) o].right >= 0 ? "+" + String (outs[(size_t) o].right + 1) : String()) + ")", o + 1);
+        box.setSelectedId (jlimit (0, jmax (0, (int) outs.size() - 1), selected) + 1, dontSendNotification);
+    }
+
+    void applyCountIn()
+    {
+        const int beats = jmax (0, countInBox.getSelectedId() - 1);
+        engine.setSongCountIn (songIndex, beats, jmax (0, countInOutBox.getSelectedId() - 1));
+        countInOutBox.setEnabled (beats > 0);
+    }
+
+    void timerCallback() override
+    {
+        // Rows follow the song if it was changed elsewhere -- a stem dropped on it in the songs panel.
+        const auto& songs = engine.getSongs();
+        if (songIndex >= 0 && songIndex < (int) songs.size() && songs[(size_t) songIndex].stems.size() != rows.size())
+            rebuild();
+    }
+
+    Engine& engine;
+    SongsPanel& panel;
+    const int songIndex;
+    std::vector<std::unique_ptr<Row>> rows;
+    TextButton addBtn { "+ Add audio files..." };
+    Label countInLabel { {}, "Count-in" }, countInOutLabel { {}, "on" }, hint;
+    ComboBox countInBox, countInOutBox;
+    std::unique_ptr<FileChooser> chooser;
+};
+
+void SongsPanel::showTracksDialog (int songIndex)
+{
+    const auto& songs = engine.getSongs();
+    if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+    auto* content = new TracksComponent (engine, *this, songIndex);
+    content->setSize (620, 360);
+    DialogWindow::LaunchOptions o;
+    o.content.setOwned (content);
+    o.dialogTitle = "Backing track: " + songs[(size_t) songIndex].name;
+    o.dialogBackgroundColour = bgPanel;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = true;
+    o.launchAsync();
 }
 
 } // namespace perf

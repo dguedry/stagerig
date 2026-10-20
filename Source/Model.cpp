@@ -292,6 +292,26 @@ File chartsFolderFor (const File& setupFile)
     return setupFile.getSiblingFile (setupFile.getFileNameWithoutExtension() + ".charts");
 }
 
+var StemDef::toVar() const
+{
+    auto* o = new DynamicObject();
+    o->setProperty ("file", file);
+    if (name.isNotEmpty()) o->setProperty ("name", name);
+    o->setProperty ("output", output);
+    if (gainDb != 0.0f) o->setProperty ("gainDb", gainDb);
+    return var (o);
+}
+
+StemDef StemDef::fromVar (const var& v)
+{
+    StemDef d;
+    d.file   = propStr (v, "file");
+    d.name   = propStr (v, "name");
+    d.output = jmax (0, prop<int> (v, "output", 0));
+    d.gainDb = (float) prop<double> (v, "gainDb", 0.0);
+    return d;
+}
+
 var SongDef::toVar() const
 {
     auto* o = new DynamicObject();
@@ -307,6 +327,17 @@ var SongDef::toVar() const
         juce::Array<juce::var> arr;
         for (const auto& c : charts) arr.add (c.toVar());
         o->setProperty ("charts", arr);
+    }
+    if (! stems.empty())
+    {
+        juce::Array<juce::var> arr;
+        for (const auto& st : stems) arr.add (st.toVar());
+        o->setProperty ("stems", arr);
+    }
+    if (countInBeats > 0)
+    {
+        o->setProperty ("countInBeats", countInBeats);
+        o->setProperty ("countInOutput", countInOutput);
     }
     return var (o);
 }
@@ -326,6 +357,12 @@ SongDef SongDef::fromVar (const var& v)
         if (auto* arr = o->getProperty ("programs").getArray())
             for (auto& p : *arr)
                 s.programs.push_back ((int) p);
+        if (auto* arr = o->getProperty ("stems").getArray())
+            for (const auto& st : *arr)
+                if (auto stem = StemDef::fromVar (st); stem.file.isNotEmpty())
+                    s.stems.push_back (stem);
+        s.countInBeats  = jlimit (0, 16, (int) o->getProperty ("countInBeats"));
+        s.countInOutput = jmax (0, (int) o->getProperty ("countInOutput"));
     }
     return s;
 }
@@ -395,6 +432,7 @@ var Setup::toVar() const
     }
     if (nextSongCC > 0) o->setProperty ("nextSongCC", nextSongCC);
     if (prevSongCC > 0) o->setProperty ("prevSongCC", prevSongCC);
+    if (transportCC > 0) o->setProperty ("transportCC", transportCC);
     return var (o);
 }
 
@@ -420,6 +458,7 @@ Setup Setup::fromVar (const var& v)
 
     s.nextSongCC = prop<int> (v, "nextSongCC", 0);
     s.prevSongCC = prop<int> (v, "prevSongCC", 0);
+    s.transportCC = jlimit (0, 127, prop<int> (v, "transportCC", 0));
     if (auto* o = obj (v))
     {
         if (auto* arr = o->getProperty ("songs").getArray())

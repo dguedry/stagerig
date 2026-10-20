@@ -90,11 +90,21 @@ private:
     ListProxy songsModel { *this, false }, setModel { *this, true };
 
     juce::TextButton addBtn { "+" }, removeBtn { "-" },
-                     captureBtn { "Capture" }, editBtn { "Edit" }, chartBtn { "Chart..." };
+                     captureBtn { "Capture" }, editBtn { "Edit" }, chartBtn { "Files..." };
     juce::TextButton toSetBtn { "Add to set >" }, fromSetBtn { "< Remove" },
                      upBtn { "^" }, downBtn { "v" };
     juce::TextButton songUpBtn { "^" }, songDownBtn { "v" };
     juce::TextButton setBtn { "Set..." }, footBtn { "Footswitches..." };
+
+    // The backing track of the song in play: start/stop, and where it is.
+    juce::TextButton playBtn { "Play" };
+    juce::Label trackLabel;
+    void refreshTransport();
+    void showTracksDialog (int songIndex);
+public:
+    /** Copies an audio file beside the setup and adds it to the song as a stem. */
+    void addTrackFile (const juce::File&, int songIndex);
+private:
 
     int selectedSong = -1;        // index into engine.getSongs()
     int selectedInSet = -1;       // position within the current set

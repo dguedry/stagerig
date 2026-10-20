@@ -3,6 +3,7 @@
 #include "Model.h"
 #include "PluginHost.h"
 #include "RemotePlugin.h"
+#include "SongPlayer.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
@@ -58,6 +59,8 @@ public:
         /** The user touched a parameter in a plugin GUI (effect == -1 for an instrument). */
         virtual void parameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex) { juce::ignoreUnused (inputIndex, program, slot, effect, paramIndex); }
         virtual void statusMessage (const juce::String&) {}
+        /** The backing track was armed, started, stopped or came to its end. */
+        virtual void transportChanged() {}
     };
 
     /** @param startAudioDevice  pass false for headless tests; blocks are then rendered
@@ -251,6 +254,32 @@ public:
     void setPrevSongCC (int cc);
     void armSongLearn (bool forNext);
     bool isSongLearnArmed() const { return songLearnArmed.load(); }
+
+    //==============================================================================
+    // Backing tracks: a song's stems, played from the folder beside the setup.
+    void addSongStem (int songIndex, const StemDef&);
+    void removeSongStem (int songIndex, int stemIndex);
+    void setSongStem (int songIndex, int stemIndex, const StemDef&);
+    void setSongCountIn (int songIndex, int beats, int output);
+
+    /** The song whose track is ready to play: the one selected last, or -1. */
+    int  getTrackSong() const                       { return trackSong; }
+    bool hasTrack() const                           { return player != nullptr && player->hasStems(); }
+    bool isTrackRunning() const                     { return player != nullptr && player->isRunning(); }
+    bool isTrackCountingIn() const                  { return player != nullptr && player->getState() == SongPlayer::State::countIn; }
+    double getTrackPosition() const                 { return player != nullptr ? player->getPositionSeconds() : 0.0; }
+    double getTrackLength() const                   { return player != nullptr ? player->getLengthSeconds() : 0.0; }
+    /** Starts the armed song's track from the top, after its count-in. */
+    void startTrack();
+    void stopTrack();
+    void toggleTrack();
+    /** Loads (or reloads) the track for this song, stopping whatever was playing. */
+    void armTrack (int songIndex);
+
+    int  getTransportCC() const                     { return setup.transportCC; }
+    void setTransportCC (int cc);
+    void armTransportLearn()                        { transportLearnArmed.store (true); }
+    bool isTransportLearnArmed() const              { return transportLearnArmed.load(); }
     void setProgramName (int inputIndex, int program, const juce::String&);
 
     /** The program's category ("Organs", "Strings"), or empty for ungrouped. */
@@ -360,7 +389,8 @@ private:
     struct Event
     {
         enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
-                    songStep, songLearn, editorClosed, outputVolume, outputLearn };
+                    songStep, songLearn, editorClosed, outputVolume, outputLearn,
+                    transport, transportLearn, trackFinished };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -494,6 +524,15 @@ private:
     std::atomic<int> nextCC { 0 }, prevCC { 0 };   // read on the MIDI thread
     std::atomic<bool> songLearnArmed { false };
     bool songLearnForNext = true;
+
+    // Backing tracks
+    juce::AudioFormatManager trackFormats;
+    juce::TimeSliceThread trackReader { "stagerig-track-reader" };
+    std::unique_ptr<SongPlayer> player;           // swapped under `lock`
+    int trackSong = -1;                           // message thread
+    std::atomic<int> transportCCAtomic { 0 };     // read on the MIDI thread
+    std::atomic<bool> transportLearnArmed { false };
+    void resetPluginPositions();                  // audio thread, under lock
 
     int loaderThreadCount = 4;                    // settings "parallelLoads"
     std::vector<std::thread> loaderThreads;

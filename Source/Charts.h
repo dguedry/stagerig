@@ -24,6 +24,10 @@ bool isChartFile (const juce::File&);
 /** For a file chooser. */
 juce::String chartFilePatterns();
 
+/** Audio a song can carry as a backing-track stem: WAV, AIFF, FLAC, Ogg, MP3. */
+bool isTrackFile (const juce::File&);
+juce::String trackFilePatterns();
+
 /** The MIME type to serve the file with. */
 juce::String chartContentTypeFor (const juce::File&);
 

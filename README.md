@@ -56,6 +56,10 @@ other plugin.
   page or a B-3X's drawbars without walking back to the computer. Nothing to
   install -- scan the code or type a short one, and add it to the home screen if
   you like. StageRig can serve its own wifi network when the venue has none.
+- **Backing tracks.** A song can carry audio stems -- a full mix, or drums,
+  bass and pads apart, plus a click and cues for the in-ears -- each on its own
+  output, with a count-in, started and stopped from a footswitch, the laptop
+  or the tablet. Plugins' tempo-synced effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
   song -- PDF, image, text or ChordPro -- and the tablet shows it, turning
   PDF pages a tap at a time and following the set from song to song. Files

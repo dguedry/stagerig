@@ -17,6 +17,7 @@ and the code layout, see the [README](../README.md).
 - [Programs: your sounds](#programs-your-sounds)
 - [Songs and sets](#songs-and-sets)
 - [Charts on the stand](#charts-on-the-stand)
+- [Backing tracks](#backing-tracks)
 - [Outputs and the master chain](#outputs-and-the-master-chain)
 - [Slots: instruments inside a program](#slots-instruments-inside-a-program)
 - [Splits and layers](#splits-and-layers)
@@ -316,6 +317,43 @@ to the new song's chart, and says so when the new song has none. Press
 **Follow** to pin it to the song you are looking at instead. A song's
 `notes` line is still the place for a key or a count-in; a chart is for what
 does not fit on one line.
+
+## Backing tracks
+
+A song can bring a backing track: one or more audio files -- **stems** -- that
+play together from the top when you start them. A full mix, or drums, bass and
+pads on their own, plus a click and spoken cues for your in-ears.
+
+**Files... ▸ Backing track...** on a song opens its track. **+ Add audio files...**
+adds WAV, AIFF, FLAC, Ogg or MP3 files (or drop them on the song in the songs
+panel). Like charts, they are copied into the folder beside the setup, so the
+setup and its tracks travel together. For each stem:
+
+- **Output** -- which output it plays on. Stems go through that output's master
+  effects and volume like everything else on it. Put the click and cue stem on
+  your in-ear output and nothing else there, and the audience never hears it.
+- **Level** -- in dB, and it can be changed while the track plays.
+- **X** takes the stem off the song; the file stays in the folder.
+
+**Count-in** clicks a number of beats at the song's tempo before the stems
+start, on the output you choose -- usually the in-ears.
+
+### Playing it
+
+Selecting a song makes its track ready but never starts it: starting is always
+on purpose. Then any of these starts it, and the same again stops it with a
+short fade:
+
+- **Play / Stop** at the top of the songs panel, which also shows where the
+  track is (*0:42 / 3:51*);
+- the **Play** bar at the top of the tablet's set list;
+- a footswitch: **Footswitches... ▸ Backing track: start / stop**, then press
+  the pedal. It works on any keyboard and channel, like the song pedals.
+
+Moving to another song stops the track that is playing. When the stems start,
+every plugin's musical position goes back to bar one, beat one, so a
+tempo-synced delay or arpeggiator lands on the track's beat -- set the song's
+tempo to the track's.
 
 ## Outputs and the master chain
 

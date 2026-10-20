@@ -106,6 +106,14 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   /* The set list. The current song is the thing you must be able to read at a
      glance from a stand, so it is the one that is big. */
   .setwrap { margin:10px 12px 22px; }
+  /* The backing track of the song in play: one big button, and where it is. */
+  .transport { display:flex; align-items:center; gap:12px; background:var(--panel); border-radius:12px;
+               padding:10px 12px; margin-bottom:12px; }
+  .transport button { flex:none; border:0; border-radius:10px; padding:12px 20px; font-size:16px; font-weight:800;
+                      background:var(--accent); color:#06121f; min-width:96px; }
+  .transport button.running { background:#a3282d; color:#fff; }
+  .transport .tt { flex:1; min-width:0; font-size:15px; color:var(--dim); font-variant-numeric:tabular-nums;
+                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .setpick { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
   .setpick button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
                     padding:10px 18px; font-size:13px; font-weight:700; }
@@ -261,6 +269,27 @@ function syncTabs() {
 document.getElementById("tabSongs").onclick = () => { tab = "songs";    localStorage.setItem("tab", tab); syncTabs(); };
 document.getElementById("tabProgs").onclick = () => { tab = "programs"; localStorage.setItem("tab", tab); syncTabs(); };
 
+/* The backing track's button and clock, kept current twice a second while the
+   song in play has a track and the page is showing. */
+let transportUi = null, transportTimer = null;
+const mmss = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+function showTransport(t) {
+  if (!transportUi || !t) return;
+  transportUi.button.textContent = t.running ? "Stop" : "Play";
+  transportUi.button.classList.toggle("running", !!t.running);
+  transportUi.text.textContent = (t.name ? t.name + "   " : "")
+    + (t.countIn ? "counting in…" : mmss(t.pos) + " / " + mmss(t.len));
+}
+async function pollTransport() {
+  try { showTransport(await api("/api/transport")); } catch (e) { /* the next poll is half a second away */ }
+}
+function syncTransportPolling() {
+  const want = token && lastState && lastState.track && document.visibilityState === "visible";
+  if (want && !transportTimer) { transportTimer = setInterval(pollTransport, 500); pollTransport(); }
+  if (!want && transportTimer) { clearInterval(transportTimer); transportTimer = null; }
+}
+document.addEventListener("visibilitychange", syncTransportPolling);
+
 /* The set list. Drawn from the state the page already polls, so it follows a
    footswitch press or a change made on the laptop without doing anything. */
 function renderSets(s) {
@@ -275,6 +304,21 @@ function renderSets(s) {
   }
 
   const wrap = document.createElement("div"); wrap.className = "setwrap";
+
+  if (s.track) {
+    const bar = document.createElement("div"); bar.className = "transport";
+    const b = document.createElement("button"); b.textContent = "Play";
+    const t = document.createElement("div"); t.className = "tt"; t.textContent = "Backing track";
+    b.onclick = async () => {
+      try { showTransport(await api("/api/transport?do=toggle", { method: "POST" })); }
+      catch (e) { if (!e.gate) show(e.message); }
+    };
+    bar.appendChild(b); bar.appendChild(t);
+    wrap.appendChild(bar);
+    transportUi = { button: b, text: t };
+  } else {
+    transportUi = null;
+  }
 
   /* Search, whenever there is more than one song. It used to appear only past
      eight, which meant a five-song setup had a feature it could not discover --
@@ -672,6 +716,8 @@ async function refresh(force) {
     const s = await api("/api/state");
     if (force || s.revision !== rev) { rev = s.revision; render(s); }
     syncLevelPolling();
+    syncTransportPolling();
+    if (transportUi) pollTransport();
     show("");
   } catch (e) {
     if (e.gate) askForCode("That code was not accepted — check StageRig and try again.");
@@ -1392,6 +1438,8 @@ String RemoteServer::stateJson() const
     const auto& setup = engine.getSetup();
     DynamicObject::Ptr root (new DynamicObject());
     root->setProperty ("revision", revision.load());
+    // Whether the song in play has a backing track; the page polls /api/transport for where it is.
+    root->setProperty ("track", engine.hasTrack());
     root->setProperty ("tempo", engine.getTempoBpm());
     Array<var> inputs;
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
@@ -1497,6 +1545,21 @@ String RemoteServer::stateJson() const
         root->setProperty ("currentSong", engine.getCurrentSongInSet());
     }
     return JSON::toString (var (root.get()), true);
+}
+
+String RemoteServer::transportJson() const
+{
+    DynamicObject::Ptr o (new DynamicObject());
+    const int song = engine.getTrackSong();
+    const auto& songs = engine.getSongs();
+    o->setProperty ("has", engine.hasTrack());
+    o->setProperty ("song", song);
+    o->setProperty ("name", song >= 0 && song < (int) songs.size() ? songs[(size_t) song].name : String());
+    o->setProperty ("running", engine.isTrackRunning());
+    o->setProperty ("countIn", engine.isTrackCountingIn());
+    o->setProperty ("pos", engine.getTrackPosition());
+    o->setProperty ("len", engine.getTrackLength());
+    return JSON::toString (var (o.get()), true);
 }
 
 String RemoteServer::levelsJson() const
@@ -1871,6 +1934,25 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;
     }
+    if (path.startsWith ("/api/transport"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        // POST ...?do=toggle|start|stop changes it; any request answers with where it is.
+        const auto what = path.fromFirstOccurrenceOf ("do=", false, false).upToFirstOccurrenceOf ("&", false, false);
+        String body;
+        if (produceOnMessageThread ([this, what]
+            {
+                if (what == "toggle")     engine.toggleTrack();
+                else if (what == "start") engine.startTrack();
+                else if (what == "stop")  engine.stopTrack();
+                return transportJson();
+            }, body, 3000))
+            sendResponse (sock, "200 OK", "application/json", body);
+        else
+            sendBusy (sock, sendResponse);
+        return;
+    }
+
     if (path.startsWith ("/api/setlist"))
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }

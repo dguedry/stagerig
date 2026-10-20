@@ -630,6 +630,8 @@ void RemotePlugin::beginProcess (const float* inL, const float* inR, const MidiB
        this block covers, so a synced delay lands where the plugin expects rather
        than restarting from zero every block. */
     const double bpm = tempoBpm.load (std::memory_order_relaxed);
+    if (positionReset.exchange (false, std::memory_order_relaxed))
+        ppqPosition = 0.0;
     shm->bpm = bpm;
     shm->ppqPosition = ppqPosition;
     shm->timeSigNumerator = tempoNumerator.load (std::memory_order_relaxed);

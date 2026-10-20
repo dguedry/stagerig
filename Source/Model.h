@@ -185,6 +185,21 @@ struct ChartRef
     charts in MySetup.stagerig.charts/, beside it. */
 juce::File chartsFolderFor (const juce::File& setupFile);
 
+/** One audio file of a song's backing track: a stem (drums, bass, pads), a
+    full mix, or a click and cue track for the in-ears. Kept in the folder
+    beside the setup, like charts, so the two travel together. */
+struct StemDef
+{
+    juce::String file;            // name of the file in the setup's folder
+    juce::String name;            // shown in the list; the file name when empty
+    int output = 0;               // which of the setup's outputs it plays on
+    float gainDb = 0.0f;
+
+    juce::String displayName() const { return name.isNotEmpty() ? name : juce::File (file).getFileNameWithoutExtension(); }
+    juce::var toVar() const;
+    static StemDef fromVar (const juce::var&);
+};
+
 struct SongDef
 {
     juce::String name;
@@ -206,6 +221,15 @@ struct SongDef
     /** Sheet music for the stand. Empty for most songs; the tablet shows a
         Chart button only when there is something to show. */
     std::vector<ChartRef> charts;
+
+    /** The backing track: any number of stems, played together from the start
+        when the transport is started, each on its own output. Empty for a
+        song played entirely by hand. */
+    std::vector<StemDef> stems;
+    /** Clicks before the track starts, at the song's tempo; 0 for none. They
+        play on `countInOutput`, which is usually the in-ear pair. */
+    int countInBeats = 0;
+    int countInOutput = 0;
 
     int programFor (int inputIndex) const
     {
@@ -253,6 +277,9 @@ struct Setup
         a footswitch has to work whatever is loaded. */
     int nextSongCC = 0;
     int prevSongCC = 0;
+    /** Controller that starts and stops the song's backing track; 0 for none.
+        Global, like the song footswitches. */
+    int transportCC = 0;
 
     bool preloadAllPrograms = false;  // keep every used program's plugins resident
     double releaseTailSeconds = 4.0;  // how long the outgoing program keeps sounding
