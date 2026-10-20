@@ -7,6 +7,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Windows: the sources are UTF-8 (dashes and the like in strings), which MSVC
+# reads as the local code page unless told; and the Linux audio back ends are
+# switched off there. Nothing in this block applies to a Linux build.
+if(MSVC)
+    add_compile_options(/utf-8 /bigobj)
+endif()
+if(WIN32)
+    set(STAGERIG_LINUX_AUDIO JUCE_ALSA=0 JUCE_JACK=0)
+else()
+    set(STAGERIG_LINUX_AUDIO JUCE_ALSA=1 JUCE_JACK=1)
+endif()
+
 add_subdirectory(external/JUCE EXCLUDE_FROM_ALL)   # keeps JUCE's own install rules out of ours
 
 juce_add_gui_app(StageRig
@@ -70,8 +82,7 @@ target_compile_definitions(StageRig PRIVATE
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:StageRig,JUCE_VERSION>"
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
-    JUCE_ALSA=1
-    JUCE_JACK=1
+    ${STAGERIG_LINUX_AUDIO}
     JUCE_JACK_CLIENT_NAME="StageRig"
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_LV2=1
@@ -154,10 +165,10 @@ add_dependencies(StageRig StageRigPluginHost)
 # directory may not exist yet when the helper is linked.
 add_custom_command(TARGET StageRigPluginHost POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:StageRig>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:StageRigPluginHost> $<TARGET_FILE_DIR:StageRig>/stagerig-plugin-host
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:StageRigPluginHost> $<TARGET_FILE_DIR:StageRig>/$<TARGET_FILE_NAME:StageRigPluginHost>
     COMMENT "Copying stagerig-plugin-host next to StageRig")
 add_custom_command(TARGET StageRig POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:StageRigPluginHost> $<TARGET_FILE_DIR:StageRig>/stagerig-plugin-host
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:StageRigPluginHost> $<TARGET_FILE_DIR:StageRig>/$<TARGET_FILE_NAME:StageRigPluginHost>
     COMMENT "Copying stagerig-plugin-host next to StageRig")
 
 #------------------------------------------------------------------------------
@@ -180,7 +191,7 @@ juce_add_console_app(RemoteTest PRODUCT_NAME "RemoteTest")
 target_sources(RemoteTest PRIVATE Tests/RemoteTest.cpp Source/RemoteServer.cpp Source/LowLatency.cpp Source/Charts.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp Source/PluginView.cpp Source/QrCode.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
 target_include_directories(RemoteTest PRIVATE Source)
 target_compile_definitions(RemoteTest PRIVATE
-    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 $<$<NOT:$<PLATFORM_ID:Windows>>:JUCE_ALSA=1> JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_LV2=1 JUCE_PLUGINHOST_LADSPA=1 JUCE_PLUGINHOST_VST=0)
 target_link_libraries(RemoteTest PRIVATE
     ClapHeaders
@@ -196,7 +207,7 @@ juce_add_console_app(EngineTest PRODUCT_NAME "EngineTest")
 target_sources(EngineTest PRIVATE Tests/EngineTest.cpp Source/QrCode.cpp Source/LowLatency.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
 target_include_directories(EngineTest PRIVATE Source)
 target_compile_definitions(EngineTest PRIVATE
-    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 $<$<NOT:$<PLATFORM_ID:Windows>>:JUCE_ALSA=1> JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_LV2=1 JUCE_PLUGINHOST_LADSPA=1 JUCE_PLUGINHOST_VST=0)
 target_link_libraries(EngineTest PRIVATE
     ClapHeaders
@@ -211,6 +222,12 @@ add_test(NAME EngineTest COMMAND EngineTest)
 # to drive: it exits 77 and counts as skipped, so a distribution build without
 # Calf among its build dependencies still passes.
 set_tests_properties(EngineTest PROPERTIES ENVIRONMENT "STAGERIG_PLUGIN_HOST=$<TARGET_FILE:StageRigPluginHost>" SKIP_RETURN_CODE 77)
+
+if(WIN32)
+    # Windows: the two programs side by side; an installer comes with the port.
+    install(TARGETS StageRig StageRigPluginHost RUNTIME DESTINATION .)
+    return()
+endif()
 
 #------------------------------------------------------------------------------
 # Install: `cmake --install build --prefix ~/.local` (or /usr/local) puts the two

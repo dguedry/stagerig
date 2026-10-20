@@ -1,13 +1,18 @@
 #include "Protocol.h"
-#include <sys/mman.h>
-#include <sys/socket.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <cerrno>
+#include <chrono>
 #include <ctime>
+#if ! JUCE_WINDOWS
+ #include <sys/mman.h>
+ #include <sys/socket.h>
+ #include <fcntl.h>
+ #include <unistd.h>
+#endif
 
 namespace perf::ipc
 {
+
+#if ! JUCE_WINDOWS
 
 bool writeAll (int fd, const void* data, size_t size)
 {
@@ -112,7 +117,7 @@ timespec monotonicDeadline (double secondsFromNow)
     return ts;
 }
 
-bool waitSemaphoreUntil (sem_t& sem, const timespec& deadline)
+bool waitSemaphoreUntil (Semaphore& sem, const timespec& deadline)
 {
     for (;;)
     {
@@ -121,5 +126,38 @@ bool waitSemaphoreUntil (sem_t& sem, const timespec& deadline)
         return false;   // ETIMEDOUT
     }
 }
+
+void postSemaphore (Semaphore& sem)     { ::sem_post (&sem); }
+bool tryWaitSemaphore (Semaphore& sem)  { return ::sem_trywait (&sem) == 0; }
+
+#else
+//==============================================================================
+/* Windows: the out-of-process plugin host is not ported yet. These keep the
+   rest of the program building and make every attempt to start a host fail
+   cleanly, with the reason shown where a plugin would have loaded. */
+bool writeAll (int, const void*, size_t)        { return false; }
+bool readAll (int, void*, size_t)               { return false; }
+bool sendFrame (int, Msg, uint32_t, const juce::MemoryBlock&) { return false; }
+bool readFrame (int, FrameHeader&, juce::MemoryBlock&)        { return false; }
+
+SharedBlock* createSharedBlock (const juce::String&) { return nullptr; }
+SharedBlock* openSharedBlock (const juce::String&)   { return nullptr; }
+void closeSharedBlock (SharedBlock*)                 {}
+void unlinkSharedBlock (const juce::String&)         {}
+
+timespec monotonicDeadline (double secondsFromNow)
+{
+    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds> (std::chrono::steady_clock::now().time_since_epoch()).count()
+                  + (long long) (secondsFromNow * 1e9);
+    timespec ts {};
+    ts.tv_sec  = (time_t) (ns / 1000000000LL);
+    ts.tv_nsec = (long) (ns % 1000000000LL);
+    return ts;
+}
+
+bool waitSemaphoreUntil (Semaphore&, const timespec&) { return false; }
+void postSemaphore (Semaphore&)                       {}
+bool tryWaitSemaphore (Semaphore&)                    { return false; }
+#endif
 
 } // namespace perf::ipc

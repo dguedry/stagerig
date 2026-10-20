@@ -1,6 +1,8 @@
 #include "Engine.h"
 #include "LowLatency.h"
-#include <pthread.h>
+#if ! JUCE_WINDOWS
+ #include <pthread.h>
+#endif
 #include <cstring>
 #include <cmath>
 #include <algorithm>
@@ -2374,9 +2376,15 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
        Promoted here, on the thread itself, the first time it calls, and again
        whenever the device comes back on a new thread. PipeWire's thread is
        already realtime and is left alone. */
+   #if JUCE_WINDOWS
+    if (! callbackThreadKnown || callbackThread != std::this_thread::get_id())
+    {
+        callbackThread = std::this_thread::get_id();
+   #else
     if (! callbackThreadKnown || ! pthread_equal (callbackThread, pthread_self()))
     {
         callbackThread = pthread_self();
+   #endif
         callbackThreadKnown = true;
         audioThreadRealtime.store (LowLatency::currentThreadIsRealtime() || LowLatency::makeCurrentThreadRealtime (85));
     }

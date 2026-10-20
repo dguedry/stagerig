@@ -73,11 +73,15 @@ namespace
 #include <string>
 #include <vector>
 #include <thread>
-#include <signal.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <dirent.h>
-#include <sys/types.h>
+#include <chrono>
+#include <cstdio>
+#if ! JUCE_WINDOWS
+ #include <signal.h>
+ #include <unistd.h>
+ #include <fcntl.h>
+ #include <dirent.h>
+ #include <sys/types.h>
+#endif
 #include "ClapPluginFormat.h"
 
 using namespace juce;
@@ -649,7 +653,7 @@ private:
     {
         if (audioThread == nullptr) return;
         audioThread->signalThreadShouldExit();
-        ::sem_post (&shm->request);
+        ipc::postSemaphore (shm->request);
 
         // Never let JUCE kill this thread. stopThread() force-kills after its timeout,
         // and killing a thread inside a plugin's process() unwinds through C++ frames,
@@ -660,7 +664,7 @@ private:
         // wedged plugin, by killing the *process* rather than a thread inside it.
         for (int waited = 0; audioThread->isThreadRunning(); waited += 50)
         {
-            ::sem_post (&shm->request);              // in case it is between waits
+            ipc::postSemaphore (shm->request);              // in case it is between waits
             audioThread->waitForThreadToExit (50);
             if (waited > 0 && waited % 5000 == 0)
                 std::fprintf (stderr, "stagerig-plugin-host: waiting for the plugin to finish its block (%ds)\n", waited / 1000);
@@ -690,7 +694,7 @@ private:
             }
 
             shm->completedSeq.store (seq, std::memory_order_release);
-            ::sem_post (&shm->done);
+            ipc::postSemaphore (shm->done);
         }
     }
 
@@ -770,6 +774,7 @@ private:
 };
 
 //==============================================================================
+#if ! JUCE_WINDOWS
 /** Every process descended from `root` (not including root itself). */
 static std::vector<pid_t> collectDescendants (pid_t root)
 {
@@ -845,6 +850,21 @@ static void armExitWatchdog (int graceMs)
         ::kill (-::getpid(), SIGKILL);
     }).detach();
 }
+#else
+/* Windows: no Wine, no process groups, no /proc. Watching the parent comes
+   with the port of the serve mode; until then a probe that hangs in teardown
+   is ended after its grace period. */
+static void killDescendants (int) {}
+static void armParentWatchdog() {}
+static void armExitWatchdog (int graceMs)
+{
+    std::thread ([graceMs]
+    {
+        std::this_thread::sleep_for (std::chrono::milliseconds (graceMs));
+        std::_Exit (0);
+    }).detach();
+}
+#endif
 
 class PluginHostApplication : public JUCEApplication
 {
@@ -857,7 +877,9 @@ public:
     {
         // Own process group: lets the watchdog take stuck Wine children down with us,
         // without touching StageRig.
+       #if ! JUCE_WINDOWS
         ::setpgid (0, 0);
+       #endif
         armParentWatchdog();
 
         ArgumentList args ("stagerig-plugin-host", commandLine);
@@ -867,7 +889,9 @@ public:
             // --scan <format> <file-or-identifier>: print PluginDescription XML, one per
             // line, then an end marker. Our stdout must not leak into Wine processes the
             // plugin bridge spawns, or the parent would wait for them to exit.
+           #if ! JUCE_WINDOWS
             ::fcntl (STDOUT_FILENO, F_SETFD, FD_CLOEXEC);
+           #endif
             const int i = args.indexOfOption ("--scan");
             if (i < 0 || i + 2 >= args.size()) { setApplicationReturnValue (2); quit(); return; }
             const auto formatName = args[i + 1].text;
@@ -884,7 +908,9 @@ public:
                 if (! probeDone.load())
                 {
                     std::cerr << "stagerig-plugin-host: probe still running after 30 s, killing bridge processes\n";
+                   #if ! JUCE_WINDOWS
                     killDescendants (::getpid());
+                   #endif
                 }
             }).detach();
 
@@ -908,7 +934,9 @@ public:
             probeDone.store (true);
             std::cout << "<SCAN-DONE>\n";
             std::cout.flush();
+           #if ! JUCE_WINDOWS
             ::close (STDOUT_FILENO);      // the parent has everything; don't make it wait for teardown
+           #endif
             armExitWatchdog (3000);
             quit();
             return;
@@ -925,7 +953,9 @@ public:
 
         auto* shm = ipc::openSharedBlock (args[i + 1].text);
         const int fd = args[i + 2].text.getIntValue();
+       #if ! JUCE_WINDOWS
         if (fd >= 0) ::fcntl (fd, F_SETFD, FD_CLOEXEC);   // Wine children must not hold the control socket open
+       #endif
         if (shm == nullptr || fd < 0)
         {
             std::cerr << "stagerig-plugin-host: cannot open shared block\n";

@@ -1,14 +1,22 @@
 #include "LowLatency.h"
-#include <pthread.h>
-#include <sched.h>
-#include <dlfcn.h>
-#include <sys/resource.h>
 #include <cstdlib>
+#if JUCE_WINDOWS
+ #include <windows.h>
+ #include <avrt.h>
+ #pragma comment (lib, "avrt.lib")
+#else
+ #include <pthread.h>
+ #include <sched.h>
+ #include <dlfcn.h>
+ #include <sys/resource.h>
+#endif
 
 using namespace juce;
 
 namespace perf::LowLatency
 {
+
+#if ! JUCE_WINDOWS
 
 static bool pipeWireJack = false;
 
@@ -114,5 +122,34 @@ bool restoreClock (const ClockState& previous)
     pwMetadata ({ "0", "clock.force-rate", previous.forceRate.isEmpty() ? "0" : previous.forceRate });
     return true;
 }
+
+#else
+//==============================================================================
+/* Windows: no PipeWire, no JACK by default, no pw-metadata. The audio device's
+   own driver (ASIO or WASAPI) decides the block size, set in Audio... The
+   audio thread is put in the "Pro Audio" MMCSS class, Windows' equivalent of
+   realtime scheduling, which needs no permission. */
+static bool pipeWireJack = false;
+bool preloadPipeWireJack()                    { return false; }
+bool pipeWireJackLoaded()                     { return pipeWireJack; }
+void setRequestedQuantum (int, int)           {}
+bool realtimeSchedulingAvailable()            { return true; }
+String realtimeSchedulingHint()               { return "realtime scheduling available (MMCSS Pro Audio)"; }
+
+static thread_local bool mmcssJoined = false;
+bool currentThreadIsRealtime()                { return mmcssJoined; }
+
+bool makeCurrentThreadRealtime (int)
+{
+    if (mmcssJoined) return true;
+    DWORD taskIndex = 0;
+    mmcssJoined = ::AvSetMmThreadCharacteristicsW (L"Pro Audio", &taskIndex) != nullptr;
+    return mmcssJoined;
+}
+
+ClockState readClock()                        { return {}; }
+bool forceClock (int, int)                    { return false; }
+bool restoreClock (const ClockState&)         { return true; }
+#endif
 
 } // namespace perf::LowLatency

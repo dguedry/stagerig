@@ -3,14 +3,16 @@
 #include <cstdio>
 #include <functional>
 #include <mutex>
-#include <poll.h>
-#include <signal.h>
-#include <spawn.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #include "ClapPluginFormat.h"
+#if ! JUCE_WINDOWS
+ #include <poll.h>
+ #include <signal.h>
+ #include <spawn.h>
+ #include <sys/wait.h>
+ #include <unistd.h>
 
 extern char** environ;
+#endif
 
 using namespace juce;
 
@@ -96,6 +98,12 @@ PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, cons
                                                            String& output, const std::function<bool()>& hardStop,
                                                            const String& endMarker)
 {
+   #if JUCE_WINDOWS
+    // Not used on Windows yet: plugins are scanned in-process there (see findPluginTypesFor).
+    ignoreUnused (exe, args, timeoutMs, graceAfterStopMs, shouldStop, hardStop, endMarker);
+    output.clear();
+    return HelperResult::timedOut;
+   #else
     {
         int fds[2];
         if (::pipe (fds) != 0) return HelperResult::timedOut;
@@ -174,12 +182,20 @@ PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, cons
         output = collected.toString();
         return result;
     }
+   #endif
 }
 
 bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& format, OwnedArray<PluginDescription>& result, const String& fileOrIdentifier)
 {
     const auto exe = RemotePlugin::findHostExecutable();
+   #if JUCE_WINDOWS
+    /* The out-of-process probe needs the plugin host, which is not ported to
+       Windows yet; scan in this process meanwhile. A plugin that crashes while
+       being scanned takes StageRig with it, and is listed as crashed next time. */
+    if (true)
+   #else
     if (exe == File())
+   #endif
     {
         format.findAllTypesForFile (result, fileOrIdentifier);
         return true;

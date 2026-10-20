@@ -1,0 +1,40 @@
+name: Windows
+
+# The Windows port, built on its own branch so main and the Linux packages are
+# untouched while it comes together. Run by hand from the Actions tab too.
+on:
+  push:
+    branches: [windows]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Windows build (MSVC)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --target StageRig StageRigPluginHost ModelTest RemoteTest --parallel
+
+      - name: Test
+        # The model test has no platform code; it is the first to hold on Windows.
+        run: ctest --test-dir build -C Release -R ModelTest --output-on-failure
+
+      - name: Collect
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item build/StageRig_artefacts/Release/StageRig.exe out/
+          Copy-Item build/StageRig_artefacts/Release/stagerig-plugin-host.exe out/
+          Get-ChildItem out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stagerig-windows
+          path: out/

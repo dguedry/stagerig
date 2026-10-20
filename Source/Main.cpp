@@ -34,7 +34,9 @@ public:
            written would otherwise end the whole program: JUCE's socket write
            is a plain send(), and SIGPIPE's default is to terminate, silently,
            with no core. Treat it as the write error it is. */
+       #ifdef SIGPIPE
         std::signal (SIGPIPE, SIG_IGN);
+       #endif
 
         juce::PropertiesFile::Options opts;
         opts.applicationName = "StageRig";
@@ -79,7 +81,9 @@ public:
 
         std::signal (SIGTERM, onQuitSignal);
         std::signal (SIGINT,  onQuitSignal);
+       #ifdef SIGHUP
         std::signal (SIGHUP,  onQuitSignal);
+       #endif
         startTimer (250);
     }
 

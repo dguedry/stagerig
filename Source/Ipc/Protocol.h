@@ -10,9 +10,17 @@
 */
 
 #include <juce_core/juce_core.h>
-#include <semaphore.h>
 #include <atomic>
 #include <cstdint>
+#include <ctime>
+#if ! JUCE_WINDOWS
+ #include <semaphore.h>
+ #include <sys/types.h>
+#endif
+
+#if JUCE_WINDOWS
+using pid_t = int;
+#endif
 
 namespace perf::ipc
 {
@@ -22,6 +30,17 @@ constexpr uint32_t kVersion       = 2;            // 2 added tempo to the block
 constexpr int      kMaxBlock      = 8192;         // samples per block we can exchange
 constexpr int      kMaxMidi       = 2048;
 constexpr int      kMaxParamChanges = 512;
+
+/** The two semaphores that pace the audio exchange live inside the shared
+    block. On Linux they are process-shared POSIX semaphores. Windows has no
+    such thing that can live in shared memory -- its semaphores are kernel
+    objects opened by name -- and that port is still to come; until it is,
+    the block reserves the room and the Windows calls below report failure. */
+#if JUCE_WINDOWS
+struct Semaphore { uint32_t reserved[8]; };
+#else
+using Semaphore = sem_t;
+#endif
 
 struct MidiEvent
 {
@@ -42,8 +61,8 @@ struct SharedBlock
     uint32_t magic;
     uint32_t version;
 
-    sem_t request;                        // host -> plugin: a block is ready
-    sem_t done;                           // plugin -> host: block processed
+    Semaphore request;                    // host -> plugin: a block is ready
+    Semaphore done;                       // plugin -> host: block processed
     std::atomic<uint32_t> requestSeq;     // host increments before posting
     std::atomic<uint32_t> completedSeq;   // plugin sets to requestSeq when done
     std::atomic<uint32_t> quit;           // host sets to make the plugin's RT loop exit
@@ -121,7 +140,11 @@ void closeSharedBlock (SharedBlock*);
 void unlinkSharedBlock (const juce::String& name);
 
 /** Waits on `sem` until it's posted or the absolute CLOCK_MONOTONIC deadline passes. */
-bool waitSemaphoreUntil (sem_t& sem, const timespec& deadline);
+bool waitSemaphoreUntil (Semaphore& sem, const timespec& deadline);
 timespec monotonicDeadline (double secondsFromNow);
+/** Posts once. */
+void postSemaphore (Semaphore&);
+/** Takes one post if there is one, without waiting. */
+bool tryWaitSemaphore (Semaphore&);
 
 } // namespace perf::ipc

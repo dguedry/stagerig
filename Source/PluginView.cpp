@@ -98,6 +98,10 @@ namespace
 //==============================================================================
 bool PluginView::available (String& whatIsMissing)
 {
+   #if JUCE_WINDOWS
+    whatIsMissing = "Showing a plugin's window on the tablet is not available on Windows yet.";
+    return false;
+   #endif
     StringArray missing;
     if (findTool ("x11vnc") == File())     missing.add ("x11vnc");
     if (findTool ("websockify") == File()) missing.add ("websockify");

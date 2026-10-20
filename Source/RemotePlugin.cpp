@@ -1,14 +1,16 @@
 #include "RemotePlugin.h"
-#include <spawn.h>
-#include <sys/socket.h>
-#include <sys/wait.h>
-#include <fcntl.h>
-#include <signal.h>
 #include <condition_variable>
-#include <unistd.h>
 #include <cstdio>
+#if ! JUCE_WINDOWS
+ #include <spawn.h>
+ #include <sys/socket.h>
+ #include <sys/wait.h>
+ #include <fcntl.h>
+ #include <signal.h>
+ #include <unistd.h>
 
 extern char** environ;
+#endif
 
 using namespace juce;
 
@@ -27,6 +29,9 @@ namespace
 
     void reapProcess (pid_t pid, int patienceMs)
     {
+       #if JUCE_WINDOWS
+        ignoreUnused (pid, patienceMs);     // no host processes on Windows yet
+       #else
         // Give it a moment to exit on its own, then insist.
         for (int i = 0; i < juce::jmax (1, patienceMs / 50); ++i)
         {
@@ -38,6 +43,7 @@ namespace
         ::kill (pid, SIGKILL);
         int status = 0;
         ::waitpid (pid, &status, 0);
+       #endif
     }
 
     /* Reaping happens off the calling thread so that many hosts can be given
@@ -83,7 +89,11 @@ File RemotePlugin::findHostExecutable()
 
     const auto exe = File::getSpecialLocation (File::currentExecutableFile);
     const auto dir = exe.getParentDirectory();
+   #if JUCE_WINDOWS
+    const String name ("stagerig-plugin-host.exe");
+   #else
     const String name ("stagerig-plugin-host");
+   #endif
 
     for (auto& candidate : { dir.getChildFile (name),
                              dir.getParentDirectory().getParentDirectory().getChildFile ("StageRigPluginHost_artefacts").getChildFile (dir.getFileName()).getChildFile (name),
@@ -98,6 +108,11 @@ File RemotePlugin::findHostExecutable()
 std::vector<std::string> RemotePlugin::buildHelperEnvironment (std::vector<char*>& pointers)
 {
     std::vector<std::string> env;
+   #if JUCE_WINDOWS
+    // Wine and its session conventions are a Linux matter; a Windows host inherits the environment as it is.
+    pointers.assign (1, nullptr);
+    return env;
+   #else
     String path = SystemStats::getEnvironmentVariable ("PATH", "/usr/local/bin:/usr/bin:/bin");
     String wineLoader = SystemStats::getEnvironmentVariable ("WINELOADER", {});
 
@@ -148,6 +163,7 @@ std::vector<std::string> RemotePlugin::buildHelperEnvironment (std::vector<char*
     for (auto& e : env) pointers.push_back (const_cast<char*> (e.c_str()));
     pointers.push_back (nullptr);
     return env;
+   #endif
 }
 
 String RemotePlugin::getLastError() const
@@ -165,6 +181,11 @@ bool RemotePlugin::spawn (String& error)
         error = "stagerig-plugin-host executable not found (set STAGERIG_PLUGIN_HOST)";
         return false;
     }
+
+   #if JUCE_WINDOWS
+    error = "Plugins cannot be hosted on Windows yet: StageRig's plugin host process is still being ported.";
+    return false;
+   #else
 
     shmName = "/stagerig-" + String ((int) ::getpid()) + "-" + String (shmCounter++) + "-" + String::toHexString (Random::getSystemRandom().nextInt64());
     shm = ipc::createSharedBlock (shmName);
@@ -214,7 +235,9 @@ bool RemotePlugin::spawn (String& error)
     alive.store (true);
     reader = std::thread ([this] { readerLoop(); });
     return true;
+   #endif
 }
+
 
 bool RemotePlugin::load (const PluginDescription& desc, double sampleRate, int blockSize, String& error)
 {
@@ -372,7 +395,7 @@ void RemotePlugin::requestQuit()
     if (shm != nullptr)
     {
         shm->quit.store (1);
-        ::sem_post (&shm->request);
+        ipc::postSemaphore (shm->request);
     }
     alive.store (false);
 }
@@ -491,7 +514,10 @@ bool RemotePlugin::hostExited()
     const std::lock_guard<std::mutex> l (pidMutex);
     if (pid <= 0) return hostGone;
     int status = 0;
+   #if ! JUCE_WINDOWS
     if (::waitpid (pid, &status, WNOHANG) == 0) return false;
+   #endif
+    ignoreUnused (status);
     pid = -1;           // reaped here; shutdown() has nothing left to wait for
     hostGone = true;
     return true;
@@ -501,9 +527,11 @@ void RemotePlugin::killHost()
 {
     const std::lock_guard<std::mutex> l (pidMutex);
     if (pid <= 0) return;
+   #if ! JUCE_WINDOWS
     ::kill (pid, SIGKILL);
     int status = 0;
     ::waitpid (pid, &status, 0);
+   #endif
     pid = -1;
     hostGone = true;
 }
@@ -609,7 +637,7 @@ void RemotePlugin::queueParameterChange (int index, float value)
 
 void RemotePlugin::drainDoneSemaphore()
 {
-    while (::sem_trywait (&shm->done) == 0) {}
+    while (ipc::tryWaitSemaphore (shm->done)) {}
 }
 
 void RemotePlugin::beginProcess (const float* inL, const float* inR, const MidiBuffer& midi, int numSamples)
@@ -658,7 +686,7 @@ void RemotePlugin::beginProcess (const float* inL, const float* inR, const MidiB
     if (inR != nullptr) FloatVectorOperations::copy (shm->inR, inR, n); else FloatVectorOperations::clear (shm->inR, n);
 
     shm->requestSeq.fetch_add (1, std::memory_order_release);
-    ::sem_post (&shm->request);
+    ipc::postSemaphore (shm->request);
     blockInFlight = true;
     inFlightSamples = n;
 }
@@ -694,15 +722,19 @@ void RemotePlugin::shutdown (int patienceMs)
     if (shm != nullptr)
     {
         shm->quit.store (1);
-        ::sem_post (&shm->request);
+        ipc::postSemaphore (shm->request);
     }
 
     alive.store (false);
     if (socketFd >= 0)
     {
+       #if ! JUCE_WINDOWS
         ::shutdown (socketFd, SHUT_RDWR);
+       #endif
         if (reader.joinable()) reader.join();
+       #if ! JUCE_WINDOWS
         ::close (socketFd);
+       #endif
         socketFd = -1;
     }
     else if (reader.joinable())

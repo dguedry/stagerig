@@ -6,7 +6,11 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
-#include <pthread.h>
+#if JUCE_WINDOWS
+ #include <thread>
+#else
+ #include <pthread.h>
+#endif
 #include <condition_variable>
 #include <deque>
 #include <map>
@@ -459,7 +463,11 @@ private:
     std::vector<std::unique_ptr<OutputRuntime>> outputs;      // same lock as runtimes
     std::atomic<int> outputLearn { -1 };                        // which output is waiting for its volume controller
     juce::StringArray lastDeviceWarnings;
+   #if JUCE_WINDOWS
+    std::thread::id callbackThread {};
+   #else
     pthread_t callbackThread {};
+   #endif
     bool callbackThreadKnown = false;              // audio thread only
     std::atomic<bool> audioThreadRealtime { true };
 

@@ -3,7 +3,9 @@
 #include "PluginView.h"
 #include "Charts.h"
 #include <thread>
-#include <fcntl.h>
+#if ! JUCE_WINDOWS
+ #include <fcntl.h>
+#endif
 #include "BinaryData.h"
 #include <juce_graphics/juce_graphics.h>
 
@@ -1257,8 +1259,10 @@ bool RemoteServer::start (int p)
         listener.reset();
         return false;
     }
+   #if ! JUCE_WINDOWS
     if (const int fd = listener->getRawSocketHandle(); fd >= 0)
         ::fcntl (fd, F_SETFD, FD_CLOEXEC);
+   #endif
 
     port = p;
     running = true;

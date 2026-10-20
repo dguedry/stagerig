@@ -2,16 +2,55 @@
 
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <clap/clap.h>
-#include <dlfcn.h>
 #include <atomic>
 #include <cstring>
-#include <poll.h>
 #include <vector>
+#if JUCE_WINDOWS
+ #include <windows.h>
+#else
+ #include <dlfcn.h>
+ #include <poll.h>
+#endif
 
 namespace perf
 {
 
 using namespace juce;
+
+namespace
+{
+    /* A .clap is a shared library on every platform: a .so on Linux, a DLL on
+       Windows. RTLD_LOCAL on Linux so one plugin's symbols cannot satisfy
+       another's undefined ones -- two bundles built against different
+       versions of the same library would otherwise resolve to whichever loaded
+       first, and crash in ways that look like the second plugin's fault. */
+    void* openLibrary (const File& file)
+    {
+       #if JUCE_WINDOWS
+        return (void*) ::LoadLibraryW (file.getFullPathName().toWideCharPointer());
+       #else
+        return ::dlopen (file.getFullPathName().toRawUTF8(), RTLD_NOW | RTLD_LOCAL);
+       #endif
+    }
+
+    void* librarySymbol (void* handle, const char* name)
+    {
+       #if JUCE_WINDOWS
+        return (void*) ::GetProcAddress ((HMODULE) handle, name);
+       #else
+        return ::dlsym (handle, name);
+       #endif
+    }
+
+    void closeLibrary (void* handle)
+    {
+       #if JUCE_WINDOWS
+        ::FreeLibrary ((HMODULE) handle);
+       #else
+        ::dlclose (handle);
+       #endif
+    }
+}
 
 class ClapInstance;
 
@@ -34,31 +73,26 @@ namespace
         {
             if (! file.exists()) return {};
 
-            /* RTLD_LOCAL so one plugin's symbols cannot satisfy another's
-               undefined ones -- two bundles built against different versions of
-               the same library would otherwise resolve to whichever loaded
-               first, and crash in ways that look like the second plugin's
-               fault. */
-            auto* handle = ::dlopen (file.getFullPathName().toRawUTF8(), RTLD_NOW | RTLD_LOCAL);
+            auto* handle = openLibrary (file);
             if (handle == nullptr) return {};
 
-            auto* entry = reinterpret_cast<const clap_plugin_entry_t*> (::dlsym (handle, "clap_entry"));
+            auto* entry = reinterpret_cast<const clap_plugin_entry_t*> (librarySymbol (handle, "clap_entry"));
             if (entry == nullptr || entry->init == nullptr || entry->get_factory == nullptr)
             {
-                ::dlclose (handle);
+                closeLibrary (handle);
                 return {};
             }
 
             // Not a CLAP we understand: refuse rather than guess at its ABI.
             if (! clap_version_is_compatible (entry->clap_version))
             {
-                ::dlclose (handle);
+                closeLibrary (handle);
                 return {};
             }
 
             if (! entry->init (file.getFullPathName().toRawUTF8()))
             {
-                ::dlclose (handle);
+                closeLibrary (handle);
                 return {};
             }
 
@@ -68,7 +102,7 @@ namespace
         ~Bundle()
         {
             if (entry != nullptr && entry->deinit != nullptr) entry->deinit();
-            if (handle != nullptr) ::dlclose (handle);
+            if (handle != nullptr) closeLibrary (handle);
         }
 
         const clap_plugin_factory_t* factory() const
@@ -282,6 +316,10 @@ public:
         }
         if (snapshot.empty()) return;
 
+       #if JUCE_WINDOWS
+        // POSIX file descriptors are a Linux and macOS extension; nothing registers any on Windows.
+        ignoreUnused (p);
+       #else
         auto* ext = static_cast<const clap_plugin_posix_fd_support_t*>
                         (p->get_extension (p, CLAP_EXT_POSIX_FD_SUPPORT));
         if (ext == nullptr || ext->on_fd == nullptr) return;
@@ -308,6 +346,7 @@ public:
             if (got != 0)
                 ext->on_fd (p, pfds[i].fd, got);
         }
+       #endif
     }
 
     /** Fire any timer the plugin registered that is due. */
@@ -661,9 +700,12 @@ bool ClapInstance::initialise (double sampleRate, int blockSize, String& error)
     /* The GUI extension is only useful if the plugin can embed in an X11
        window; a floating-window-only plugin would need a different path, and
        claiming hasEditor() for one would give an empty frame. */
+   #if JUCE_LINUX || JUCE_BSD
     if (auto* g = static_cast<const clap_plugin_gui_t*> (plugin->get_extension (plugin, CLAP_EXT_GUI)))
         if (g->is_api_supported != nullptr && g->is_api_supported (plugin, CLAP_WINDOW_API_X11, false))
             gui = g;
+   #endif
+    // Windows: embedding a CLAP editor in an HWND is still to come; until then it has no editor.
 
     // --- audio ports: the main ones decide the bus layout -----------------
     if (audioPorts != nullptr)
@@ -1033,6 +1075,7 @@ void ClapInstance::setStateInformation (const void* data, int size)
 }
 
 //==============================================================================
+#if JUCE_LINUX || JUCE_BSD
 /** The plugin's own window, embedded in a JUCE component.
 
     CLAP hands us a native X11 window id to parent into, which is exactly what
@@ -1217,6 +1260,9 @@ AudioProcessorEditor* ClapInstance::createEditor()
 {
     return gui != nullptr ? new ClapEditor (*this) : nullptr;
 }
+#else
+AudioProcessorEditor* ClapInstance::createEditor() { return nullptr; }
+#endif
 
 //==============================================================================
 std::unique_ptr<AudioPluginInstance> ClapPluginFormat::createInstance (const PluginDescription& desc,
@@ -1349,12 +1395,18 @@ StringArray ClapPluginFormat::searchPathsForPlugins (const FileSearchPath& path,
 
 FileSearchPath ClapPluginFormat::getDefaultLocationsToSearch()
 {
+    FileSearchPath path;
+   #if JUCE_WINDOWS
+    // The locations the CLAP specification names for Windows.
+    path.add (File (SystemStats::getEnvironmentVariable ("COMMONPROGRAMFILES", "C:\\Program Files\\Common Files")).getChildFile ("CLAP"));
+    path.add (File (SystemStats::getEnvironmentVariable ("LOCALAPPDATA", {})).getChildFile ("Programs").getChildFile ("Common").getChildFile ("CLAP"));
+   #else
     /* The locations the CLAP specification names for Linux, plus the one
        yabridge uses for bridged Windows plugins. */
-    FileSearchPath path;
     path.add (File::getSpecialLocation (File::userHomeDirectory).getChildFile (".clap"));
     path.add (File ("/usr/lib/clap"));
     path.add (File ("/usr/local/lib/clap"));
+   #endif
     return path;
 }
 
