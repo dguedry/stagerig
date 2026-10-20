@@ -112,6 +112,12 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .transport button { flex:none; border:0; border-radius:10px; padding:12px 20px; font-size:16px; font-weight:800;
                       background:var(--accent); color:#06121f; min-width:96px; }
   .transport button.running { background:#a3282d; color:#fff; }
+  .sections { display:flex; flex-wrap:wrap; gap:8px; margin:-4px 0 12px; }
+  .sections button { background:var(--row); color:#fff; border:2px solid transparent; border-radius:10px;
+                     padding:10px 14px; font-size:15px; font-weight:700; }
+  .sections button.on { background:var(--accent); color:#06121f; }
+  .sections button.queued { border-color:var(--accent); }
+  .sections button.go { background:#8a5a12; }
   .transport .tt { flex:1; min-width:0; font-size:15px; color:var(--dim); font-variant-numeric:tabular-nums;
                    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .setpick { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
@@ -277,8 +283,38 @@ function showTransport(t) {
   if (!transportUi || !t) return;
   transportUi.button.textContent = t.running ? "Stop" : "Play";
   transportUi.button.classList.toggle("running", !!t.running);
-  transportUi.text.textContent = (t.name ? t.name + "   " : "")
-    + (t.countIn ? "counting in…" : mmss(t.pos) + " / " + mmss(t.len));
+  const sec = (t.sections || [])[t.section];
+  transportUi.text.textContent = !t.ready ? (t.name + "   loading " + Math.round((t.loading || 0) * 100) + "%")
+    : t.countIn ? (t.name + "   counting in…")
+    : ((t.sections || []).length > 1 && sec ? sec.name + (t.vamping ? " (vamp)" : "") : t.name) + "   "
+      + mmss(t.pos) + " / " + mmss(t.len)
+      + (t.queued >= 0 && t.sections[t.queued] ? "   › " + t.sections[t.queued].name : "");
+
+  /* Section buttons, redrawn only when something about them changes: a tap
+     queues that section; during a vamp, "Go on" lets it play through. */
+  const list = t.sections || [];
+  const key = JSON.stringify([list.map(x => x.name + x.vamp), t.section, t.queued, t.vamping, t.running]);
+  if (key === transportUi.key) return;
+  transportUi.key = key;
+  const host = transportUi.sections;
+  host.innerHTML = "";
+  if (list.length < 2) return;
+  if (t.vamping) {
+    const go = document.createElement("button"); go.className = "go"; go.textContent = "Go on";
+    go.onclick = async () => { try { showTransport(await api("/api/transport?do=next", { method: "POST" })); } catch (e) { if (!e.gate) show(e.message); } };
+    host.appendChild(go);
+  }
+  list.forEach((x, i) => {
+    const b = document.createElement("button");
+    b.textContent = x.name + (x.vamp ? " ↻" : "");
+    if (i === t.section) b.className = "on";
+    else if (i === t.queued) b.className = "queued";
+    b.onclick = async () => {
+      try { showTransport(await api("/api/transport?do=section&index=" + i, { method: "POST" })); }
+      catch (e) { if (!e.gate) show(e.message); }
+    };
+    host.appendChild(b);
+  });
 }
 async function pollTransport() {
   try { showTransport(await api("/api/transport")); } catch (e) { /* the next poll is half a second away */ }
@@ -315,7 +351,9 @@ function renderSets(s) {
     };
     bar.appendChild(b); bar.appendChild(t);
     wrap.appendChild(bar);
-    transportUi = { button: b, text: t };
+    const secs = document.createElement("div"); secs.className = "sections";
+    wrap.appendChild(secs);
+    transportUi = { button: b, text: t, sections: secs, key: "" };
   } else {
     transportUi = null;
   }
@@ -1559,6 +1597,20 @@ String RemoteServer::transportJson() const
     o->setProperty ("countIn", engine.isTrackCountingIn());
     o->setProperty ("pos", engine.getTrackPosition());
     o->setProperty ("len", engine.getTrackLength());
+    o->setProperty ("ready", engine.isTrackReady());
+    o->setProperty ("loading", engine.getTrackLoadProgress());
+    o->setProperty ("section", engine.getTrackSection());
+    o->setProperty ("queued", engine.getQueuedTrackSection());
+    o->setProperty ("vamping", engine.isTrackVamping());
+    Array<var> sections;
+    for (int i = 0; i < engine.getTrackSectionCount(); ++i)
+    {
+        DynamicObject::Ptr sec (new DynamicObject());
+        sec->setProperty ("name", engine.getTrackSectionName (i));
+        sec->setProperty ("vamp", engine.isTrackSectionVamp (i));
+        sections.add (var (sec.get()));
+    }
+    o->setProperty ("sections", sections);
     return JSON::toString (var (o.get()), true);
 }
 
@@ -1940,11 +1992,14 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         // POST ...?do=toggle|start|stop changes it; any request answers with where it is.
         const auto what = path.fromFirstOccurrenceOf ("do=", false, false).upToFirstOccurrenceOf ("&", false, false);
         String body;
-        if (produceOnMessageThread ([this, what]
+        const int sectionIndex = path.fromFirstOccurrenceOf ("index=", false, false).getIntValue();
+        if (produceOnMessageThread ([this, what, sectionIndex]
             {
-                if (what == "toggle")     engine.toggleTrack();
-                else if (what == "start") engine.startTrack();
-                else if (what == "stop")  engine.stopTrack();
+                if (what == "toggle")       engine.toggleTrack();
+                else if (what == "start")   engine.startTrack();
+                else if (what == "stop")    engine.stopTrack();
+                else if (what == "next")    engine.advanceTrack();
+                else if (what == "section") engine.queueTrackSection (sectionIndex);
                 return transportJson();
             }, body, 3000))
             sendResponse (sock, "200 OK", "application/json", body);

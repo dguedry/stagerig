@@ -200,6 +200,19 @@ struct StemDef
     static StemDef fromVar (const juce::var&);
 };
 
+/** A named point in a song's backing track, where a section starts: the
+    intro, the verse, the chorus. A vamp section repeats until released --
+    the band keeps the intro going until the singer is ready. */
+struct MarkerDef
+{
+    juce::String name;
+    double seconds = 0.0;
+    bool vamp = false;
+
+    juce::var toVar() const;
+    static MarkerDef fromVar (const juce::var&);
+};
+
 struct SongDef
 {
     juce::String name;
@@ -230,6 +243,8 @@ struct SongDef
         play on `countInOutput`, which is usually the in-ear pair. */
     int countInBeats = 0;
     int countInOutput = 0;
+    /** Sections of the backing track, by where each starts. */
+    std::vector<MarkerDef> markers;
 
     int programFor (int inputIndex) const
     {
@@ -280,6 +295,8 @@ struct Setup
     /** Controller that starts and stops the song's backing track; 0 for none.
         Global, like the song footswitches. */
     int transportCC = 0;
+    /** Controller that releases a vamp, or else queues the next section. */
+    int sectionCC = 0;
 
     bool preloadAllPrograms = false;  // keep every used program's plugins resident
     double releaseTailSeconds = 4.0;  // how long the outgoing program keeps sounding

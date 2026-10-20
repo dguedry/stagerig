@@ -59,7 +59,8 @@ other plugin.
 - **Backing tracks.** A song can carry audio stems -- a full mix, or drums,
   bass and pads apart, plus a click and cues for the in-ears -- each on its own
   output, with a count-in, started and stopped from a footswitch, the laptop
-  or the tablet. Plugins' tempo-synced effects lock to the track.
+  or the tablet. Mark its sections and jump between them in time, and vamp
+  an intro until a pedal lets it go on. Tempo-synced effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
   song -- PDF, image, text or ChordPro -- and the tablet shows it, turning
   PDF pages a tap at a time and following the set from song to song. Files

@@ -97,7 +97,7 @@ private:
     juce::TextButton setBtn { "Set..." }, footBtn { "Footswitches..." };
 
     // The backing track of the song in play: start/stop, and where it is.
-    juce::TextButton playBtn { "Play" };
+    juce::TextButton playBtn { "Play" }, nextBtn { "Next" };
     juce::Label trackLabel;
     void refreshTransport();
     void showTracksDialog (int songIndex);

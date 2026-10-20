@@ -1731,8 +1731,14 @@ int main()
         const int click = engine.addOutput ("Click", 2, 3);
         const int song = engine.addSong ("Backing");
         engine.addSongStem (song, { "stem.wav", "Tone", 0, 0.0f });
+        auto waitReady = [&]
+        {
+            for (int i = 0; i < 200 && ! engine.isTrackReady(); ++i) pump (25);
+            return engine.isTrackReady();
+        };
         engine.selectSong (song);
         CHECK (engine.getTrackSong() == song && engine.hasTrack());
+        CHECK (waitReady());
         CHECK (! engine.isTrackRunning());
         std::printf ("     track length %.2f s\n", engine.getTrackLength());
         CHECK (std::abs (engine.getTrackLength() - 1.0) < 0.01);
@@ -1774,7 +1780,9 @@ int main()
         engine.setSongTempo (song, 120.0);
         engine.setSongCountIn (song, 2, click);
         engine.selectSong (song);
+        CHECK (waitReady());
         engine.startTrack();
+        levels (1);                                                      // the first block begins the count-in
         CHECK (engine.isTrackCountingIn());
         const auto countIn = levels (40);                                // 0.43 s at 48 kHz: inside the count-in
         std::printf ("     count-in: main %.3f click %.3f\n", countIn[0], countIn[2]);
@@ -1788,6 +1796,62 @@ int main()
         pump (50);
         std::printf ("     ended: running %d\n", (int) engine.isTrackRunning());
         CHECK (! engine.isTrackRunning());
+
+        // Sections: a three-second stem whose level steps up each second -- A 0.2, B 0.5, C 0.8.
+        {
+            const auto f = folder.getChildFile ("sections.wav");
+            f.deleteFile();
+            WavAudioFormat wav;
+            std::unique_ptr<OutputStream> os (f.createOutputStream().release());
+            std::unique_ptr<AudioFormatWriter> w (wav.createWriterFor (os.get(), 48000.0, 1, 16, {}, 0));
+            CHECK (w != nullptr);
+            os.release();
+            AudioBuffer<float> b (1, 3 * 48000);
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                const float amp = i < 48000 ? 0.2f : (i < 96000 ? 0.5f : 0.8f);
+                b.setSample (0, i, amp * (float) std::sin (MathConstants<double>::twoPi * 440.0 * i / 48000.0));
+            }
+            CHECK (w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples()));
+        }
+        const int secSong = engine.addSong ("Sections");
+        engine.addSongStem (secSong, { "sections.wav", {}, 0, 0.0f });
+        engine.setSongMarkers (secSong, { { "A", 0.0, false }, { "B", 1.0, true }, { "C", 2.0, false } });
+        engine.selectSong (secSong);
+        CHECK (waitReady());
+        CHECK (engine.getTrackSectionCount() == 3 && engine.getTrackSectionName (1) == "B" && engine.isTrackSectionVamp (1));
+
+        auto peakFor = [&] (double seconds) { return levels ((int) (seconds * 48000.0 / kBlock))[0]; };
+        engine.startTrack();
+        peakFor (1.4);                                                   // into B
+        CHECK (engine.getTrackSection() == 1 && engine.isTrackVamping());
+        const auto inVamp = peakFor (1.5);                               // B's end has come and gone: still B
+        std::printf ("     vamping: section %d, level %.2f, position %.2f s\n", engine.getTrackSection(), inVamp, engine.getTrackPosition());
+        CHECK (engine.getTrackSection() == 1 && std::abs (inVamp - 0.5f) < 0.05f && engine.getTrackPosition() < 2.0);
+
+        engine.advanceTrack();                                           // the pedal: release
+        peakFor (1.1);                                                   // to the end of this pass, then C
+        CHECK (engine.getTrackSection() == 2);
+        std::printf ("     released into C: section %d, level %.2f\n", engine.getTrackSection(), levels (4)[0]);
+
+        engine.queueTrackSection (0);                                    // at C's end, back to A instead of stopping
+        peakFor (1.1);
+        std::printf ("     queued A: section %d, running %d\n", engine.getTrackSection(), (int) engine.isTrackRunning());
+        CHECK (engine.isTrackRunning() && engine.getTrackSection() == 0);
+        CHECK (std::abs (levels (4)[0] - 0.2f) < 0.05f);
+
+        engine.stopTrack();
+        levels (4); pump (50);
+        CHECK (! engine.isTrackRunning());
+
+        // Cued while stopped: Play starts at C.
+        engine.queueTrackSection (2);
+        engine.startTrack();
+        levels (2);
+        std::printf ("     cued C: section %d, position %.2f s\n", engine.getTrackSection(), engine.getTrackPosition());
+        CHECK (engine.getTrackSection() == 2 && engine.getTrackPosition() >= 2.0);
+        engine.stopTrack();
+        levels (4); pump (50);
 
         // A song with no stems arms nothing.
         const int bare = engine.addSong ("No track");

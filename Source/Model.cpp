@@ -292,6 +292,24 @@ File chartsFolderFor (const File& setupFile)
     return setupFile.getSiblingFile (setupFile.getFileNameWithoutExtension() + ".charts");
 }
 
+var MarkerDef::toVar() const
+{
+    auto* o = new DynamicObject();
+    o->setProperty ("name", name);
+    o->setProperty ("seconds", seconds);
+    if (vamp) o->setProperty ("vamp", true);
+    return var (o);
+}
+
+MarkerDef MarkerDef::fromVar (const var& v)
+{
+    MarkerDef m;
+    m.name    = propStr (v, "name");
+    m.seconds = jmax (0.0, prop<double> (v, "seconds", 0.0));
+    m.vamp    = prop<bool> (v, "vamp", false);
+    return m;
+}
+
 var StemDef::toVar() const
 {
     auto* o = new DynamicObject();
@@ -339,6 +357,12 @@ var SongDef::toVar() const
         o->setProperty ("countInBeats", countInBeats);
         o->setProperty ("countInOutput", countInOutput);
     }
+    if (! markers.empty())
+    {
+        juce::Array<juce::var> arr;
+        for (const auto& m : markers) arr.add (m.toVar());
+        o->setProperty ("markers", arr);
+    }
     return var (o);
 }
 
@@ -361,6 +385,9 @@ SongDef SongDef::fromVar (const var& v)
             for (const auto& st : *arr)
                 if (auto stem = StemDef::fromVar (st); stem.file.isNotEmpty())
                     s.stems.push_back (stem);
+        if (auto* arr = o->getProperty ("markers").getArray())
+            for (const auto& m : *arr)
+                s.markers.push_back (MarkerDef::fromVar (m));
         s.countInBeats  = jlimit (0, 16, (int) o->getProperty ("countInBeats"));
         s.countInOutput = jmax (0, (int) o->getProperty ("countInOutput"));
     }
@@ -433,6 +460,7 @@ var Setup::toVar() const
     if (nextSongCC > 0) o->setProperty ("nextSongCC", nextSongCC);
     if (prevSongCC > 0) o->setProperty ("prevSongCC", prevSongCC);
     if (transportCC > 0) o->setProperty ("transportCC", transportCC);
+    if (sectionCC > 0)   o->setProperty ("sectionCC", sectionCC);
     return var (o);
 }
 
@@ -459,6 +487,7 @@ Setup Setup::fromVar (const var& v)
     s.nextSongCC = prop<int> (v, "nextSongCC", 0);
     s.prevSongCC = prop<int> (v, "prevSongCC", 0);
     s.transportCC = jlimit (0, 127, prop<int> (v, "transportCC", 0));
+    s.sectionCC   = jlimit (0, 127, prop<int> (v, "sectionCC", 0));
     if (auto* o = obj (v))
     {
         if (auto* arr = o->getProperty ("songs").getArray())

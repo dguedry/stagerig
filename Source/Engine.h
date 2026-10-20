@@ -261,10 +261,14 @@ public:
     void removeSongStem (int songIndex, int stemIndex);
     void setSongStem (int songIndex, int stemIndex, const StemDef&);
     void setSongCountIn (int songIndex, int beats, int output);
+    void setSongMarkers (int songIndex, const std::vector<MarkerDef>&);
 
     /** The song whose track is ready to play: the one selected last, or -1. */
     int  getTrackSong() const                       { return trackSong; }
     bool hasTrack() const                           { return player != nullptr && player->hasStems(); }
+    /** False while the stems are still being read into memory. */
+    bool isTrackReady() const                       { return player != nullptr && player->isReady(); }
+    float getTrackLoadProgress() const              { return player != nullptr ? player->getLoadProgress() : 0.0f; }
     bool isTrackRunning() const                     { return player != nullptr && player->isRunning(); }
     bool isTrackCountingIn() const                  { return player != nullptr && player->getState() == SongPlayer::State::countIn; }
     double getTrackPosition() const                 { return player != nullptr ? player->getPositionSeconds() : 0.0; }
@@ -273,6 +277,24 @@ public:
     void startTrack();
     void stopTrack();
     void toggleTrack();
+
+    /** Sections of the armed track. A section asked for while playing comes
+        when the current one ends; while stopped, it is where Play starts. */
+    int  getTrackSectionCount() const               { return player != nullptr ? player->getNumSections() : 0; }
+    juce::String getTrackSectionName (int i) const  { return player != nullptr ? player->getSectionName (i) : juce::String(); }
+    double getTrackSectionStart (int i) const       { return player != nullptr ? player->getSectionStart (i) : 0.0; }
+    bool isTrackSectionVamp (int i) const           { return player != nullptr && player->isSectionVamp (i); }
+    int  getTrackSection() const                    { return player != nullptr ? player->getCurrentSection() : -1; }
+    int  getQueuedTrackSection() const              { return player != nullptr ? player->getQueuedSection() : -1; }
+    bool isTrackVamping() const                     { return player != nullptr && player->isVamping(); }
+    void queueTrackSection (int index);
+    void releaseVamp();
+    /** One pedal: releases a vamp, or else queues the next section. */
+    void advanceTrack();
+
+    int  getSectionCC() const                       { return setup.sectionCC; }
+    void setSectionCC (int cc);
+    void armSectionLearn()                          { sectionLearnArmed.store (true); }
     /** Loads (or reloads) the track for this song, stopping whatever was playing. */
     void armTrack (int songIndex);
 
@@ -390,7 +412,7 @@ private:
     {
         enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
                     songStep, songLearn, editorClosed, outputVolume, outputLearn,
-                    transport, transportLearn, trackFinished };
+                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -527,8 +549,10 @@ private:
 
     // Backing tracks
     juce::AudioFormatManager trackFormats;
-    juce::TimeSliceThread trackReader { "stagerig-track-reader" };
     std::unique_ptr<SongPlayer> player;           // swapped under `lock`
+    bool trackProblemsReported = true;            // message thread
+    std::atomic<int> sectionCCAtomic { 0 };
+    std::atomic<bool> sectionLearnArmed { false };
     int trackSong = -1;                           // message thread
     std::atomic<int> transportCCAtomic { 0 };     // read on the MIDI thread
     std::atomic<bool> transportLearnArmed { false };

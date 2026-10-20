@@ -1,109 +1,260 @@
 #include "SongPlayer.h"
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 
 using namespace juce;
 
 namespace perf
 {
 
-SongPlayer::SongPlayer (TimeSliceThread& readAhead, AudioFormatManager& formats,
-                        const File& folder, const SongDef& song, double sr, int bs,
-                        StringArray& problems)
-    : sampleRate (sr > 0.0 ? sr : 48000.0), blockSize (jmax (16, bs))
+SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef& song, double sr, int bs)
+    : formats (f), sampleRate (sr > 0.0 ? sr : 48000.0), blockSize (jmax (16, bs))
 {
-    for (int index = 0; index < (int) song.stems.size(); ++index)
+    for (int i = 0; i < (int) song.stems.size(); ++i)
     {
-        const auto& def = song.stems[(size_t) index];
-        const auto file = folder.getChildFile (def.file);
-        auto* reader = file.existsAsFile() ? formats.createReaderFor (file) : nullptr;
-        if (reader == nullptr)
-        {
-            problems.add (def.displayName() + ": " + (file.existsAsFile() ? "not an audio file StageRig can read" : "file missing"));
-            continue;
-        }
-
+        const auto& def = song.stems[(size_t) i];
         auto stem = std::make_unique<Stem>();
-        stem->defIndex = index;
-        stem->fileRate = reader->sampleRate;
-        stem->fileLength = reader->lengthInSamples;
-        stem->reader = std::make_unique<AudioFormatReaderSource> (reader, true);
-        /* Four seconds ahead: enough to ride out a busy disk, small enough that
-           a dozen stems cost a few megabytes. */
-        stem->buffered = std::make_unique<BufferingAudioSource> (stem->reader.get(), readAhead, false,
-                                                                 (int) jmax (8192.0, reader->sampleRate * 4.0), 2, true);
-        stem->resampled = std::make_unique<ResamplingAudioSource> (stem->buffered.get(), false, 2);
+        stem->defIndex = i;
+        stem->file = folder.getChildFile (def.file);
         stem->output.store (jmax (0, def.output));
         stem->gain.store (Decibels::decibelsToGain (def.gainDb, -60.0f));
         stems.push_back (std::move (stem));
     }
-    prepare (sampleRate, blockSize);
+    numStemDefs = (int) stems.size();
+    fadeLength = jmax (1, (int) (0.03 * sampleRate));
+    scratch.setSize (2, blockSize, false, true, true);
+    setMarkers (song.markers);
+    startLoading();
 }
 
 SongPlayer::~SongPlayer()
 {
-    for (auto& s : stems)
-    {
-        s->resampled->releaseResources();
-        s->buffered->releaseResources();
-    }
+    stopLoading();
 }
 
+String SongPlayer::getProblems() const
+{
+    return ready.load() ? problems.joinIntoString ("; ") : String();
+}
+
+//==============================================================================
+void SongPlayer::startLoading()
+{
+    stopLoading();
+    ready.store (false);
+    loadProgress.store (0.0f);
+    loaderStop.store (false);
+    loader = std::thread ([this] { load(); });
+}
+
+void SongPlayer::stopLoading()
+{
+    loaderStop.store (true);
+    if (loader.joinable()) loader.join();
+}
+
+void SongPlayer::load()
+{
+    problems.clear();
+    int64 longest = 0;
+    for (size_t i = 0; i < stems.size() && ! loaderStop.load(); ++i)
+    {
+        if (loadStem (*stems[i]))
+            longest = jmax (longest, (int64) stems[i]->left.size());
+        loadProgress.store ((float) (i + 1) / (float) stems.size());
+    }
+    if (loaderStop.load()) return;
+    lengthSamples = longest;
+    ready.store (true);
+}
+
+bool SongPlayer::loadStem (Stem& s)
+{
+    std::unique_ptr<AudioFormatReader> reader (s.file.existsAsFile() ? formats.createReaderFor (s.file) : nullptr);
+    if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+    {
+        problems.add (s.file.getFileName() + ": " + (s.file.existsAsFile() ? "not an audio file StageRig can read" : "file missing"));
+        s.left.clear(); s.right.clear();
+        return false;
+    }
+
+    const double ratio = reader->sampleRate / sampleRate;           // input samples per output sample
+    const int64 outLength = (int64) std::ceil ((double) reader->lengthInSamples / ratio);
+    s.left.assign ((size_t) outLength, 0);
+    s.right.assign ((size_t) outLength, 0);
+
+    /* Read in chunks and resample as we go, so a long stem never sits in
+       memory as floats at the file's rate as well. */
+    constexpr int chunk = 65536;
+    AudioBuffer<float> in (2, chunk + 8);
+    std::vector<float> outL ((size_t) ((double) chunk / ratio + 16.0)), outR (outL.size());
+    LagrangeInterpolator interpL, interpR;
+    int64 readPos = 0, written = 0;
+    int carried = 0;                                                  // input samples left over from the last chunk
+
+    auto store = [&s, &written, outLength] (const float* l, const float* r, int n)
+    {
+        for (int i = 0; i < n && written < outLength; ++i, ++written)
+        {
+            s.left [(size_t) written] = (int16_t) jlimit (-32767.0f, 32767.0f, l[i] * 32767.0f);
+            s.right[(size_t) written] = (int16_t) jlimit (-32767.0f, 32767.0f, r[i] * 32767.0f);
+        }
+    };
+
+    while (readPos < reader->lengthInSamples && ! loaderStop.load())
+    {
+        const int want = (int) jmin ((int64) (chunk - carried), reader->lengthInSamples - readPos);
+        // A mono file fills both sides.
+        reader->read (&in, carried, want, readPos, true, true);
+        readPos += want;
+        const int available = carried + want;
+        const bool last = readPos >= reader->lengthInSamples;
+
+        if (std::abs (ratio - 1.0) < 1e-9)
+        {
+            store (in.getReadPointer (0), in.getReadPointer (1), available);
+            carried = 0;
+            continue;
+        }
+
+        // Keep a few input samples back for the interpolator, except at the very end.
+        const int usable = last ? available : jmax (0, available - 8);
+        const int outCount = jmin ((int) outL.size(), (int) ((double) usable / ratio));
+        if (outCount <= 0) { carried = available; continue; }
+        const int used = interpL.process (ratio, in.getReadPointer (0), outL.data(), outCount);
+        interpR.process (ratio, in.getReadPointer (1), outR.data(), outCount);
+        store (outL.data(), outR.data(), outCount);
+
+        carried = jmax (0, available - used);
+        if (carried > 0)
+            for (int c = 0; c < 2; ++c)
+                std::memmove (in.getWritePointer (c), in.getReadPointer (c) + used, (size_t) carried * sizeof (float));
+    }
+    s.left.resize ((size_t) written);
+    s.right.resize ((size_t) written);
+    return ! loaderStop.load();
+}
+
+//==============================================================================
 void SongPlayer::prepare (double sr, int bs)
 {
-    sampleRate = sr > 0.0 ? sr : 48000.0;
+    const double newRate = sr > 0.0 ? sr : 48000.0;
+    const bool rateChanged = std::abs (newRate - sampleRate) > 0.5;
     blockSize = jmax (16, bs);
-    lengthSamples = 0;
+    scratch.setSize (2, blockSize, false, true, true);
+    if (! rateChanged) return;
+
+    // A new rate: everything is stopped and loaded again at it.
+    state.store ((int) State::idle);
+    sampleRate = newRate;
     fadeLength = jmax (1, (int) (0.03 * sampleRate));
-    for (auto& s : stems)
-    {
-        s->resampled->setResamplingRatio (s->fileRate / sampleRate);
-        s->resampled->prepareToPlay (blockSize, sampleRate);
-        s->scratch.setSize (2, blockSize, false, true, true);
-        lengthSamples = jmax (lengthSamples, (int64) ((double) s->fileLength * sampleRate / s->fileRate));
-    }
+    for (int i = 0; i < numSections; ++i)
+        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate);
+    startLoading();
 }
 
-void SongPlayer::rewind()
+void SongPlayer::setMarkers (const std::vector<MarkerDef>& markers)
 {
-    jassert (getState() == State::idle);
-    for (auto& s : stems)
+    std::vector<MarkerDef> sorted (markers);
+    std::sort (sorted.begin(), sorted.end(), [] (const MarkerDef& a, const MarkerDef& b) { return a.seconds < b.seconds; });
+
+    /* Whatever comes before the first marker is a section of its own -- the
+       intro -- unless the first marker is at the very top. */
+    int n = 0;
+    if (sorted.empty() || sorted.front().seconds > 0.001)
     {
-        s->buffered->setNextReadPosition (0);
-        s->resampled->flushBuffers();
+        sectionSeconds[0] = 0.0;
+        sectionName[0] = sorted.empty() ? "Song" : "Start";
+        sectionVamp[0] = false;
+        n = 1;
     }
-    position.store (0);
+    for (const auto& m : sorted)
+    {
+        if (n >= kMaxSections) break;
+        sectionSeconds[n] = jmax (0.0, m.seconds);
+        sectionName[n] = m.name.isNotEmpty() ? m.name : "Section " + String (n + 1);
+        sectionVamp[n] = m.vamp;
+        ++n;
+    }
+    for (int i = 0; i < n; ++i)
+        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate);
+    numSections = n;
+    if (queuedSection.load() >= numSections) queuedSection.store (-1);
+    if (currentSection.load() >= numSections) currentSection.store (0);
 }
 
-bool SongPlayer::waitUntilReady (int timeoutMs)
+String SongPlayer::getSectionName (int i) const     { return i >= 0 && i < numSections ? sectionName[i] : String(); }
+double SongPlayer::getSectionStart (int i) const    { return i >= 0 && i < numSections ? sectionSeconds[i] : 0.0; }
+bool SongPlayer::isSectionVamp (int i) const        { return i >= 0 && i < numSections && sectionVamp[i]; }
+
+int SongPlayer::sectionAt (int64 pos) const
 {
-    bool all = true;
-    for (auto& s : stems)
-    {
-        AudioBuffer<float> probe (2, blockSize);
-        AudioSourceChannelInfo info (&probe, 0, blockSize);
-        all = s->buffered->waitForNextAudioBlockReady (info, (uint32) timeoutMs) && all;
-    }
-    return all;
+    int s = 0;
+    for (int i = 0; i < numSections; ++i)
+        if (sectionStart[i] <= pos) s = i;
+    return s;
 }
 
+int64 SongPlayer::sectionEnd (int s) const
+{
+    return s + 1 < numSections ? jmin (sectionStart[s + 1], lengthSamples) : lengthSamples;
+}
+
+//==============================================================================
 void SongPlayer::start (int beats, double beatSeconds, int output)
 {
     if (getState() != State::idle) return;
-    countInTotalBeats = jmax (0, beats);
-    beatSamples = jmax ((int64) 1, (int64) (beatSeconds * sampleRate));
-    countInRemaining = (int64) countInTotalBeats * beatSamples;
-    countInDone = 0;
+    pendingCountInBeats.store (jmax (0, beats));
+    pendingBeatSeconds.store (jmax (0.05, beatSeconds));
     countInOutput.store (jmax (0, output));
+    position.store (cuedPosition.load());
+    currentSection.store (sectionAt (cuedPosition.load()));
+    vampHold.store (isSectionVamp (currentSection.load()));
+    vamping.store (false);
+    queuedSection.store (-1);
     fadeRemaining = 0;
-    state.store ((int) (countInRemaining > 0 ? State::countIn : State::playing));
+    state.store ((int) State::waiting);            // the audio thread begins the count-in once loading is done
 }
 
 void SongPlayer::stop()
 {
     int expected = (int) State::playing;
-    if (state.compare_exchange_strong (expected, (int) State::stopping)) return;
-    expected = (int) State::countIn;
-    state.compare_exchange_strong (expected, (int) State::idle);    // nothing sounding yet but clicks
+    if (! state.compare_exchange_strong (expected, (int) State::stopping))
+    {
+        expected = (int) State::countIn;
+        if (! state.compare_exchange_strong (expected, (int) State::idle))
+        {
+            expected = (int) State::waiting;
+            state.compare_exchange_strong (expected, (int) State::idle);
+        }
+    }
+    cuedPosition.store (0);
+    queuedSection.store (-1);
+    vamping.store (false);
+}
+
+void SongPlayer::queueSection (int index)
+{
+    if (index < 0 || index >= numSections) { queuedSection.store (-1); return; }
+    if (getState() == State::idle)
+    {
+        // Stopped: this is where Play will start.
+        cuedPosition.store (sectionStart[index]);
+        position.store (sectionStart[index]);
+        currentSection.store (index);
+        queuedSection.store (-1);
+        return;
+    }
+    queuedSection.store (index);
+}
+
+void SongPlayer::advance()
+{
+    if (vamping.load() && vampHold.load()) { releaseVamp(); return; }
+    const int q = queuedSection.load();
+    const int next = (q >= 0 ? q : currentSection.load()) + 1;
+    if (next < numSections) queueSection (next);
 }
 
 void SongPlayer::setStemMix (int stemIndex, int output, float gainDb)
@@ -116,6 +267,7 @@ void SongPlayer::setStemMix (int stemIndex, int output, float gainDb)
         }
 }
 
+//==============================================================================
 void SongPlayer::addClicks (float* l, float* r, int n)
 {
     /* A short sine blip on every beat, higher on the first: the sound of a
@@ -139,10 +291,22 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, i
 {
     auto st = getState();
     if (st == State::idle || stems.empty()) return Happened::nothing;
+    if (n > scratch.getNumSamples()) return Happened::nothing;    // larger than prepared: never allocate here
 
-    int offset = 0;
     Happened happened = Happened::nothing;
 
+    if (st == State::waiting)
+    {
+        if (! ready.load()) return Happened::nothing;
+        countInTotalBeats = pendingCountInBeats.load();
+        beatSamples = jmax ((int64) 1, (int64) (pendingBeatSeconds.load() * sampleRate));
+        countInRemaining = (int64) countInTotalBeats * beatSamples;
+        countInDone = 0;
+        if (countInRemaining > 0) { state.store ((int) State::countIn); st = State::countIn; }
+        else                      { state.store ((int) State::playing); st = State::playing; happened = Happened::stemsStarted; }
+    }
+
+    int offset = 0;
     if (st == State::countIn)
     {
         const int now = (int) jmin ((int64) n, countInRemaining);
@@ -152,18 +316,56 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, i
         countInRemaining -= now;
         offset = now;
         if (countInRemaining > 0) return Happened::nothing;
-        // The stems start inside this block, right where the count-in ends.
         state.store ((int) State::playing);
         st = State::playing;
-        happened = Happened::stemsStarted;
-    }
-    else if (st == State::playing && position.load() == 0)
-    {
         happened = Happened::stemsStarted;
     }
 
     const int len = n - offset;
     if (len <= 0) return happened;
+
+    /* Where each part of this block comes from. Usually one run; a section
+       boundary inside the block -- a vamp going round, a queued jump, the
+       end -- splits it, and each part reads from its own place. */
+    struct Run { int at; int64 from; int count; };
+    Run runs[16];
+    int numRuns = 0;
+    bool ended = false;
+    int64 pos = position.load();
+    int done = 0;
+    while (done < len && numRuns < 16)
+    {
+        const int sec = sectionAt (pos);
+        const int64 end = sectionEnd (sec);
+        const int count = (int) jmin ((int64) (len - done), jmax ((int64) 0, end - pos));
+        if (count > 0) { runs[numRuns++] = { offset + done, pos, count }; done += count; pos += count; }
+        if (pos < end) break;
+
+        // At the end of section `sec`: a queued section, a vamp going round, the next section, or the end.
+        if (const int q = queuedSection.exchange (-1); q >= 0)
+        {
+            pos = sectionStart[q];
+            vampHold.store (sectionVamp[q]);
+        }
+        else if (sectionVamp[sec] && vampHold.load())
+        {
+            pos = sectionStart[sec];
+        }
+        else if (end >= lengthSamples)
+        {
+            ended = true;
+            break;
+        }
+        else
+        {
+            vampHold.store (sectionVamp[sectionAt (pos)]);
+        }
+        if (count == 0 && sectionEnd (sectionAt (pos)) <= pos) { ended = true; break; }   // nothing left to play
+    }
+    position.store (pos);
+    const int sec = sectionAt (pos);
+    currentSection.store (sec);
+    vamping.store (sectionVamp[sec] && vampHold.load());
 
     // Fading out: a short ramp, so a stop never clicks.
     float startGain = 1.0f, endGain = 1.0f;
@@ -178,35 +380,50 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, i
 
     for (auto& s : stems)
     {
-        if (s->scratch.getNumSamples() < len) continue;       // a device block larger than prepared: skip, never allocate
-        AudioSourceChannelInfo info (&s->scratch, 0, len);
-        s->resampled->getNextAudioBlock (info);
         const int o = s->output.load (std::memory_order_relaxed);
-        if (o < 0 || o >= numOutputs) continue;
-        const float g = s->gain.load (std::memory_order_relaxed);
+        if (o < 0 || o >= numOutputs || s->left.empty()) continue;
+        const float g = s->gain.load (std::memory_order_relaxed) / 32767.0f;
+        const int64 stemLen = (int64) s->left.size();
+
+        scratch.clear (0, n);
+        for (int r = 0; r < numRuns; ++r)
+        {
+            const auto& run = runs[r];
+            auto* l = scratch.getWritePointer (0) + run.at;
+            auto* rr = scratch.getWritePointer (1) + run.at;
+            const int count = (int) jmax ((int64) 0, jmin ((int64) run.count, stemLen - run.from));
+            for (int i = 0; i < count; ++i)
+            {
+                l[i]  = (float) s->left [(size_t) (run.from + i)];
+                rr[i] = (float) s->right[(size_t) (run.from + i)];
+            }
+        }
         for (int c = 0; c < 2; ++c)
             if (auto* dest = outputs[o][c])
             {
+                const float* src = scratch.getReadPointer (c);
                 if (startGain == endGain)
-                    FloatVectorOperations::addWithMultiply (dest + offset, s->scratch.getReadPointer (c), g * startGain, len);
+                    FloatVectorOperations::addWithMultiply (dest + offset, src + offset, g * startGain, len);
                 else
                     for (int i = 0; i < len; ++i)
-                        dest[offset + i] += s->scratch.getSample (c, i) * g
-                                          * (startGain + (endGain - startGain) * (float) i / (float) len);
+                        dest[offset + i] += src[offset + i] * g * (startGain + (endGain - startGain) * (float) i / (float) len);
             }
     }
-
-    const auto pos = position.load() + len;
-    position.store (pos);
 
     if (st == State::stopping && fadeRemaining <= 0)
     {
         state.store ((int) State::idle);
+        position.store (0);
+        currentSection.store (0);
         return Happened::stopped;
     }
-    if (pos >= lengthSamples)
+    if (ended)
     {
         state.store ((int) State::idle);
+        position.store (0);
+        cuedPosition.store (0);
+        currentSection.store (0);
+        vamping.store (false);
         return Happened::ended;
     }
     return happened;

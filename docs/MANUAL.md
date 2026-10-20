@@ -321,7 +321,7 @@ does not fit on one line.
 ## Backing tracks
 
 A song can bring a backing track: one or more audio files -- **stems** -- that
-play together from the top when you start them. A full mix, or drums, bass and
+play together when you start them. A full mix, or drums, bass and
 pads on their own, plus a click and spoken cues for your in-ears.
 
 **Files... ▸ Backing track...** on a song opens its track. **+ Add audio files...**
@@ -338,6 +338,24 @@ setup and its tracks travel together. For each stem:
 **Count-in** clicks a number of beats at the song's tempo before the stems
 start, on the output you choose -- usually the in-ears.
 
+The stems are read into memory when the song is selected, so they can jump
+and loop without a gap; the songs panel says *loading* until they are ready,
+and a Play pressed before then starts the moment they are. Only the song in
+play is held -- about 46 MB for four minutes of a stereo stem.
+
+### Sections and vamps
+
+**+ Add section** under **Sections** marks where a section starts -- type the
+time (*1:23.5*), or press it while the track plays to mark the spot you are
+at. Each section runs to the next one; anything before the first is a section
+of its own.
+
+- **Vamp** makes a section repeat until it is released: the intro goes round
+  while the singer talks to the audience, then goes on into the verse at the
+  end of the pass you are in.
+- **Go** goes to a section -- when the current one ends, so the band stays in
+  time. While the track is stopped, it sets where Play starts.
+
 ### Playing it
 
 Selecting a song makes its track ready but never starts it: starting is always
@@ -349,6 +367,14 @@ short fade:
 - the **Play** bar at the top of the tablet's set list;
 - a footswitch: **Footswitches... ▸ Backing track: start / stop**, then press
   the pedal. It works on any keyboard and channel, like the song pedals.
+
+**Next** beside Play does the job of one pedal: during a vamp it lets the
+vamp go on (it reads **Go on** then); otherwise it queues the next section.
+The tablet shows the sections as buttons under its Play bar -- tap one to go
+there when the current section ends -- with **Go on** during a vamp, and a
+footswitch can do the same: **Footswitches... ▸ Backing track: next section /
+release vamp**. The panel shows the section you are in and the one queued
+(*Verse 1:12 / 3:40 > Chorus*).
 
 Moving to another song stops the track that is playing. When the stems start,
 every plugin's musical position goes back to bar one, beat one, so a

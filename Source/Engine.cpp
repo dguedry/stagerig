@@ -224,7 +224,6 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
 
     // Backing tracks: WAV, AIFF, FLAC, Ogg and MP3, read ahead on their own thread.
     trackFormats.registerBasicFormats();
-    trackReader.startThread (Thread::Priority::high);
 
     /* Default from the machine rather than a fixed 4. Loading is mostly waiting
        -- Wine starting, a plugin reading its own files -- so the useful number
@@ -264,7 +263,6 @@ Engine::~Engine()
         std::unique_ptr<SongPlayer> gone;
         { const ScopedLock sl (lock); gone = std::move (player); }
     }
-    trackReader.stopThread (2000);
 
     // Stop the loader: drop queued jobs, cut short a load in progress, join.
     {
@@ -361,6 +359,7 @@ void Engine::loadSetup (Setup newSetup)
     nextCC.store (jlimit (0, 127, setup.nextSongCC), std::memory_order_relaxed);
     prevCC.store (jlimit (0, 127, setup.prevSongCC), std::memory_order_relaxed);
     transportCCAtomic.store (jlimit (0, 127, setup.transportCC), std::memory_order_relaxed);
+    sectionCCAtomic.store (jlimit (0, 127, setup.sectionCC), std::memory_order_relaxed);
     tapTimes.clear();
     rebuildRuntimes();
     listeners.call ([] (Listener& l) { l.setupChanged(); });
@@ -1139,6 +1138,46 @@ void Engine::setSongCountIn (int songIndex, int beats, int output)
     s.countInOutput = jmax (0, output);
 }
 
+void Engine::setSongMarkers (int songIndex, const std::vector<MarkerDef>& markers)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.songs[(size_t) songIndex].markers = markers;
+    if (songIndex == trackSong && player != nullptr)
+    {
+        const ScopedLock sl (lock);
+        player->setMarkers (markers);
+    }
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+void Engine::queueTrackSection (int index)
+{
+    if (player == nullptr) return;
+    player->queueSection (index);
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+void Engine::releaseVamp()
+{
+    if (player == nullptr) return;
+    player->releaseVamp();
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+void Engine::advanceTrack()
+{
+    if (player == nullptr) return;
+    player->advance();
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+void Engine::setSectionCC (int cc)
+{
+    setup.sectionCC = jlimit (0, 127, cc);
+    sectionCCAtomic.store (setup.sectionCC, std::memory_order_relaxed);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
 void Engine::armTrack (int songIndex)
 {
     // Whatever is playing stops first, with its short fade, so a change of song never clicks.
@@ -1148,15 +1187,13 @@ void Engine::armTrack (int songIndex)
         for (int i = 0; i < 20 && player->isRunning(); ++i) Thread::sleep (5);
     }
 
+    // Read into memory on its own thread; Play before it is done waits for it.
     std::unique_ptr<SongPlayer> fresh;
     if (songIndex >= 0 && songIndex < (int) setup.songs.size() && ! setup.songs[(size_t) songIndex].stems.empty())
     {
-        StringArray problems;
-        fresh = std::make_unique<SongPlayer> (trackReader, trackFormats, getChartsFolder(),
-                                              setup.songs[(size_t) songIndex], sampleRate, blockSize, problems);
-        if (! problems.isEmpty())
-            listeners.call ([p = problems.joinIntoString ("; ")] (Listener& l) { l.statusMessage ("Backing track: " + p); });
-        if (! fresh->hasStems()) fresh.reset();
+        fresh = std::make_unique<SongPlayer> (trackFormats, getChartsFolder(),
+                                              setup.songs[(size_t) songIndex], sampleRate, blockSize);
+        trackProblemsReported = false;
     }
 
     std::unique_ptr<SongPlayer> gone;
@@ -1173,8 +1210,8 @@ void Engine::startTrack()
 {
     if (player == nullptr) return;
     if (player->isRunning()) return;
-    player->rewind();
-    player->waitUntilReady (800);            // the first second is on disk until it is buffered
+    if (! player->isReady())
+        listeners.call ([] (Listener& l) { l.statusMessage ("Backing track still loading -- it starts as soon as it is ready."); });
 
     int beats = 0, output = 0;
     double bpm = setup.tempoBpm > 0.0 ? setup.tempoBpm : 120.0;
@@ -2233,6 +2270,22 @@ void Engine::handleAsyncUpdate()
                     toggleTrack();
                 break;
 
+            case Event::sectionLearn:
+                setSectionCC (e.a);
+                listeners.call ([cc = e.a] (Listener& l) { l.statusMessage ("Next section / release vamp: CC " + String (cc)); });
+                break;
+
+            case Event::sectionPedal:
+                if (hasTrack())
+                {
+                    advanceTrack();
+                    const int q = getQueuedTrackSection();
+                    const auto msg = isTrackVamping() ? String ("Vamp: released at the end of this pass")
+                                   : q >= 0 ? "Next: " + getTrackSectionName (q) : String ("No section after this one");
+                    listeners.call ([msg] (Listener& l) { l.statusMessage (msg); });
+                }
+                break;
+
             case Event::trackFinished:
                 listeners.call ([] (Listener& l) { l.transportChanged(); });
                 break;
@@ -2318,6 +2371,13 @@ void Engine::timerCallback() { housekeeping(); }
 
 void Engine::housekeeping()
 {
+    if (! trackProblemsReported && player != nullptr && player->isReady())
+    {
+        trackProblemsReported = true;
+        if (const auto p = player->getProblems(); p.isNotEmpty())
+            listeners.call ([p] (Listener& l) { l.statusMessage ("Backing track: " + p); });
+        listeners.call ([] (Listener& l) { l.transportChanged(); });
+    }
     for (int i = 0; i < (int) runtimes.size(); ++i)
     {
         auto& in = *runtimes[(size_t) i];
@@ -2427,6 +2487,12 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
         postEvent ({ Event::transportLearn, i, m.getControllerNumber(), 0, 0, 0 });
         return;
     }
+    if (sectionLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
+    {
+        sectionLearnArmed.store (false);
+        postEvent ({ Event::sectionLearn, i, m.getControllerNumber(), 0, 0, 0 });
+        return;
+    }
 
     /* Stepping through the set, outside the channel filter and whatever is
        loaded -- a footswitch has to work all night. Only the press counts. */
@@ -2439,6 +2505,8 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
         { postEvent ({ Event::songStep, i, -1, 0, 0, 0 }); return; }
         if (const int t = transportCCAtomic.load (std::memory_order_relaxed); t > 0 && cc == t)
         { postEvent ({ Event::transport, i, 0, 0, 0, 0 }); return; }
+        if (const int sc = sectionCCAtomic.load (std::memory_order_relaxed); sc > 0 && cc == sc)
+        { postEvent ({ Event::sectionPedal, i, 0, 0, 0, 0 }); return; }
     }
 
     /* Tap tempo, outside the channel filter: the tempo belongs to the rig, so a

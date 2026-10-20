@@ -62,6 +62,10 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     playBtn.setTooltip ("Start or stop the backing track of the song in play, after its count-in. "
                         "A footswitch can do the same (Footswitches...).");
     playBtn.onClick = [this] { engine.toggleTrack(); refreshTransport(); };
+    addAndMakeVisible (nextBtn);
+    nextBtn.setTooltip ("Releases a vamp at the end of its pass, or queues the next section of the backing track. "
+                        "A footswitch can do the same (Footswitches...).");
+    nextBtn.onClick = [this] { engine.advanceTrack(); refreshTransport(); };
     addAndMakeVisible (trackLabel);
     trackLabel.setFont (FontOptions (12.0f));
     trackLabel.setColour (Label::textColourId, textDim);
@@ -125,6 +129,7 @@ void SongsPanel::resized()
     r.removeFromTop (4);
     auto transport = r.removeFromTop (24);
     playBtn.setBounds (transport.removeFromLeft (52).reduced (1, 0));
+    nextBtn.setBounds (transport.removeFromLeft (48).reduced (1, 0));
     transport.removeFromLeft (4);
     trackLabel.setBounds (transport);
     r.removeFromTop (6);
@@ -230,15 +235,31 @@ void SongsPanel::refreshTransport()
 
     playBtn.setEnabled (has);
     playBtn.setButtonText (engine.isTrackRunning() ? "Stop" : "Play");
+    const bool vamping = engine.isTrackVamping();
+    nextBtn.setEnabled (has && (engine.getTrackSectionCount() > 1));
+    nextBtn.setButtonText (vamping ? "Go on" : "Next");
+    nextBtn.setColour (TextButton::buttonColourId, vamping ? Colour (0xff8a5a12) : getLookAndFeel().findColour (TextButton::buttonColourId));
     playBtn.setColour (TextButton::buttonColourId, engine.isTrackRunning() ? accentDim : getLookAndFeel().findColour (TextButton::buttonColourId));
 
     String text;
     if (! has)
         text = "No backing track";
+    else if (! engine.isTrackReady())
+        text = songs[(size_t) song].name + "  -- loading " + String (roundToInt (engine.getTrackLoadProgress() * 100.0f)) + "%";
     else if (engine.isTrackCountingIn())
         text = songs[(size_t) song].name + "  -- counting in";
     else
-        text = songs[(size_t) song].name + "  " + mmss (engine.getTrackPosition()) + " / " + mmss (engine.getTrackLength());
+    {
+        text = mmss (engine.getTrackPosition()) + " / " + mmss (engine.getTrackLength());
+        if (engine.getTrackSectionCount() > 1)
+        {
+            text = engine.getTrackSectionName (engine.getTrackSection()) + (vamping ? " (vamp)" : "") + "  " + text;
+            if (const int q = engine.getQueuedTrackSection(); q >= 0)
+                text << "  > " << engine.getTrackSectionName (q);
+        }
+        else
+            text = songs[(size_t) song].name + "  " + text;
+    }
     if (trackLabel.getText() != text) trackLabel.setText (text, dontSendNotification);
 }
 
@@ -659,6 +680,10 @@ void SongsPanel::showFootswitchMenu()
     m.addItem (5, "Learn: press the pedal...");
     if (playCC > 0) m.addItem (6, "Stop using CC " + String (playCC));
 
+    m.addSectionHeader ("Backing track: next section / release vamp");
+    m.addItem (7, "Learn: press the pedal...");
+    if (engine.getSectionCC() > 0) m.addItem (8, "Stop using CC " + String (engine.getSectionCC()));
+
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (footBtn), [this] (int choice)
     {
         switch (choice)
@@ -669,6 +694,8 @@ void SongsPanel::showFootswitchMenu()
             case 4: engine.setPrevSongCC (0);    break;
             case 5: engine.armTransportLearn();  break;
             case 6: engine.setTransportCC (0);   break;
+            case 7: engine.armSectionLearn();    break;
+            case 8: engine.setSectionCC (0);     break;
             default: break;
         }
         refresh();
@@ -832,13 +859,24 @@ public:
         addAndMakeVisible (countInOutBox);
         countInOutBox.onChange = [this] { applyCountIn(); };
 
+        addAndMakeVisible (sectionsHeader);
+        sectionsHeader.setColour (Label::textColourId, accent);
+        sectionsHeader.setFont (FontOptions (13.0f, Font::bold));
+        addAndMakeVisible (addSectionBtn);
+        addSectionBtn.setTooltip ("A new section where the track is now if it is playing, otherwise after the last one. "
+                                  "Type the time to move it: 1:23.5");
+        addSectionBtn.onClick = [this] { addSection(); };
+
         addAndMakeVisible (hint);
         hint.setColour (Label::textColourId, textDim);
         hint.setFont (FontOptions (12.0f));
         hint.setJustificationType (Justification::topLeft);
         hint.setText ("Each stem plays on its own output from the start of the song when the track is started "
                       "-- Play in the songs panel, the tablet, or the start/stop footswitch. Put a click or cue "
-                      "stem on your in-ear output. The count-in clicks at the song's tempo.", dontSendNotification);
+                      "stem on your in-ear output. The count-in clicks at the song's tempo.\n"
+                      "Sections start at their time and run to the next. A vamp section repeats until released "
+                      "(Next, the tablet, or the section footswitch); asking for a section takes you there when "
+                      "the current one ends.", dontSendNotification);
 
         rebuild();
         startTimerHz (2);
@@ -858,6 +896,14 @@ public:
             rows.push_back (std::move (row));
         }
 
+        sectionRows.clear();
+        for (int i = 0; i < (int) sg.markers.size(); ++i)
+        {
+            auto row = std::make_unique<SectionRow> (*this, i, sg.markers[(size_t) i]);
+            addAndMakeVisible (row.get());
+            sectionRows.push_back (std::move (row));
+        }
+
         fillOutputs (countInOutBox, sg.countInOutput);
         countInBox.setSelectedId (sg.countInBeats + 1, dontSendNotification);
         countInOutBox.setEnabled (sg.countInBeats > 0);
@@ -870,6 +916,11 @@ public:
         for (auto& row : rows) row->setBounds (r.removeFromTop (30));
         r.removeFromTop (6);
         addBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
+        r.removeFromTop (12);
+        sectionsHeader.setBounds (r.removeFromTop (20));
+        for (auto& row : sectionRows) row->setBounds (r.removeFromTop (28));
+        r.removeFromTop (4);
+        addSectionBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
         r.removeFromTop (12);
         auto c = r.removeFromTop (24);
         countInLabel.setBounds (c.removeFromLeft (70));
@@ -925,6 +976,118 @@ private:
         TextButton remove { "X" };
     };
 
+    struct SectionRow : public Component
+    {
+        SectionRow (TracksComponent& o, int i, const MarkerDef& m) : owner (o), index (i)
+        {
+            addAndMakeVisible (name);
+            name.setText (m.name, dontSendNotification);
+            name.setEditable (true);
+            name.onTextChange = [this] { owner.updateMarker (index, [this] (MarkerDef& d) { d.name = name.getText().trim(); }); };
+
+            addAndMakeVisible (time);
+            time.setText (formatTime (m.seconds), dontSendNotification);
+            time.setEditable (true);
+            time.setJustificationType (Justification::centredRight);
+            time.setTooltip ("Where the section starts: seconds, or minutes:seconds");
+            time.onTextChange = [this]
+            {
+                const double secs = parseTime (time.getText());
+                owner.updateMarker (index, [secs] (MarkerDef& d) { d.seconds = secs; });
+                time.setText (formatTime (secs), dontSendNotification);
+            };
+
+            addAndMakeVisible (vamp);
+            vamp.setToggleState (m.vamp, dontSendNotification);
+            vamp.setTooltip ("Repeat this section until released");
+            vamp.onClick = [this] { const bool v = vamp.getToggleState(); owner.updateMarker (index, [v] (MarkerDef& d) { d.vamp = v; }); };
+
+            addAndMakeVisible (go);
+            go.setTooltip ("Go here: at the end of the current section if the track is playing, otherwise where Play starts");
+            go.onClick = [this] { owner.goToMarker (index); };
+
+            addAndMakeVisible (remove);
+            remove.onClick = [this] { owner.removeMarker (index); };
+        }
+        static String formatTime (double s)
+        {
+            const int m = (int) (s / 60.0);
+            return String (m) + ":" + String (s - m * 60.0, 1).paddedLeft ('0', 4);
+        }
+        static double parseTime (const String& t)
+        {
+            if (t.containsChar (':'))
+                return jmax (0.0, t.upToFirstOccurrenceOf (":", false, false).getDoubleValue() * 60.0
+                                    + t.fromFirstOccurrenceOf (":", false, false).getDoubleValue());
+            return jmax (0.0, t.getDoubleValue());
+        }
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (0, 2);
+            remove.setBounds (r.removeFromRight (28));   r.removeFromRight (6);
+            go.setBounds (r.removeFromRight (44));       r.removeFromRight (6);
+            vamp.setBounds (r.removeFromRight (70));     r.removeFromRight (6);
+            time.setBounds (r.removeFromRight (90));     r.removeFromRight (6);
+            name.setBounds (r);
+        }
+        TracksComponent& owner;
+        int index;
+        Label name, time;
+        ToggleButton vamp { "Vamp" };
+        TextButton go { "Go" }, remove { "X" };
+    };
+
+    std::vector<MarkerDef> markers() const
+    {
+        const auto& songs = engine.getSongs();
+        return songIndex >= 0 && songIndex < (int) songs.size() ? songs[(size_t) songIndex].markers : std::vector<MarkerDef>();
+    }
+
+    void updateMarker (int index, std::function<void (MarkerDef&)> change)
+    {
+        auto m = markers();
+        if (index < 0 || index >= (int) m.size()) return;
+        change (m[(size_t) index]);
+        engine.setSongMarkers (songIndex, m);
+    }
+
+    void addSection()
+    {
+        auto m = markers();
+        double at = 0.0;
+        if (engine.getTrackSong() == songIndex && engine.isTrackRunning())
+            at = engine.getTrackPosition();
+        else if (! m.empty())
+        {
+            for (const auto& x : m) at = jmax (at, x.seconds);
+            at += 10.0;
+        }
+        m.push_back ({ "Section " + String ((int) m.size() + 1), at, false });
+        std::sort (m.begin(), m.end(), [] (const MarkerDef& a, const MarkerDef& b) { return a.seconds < b.seconds; });
+        engine.setSongMarkers (songIndex, m);
+        rebuild();
+    }
+
+    void removeMarker (int index)
+    {
+        auto m = markers();
+        if (index < 0 || index >= (int) m.size()) return;
+        m.erase (m.begin() + index);
+        engine.setSongMarkers (songIndex, m);
+        MessageManager::callAsync ([this] { rebuild(); });
+    }
+
+    void goToMarker (int index)
+    {
+        if (engine.getTrackSong() != songIndex) return;
+        const auto m = markers();
+        if (index < 0 || index >= (int) m.size()) return;
+        // The player's sections may begin with an implicit one before the first marker: find it by time.
+        for (int s = 0; s < engine.getTrackSectionCount(); ++s)
+            if (std::abs (engine.getTrackSectionStart (s) - m[(size_t) index].seconds) < 0.001)
+                { engine.queueTrackSection (s); return; }
+    }
+
     void fillOutputs (ComboBox& box, int selected)
     {
         box.clear (dontSendNotification);
@@ -946,7 +1109,8 @@ private:
     {
         // Rows follow the song if it was changed elsewhere -- a stem dropped on it in the songs panel.
         const auto& songs = engine.getSongs();
-        if (songIndex >= 0 && songIndex < (int) songs.size() && songs[(size_t) songIndex].stems.size() != rows.size())
+        if (songIndex >= 0 && songIndex < (int) songs.size()
+            && (songs[(size_t) songIndex].stems.size() != rows.size() || songs[(size_t) songIndex].markers.size() != sectionRows.size()))
             rebuild();
     }
 
@@ -954,6 +1118,9 @@ private:
     SongsPanel& panel;
     const int songIndex;
     std::vector<std::unique_ptr<Row>> rows;
+    std::vector<std::unique_ptr<SectionRow>> sectionRows;
+    Label sectionsHeader { {}, "SECTIONS" };
+    TextButton addSectionBtn { "+ Add section" };
     TextButton addBtn { "+ Add audio files..." };
     Label countInLabel { {}, "Count-in" }, countInOutLabel { {}, "on" }, hint;
     ComboBox countInBox, countInOutBox;
@@ -965,7 +1132,7 @@ void SongsPanel::showTracksDialog (int songIndex)
     const auto& songs = engine.getSongs();
     if (songIndex < 0 || songIndex >= (int) songs.size()) return;
     auto* content = new TracksComponent (engine, *this, songIndex);
-    content->setSize (620, 360);
+    content->setSize (640, 560);
     DialogWindow::LaunchOptions o;
     o.content.setOwned (content);
     o.dialogTitle = "Backing track: " + songs[(size_t) songIndex].name;
