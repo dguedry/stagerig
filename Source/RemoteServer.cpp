@@ -234,7 +234,9 @@ function askForCode(message) {
 
 async function api(path, opts) {
   const r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token), opts);
-  if (r.status === 403) { localStorage.removeItem("t"); const e = new Error("gate"); e.gate = true; throw e; }
+)HTML"
+/* MSVC caps one string literal at 16 KB: the page continues in the next. */
+R"HTML(  if (r.status === 403) { localStorage.removeItem("t"); const e = new Error("gate"); e.gate = true; throw e; }
   if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
 }
@@ -501,7 +503,9 @@ function render(s) {
     const gui = document.createElement("button");
     gui.className = "gui"; gui.textContent = "GUI";
     gui.style.display = "none";
-    gui.onclick = () => {
+)HTML"
+/* MSVC caps one string literal at 16 KB: the page continues in the next. */
+R"HTML(    gui.onclick = () => {
       const list = slotCache[i] || [];
       if (!list.length) return;
       if (list.length === 1) { openPluginWindow(i, list[0].slot, list[0].effect, list[0].name, gui, "GUI", list[0].bus); return; }
