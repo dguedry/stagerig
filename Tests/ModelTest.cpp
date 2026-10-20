@@ -383,7 +383,10 @@ int main()
         CHECK (! plain.toVar().getDynamicObject()->hasProperty ("charts"));
 
         // The folder sits beside the setup, named after it.
-        CHECK (chartsFolderFor (juce::File ("/x/MySetup.stagerig.json")).getFullPathName() == "/x/MySetup.stagerig.charts");
+        {
+            const auto setupFile = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("MySetup.stagerig.json");
+            CHECK (chartsFolderFor (setupFile) == setupFile.getSiblingFile ("MySetup.stagerig.charts"));
+        }
         CHECK (chartsFolderFor (juce::File()) == juce::File());
     }
 
