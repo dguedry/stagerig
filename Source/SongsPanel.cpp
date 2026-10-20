@@ -836,7 +836,7 @@ public:
         addAndMakeVisible (addBtn);
         addBtn.onClick = [this]
         {
-            chooser = std::make_unique<FileChooser> ("Add audio files to the backing track",
+            chooser = std::make_unique<FileChooser> ("Add audio or MIDI files to the backing track",
                                                      File::getSpecialLocation (File::userHomeDirectory),
                                                      trackFilePatterns());
             chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles
@@ -871,7 +871,8 @@ public:
         hint.setColour (Label::textColourId, textDim);
         hint.setFont (FontOptions (12.0f));
         hint.setJustificationType (Justification::topLeft);
-        hint.setText ("Each stem plays on its own output from the start of the song when the track is started "
+        hint.setText ("Audio stems play on an output; a MIDI file plays through a keyboard's current sounds. "
+                      "Each stem plays on its own output from the start of the song when the track is started "
                       "-- Play in the songs panel, the tablet, or the start/stop footswitch. Put a click or cue "
                       "stem on your in-ear output. The count-in clicks at the song's tempo.\n"
                       "Sections start at their time and run to the next. A vamp section repeats until released "
@@ -944,6 +945,21 @@ private:
             name.onTextChange = [this] { def.name = name.getText().trim(); owner.engine.setSongStem (owner.songIndex, index, def); };
 
             addAndMakeVisible (output);
+            if (d.isMidi())
+            {
+                /* A MIDI file plays through an input -- its current program,
+                   like the keys -- and can keep just one of the file's channels. */
+                owner.fillInputs (output, d.input);
+                output.setTooltip ("The keyboard this MIDI file plays through: its current program, as if played");
+                output.onChange = [this] { def.input = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
+                addAndMakeVisible (channel);
+                channel.addItem ("All channels", 1);
+                for (int c = 1; c <= 16; ++c) channel.addItem ("Channel " + String (c), c + 1);
+                channel.setSelectedId (d.midiChannel + 1, dontSendNotification);
+                channel.setTooltip ("Only this channel of the file -- add the file twice to send one part to each keyboard");
+                channel.onChange = [this] { def.midiChannel = channel.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
+                return;
+            }
             owner.fillOutputs (output, d.output);
             output.onChange = [this] { def.output = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
 
@@ -963,7 +979,9 @@ private:
         {
             auto r = getLocalBounds().reduced (0, 2);
             remove.setBounds (r.removeFromRight (28));     r.removeFromRight (6);
-            gain.setBounds (r.removeFromRight (110));      r.removeFromRight (6);
+            if (def.isMidi()) channel.setBounds (r.removeFromRight (110));
+            else              gain.setBounds (r.removeFromRight (110));
+            r.removeFromRight (6);
             output.setBounds (r.removeFromRight (180));    r.removeFromRight (6);
             name.setBounds (r);
         }
@@ -971,7 +989,7 @@ private:
         int index;
         StemDef def;
         Label name;
-        ComboBox output;
+        ComboBox output, channel;
         Slider gain;
         TextButton remove { "X" };
     };
@@ -1088,6 +1106,15 @@ private:
                 { engine.queueTrackSection (s); return; }
     }
 
+    void fillInputs (ComboBox& box, int selected)
+    {
+        box.clear (dontSendNotification);
+        const auto& ins = engine.getSetup().inputs;
+        for (int i = 0; i < (int) ins.size(); ++i)
+            box.addItem ("-> " + ins[(size_t) i].name, i + 1);
+        box.setSelectedId (jlimit (0, jmax (0, (int) ins.size() - 1), selected) + 1, dontSendNotification);
+    }
+
     void fillOutputs (ComboBox& box, int selected)
     {
         box.clear (dontSendNotification);
@@ -1121,7 +1148,7 @@ private:
     std::vector<std::unique_ptr<SectionRow>> sectionRows;
     Label sectionsHeader { {}, "SECTIONS" };
     TextButton addSectionBtn { "+ Add section" };
-    TextButton addBtn { "+ Add audio files..." };
+    TextButton addBtn { "+ Add audio or MIDI..." };
     Label countInLabel { {}, "Count-in" }, countInOutLabel { {}, "on" }, hint;
     ComboBox countInBox, countInOutBox;
     std::unique_ptr<FileChooser> chooser;

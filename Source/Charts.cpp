@@ -86,12 +86,12 @@ void prerenderPdfPagesAsync (const File& pdf)
 
 bool isTrackFile (const File& f)
 {
-    return f.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3");
+    return f.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;mid;midi");
 }
 
 String trackFilePatterns()
 {
-    return "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3";
+    return "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3;*.mid;*.midi";
 }
 
 } // namespace perf

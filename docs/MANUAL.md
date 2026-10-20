@@ -324,8 +324,8 @@ A song can bring a backing track: one or more audio files -- **stems** -- that
 play together when you start them. A full mix, or drums, bass and
 pads on their own, plus a click and spoken cues for your in-ears.
 
-**Files... ▸ Backing track...** on a song opens its track. **+ Add audio files...**
-adds WAV, AIFF, FLAC, Ogg or MP3 files (or drop them on the song in the songs
+**Files... ▸ Backing track...** on a song opens its track. **+ Add audio or MIDI...**
+adds WAV, AIFF, FLAC, Ogg or MP3 files, or MIDI files, (or drop them on the song in the songs
 panel). Like charts, they are copied into the folder beside the setup, so the
 setup and its tracks travel together. For each stem:
 
@@ -334,6 +334,16 @@ setup and its tracks travel together. For each stem:
   your in-ear output and nothing else there, and the audience never hears it.
 - **Level** -- in dB, and it can be changed while the track plays.
 - **X** takes the stem off the song; the file stays in the folder.
+
+**MIDI files** can be stems too (*.mid*). A MIDI stem has an **input** where
+an audio stem has an output: it plays through that keyboard's current
+program, exactly as if played on the keys -- splits, layers, effects and all.
+**Channel** keeps just one channel of the file, so a file with a bass part on
+channel 1 and a pad on channel 2 can be added twice: channel 1 to Lower,
+channel 2 to Upper. The file's program changes are ignored (it must not swap
+your sounds), its notes follow sections, vamps and jumps like the audio does,
+and every note is let go when the track stops or jumps. Set the song's
+programs (Capture) to what the MIDI parts should play.
 
 **Count-in** clicks a number of beats at the song's tempo before the stems
 start, on the output you choose -- usually the in-ears.

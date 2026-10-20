@@ -58,7 +58,7 @@ other plugin.
   you like. StageRig can serve its own wifi network when the venue has none.
 - **Backing tracks.** A song can carry audio stems -- a full mix, or drums,
   bass and pads apart, plus a click and cues for the in-ears -- each on its own
-  output, with a count-in, started and stopped from a footswitch, the laptop
+  output, and MIDI files that play through your keyboards' own sounds, with a count-in, started and stopped from a footswitch, the laptop
   or the tablet. Mark its sections and jump between them in time, and vamp
   an intro until a pedal lets it go on. Tempo-synced effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a

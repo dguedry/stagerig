@@ -1853,6 +1853,51 @@ int main()
         engine.stopTrack();
         levels (4); pump (50);
 
+        // A MIDI file through an input: it plays that input's current sound, like the keys.
+        {
+            MidiMessageSequence seq;
+            seq.addEvent (MidiMessage::noteOn  (1, 60, (uint8) 100), 0);       // ticks; 960 per quarter, 120 bpm
+            seq.addEvent (MidiMessage::noteOff (1, 60), 960 * 3);              // held for 1.5 s
+            seq.addEvent (MidiMessage::programChange (1, 5), 10);              // must be ignored
+            seq.updateMatchedPairs();
+            MidiFile mf;
+            mf.setTicksPerQuarterNote (960);
+            mf.addTrack (seq);
+            const auto f = folder.getChildFile ("part.mid");
+            f.deleteFile();
+            FileOutputStream os (f);
+            CHECK (os.openedOk() && mf.writeTo (os));
+        }
+        const int midiSong = engine.addSong ("MIDI part");
+        StemDef part; part.file = "part.mid"; part.input = 0;
+        engine.addSongStem (midiSong, part);
+        const int programBefore = engine.getSetup().inputs[0].currentProgram;
+        engine.selectSong (midiSong);
+        CHECK (waitReady() && engine.hasTrack());
+        std::printf ("     MIDI track length %.2f s\n", engine.getTrackLength());
+        CHECK (std::abs (engine.getTrackLength() - 1.5) < 0.05);
+        engine.startTrack();
+        const float sounding = levels (24)[0];                           // about a quarter of a second in
+        std::printf ("     MIDI through input 0: %.3f\n", sounding);
+        CHECK (sounding > 0.01f);
+        CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);    // its program change was ignored
+        engine.stopTrack();                                              // with the note still held
+        levels (4); pump (50);
+        levels (120);                                                    // the synth's release
+        const float afterStop = levels (8)[0];
+        std::printf ("     after stopping with a note held: %.5f\n", afterStop);
+        CHECK (afterStop < 1e-3f);
+
+        // Only channel 2 of a file that plays on channel 1: nothing.
+        part.midiChannel = 2;
+        engine.setSongStem (midiSong, 0, part);
+        CHECK (waitReady());
+        engine.startTrack();
+        const float otherChannel = levels (24)[0];
+        std::printf ("     channel 2 only: %.5f\n", otherChannel);
+        CHECK (otherChannel < 1e-3f);
+        engine.stopTrack(); levels (4); pump (50);
+
         // A song with no stems arms nothing.
         const int bare = engine.addSong ("No track");
         engine.selectSong (bare);

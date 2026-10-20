@@ -163,6 +163,7 @@ struct Engine::InputRuntime
     std::atomic<int> output { 0 };                           // which output it lands on
     MidiMessageCollector collector;
     MidiBuffer block;
+    MidiBuffer trackMidi;          // the backing track's MIDI for this block, merged into `block`
     MidiBuffer holdBlock;          // this block's MIDI less the note-ons, for programs left sounding
     std::map<int, std::unique_ptr<ProgramRuntime>> loaded;
     ProgramRuntime* active = nullptr;
@@ -479,6 +480,7 @@ void Engine::rebuildRuntimes()
     {
         auto rt = std::make_unique<InputRuntime>();
         rt->collector.reset (sampleRate);
+        rt->trackMidi.ensureSize (4096);
         applyInputDef (*rt, setup.inputs[(size_t) i]);
         runtimes.push_back (std::move (rt));
     }
@@ -747,6 +749,7 @@ int Engine::addInput (const String& name, InputDef::Kind kind)
 
     auto rt = std::make_unique<InputRuntime>();
     rt->collector.reset (sampleRate);
+        rt->trackMidi.ensureSize (4096);
     applyInputDef (*rt, def);
     {
         const ScopedLock sl (lock);
@@ -1119,13 +1122,14 @@ void Engine::setSongStem (int songIndex, int stemIndex, const StemDef& d)
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
     auto& stems = setup.songs[(size_t) songIndex].stems;
     if (stemIndex < 0 || stemIndex >= (int) stems.size()) return;
-    const bool fileChanged = stems[(size_t) stemIndex].file != d.file;
+    // A different file, or a different channel of a MIDI file, needs reading again.
+    const bool fileChanged = stems[(size_t) stemIndex].file != d.file || stems[(size_t) stemIndex].midiChannel != d.midiChannel;
     stems[(size_t) stemIndex] = d;
     if (songIndex != trackSong) return;
     /* A new output or level takes effect at once, even mid-song; only a
        different file needs the track loaded again. */
     if (! fileChanged && player != nullptr)
-        player->setStemMix (stemIndex, d.output, d.gainDb);
+        player->setStemMix (stemIndex, d.output, d.gainDb, d.input);
     else
         armTrack (songIndex);
 }
@@ -2658,16 +2662,8 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
            sum used to be, one chain and one multiply later. */
         for (auto& o : outputs)
             o->mix.clear (0, n);
-        for (auto& rt : runtimes)
-        {
-            if (outputs.empty()) break;
-            int idx = rt->output.load (std::memory_order_relaxed);
-            if (idx < 0 || idx >= (int) outputs.size()) idx = 0;
-            float* busOut[2] = { outputs[(size_t) idx]->mix.getWritePointer (0), outputs[(size_t) idx]->mix.getWritePointer (1) };
-            processInput (*rt, inChunk, numIn, busOut, 2, n, panicNow);
-        }
-
-        // The backing track, onto its outputs ahead of their master effects and volume.
+        /* The backing track first: its audio onto the outputs, ahead of their
+           master effects, and its MIDI into the inputs this same block. */
         if (player != nullptr)
         {
             float* trackOut[16][2];
@@ -2677,11 +2673,23 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
                 trackOut[o][0] = outputs[(size_t) o]->mix.getWritePointer (0);
                 trackOut[o][1] = outputs[(size_t) o]->mix.getWritePointer (1);
             }
-            const auto happened = player->render (trackOut, numTrackOutputs, n);
+            MidiBuffer* trackMidi[64];
+            const int numTrackInputs = jmin ((int) runtimes.size(), 64);
+            for (int i = 0; i < numTrackInputs; ++i) trackMidi[i] = &runtimes[(size_t) i]->trackMidi;
+            const auto happened = player->render (trackOut, numTrackOutputs, trackMidi, numTrackInputs, n);
             if (happened == SongPlayer::Happened::stemsStarted)
                 resetPluginPositions();
             else if (happened == SongPlayer::Happened::ended || happened == SongPlayer::Happened::stopped)
                 postEvent ({ Event::trackFinished, 0, 0, 0, 0, 0 });
+        }
+
+        for (auto& rt : runtimes)
+        {
+            if (outputs.empty()) break;
+            int idx = rt->output.load (std::memory_order_relaxed);
+            if (idx < 0 || idx >= (int) outputs.size()) idx = 0;
+            float* busOut[2] = { outputs[(size_t) idx]->mix.getWritePointer (0), outputs[(size_t) idx]->mix.getWritePointer (1) };
+            processInput (*rt, inChunk, numIn, busOut, 2, n, panicNow);
         }
 
         static const MidiBuffer noMidi;
@@ -2704,6 +2712,19 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
 {
     in.block.clear();
     in.collector.removeNextBlockOfMessages (in.block, numSamples);
+    if (! in.trackMidi.isEmpty())
+    {
+        /* A MIDI file playing through this input, on the input's own channel
+           so the channel filter and the slots treat it as the keyboard. */
+        const int ch = in.channel.load (std::memory_order_relaxed);
+        for (const auto meta : in.trackMidi)
+        {
+            auto m = meta.getMessage();
+            if (ch > 0 && m.getChannel() > 0) m.setChannel (ch);
+            in.block.addEvent (m, meta.samplePosition);
+        }
+        in.trackMidi.clear();
+    }
 
     /* An audio input's signal goes to the program that is current. One left
        behind by a change gets silence instead and rings out: a delay or

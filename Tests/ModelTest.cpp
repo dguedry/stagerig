@@ -38,6 +38,8 @@ int main()
         SongDef sg; sg.name = "With a track";
         sg.stems.push_back ({ "mix.wav", "Mix", 0, -3.0f });
         sg.stems.push_back ({ "click.wav", {}, 1, 0.0f });
+        StemDef midiStem; midiStem.file = "bass.mid"; midiStem.input = 1; midiStem.midiChannel = 2;
+        sg.stems.push_back (midiStem);
         sg.countInBeats = 4; sg.countInOutput = 1;
         sg.markers = { { "Intro", 0.0, true }, { "Verse", 8.5, false } };
         s.songs.push_back (sg);
@@ -103,7 +105,9 @@ int main()
     CHECK (std::abs (loaded.outputs[1].gainDb + 3.0f) < 1e-6f && loaded.outputs[1].volumeCC == 7);
     CHECK (loaded.inputs[0].output == 1 && loaded.inputs[1].output == 0);
     CHECK (Setup::makeDefault().outputs.size() == 1 && Setup::makeDefault().outputs[0].isDefault());
-    CHECK (loaded.songs.size() == 1 && loaded.songs[0].stems.size() == 2);
+    CHECK (loaded.songs.size() == 1 && loaded.songs[0].stems.size() == 3);
+    CHECK (loaded.songs[0].stems[2].isMidi() && loaded.songs[0].stems[2].input == 1 && loaded.songs[0].stems[2].midiChannel == 2);
+    CHECK (! loaded.songs[0].stems[0].isMidi());
     CHECK (loaded.songs[0].stems[0].file == "mix.wav" && loaded.songs[0].stems[0].name == "Mix"
            && std::abs (loaded.songs[0].stems[0].gainDb + 3.0f) < 1e-6f && loaded.songs[0].stems[1].output == 1);
     CHECK (loaded.songs[0].stems[1].displayName() == "click");

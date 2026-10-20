@@ -78,12 +78,13 @@ public:
     /** The one-pedal control: releases a vamp, or else queues the next section. */
     void advance();
 
-    void setStemMix (int stemIndex, int output, float gainDb);
+    void setStemMix (int stemIndex, int output, float gainDb, int input);
 
     enum class Happened { nothing, stemsStarted, ended, stopped };
-    /** Audio thread: adds this block of the track to the outputs' mixes.
-        `outputs[i]` holds output i's left and right mix buffers. */
-    Happened render (float* (*outputs)[2], int numOutputs, int numSamples);
+    /** Audio thread: adds this block of the track to the outputs' mixes, and
+        its MIDI to the inputs'. `outputs[i]` holds output i's left and right
+        mix buffers; `inputMidi[i]` is input i's MIDI for this block. */
+    Happened render (float* (*outputs)[2], int numOutputs, juce::MidiBuffer* const* inputMidi, int numInputs, int numSamples);
 
 private:
     struct Stem
@@ -93,7 +94,19 @@ private:
         std::vector<int16_t> left, right;         // at the device rate; filled by the loader
         std::atomic<int> output { 0 };
         std::atomic<float> gain { 1.0f };
+
+        // A MIDI stem: its events at device-rate sample positions, in order.
+        bool midi = false;
+        int midiChannel = 0;
+        std::atomic<int> input { 0 };
+        struct Event { juce::int64 at; uint8_t data[3]; uint8_t size; };
+        std::vector<Event> events;
+        juce::int64 midiLength = 0;
+        bool notesSounding = false;               // audio thread: notes may be held, so a jump sends notes-off
     };
+    bool loadMidiStem (Stem&);
+    void midiForRun (Stem&, juce::MidiBuffer&, juce::int64 from, int count, int at);
+    void allNotesOff (juce::MidiBuffer&, int at);
 
     void startLoading();
     void stopLoading();
@@ -139,6 +152,7 @@ private:
 
     // fade-out, audio thread
     int fadeRemaining = 0, fadeLength = 1;
+    juce::int64 lastRunEnd = -1;                  // audio thread: where the last block's playback ended, to see a jump between blocks
 
     // mixing scratch, sized in prepare()
     juce::AudioBuffer<float> scratch;

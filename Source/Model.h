@@ -194,7 +194,13 @@ struct StemDef
     juce::String name;            // shown in the list; the file name when empty
     int output = 0;               // which of the setup's outputs it plays on
     float gainDb = 0.0f;
+    /** A MIDI file (.mid) plays through an input instead: into that input's
+        current program, like the keys do. `midiChannel` keeps only one
+        channel of the file (0 = all), so one file can feed Upper and Lower. */
+    int input = 0;
+    int midiChannel = 0;
 
+    bool isMidi() const { return juce::File (file).hasFileExtension ("mid;midi;smf"); }
     juce::String displayName() const { return name.isNotEmpty() ? name : juce::File (file).getFileNameWithoutExtension(); }
     juce::var toVar() const;
     static StemDef fromVar (const juce::var&);

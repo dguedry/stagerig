@@ -317,6 +317,11 @@ var StemDef::toVar() const
     if (name.isNotEmpty()) o->setProperty ("name", name);
     o->setProperty ("output", output);
     if (gainDb != 0.0f) o->setProperty ("gainDb", gainDb);
+    if (isMidi())
+    {
+        o->setProperty ("input", input);
+        if (midiChannel > 0) o->setProperty ("midiChannel", midiChannel);
+    }
     return var (o);
 }
 
@@ -327,6 +332,8 @@ StemDef StemDef::fromVar (const var& v)
     d.name   = propStr (v, "name");
     d.output = jmax (0, prop<int> (v, "output", 0));
     d.gainDb = (float) prop<double> (v, "gainDb", 0.0);
+    d.input  = jmax (0, prop<int> (v, "input", 0));
+    d.midiChannel = jlimit (0, 16, prop<int> (v, "midiChannel", 0));
     return d;
 }
 
