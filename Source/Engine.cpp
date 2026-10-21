@@ -65,6 +65,13 @@ struct Engine::SlotRuntime : public PluginNode
 {
     SlotRuntime (Engine& e, int in, int prog, int slot) : PluginNode (e, in, prog, slot, -1) {}
 
+    /** An external instrument: played through a MIDI port, heard (if at all)
+        through interface inputs. Fixed when the slot is built. */
+    bool external = false;
+    std::atomic<int> outPort { -1 }, returnLeft { -1 }, returnRight { -1 };
+    /** Whether it takes notes: a running plugin, or an external instrument. */
+    bool playable() const { return external || alive(); }
+
     void applyDef (const SlotDef& d)
     {
         enabled.store (d.enabled);
@@ -77,11 +84,14 @@ struct Engine::SlotRuntime : public PluginNode
         velocityCurve.store (d.velocityCurve);
         pan.store (d.pan);
         outChannel.store (d.outChannel);
+        receiveChannel.store (d.receiveChannel);
+        returnLeft.store (d.returnLeft);
+        returnRight.store (d.returnRight);
     }
 
     std::atomic<bool> enabled { true };
     std::atomic<float> gain { 1.0f }, velocityCurve { 0.0f }, pan { 0.0f };
-    std::atomic<int> transpose { 0 }, lowKey { 0 }, highKey { 127 }, lowVelocity { 1 }, highVelocity { 127 }, outChannel { 0 };
+    std::atomic<int> transpose { 0 }, lowKey { 0 }, highKey { 127 }, lowVelocity { 1 }, highVelocity { 127 }, outChannel { 0 }, receiveChannel { 0 };
     std::vector<std::unique_ptr<EffectRuntime>> effects;
     AudioBuffer<float> stereo;     // the slot's signal as it travels down the chain
 };
@@ -904,6 +914,7 @@ void Engine::setInputRespondToProgramChange (int inputIndex, bool b)
 void Engine::refreshMidiDevices()
 {
     openMidiDevices();
+    midiOuts.refresh();
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
@@ -1424,6 +1435,8 @@ void Engine::selectProgram (int inputIndex, int program)
             in.active = next;
         }
     }
+    // External instruments switch to their patch with the program.
+    sendPatches (*next, setup.inputs[(size_t) inputIndex].programs[(size_t) program]);
 
     listeners.call ([=] (Listener& l) { l.programChanged (inputIndex, program); });
 }
@@ -1534,7 +1547,14 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
     slot->stereo.setSize (2, blockSize);
     slot->midi.ensureSize (2048);
     nodeRegistry[slot->id] = slot.get();
-    queueLoad (*slot, def.plugin, def.state);
+    if (def.isExternal())
+    {
+        // No process to start: the instrument is the hardware, reached through its port.
+        slot->external = true;
+        slot->outPort.store (midiOuts.portFor (def.midiOutIdentifier, def.midiOutName));
+    }
+    else
+        queueLoad (*slot, def.plugin, def.state);
     for (int e = 0; e < (int) def.effects.size(); ++e)
         slot->effects.push_back (buildEffect (inputIndex, program, slotIndex, e, def.effects[(size_t) e]));
     return slot;
@@ -1839,6 +1859,7 @@ PERF_SLOT_SETTER (setSlotEnabled,    enabled,    enabled.store (v))
 PERF_SLOT_SETTER (setSlotGainDb,     gainDb,     gain.store (Decibels::decibelsToGain (v, -60.0f)))
 PERF_SLOT_SETTER (setSlotTranspose,  transpose,  transpose.store (v))
 PERF_SLOT_SETTER (setSlotOutChannel, outChannel, outChannel.store (v))
+PERF_SLOT_SETTER (setSlotReceiveChannel, receiveChannel, receiveChannel.store (jlimit (0, 16, v)))
 PERF_SLOT_SETTER (setSlotVelocityCurve, velocityCurve, velocityCurve.store (jlimit (-1.0f, 1.0f, v)))
 PERF_SLOT_SETTER (setSlotPan,        pan,        pan.store (jlimit (-1.0f, 1.0f, v)))
 #undef PERF_SLOT_SETTER
@@ -2050,7 +2071,98 @@ RemotePlugin* Engine::getPlugin (int inputIndex, int program, int slot, int effe
 bool Engine::isPluginAlive (int inputIndex, int program, int slot, int effect) const
 {
     auto* node = getNode (inputIndex, program, slot, effect);
+    if (node != nullptr && effect < 0)
+        if (auto* s = static_cast<SlotRuntime*> (node); s->external)
+            return midiOuts.isOpen (s->outPort.load());
     return node != nullptr && node->alive();
+}
+
+bool Engine::isSlotPortOpen (int inputIndex, int program, int slot) const
+{
+    auto* node = getNode (inputIndex, program, slot, -1);
+    return node != nullptr && static_cast<SlotRuntime*> (node)->external && midiOuts.isOpen (static_cast<SlotRuntime*> (node)->outPort.load());
+}
+
+//==============================================================================
+// External instruments
+//==============================================================================
+bool Engine::addExternalSlot (int inputIndex, int program, const MidiDeviceInfo& port)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return false;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    SlotDef sd;
+    sd.kind = SlotDef::Kind::external;
+    sd.midiOutIdentifier = port.identifier;
+    sd.midiOutName = port.name;
+    sd.outChannel = 1;                    // a hardware synth listens on one channel; 1 unless told
+    def.slots.push_back (sd);
+    const int slotIndex = (int) def.slots.size() - 1;
+    if (auto* rt = getLoaded (inputIndex, program))
+    {
+        auto slot = buildSlot (inputIndex, program, slotIndex, sd);
+        const ScopedLock sl (lock);
+        rt->slots.push_back (std::move (slot));
+    }
+    notifyContent (inputIndex, program);
+    return true;
+}
+
+void Engine::setSlotMidiOut (int inputIndex, int program, int slotIndex, const MidiDeviceInfo& port)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size() || ! def.slots[(size_t) slotIndex].isExternal()) return;
+    auto& sd = def.slots[(size_t) slotIndex];
+    sd.midiOutIdentifier = port.identifier;
+    sd.midiOutName = port.name;
+    if (auto* rt = getLoaded (inputIndex, program))
+        if (slotIndex < (int) rt->slots.size())
+            rt->slots[(size_t) slotIndex]->outPort.store (midiOuts.portFor (port.identifier, port.name));
+    notifyContent (inputIndex, program);
+}
+
+void Engine::setSlotPatch (int inputIndex, int program, int slotIndex, int msb, int lsb, int patch)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size()) return;
+    auto& sd = def.slots[(size_t) slotIndex];
+    sd.bankMsb = jlimit (-1, 127, msb);
+    sd.bankLsb = jlimit (-1, 127, lsb);
+    sd.patch   = jlimit (-1, 127, patch);
+    // Playing now: the instrument changes at once, the way it will when the program is selected.
+    if (auto* rt = getLoaded (inputIndex, program); rt != nullptr && runtimes[(size_t) inputIndex]->active == rt)
+        sendPatches (*rt, def);
+}
+
+void Engine::setSlotReturn (int inputIndex, int program, int slotIndex, int left, int right)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size()) return;
+    def.slots[(size_t) slotIndex].returnLeft = jlimit (-1, 63, left);
+    def.slots[(size_t) slotIndex].returnRight = jlimit (-1, 63, right);
+    if (left >= 0) ensureAudioInputsOpen();
+    if (auto* rt = getLoaded (inputIndex, program))
+        if (slotIndex < (int) rt->slots.size())
+        {
+            rt->slots[(size_t) slotIndex]->returnLeft.store (def.slots[(size_t) slotIndex].returnLeft);
+            rt->slots[(size_t) slotIndex]->returnRight.store (def.slots[(size_t) slotIndex].returnRight);
+        }
+}
+
+void Engine::sendPatches (ProgramRuntime& rt, const ProgramDef& def)
+{
+    for (size_t s = 0; s < rt.slots.size() && s < def.slots.size(); ++s)
+    {
+        const auto& sd = def.slots[s];
+        if (! sd.isExternal() || ! rt.slots[s]->external) continue;
+        const int port = rt.slots[s]->outPort.load();
+        const int ch = sd.outChannel > 0 ? sd.outChannel : 1;
+        if (sd.bankMsb >= 0) midiOuts.sendNow (port, MidiMessage::controllerEvent (ch, 0, sd.bankMsb));
+        if (sd.bankLsb >= 0) midiOuts.sendNow (port, MidiMessage::controllerEvent (ch, 32, sd.bankLsb));
+        if (sd.patch >= 0)   midiOuts.sendNow (port, MidiMessage::programChange (ch, sd.patch));
+    }
 }
 
 bool Engine::isPluginLoading (int inputIndex, int program, int slot, int effect) const
@@ -2063,6 +2175,9 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
 {
     auto* node = getNode (inputIndex, program, slot, effect);
     if (node == nullptr || node->loading.load()) return {};
+    if (effect < 0)
+        if (auto* s = static_cast<SlotRuntime*> (node); s->external)
+            return midiOuts.isOpen (s->outPort.load()) ? String() : "MIDI port not connected: " + midiOuts.getName (s->outPort.load());
     if (node->plugin != nullptr && ! node->plugin->isAlive())
         return "Plugin process stopped: " + node->plugin->getLastError();
     return node->loadError;
@@ -2071,6 +2186,13 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
 void Engine::reloadPlugin (int inputIndex, int program, int slot, int effect)
 {
     auto* node = getNode (inputIndex, program, slot, effect);
+    if (node != nullptr && effect < 0 && static_cast<SlotRuntime*> (node)->external)
+    {
+        // An external instrument: "reload" is looking for its port again.
+        midiOuts.refresh();
+        notifyContent (inputIndex, program);
+        return;
+    }
     auto* defPtr = defFor (inputIndex, program);
     if (node == nullptr || defPtr == nullptr) return;
     auto& def = *defPtr;
@@ -2579,6 +2701,9 @@ void Engine::renderBlockForTesting (const float* const* in, int numIn, float* co
 //==============================================================================
 void Engine::audioDeviceAboutToStart (AudioIODevice* device)
 {
+    outputLatencyMs = device->getCurrentSampleRate() > 0.0
+                    ? (device->getOutputLatencyInSamples() + device->getCurrentBufferSizeSamples()) * 1000.0 / device->getCurrentSampleRate()
+                    : 0.0;
     sampleRate = device->getCurrentSampleRate();
     blockSize  = device->getCurrentBufferSizeSamples();
 
@@ -2637,6 +2762,11 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
     blockDeadline = ipc::monotonicDeadline (jmax (0.001, 0.85 * numSamples / sampleRate));
     lastBlockSamples.store (numSamples, std::memory_order_relaxed);
 
+    /* External instruments' notes are timed to be heard with the audio this
+       callback is making: it leaves the speakers one block and the device's
+       output latency from now. */
+    const double callbackStartMs = Time::getMillisecondCounterHiRes();
+
     const ScopedLock sl (lock);
     bool panicNow = panicRequested.exchange (false);
 
@@ -2655,6 +2785,9 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
             chunk[c] = out[c] != nullptr ? out[c] + start : nullptr;
         for (int c = 0; c < numIn; ++c)
             inChunk[c] = in[c] != nullptr ? in[c] + start : nullptr;
+        chunkIn = inChunk;
+        chunkNumIn = numIn;
+        chunkStartMs = callbackStartMs + outputLatencyMs + start * 1000.0 / sampleRate;
 
         /* Each input lands on its output's mix; each output then runs its
            master chain, takes its volume, and goes to its two device channels.
@@ -2873,7 +3006,9 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
 
         for (auto& slot : prog.slots)
         {
-            if (! slot->alive() || ! slot->enabled.load()) continue;
+            if (! slot->playable() || ! slot->enabled.load()) continue;
+            // Only its own channel, when it names one; channel-less messages reach every slot.
+            if (const int rc = slot->receiveChannel.load(); rc > 0 && m.getChannel() > 0 && m.getChannel() != rc) continue;
 
             MidiMessage mm (m);
             if (mm.isNoteOnOrOff())
@@ -2922,14 +3057,33 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
 
     for (auto& slot : prog.slots)
     {
-        if (! slot->alive()) continue;
         AudioBuffer<float> stereo (slot->stereo.getArrayOfWritePointers(), 2, numSamples);
 
-        if (! slot->plugin->finishProcess (stereo.getWritePointer (0), stereo.getWritePointer (1), blockDeadline))
+        if (slot->external)
         {
+            /* Its notes leave for the port, each at the moment its sample
+               will be heard; its sound, if it comes back on interface
+               inputs, joins the mix from here like a plugin's would. */
+            if (const int port = slot->outPort.load (std::memory_order_relaxed); port >= 0)
+                for (const auto meta : slot->midi)
+                    midiOuts.push (port, meta.getMessage(), chunkStartMs + meta.samplePosition * 1000.0 / sampleRate);
+
             stereo.clear();
-            lateBlocks.fetch_add (1);
-            continue;
+            const int l = slot->returnLeft.load (std::memory_order_relaxed);
+            const int r = slot->returnRight.load (std::memory_order_relaxed);
+            if (l < 0 || l >= chunkNumIn || chunkIn == nullptr || chunkIn[l] == nullptr) continue;
+            stereo.copyFrom (0, 0, chunkIn[l], numSamples);
+            stereo.copyFrom (1, 0, (r >= 0 && r < chunkNumIn && chunkIn[r] != nullptr) ? chunkIn[r] : chunkIn[l], numSamples);
+        }
+        else
+        {
+            if (! slot->alive()) continue;
+            if (! slot->plugin->finishProcess (stereo.getWritePointer (0), stereo.getWritePointer (1), blockDeadline))
+            {
+                stereo.clear();
+                lateBlocks.fetch_add (1);
+                continue;
+            }
         }
         runChain (slot->effects, slot->midi, stereo, numSamples);
 

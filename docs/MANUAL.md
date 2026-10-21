@@ -338,9 +338,11 @@ setup and its tracks travel together. For each stem:
 **MIDI files** can be stems too (*.mid*). A MIDI stem has an **input** where
 an audio stem has an output: it plays through that keyboard's current
 program, exactly as if played on the keys -- splits, layers, effects and all.
-**Channel** keeps just one channel of the file, so a file with a bass part on
-channel 1 and a pad on channel 2 can be added twice: channel 1 to Lower,
-channel 2 to Upper. The file's program changes are ignored (it must not swap
+Its notes keep their channels when the input is on *Omni*, so slots that
+listen to one channel each (see *Routing by channel*) give every part of the
+file its own sound from one program. Or use **Channel** on the stem to keep
+just one channel of the file, and add the file once per part, each to its own
+input. The file's program changes are ignored (it must not swap
 your sounds), its notes follow sections, vamps and jumps like the audio does,
 and every note is let go when the track stops or jumps. Set the song's
 programs (Capture) to what the MIDI parts should play.
@@ -418,7 +420,9 @@ last output cannot be removed.
 
 ## Slots: instruments inside a program
 
-Each slot is one plugin instrument. The controls, left to right:
+Each slot is one instrument: a plugin, or an external instrument -- a
+hardware synth or module played through a MIDI port (see below). The
+controls, left to right:
 
 | Control | What it does |
 |---|---|
@@ -430,13 +434,51 @@ Each slot is one plugin instrument. The controls, left to right:
 | **GAIN** | Level of this slot, applied after its effects. Double-click for 0 dB. |
 | **PAN** | Stereo position, `centre`, `L 40`, `R 25`. Double-click for centre. |
 | **TRANSPOSE** | Shifts incoming notes in semitones; `+12 st` is an octave up. |
-| **MIDI CHANNEL** | *Keep incoming channel*, or force one. Multi-timbral plugins such as Kontakt play the instrument assigned to that channel. |
+| **LISTENS TO** | Which incoming MIDI channel this slot plays: *All channels*, or one. With the input on *Omni*, one program can give each channel its own sound -- see *Routing by channel* below. |
+| **PLAYS ON** | *Same channel*, or a fixed one the slot sends on. Multi-timbral plugins such as Kontakt play the instrument assigned to that channel; an external instrument listens on one channel, usually 1. |
 | **KEY RANGE** | Two handles: the lowest and highest key that reach this slot. The caption spells the range out. |
 | **VELOCITY** | Two handles: the softest and loudest note-on that reach this slot. |
 | **VELOCITY CURVE** | Reshapes how hard your playing appears to the plugin, from `100 % softer` through `linear` to `+100 % louder`. |
 
 **+ Add instrument...** adds a slot. The menu is grouped by manufacturer with
-each plugin's icon.
+each plugin's icon, and ends with **External MIDI instrument**, listing your
+MIDI output ports.
+
+### Routing by channel
+
+A program's slots hear everything their input lets through, unless a slot
+**listens to** one channel. Set the input's channel to *Omni* and give each
+slot its channel, and one program sorts the parts by itself:
+
+| Slot | Listens to | Plays |
+|---|---|---|
+| Electric bass | Channel 2 | the left-hand part of a keyboard that splits by channel, or a MIDI file's bass |
+| Pad | Channel 1 | the right hand, or the file's chords |
+
+That is how a keyboard which sends its zones on different channels, or a
+multi-part MIDI file on a backing track, plays several sounds from one
+program -- no extra inputs needed.
+
+### External instruments
+
+A slot can play a hardware synth, sound module or another computer instead
+of a plugin: **+ Add instrument... ▸ External MIDI instrument**, then the port.
+Everything about a slot still applies -- key and velocity ranges, transpose,
+curves, listening to a channel, holding notes across a program change -- and
+the notes leave through the port, each timed to when StageRig's own audio is
+heard. **PANIC** sends notes-off to it too. **Setup...** on the slot holds what
+is particular to it:
+
+- **MIDI port** -- which port, if it changes (a different USB socket, say).
+  The slot turns red while the port is missing and comes back by itself after
+  **Options ▸ Rescan MIDI devices**.
+- **Patch recall...** -- bank select (MSB, LSB) and a program number, sent to
+  the instrument when the program is selected, on the channel the slot plays
+  on. So a program called *Montage Pad* also switches the Montage to its pad.
+  Leave a box empty to send nothing.
+- **Audio comes back on** -- the interface inputs the instrument's outputs are
+  plugged into. Then its sound joins the program: its effects, gain, pan and
+  output, like a plugin. *None* leaves it to go to the desk on its own.
 
 ## Splits and layers
 

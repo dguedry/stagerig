@@ -710,8 +710,25 @@ private:
         }
         PopupMenu menu;
         addPluginsToMenu (menu, types, engine.getPluginHost().getIcons());
-        menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types] (int result)
+
+        /* A hardware synth or module, played through a MIDI port: everything
+           a plugin slot does -- splits, layers, curves -- with the notes going
+           out to the instrument instead. */
+        const auto ports = MidiOutput::getAvailableDevices();
+        PopupMenu external;
+        for (int i = 0; i < ports.size(); ++i) external.addItem (100000 + i, ports[i].name);
+        if (ports.isEmpty()) external.addItem (99999, "(no MIDI outputs found)", false);
+        menu.addSeparator();
+        menu.addSubMenu ("External MIDI instrument", external);
+
+        menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types, ports] (int result)
         {
+            if (result >= 100000 && result < 100000 + ports.size())
+            {
+                engine.addExternalSlot (owner.getSelectedInput(), owner.getEditedProgram(), ports[result - 100000]);
+                owner.showStatus ("Added " + ports[result - 100000].name + ": set its channel, patch and audio return under Setup...");
+                return;
+            }
             const int idx = result - 1;
             if (idx < 0 || idx >= types.size()) return;
             String error;
@@ -941,10 +958,11 @@ public:
             addAndMakeVisible (transpose);
             addAndMakeVisible (keyRange);
             addAndMakeVisible (outCh);
+            addAndMakeVisible (inCh);
             addAndMakeVisible (pan);
             addAndMakeVisible (velRange);
             addAndMakeVisible (velCurve);
-            for (auto* c : { &gainCap, &transposeCap, &keysCap, &chCap, &panCap, &velCap, &curveCap })
+            for (auto* c : { &gainCap, &transposeCap, &keysCap, &chCap, &inChCap, &panCap, &velCap, &curveCap })
             {
                 addAndMakeVisible (c);
                 c->setFont (FontOptions (10.5f, Font::bold));
@@ -954,7 +972,8 @@ public:
             }
             gainCap.setText ("GAIN", dontSendNotification);
             transposeCap.setText ("TRANSPOSE", dontSendNotification);
-            chCap.setText ("MIDI CHANNEL", dontSendNotification);
+            chCap.setText ("PLAYS ON", dontSendNotification);
+            inChCap.setText ("LISTENS TO", dontSendNotification);
             panCap.setText ("PAN", dontSendNotification);
             curveCap.setText ("VELOCITY CURVE", dontSendNotification);
 
@@ -1005,8 +1024,12 @@ public:
             keyRange.setPopupDisplayEnabled (true, false, this);
             keyRange.setTooltip ("Which keys reach this plugin. Drag the two handles to make a split: notes outside the range are ignored by this slot.");
 
-            outCh.addItem ("Keep incoming channel", 1);
+            outCh.addItem ("Same channel", 1);
             for (int c = 1; c <= 16; ++c) outCh.addItem ("Channel " + String (c), c + 1);
+            inCh.addItem ("All channels", 1);
+            for (int c = 1; c <= 16; ++c) inCh.addItem ("Channel " + String (c), c + 1);
+            inCh.setTooltip ("Which incoming MIDI channel this slot plays. With the input on Omni, one program can give each "
+                             "channel its own sound: a bass on channel 2 and a pad on channel 1, from one keyboard or one MIDI file.");
             outCh.setTooltip ("MIDI channel the plugin receives on. Keep the input's channel, or force one (multi-timbral plugins like Kontakt play the instrument on that channel).");
 
             auto& e = panel.engine;
@@ -1021,7 +1044,9 @@ public:
             velRange.onValueChange  = [this, &e, &o] { e.setSlotVelocityRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) velRange.getMinValue(), (int) velRange.getMaxValue());
                                                        updateVelCaption(); o.markDirty(); };
             outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); o.markDirty(); };
-            guiBtn.onClick    = [this, &e, &o] { if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
+            inCh.onChange     = [this, &e, &o] { e.setSlotReceiveChannel (o.getSelectedInput(), o.getEditedProgram(), index, inCh.getSelectedId() - 1); o.markDirty(); };
+            guiBtn.onClick    = [this, &e, &o] { if (external) showExternalMenu();
+                                                 else if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
                                                  else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
             removeBtn.onClick = [this, &e, &o] { e.removeSlot (o.getSelectedInput(), o.getEditedProgram(), index); };
         }
@@ -1030,11 +1055,26 @@ public:
         {
             alive = loaded;
             enabled.setToggleState (def.enabled, dontSendNotification);
-            icon.setImage (panel.engine.getPluginHost().getIcons().get (def.plugin, 48), RectanglePlacement::centred);
+            external = def.isExternal();
+            PluginDescription forIcon = def.plugin;
+            if (external) { forIcon = {}; forIcon.name = def.midiOutName; forIcon.pluginFormatName = "MIDI"; }   // a badge with the port's initials
+            icon.setImage (panel.engine.getPluginHost().getIcons().get (forIcon, 48), RectanglePlacement::centred);
             icon.setAlpha (def.enabled ? 1.0f : 0.45f);
-            name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]" + (loading ? "   loading..." : String()), dontSendNotification);
-            name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
-            name.setTooltip (error.isNotEmpty() ? error : def.plugin.fileOrIdentifier);
+            if (external)
+            {
+                String what = def.midiOutName + "  [MIDI out";
+                if (def.patch >= 0) what << ", patch " << (def.patch + 1);
+                what << (def.returnLeft >= 0 ? ", audio back on in " + String (def.returnLeft + 1) + (def.returnRight >= 0 ? "+" + String (def.returnRight + 1) : String()) : String()) << "]";
+                name.setText (what, dontSendNotification);
+                name.setColour (Label::textColourId, loaded ? Colours::white : Colours::orangered);
+                name.setTooltip (loaded ? "An external instrument, played through this MIDI port" : error);
+            }
+            else
+            {
+                name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]" + (loading ? "   loading..." : String()), dontSendNotification);
+                name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
+                name.setTooltip (error.isNotEmpty() ? error : def.plugin.fileOrIdentifier);
+            }
             gain.setValue (def.gainDb, dontSendNotification);
             transpose.setValue (def.transpose, dontSendNotification);
             keyRange.setMinAndMaxValues (def.lowKey, def.highKey, dontSendNotification);
@@ -1044,9 +1084,20 @@ public:
             velRange.setMinAndMaxValues (def.lowVelocity, def.highVelocity, dontSendNotification);
             updateVelCaption();
             outCh.setSelectedId (def.outChannel + 1, dontSendNotification);
-            guiBtn.setButtonText (loading ? "Loading" : loaded ? "Edit GUI" : "Reload");
-            guiBtn.setEnabled (! loading);
-            guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
+            inCh.setSelectedId (def.receiveChannel + 1, dontSendNotification);
+            slotDef = def;
+            if (external)
+            {
+                guiBtn.setButtonText ("Setup...");
+                guiBtn.setEnabled (true);
+                guiBtn.setColour (TextButton::buttonColourId, getLookAndFeel().findColour (TextButton::buttonColourId));
+            }
+            else
+            {
+                guiBtn.setButtonText (loading ? "Loading" : loaded ? "Edit GUI" : "Reload");
+                guiBtn.setEnabled (! loading);
+                guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
+            }
             chain.rebuild (def.effects, inputIndex, program);
         }
 
@@ -1091,9 +1142,10 @@ public:
                 cap.setBounds (caps.removeFromLeft (cw).reduced (2, 0));
                 control.setBounds (bottom.removeFromLeft (cw).reduced (2, 0));
             };
-            column (24, gainCap, gain);
-            column (14, panCap, pan);
-            column (18, transposeCap, transpose);
+            column (20, gainCap, gain);
+            column (12, panCap, pan);
+            column (14, transposeCap, transpose);
+            column (27, inChCap, inCh);
             chCap.setBounds (caps.reduced (2, 0));
             outCh.setBounds (bottom.reduced (2, 0));
 
@@ -1109,15 +1161,83 @@ public:
             chain.setBounds (r.withTrimmedLeft (24));
         }
 
+        /** An external instrument's port, patch recall and audio return. */
+        void showExternalMenu()
+        {
+            auto& e = panel.engine;
+            auto& o = panel.owner;
+            const int in = o.getSelectedInput(), prog = o.getEditedProgram();
+            const auto ports = MidiOutput::getAvailableDevices();
+            const auto inputs = e.getAudioInputChannelNames();
+
+            PopupMenu portMenu;
+            for (int i = 0; i < ports.size(); ++i)
+                portMenu.addItem (100 + i, ports[i].name, true, ports[i].identifier == slotDef.midiOutIdentifier);
+            PopupMenu returnMenu;
+            returnMenu.addItem (300, "None: it goes to the desk on its own", true, slotDef.returnLeft < 0);
+            for (int c = 0; c < inputs.size(); ++c)
+                returnMenu.addItem (400 + c, String (c + 1) + ": " + inputs[c], true, slotDef.returnLeft == c && slotDef.returnRight < 0);
+            for (int c = 0; c + 1 < inputs.size(); ++c)
+                returnMenu.addItem (500 + c, String (c + 1) + "+" + String (c + 2) + ": " + inputs[c] + " / " + inputs[c + 1], true,
+                                    slotDef.returnLeft == c && slotDef.returnRight == c + 1);
+            if (inputs.isEmpty()) returnMenu.addItem (301, "(no interface inputs open: see Audio...)", false);
+
+            PopupMenu m;
+            m.addSubMenu ("MIDI port", portMenu);
+            m.addItem (200, "Patch recall...");
+            m.addSubMenu ("Audio comes back on", returnMenu);
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (guiBtn), [this, &e, &o, in, prog, ports] (int r)
+            {
+                if (r >= 100 && r < 100 + ports.size()) e.setSlotMidiOut (in, prog, index, ports[r - 100]);
+                else if (r == 200) showPatchDialog();
+                else if (r == 300) e.setSlotReturn (in, prog, index, -1, -1);
+                else if (r >= 400 && r < 500) e.setSlotReturn (in, prog, index, r - 400, -1);
+                else if (r >= 500) e.setSlotReturn (in, prog, index, r - 500, r - 500 + 1);
+                else return;
+                o.markDirty();
+                panel.refresh();
+            });
+        }
+
+        void showPatchDialog()
+        {
+            auto* w = new AlertWindow ("Patch recall",
+                                       "Sent to " + slotDef.midiOutName + " when this program is selected, on the channel the slot "
+                                       "plays on. Leave a box empty to send nothing. Program numbers as the synth shows them, 1-128.",
+                                       MessageBoxIconType::NoIcon);
+            auto txt = [] (int v, int add) { return v >= 0 ? String (v + add) : String(); };
+            w->addTextEditor ("msb", txt (slotDef.bankMsb, 0), "Bank select MSB (CC 0), 0-127");
+            w->addTextEditor ("lsb", txt (slotDef.bankLsb, 0), "Bank select LSB (CC 32), 0-127");
+            w->addTextEditor ("prog", txt (slotDef.patch, 1), "Program, 1-128");
+            w->addButton ("OK", 1, KeyPress (KeyPress::returnKey));
+            w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+            auto& e = panel.engine;
+            auto& o = panel.owner;
+            const int in = o.getSelectedInput(), prog = o.getEditedProgram();
+            w->enterModalState (true, ModalCallbackFunction::create ([this, w, &e, &o, in, prog] (int r)
+            {
+                if (r == 1)
+                {
+                    auto num = [w] (const char* id, int lo, int hi, int sub) {
+                        const auto t = w->getTextEditorContents (id).trim();
+                        return t.isEmpty() ? -1 : jlimit (lo, hi, t.getIntValue()) - sub; };
+                    e.setSlotPatch (in, prog, index, num ("msb", 0, 127, 0), num ("lsb", 0, 127, 0), num ("prog", 1, 128, 1));
+                    o.markDirty();
+                    panel.refresh();
+                }
+            }), true);
+        }
+
         SlotsPanel& panel;
         int index;
-        bool alive = false;
+        bool alive = false, external = false;
+        SlotDef slotDef;
         ImageComponent icon;
         ToggleButton enabled;
         Label name;
         Slider gain, transpose, pan, velCurve, keyRange { Slider::TwoValueHorizontal, Slider::NoTextBox }, velRange { Slider::TwoValueHorizontal, Slider::NoTextBox };
-        Label gainCap, transposeCap, keysCap, chCap, panCap, velCap, curveCap;
-        ComboBox outCh;
+        Label gainCap, transposeCap, keysCap, chCap, inChCap, panCap, velCap, curveCap;
+        ComboBox outCh, inCh;
         TextButton guiBtn { "Edit GUI" }, removeBtn { "X" };
         EffectChainComponent chain;
     };
@@ -1509,7 +1629,8 @@ public:
         {
             for (int s = 0; s < (int) def->slots.size(); ++s)
             {
-                targets.push_back ({ s, -1, String (s + 1) + ": " + def->slots[(size_t) s].plugin.name });
+                if (! def->slots[(size_t) s].isExternal())     // no parameters to map on a hardware synth
+                    targets.push_back ({ s, -1, String (s + 1) + ": " + def->slots[(size_t) s].plugin.name });
                 for (int e = 0; e < (int) def->slots[(size_t) s].effects.size(); ++e)
                     targets.push_back ({ s, e, String (s + 1) + " > FX" + String (e + 1) + ": " + def->slots[(size_t) s].effects[(size_t) e].plugin.name });
             }

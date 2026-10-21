@@ -1913,6 +1913,94 @@ int main()
         engine.removeOutput (click);
     }
 
+    // --- routing: per-slot receive channel, and an external instrument on a MIDI port ----------
+    {
+        struct Catcher : public MidiInputCallback
+        {
+            std::mutex m;
+            std::vector<MidiMessage> got;
+            void handleIncomingMidiMessage (MidiInput*, const MidiMessage& msg) override { std::lock_guard<std::mutex> l (m); got.push_back (msg); }
+            std::vector<MidiMessage> take() { std::lock_guard<std::mutex> l (m); auto r = got; got.clear(); return r; }
+        } catcher;
+        /* ALSA's Midi Through port gives back whatever is sent to it: send to
+           its output side, listen on its input side. (A virtual port of our
+           own would do, but JUCE does not list a process's own ports.) */
+        MidiDeviceInfo port;
+        std::unique_ptr<MidiInput> virt;
+        for (const auto& d : MidiOutput::getAvailableDevices())
+            if (d.name.containsIgnoreCase ("Midi Through")) port = d;
+        if (port.identifier.isNotEmpty())
+            for (const auto& d : MidiInput::getAvailableDevices())
+                if (d.name == port.name) { virt = MidiInput::openDevice (d.identifier, &catcher); break; }
+        if (virt == nullptr) port = {};
+        else { virt->start(); std::printf ("     looping through %s (%s)\n", port.name.toRawUTF8(), port.identifier.toRawUTF8()); }
+        if (port.identifier.isEmpty())
+        {
+            std::printf ("     skip external-instrument check (no Midi Through port here)\n");
+        }
+        else
+        {
+            const int oldChannel = engine.getSetup().inputs[0].channel;
+            engine.setInputChannel (0, 0);                                   // Omni: the slot sorts the channels
+            engine.clearProgram (0, 90);
+            engine.selectProgram (0, 90); settle();
+            CHECK (engine.addExternalSlot (0, 90, port));
+            CHECK (engine.isPluginAlive (0, 90, 0));
+            engine.setSlotPatch (0, 90, 0, 0, 3, 17);                        // playing: sent at once
+            auto renderAndWait = [&] { AudioBuffer<float> b (2, kBlock); for (int i = 0; i < 6; ++i) { b.clear(); engine.renderBlockForTesting (b.getArrayOfWritePointers(), 2, kBlock); } Thread::sleep (150); return catcher.take(); };
+            auto has = [] (const std::vector<MidiMessage>& v, std::function<bool (const MidiMessage&)> f) { for (auto& m : v) if (f (m)) return true; return false; };
+
+            auto patch = renderAndWait();
+            CHECK (has (patch, [] (const MidiMessage& m) { return m.isProgramChange() && m.getProgramChangeNumber() == 17 && m.getChannel() == 1; }));
+            CHECK (has (patch, [] (const MidiMessage& m) { return m.isController() && m.getControllerNumber() == 32 && m.getControllerValue() == 3; }));
+
+            engine.injectMidi (0, MidiMessage::noteOn (5, 64, (uint8) 90));   // plays on channel 1, as the slot is set
+            auto notes = renderAndWait();
+            std::printf ("     external instrument received %d messages\n", (int) notes.size());
+            CHECK (has (notes, [] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == 64 && m.getChannel() == 1; }));
+            engine.injectMidi (0, MidiMessage::noteOff (5, 64));
+            renderAndWait();
+
+            // Listens to channel 2 only.
+            engine.setSlotReceiveChannel (0, 90, 0, 2);
+            engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));
+            CHECK (! has (renderAndWait(), [] (const MidiMessage& m) { return m.isNoteOn(); }));
+            engine.injectMidi (0, MidiMessage::noteOn (2, 62, (uint8) 90));
+            CHECK (has (renderAndWait(), [] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == 62; }));
+
+            // PANIC reaches the hardware too.
+            engine.panic();
+            CHECK (has (renderAndWait(), [] (const MidiMessage& m) { return m.isAllNotesOff() || (m.isController() && m.getControllerNumber() == 123); }));
+
+            // Its sound back through an interface input joins the program's mix.
+            engine.setSlotReturn (0, 90, 0, 0, -1);
+            AudioBuffer<float> tone (1, kBlock), outBuf (2, kBlock);
+            for (int i = 0; i < kBlock; ++i) tone.setSample (0, i, 0.4f * (float) std::sin (MathConstants<double>::twoPi * 330.0 * i / 48000.0));
+            float back = 0.0f;
+            for (int i = 0; i < 4; ++i)
+            {
+                outBuf.clear();
+                engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock);
+                back = jmax (back, outBuf.getMagnitude (0, 0, kBlock));
+            }
+            std::printf ("     audio return in the mix: %.3f (input peak 0.4)\n", back);
+            CHECK (std::abs (back - 0.4f) < 0.05f);
+
+            // Saved and read back.
+            TemporaryFile ef (".stagerig.json");
+            CHECK (engine.captureSetup().saveToFile (ef.getFile()).wasOk());
+            Setup back2;
+            CHECK (Setup::loadFromFile (ef.getFile(), back2).wasOk());
+            const auto& sd = back2.inputs[0].programs[90].slots[0];
+            CHECK (sd.isExternal() && sd.midiOutIdentifier == port.identifier && sd.patch == 17 && sd.bankLsb == 3
+                   && sd.receiveChannel == 2 && sd.returnLeft == 0 && sd.returnRight == -1);
+
+            engine.clearProgram (0, 90);
+            engine.setInputChannel (0, oldChannel);
+            virt->stop();
+        }
+    }
+
     // CLAP has to be loadable by the synchronous API, because that is the one
     // the out-of-process host calls. A format claiming it needs an unblocked
     // message thread is refused outright by JUCE with "cannot be instantiated

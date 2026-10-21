@@ -80,6 +80,21 @@ var SlotDef::toVar() const
     o->setProperty ("velocityCurve", velocityCurve);
     o->setProperty ("pan", pan);
     o->setProperty ("outChannel", outChannel);
+    if (receiveChannel > 0) o->setProperty ("receiveChannel", receiveChannel);
+    if (isExternal())
+    {
+        o->setProperty ("kind", "external");
+        o->setProperty ("midiOut", midiOutIdentifier);
+        o->setProperty ("midiOutName", midiOutName);
+        if (bankMsb >= 0) o->setProperty ("bankMsb", bankMsb);
+        if (bankLsb >= 0) o->setProperty ("bankLsb", bankLsb);
+        if (patch >= 0)   o->setProperty ("patch", patch);
+        if (returnLeft >= 0)
+        {
+            o->setProperty ("returnLeft", returnLeft);
+            o->setProperty ("returnRight", returnRight);
+        }
+    }
     o->setProperty ("effects", effectsToVar (effects));
     return var (o);
 }
@@ -100,6 +115,18 @@ SlotDef SlotDef::fromVar (const var& v)
     s.velocityCurve = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "velocityCurve", 0.0f));
     s.pan           = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "pan", 0.0f));
     s.outChannel = prop<int>   (v, "outChannel", 0);
+    s.receiveChannel = juce::jlimit (0, 16, prop<int> (v, "receiveChannel", 0));
+    if (propStr (v, "kind") == "external")
+    {
+        s.kind = Kind::external;
+        s.midiOutIdentifier = propStr (v, "midiOut");
+        s.midiOutName = propStr (v, "midiOutName");
+        s.bankMsb = juce::jlimit (-1, 127, prop<int> (v, "bankMsb", -1));
+        s.bankLsb = juce::jlimit (-1, 127, prop<int> (v, "bankLsb", -1));
+        s.patch   = juce::jlimit (-1, 127, prop<int> (v, "patch", -1));
+        s.returnLeft  = juce::jlimit (-1, 63, prop<int> (v, "returnLeft", -1));
+        s.returnRight = juce::jlimit (-1, 63, prop<int> (v, "returnRight", -1));
+    }
     s.effects    = effectsFromVar (v);
     return s;
 }

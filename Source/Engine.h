@@ -4,6 +4,7 @@
 #include "PluginHost.h"
 #include "RemotePlugin.h"
 #include "SongPlayer.h"
+#include "MidiOuts.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
@@ -331,6 +332,17 @@ public:
     /** Left/right gains for a pan position: a balance law, unity in the centre. */
     static void panGains (float pan, float& left, float& right);
     void setSlotOutChannel(int inputIndex, int program, int slot, int);
+    void setSlotReceiveChannel (int inputIndex, int program, int slot, int);     // 0 = all
+
+    // External instruments: a slot played through a MIDI output port ------------
+    bool addExternalSlot (int inputIndex, int program, const juce::MidiDeviceInfo&);
+    void setSlotMidiOut (int inputIndex, int program, int slot, const juce::MidiDeviceInfo&);
+    /** Bank select and program change sent when the program is selected (and now, if it is); -1 = not sent. */
+    void setSlotPatch (int inputIndex, int program, int slot, int bankMsb, int bankLsb, int patch);
+    /** The interface inputs the instrument's audio comes back on; -1 = none. */
+    void setSlotReturn (int inputIndex, int program, int slot, int left, int right);
+    /** Is the slot's MIDI port there? False for a plugin slot. */
+    bool isSlotPortOpen (int inputIndex, int program, int slot) const;
 
 
     //==============================================================================
@@ -549,6 +561,14 @@ private:
 
     // Backing tracks
     juce::AudioFormatManager trackFormats;
+
+    // External instruments
+    MidiOuts midiOuts;
+    double chunkStartMs = 0.0;                    // audio thread: when this chunk will be heard, on Time's hi-res clock
+    double outputLatencyMs = 0.0;
+    const float* const* chunkIn = nullptr;        // audio thread: this chunk's device inputs
+    int chunkNumIn = 0;
+    void sendPatches (ProgramRuntime&, const ProgramDef&);
     std::unique_ptr<SongPlayer> player;           // swapped under `lock`
     bool trackProblemsReported = true;            // message thread
     std::atomic<int> sectionCCAtomic { 0 };

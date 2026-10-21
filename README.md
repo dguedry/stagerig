@@ -30,7 +30,12 @@ other plugin.
   same way. Group programs by kind -- organs, strings, brass -- to find things
   quickly.
 - **Keyboards play instruments**, with splits and layers: per-slot key range,
-  velocity range, velocity curve, transpose, gain and pan.
+  velocity range, velocity curve, transpose, gain and pan, and the MIDI
+  channel each slot listens to, so one program can sort a multi-channel
+  keyboard or a MIDI file into its parts.
+- **External instruments too.** A slot can play a hardware synth through a
+  MIDI port -- with patch recall when the program is selected, and its audio
+  back through the interface into the program's effects and outputs.
 - **Audio runs through effects.** An audio input's programs are effect chains
   with an input trim -- reverb on the vocal for the ballad, drive on the guitar
   for the solo -- and a level meter on the laptop and on the tablet. Effects

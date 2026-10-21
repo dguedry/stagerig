@@ -23,6 +23,11 @@ struct EffectDef
 /** One instrument inside a program, with its own insert-effect chain. */
 struct SlotDef
 {
+    /** What makes the sound: a hosted plugin, or an external instrument -- a
+        hardware synth or module played through a MIDI output port. */
+    enum class Kind { plugin, external };
+    Kind kind = Kind::plugin;
+
     juce::PluginDescription plugin;   // which plugin
     juce::MemoryBlock state;          // last saved plugin state
     bool enabled = true;
@@ -33,6 +38,26 @@ struct SlotDef
     float velocityCurve = 0.0f;       // -1..1: <0 softer, 0 linear, >0 louder for the same touch
     float pan = 0.0f;                 // -1 (left) .. 1 (right); a balance on the stereo output, unity at centre
     int outChannel = 0;               // 0 = keep incoming channel, 1..16 = force
+    /** Which incoming channel this slot listens to: 0 = all of what its input
+        lets through, 1..16 = that channel only. With the input on Omni, one
+        program can then give each channel its own sound -- a bass on 2 and a
+        pad on 1, from one keyboard or one MIDI file. */
+    int receiveChannel = 0;
+
+    // An external instrument ----------------------------------------------------
+    juce::String midiOutIdentifier, midiOutName;   // the port it plays through
+    /** Patch recall: sent to the instrument when the program is selected,
+        on the channel it plays on. -1 = not sent. */
+    int bankMsb = -1, bankLsb = -1, patch = -1;
+    /** Its audio, back into the mix: the interface inputs it is plugged into
+        (open device input channels, from 0), or -1 for none -- then it goes
+        to the desk on its own and only its notes come from here. A right of
+        -1 with a left set is mono. */
+    int returnLeft = -1, returnRight = -1;
+
+    bool isExternal() const           { return kind == Kind::external; }
+    /** What to call it: the plugin's name, or the port's. */
+    juce::String displayName() const  { return isExternal() ? midiOutName + " (MIDI)" : plugin.name; }
     std::vector<EffectDef> effects;   // processed in order after the instrument
 
     juce::var toVar() const;

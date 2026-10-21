@@ -1723,8 +1723,9 @@ String RemoteServer::slotsJson (int inputIndex) const
             for (int sIdx = 0; sIdx < (int) def.slots.size(); ++sIdx)
             {
                 const auto& slot = def.slots[(size_t) sIdx];
-                if (slot.plugin.name.isEmpty()) continue;        // a slot with no plugin has nothing to show
-                add (sIdx, -1, String (sIdx + 1) + ": " + slot.plugin.name, slot.enabled);
+                // An external instrument has no window of its own; its effects still do.
+                if (slot.plugin.name.isNotEmpty() && ! slot.isExternal())
+                    add (sIdx, -1, String (sIdx + 1) + ": " + slot.plugin.name, slot.enabled);
                 for (int e = 0; e < (int) slot.effects.size(); ++e)
                     if (slot.effects[(size_t) e].plugin.name.isNotEmpty())
                         add (sIdx, e, String (sIdx + 1) + " > FX" + String (e + 1) + ": " + slot.effects[(size_t) e].plugin.name,

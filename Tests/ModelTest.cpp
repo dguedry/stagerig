@@ -29,6 +29,12 @@ int main()
     upper.currentProgram = 5;
 
     upper.programChangeChannel = 16;          // a workstation's global channel
+    {
+        SlotDef ext; ext.kind = SlotDef::Kind::external;
+        ext.midiOutIdentifier = "20-0"; ext.midiOutName = "Montage"; ext.outChannel = 3; ext.receiveChannel = 2;
+        ext.bankMsb = 63; ext.bankLsb = 1; ext.patch = 9; ext.returnLeft = 2; ext.returnRight = 3;
+        upper.programs[7].slots.push_back (ext);
+    }
 
     OutputDef mon; mon.name = "Monitors"; mon.left = 2; mon.right = 3; mon.gainDb = -3.0f; mon.volumeCC = 7;
     s.outputs.push_back (mon);
@@ -105,6 +111,13 @@ int main()
     CHECK (std::abs (loaded.outputs[1].gainDb + 3.0f) < 1e-6f && loaded.outputs[1].volumeCC == 7);
     CHECK (loaded.inputs[0].output == 1 && loaded.inputs[1].output == 0);
     CHECK (Setup::makeDefault().outputs.size() == 1 && Setup::makeDefault().outputs[0].isDefault());
+    {
+        const auto& ext = loaded.inputs[0].programs[7].slots[0];
+        CHECK (ext.isExternal() && ext.midiOutIdentifier == "20-0" && ext.midiOutName == "Montage" && ext.outChannel == 3
+               && ext.receiveChannel == 2 && ext.bankMsb == 63 && ext.bankLsb == 1 && ext.patch == 9
+               && ext.returnLeft == 2 && ext.returnRight == 3 && ext.displayName() == "Montage (MIDI)");
+        CHECK (! loaded.inputs[0].programs[5].slots[0].isExternal() && loaded.inputs[0].programs[5].slots[0].receiveChannel == 0);
+    }
     CHECK (loaded.songs.size() == 1 && loaded.songs[0].stems.size() == 3);
     CHECK (loaded.songs[0].stems[2].isMidi() && loaded.songs[0].stems[2].input == 1 && loaded.songs[0].stems[2].midiChannel == 2);
     CHECK (! loaded.songs[0].stems[0].isMidi());
