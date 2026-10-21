@@ -209,6 +209,15 @@ target_link_libraries(EngineTest PRIVATE
     juce::juce_graphics juce::juce_gui_basics juce::juce_gui_extra
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 add_dependencies(EngineTest StageRigPluginHost)
+
+# A CLAP note effect of our own (notes an octave up), for the slot MIDI-chain
+# check: nothing installed can be relied on to be a MIDI processor.
+add_library(StageRigTestNoteEffect MODULE Tests/TestNoteEffect.cpp)
+target_link_libraries(StageRigTestNoteEffect PRIVATE ClapHeaders)
+set_target_properties(StageRigTestNoteEffect PROPERTIES PREFIX "" SUFFIX ".clap"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
+add_dependencies(EngineTest StageRigTestNoteEffect)
+target_compile_definitions(EngineTest PRIVATE STAGERIG_TEST_NOTE_EFFECT="$<TARGET_FILE:StageRigTestNoteEffect>")
 add_test(NAME EngineTest COMMAND EngineTest)
 # Without an LV2 instrument to play (Calf Monosynth) the engine test has nothing
 # to drive: it exits 77 and counts as skipped, so a distribution build without

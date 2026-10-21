@@ -33,7 +33,13 @@ int main()
         SlotDef ext; ext.kind = SlotDef::Kind::external;
         ext.midiOutIdentifier = "20-0"; ext.midiOutName = "Montage"; ext.outChannel = 3; ext.receiveChannel = 2;
         ext.bankMsb = 63; ext.bankLsb = 1; ext.patch = 9; ext.returnLeft = 2; ext.returnRight = 3;
+        EffectDef arp; arp.plugin.name = "Arp"; arp.plugin.pluginFormatName = "CLAP"; arp.plugin.fileOrIdentifier = "/x/arp.clap|a";
+        EffectDef send; send.kind = EffectDef::Kind::midiSend; send.portIdentifier = "24-0"; send.portName = "MicroFreak";
+        send.channel = 4; send.patch = 12; send.bypassed = true;
+        ext.midiEffects = { arp, send };
         upper.programs[7].slots.push_back (ext);
+        SlotDef mic; mic.kind = SlotDef::Kind::audioIn; mic.returnLeft = 1;
+        upper.programs[7].slots.push_back (mic);
     }
 
     OutputDef mon; mon.name = "Monitors"; mon.left = 2; mon.right = 3; mon.gainDb = -3.0f; mon.volumeCC = 7;
@@ -117,6 +123,15 @@ int main()
                && ext.receiveChannel == 2 && ext.bankMsb == 63 && ext.bankLsb == 1 && ext.patch == 9
                && ext.returnLeft == 2 && ext.returnRight == 3 && ext.displayName() == "Montage (MIDI)");
         CHECK (! loaded.inputs[0].programs[5].slots[0].isExternal() && loaded.inputs[0].programs[5].slots[0].receiveChannel == 0);
+        CHECK (ext.midiEffects.size() == 2 && ! ext.midiEffects[0].isSend() && ext.midiEffects[0].plugin.name == "Arp"
+               && ext.midiEffects[1].isSend() && ext.midiEffects[1].portIdentifier == "24-0" && ext.midiEffects[1].portName == "MicroFreak"
+               && ext.midiEffects[1].channel == 4 && ext.midiEffects[1].patch == 12 && ext.midiEffects[1].bankMsb == -1 && ext.midiEffects[1].bypassed);
+        CHECK (loaded.inputs[0].programs[5].slots[0].midiEffects.empty());
+        const auto& mic = loaded.inputs[0].programs[7].slots[1];
+        CHECK (mic.isAudioIn() && mic.returnLeft == 1 && mic.returnRight == -1 && mic.displayName() == "Audio in 2");
+        // The MIDI chain is addressed through the slot number.
+        CHECK (loaded.inputs[0].programs[7].chainFor (ProgramDef::midiChainOf (0)) == &ext.midiEffects);
+        CHECK (ProgramDef::slotOfChain (ProgramDef::midiChainOf (3)) == 3 && ! ProgramDef::isMidiChain (3));
     }
     CHECK (loaded.songs.size() == 1 && loaded.songs[0].stems.size() == 3);
     CHECK (loaded.songs[0].stems[2].isMidi() && loaded.songs[0].stems[2].input == 1 && loaded.songs[0].stems[2].midiChannel == 2);

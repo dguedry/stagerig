@@ -699,6 +699,7 @@ private:
         const int n = jlimit (1, ipc::kMaxBlock, shm->numSamples);
         FloatVectorOperations::clear (shm->outL, n);
         FloatVectorOperations::clear (shm->outR, n);
+        shm->midiOutCount = 0;
 
         const std::lock_guard<std::mutex> l (processMutex);
         if (instance == nullptr || instance->isSuspended()) return;
@@ -741,6 +742,20 @@ private:
 
         instance->processBlock (view, midi);
         if (playHead != nullptr) playHead->samplesElapsed += n;
+
+        /* The formats leave the plugin's own MIDI output in the buffer (VST3
+           and LV2 clear it first; a plugin that makes none leaves it empty). */
+        uint32_t count = 0;
+        for (const auto meta : midi)
+        {
+            if (count >= (uint32_t) ipc::kMaxMidi) break;
+            if (meta.numBytes < 1 || meta.numBytes > 3) continue;     // no SysEx through here
+            auto& ev = shm->midiOut[count++];
+            ev.samplePosition = jlimit (0, n - 1, meta.samplePosition);
+            ev.size = (uint8_t) meta.numBytes;
+            std::memcpy (ev.data, meta.data, (size_t) meta.numBytes);
+        }
+        shm->midiOutCount = count;
 
         const int nOut = instance->getMainBusNumOutputChannels();
         if (nOut <= 0) return;

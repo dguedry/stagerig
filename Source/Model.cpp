@@ -35,10 +35,10 @@ static var effectsToVar (const std::vector<EffectDef>& effects)
     return arr;
 }
 
-static std::vector<EffectDef> effectsFromVar (const var& parent)
+static std::vector<EffectDef> effectsFromVar (const var& parent, const char* key = "effects")
 {
     std::vector<EffectDef> out;
-    if (auto* arr = obj (parent) != nullptr ? obj (parent)->getProperty ("effects").getArray() : nullptr)
+    if (auto* arr = obj (parent) != nullptr ? obj (parent)->getProperty (key).getArray() : nullptr)
         for (auto& e : *arr) out.push_back (EffectDef::fromVar (e));
     return out;
 }
@@ -46,6 +46,18 @@ static std::vector<EffectDef> effectsFromVar (const var& parent)
 var EffectDef::toVar() const
 {
     auto* o = new DynamicObject();
+    if (isSend())
+    {
+        o->setProperty ("kind", "midiSend");
+        o->setProperty ("port", portIdentifier);
+        o->setProperty ("portName", portName);
+        if (channel > 0)  o->setProperty ("channel", channel);
+        if (bankMsb >= 0) o->setProperty ("bankMsb", bankMsb);
+        if (bankLsb >= 0) o->setProperty ("bankLsb", bankLsb);
+        if (patch >= 0)   o->setProperty ("patch", patch);
+        o->setProperty ("bypassed", bypassed);
+        return var (o);
+    }
     if (auto xml = plugin.createXml())
         o->setProperty ("plugin", xml->toString (XmlElement::TextFormat().singleLine()));
     o->setProperty ("state", state.toBase64Encoding());
@@ -56,6 +68,18 @@ var EffectDef::toVar() const
 EffectDef EffectDef::fromVar (const var& v)
 {
     EffectDef e;
+    if (propStr (v, "kind") == "midiSend")
+    {
+        e.kind = Kind::midiSend;
+        e.portIdentifier = propStr (v, "port");
+        e.portName = propStr (v, "portName");
+        e.channel = jlimit (0, 16, prop<int> (v, "channel", 0));
+        e.bankMsb = jlimit (-1, 127, prop<int> (v, "bankMsb", -1));
+        e.bankLsb = jlimit (-1, 127, prop<int> (v, "bankLsb", -1));
+        e.patch   = jlimit (-1, 127, prop<int> (v, "patch", -1));
+        e.bypassed = prop<bool> (v, "bypassed", false);
+        return e;
+    }
     if (auto xml = parseXML (propStr (v, "plugin")))
         e.plugin.loadFromXml (*xml);
     e.state.fromBase64Encoding (propStr (v, "state"));
@@ -89,12 +113,15 @@ var SlotDef::toVar() const
         if (bankMsb >= 0) o->setProperty ("bankMsb", bankMsb);
         if (bankLsb >= 0) o->setProperty ("bankLsb", bankLsb);
         if (patch >= 0)   o->setProperty ("patch", patch);
-        if (returnLeft >= 0)
-        {
-            o->setProperty ("returnLeft", returnLeft);
-            o->setProperty ("returnRight", returnRight);
-        }
     }
+    else if (isAudioIn())
+        o->setProperty ("kind", "audioIn");
+    if (! isPlugin() && returnLeft >= 0)
+    {
+        o->setProperty ("returnLeft", returnLeft);
+        o->setProperty ("returnRight", returnRight);
+    }
+    if (! midiEffects.empty()) o->setProperty ("midiEffects", effectsToVar (midiEffects));
     o->setProperty ("effects", effectsToVar (effects));
     return var (o);
 }
@@ -124,10 +151,18 @@ SlotDef SlotDef::fromVar (const var& v)
         s.bankMsb = juce::jlimit (-1, 127, prop<int> (v, "bankMsb", -1));
         s.bankLsb = juce::jlimit (-1, 127, prop<int> (v, "bankLsb", -1));
         s.patch   = juce::jlimit (-1, 127, prop<int> (v, "patch", -1));
+    }
+    else if (propStr (v, "kind") == "audioIn")
+        s.kind = Kind::audioIn;
+    if (! s.isPlugin())
+    {
         s.returnLeft  = juce::jlimit (-1, 63, prop<int> (v, "returnLeft", -1));
         s.returnRight = juce::jlimit (-1, 63, prop<int> (v, "returnRight", -1));
     }
-    s.effects    = effectsFromVar (v);
+    s.midiEffects = effectsFromVar (v, "midiEffects");
+    // A send belongs to the MIDI chain only: one found among the effects is dropped.
+    for (auto& e : effectsFromVar (v))
+        if (! e.isSend()) s.effects.push_back (std::move (e));
     return s;
 }
 

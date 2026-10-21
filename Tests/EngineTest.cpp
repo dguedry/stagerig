@@ -1996,9 +1996,100 @@ int main()
                    && sd.receiveChannel == 2 && sd.returnLeft == 0 && sd.returnRight == -1);
 
             engine.clearProgram (0, 90);
+
+            // --- a slot's MIDI chain: a processor plugin and a send, before the sound ---
+            perf::ClapPluginFormat clapFmt;
+            OwnedArray<PluginDescription> found;
+            clapFmt.findAllTypesForFile (found, STAGERIG_TEST_NOTE_EFFECT);
+            CHECK (found.size() == 1);
+            if (found.size() == 1)
+            {
+                const int midiChain = ProgramDef::midiChainOf (0);
+                engine.clearProgram (0, 91);
+                engine.selectProgram (0, 91); settle();
+                CHECK (engine.addExternalSlot (0, 91, port));               // the sound: plays on channel 1
+                String fxErr;
+                CHECK (engine.addEffect (0, 91, midiChain, *found[0], fxErr));
+                settle();
+                auto* octave = engine.getPlugin (0, 91, midiChain, 0);
+                CHECK (octave != nullptr && octave->isAlive());
+                renderAndWait();
+
+                auto noteOn = [] (int n, int ch) { return [n, ch] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == n && m.getChannel() == ch; }; };
+                auto play = [&] (int note) { engine.injectMidi (0, MidiMessage::noteOn (1, note, (uint8) 90)); auto got = renderAndWait();
+                                             engine.injectMidi (0, MidiMessage::noteOff (1, note)); renderAndWait(); return got; };
+
+                // Through the processor: the sound hears the octave, not the key.
+                auto got = play (60);
+                std::printf ("     MIDI processor -> external: %d messages\n", (int) got.size());
+                CHECK (has (got, noteOn (72, 1)));
+                CHECK (! has (got, noteOn (60, 1)));
+
+                // Bypassed, the notes go past it.
+                engine.setEffectBypassed (0, 91, midiChain, 0, true);
+                got = play (60);
+                CHECK (has (got, noteOn (60, 1)) && ! has (got, noteOn (72, 1)));
+                engine.setEffectBypassed (0, 91, midiChain, 0, false);
+
+                // A send after it gets the octave too, on its own channel; the sound still plays.
+                CHECK (engine.addMidiSend (0, 91, 0, port));
+                engine.setMidiSendChannel (0, 91, 0, 1, 5);
+                CHECK (engine.isPluginAlive (0, 91, midiChain, 1));
+                got = play (62);
+                CHECK (has (got, noteOn (74, 5)) && has (got, noteOn (74, 1)));
+
+                // Moved ahead of the processor, the send hears the key as played.
+                engine.moveEffect (0, 91, midiChain, 1, 0);
+                got = play (62);
+                CHECK (has (got, noteOn (62, 5)) && has (got, noteOn (74, 1)) && ! has (got, noteOn (74, 5)));
+
+                // The send recalls a patch on its channel.
+                engine.setMidiSendPatch (0, 91, 0, 0, -1, -1, 9);
+                got = renderAndWait();
+                CHECK (has (got, [] (const MidiMessage& m) { return m.isProgramChange() && m.getProgramChangeNumber() == 9 && m.getChannel() == 5; }));
+
+                // PANIC gets past the processor to the sound.
+                engine.panic();
+                CHECK (has (renderAndWait(), [] (const MidiMessage& m) { return m.getChannel() == 1 && (m.isAllNotesOff() || (m.isController() && m.getControllerNumber() == 123)); }));
+
+                TemporaryFile cf (".stagerig.json");
+                CHECK (engine.captureSetup().saveToFile (cf.getFile()).wasOk());
+                Setup back3;
+                CHECK (Setup::loadFromFile (cf.getFile(), back3).wasOk());
+                const auto& chainBack = back3.inputs[0].programs[91].slots[0].midiEffects;
+                CHECK (chainBack.size() == 2 && chainBack[0].isSend() && chainBack[0].channel == 5 && chainBack[0].patch == 9
+                       && chainBack[0].portIdentifier == port.identifier && ! chainBack[1].isSend()
+                       && chainBack[1].plugin.name == found[0]->name);
+
+                // Removing the slot takes its chain with it.
+                engine.removeSlot (0, 91, 0);
+                CHECK (engine.getPlugin (0, 91, midiChain, 0) == nullptr);
+                engine.clearProgram (0, 91);
+            }
             engine.setInputChannel (0, oldChannel);
             virt->stop();
         }
+    }
+
+    // --- an audio-in slot: interface inputs are the sound ------------------------------------
+    {
+        engine.clearProgram (0, 92);
+        engine.selectProgram (0, 92); settle();
+        CHECK (engine.addAudioInSlot (0, 92, 0, -1));
+        CHECK (engine.isPluginAlive (0, 92, 0));
+        engine.setSlotGainDb (0, 92, 0, -6.0f);
+        AudioBuffer<float> tone (1, kBlock), outBuf (2, kBlock);
+        for (int i = 0; i < kBlock; ++i) tone.setSample (0, i, 0.4f * (float) std::sin (MathConstants<double>::twoPi * 330.0 * i / 48000.0));
+        float heard = 0.0f;
+        for (int i = 0; i < 4; ++i)
+        {
+            outBuf.clear();
+            engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock);
+            heard = jmax (heard, outBuf.getMagnitude (0, 0, kBlock));
+        }
+        std::printf ("     audio-in slot at -6 dB: %.3f (input peak 0.4)\n", heard);
+        CHECK (std::abs (heard - 0.4f * Decibels::decibelsToGain (-6.0f)) < 0.03f);
+        engine.clearProgram (0, 92);
     }
 
     // CLAP has to be loadable by the synchronous API, because that is the one

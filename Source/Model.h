@@ -8,12 +8,28 @@ namespace perf
 {
 
 //==============================================================================
-/** An effect plugin in an insert chain (per slot, or per program). */
+/** A block in a chain: an effect plugin in an insert chain (per slot, or
+    per program), or, in a slot's MIDI chain, a MIDI processor plugin or a
+    MIDI send. */
 struct EffectDef
 {
+    /** A plugin, or -- in a slot's MIDI chain only -- a send: the MIDI at
+        that point also goes out of a port, to a hardware synth or another
+        program, and carries on unchanged to the next block. */
+    enum class Kind { plugin, midiSend };
+    Kind kind = Kind::plugin;
+
     juce::PluginDescription plugin;
     juce::MemoryBlock state;
     bool bypassed = false;
+
+    // A MIDI send ------------------------------------------------------------
+    juce::String portIdentifier, portName;
+    int channel = 0;                  // 0 = as it arrives, 1..16 = rechannelled for the port
+    int bankMsb = -1, bankLsb = -1, patch = -1;   // patch recall, as an external instrument's
+
+    bool isSend() const               { return kind == Kind::midiSend; }
+    juce::String displayName() const  { return isSend() ? portName : plugin.name; }
 
     juce::var toVar() const;
     static EffectDef fromVar (const juce::var&);
@@ -23,9 +39,11 @@ struct EffectDef
 /** One instrument inside a program, with its own insert-effect chain. */
 struct SlotDef
 {
-    /** What makes the sound: a hosted plugin, or an external instrument -- a
-        hardware synth or module played through a MIDI output port. */
-    enum class Kind { plugin, external };
+    /** What makes the sound: a hosted plugin; an external instrument -- a
+        hardware synth or module played through a MIDI output port; or audio
+        coming in on interface inputs (a microphone into a vocoder, a guitar
+        into an amp), which the slot's effects hear with its MIDI. */
+    enum class Kind { plugin, external, audioIn };
     Kind kind = Kind::plugin;
 
     juce::PluginDescription plugin;   // which plugin
@@ -52,12 +70,27 @@ struct SlotDef
     /** Its audio, back into the mix: the interface inputs it is plugged into
         (open device input channels, from 0), or -1 for none -- then it goes
         to the desk on its own and only its notes come from here. A right of
-        -1 with a left set is mono. */
+        -1 with a left set is mono. An audio-in slot's signal is the same pair. */
     int returnLeft = -1, returnRight = -1;
 
     bool isExternal() const           { return kind == Kind::external; }
+    bool isAudioIn() const            { return kind == Kind::audioIn; }
+    bool isPlugin() const             { return kind == Kind::plugin; }
     /** What to call it: the plugin's name, or the port's. */
-    juce::String displayName() const  { return isExternal() ? midiOutName + " (MIDI)" : plugin.name; }
+    juce::String displayName() const
+    {
+        if (isExternal()) return midiOutName + " (MIDI)";
+        if (isAudioIn())  return "Audio in " + juce::String (returnLeft + 1) + (returnRight >= 0 ? "+" + juce::String (returnRight + 1) : juce::String());
+        return plugin.name;
+    }
+
+    /** The slot as a chain, in signal order:
+            [MIDI chain] -> sound -> [effects]
+        The MIDI chain works on the notes after the slot's own key range,
+        transpose and channels, before the sound hears them: MIDI processor
+        plugins (an arpeggiator, a chord generator) and MIDI sends, in order.
+        The effects work on the sound, and hear the MIDI the sound heard. */
+    std::vector<EffectDef> midiEffects;
     std::vector<EffectDef> effects;   // processed in order after the instrument
 
     juce::var toVar() const;
@@ -104,11 +137,23 @@ struct ProgramDef
 
     bool isEmpty() const { return slots.empty() && effects.empty(); }
 
+    /** Chains are addressed by a slot number: -1 is the program's own chain,
+        a slot's index its effects, and midiChainOf (slot) that slot's MIDI
+        chain. One number keeps every (slot, effect) address -- mappings, the
+        engine's add/move/remove, the editors -- working for all three. */
+    static constexpr int midiChainBase = 1 << 16;
+    static int  midiChainOf (int slot)        { return midiChainBase + slot; }
+    static bool isMidiChain (int address)     { return address >= midiChainBase; }
+    /** The slot a chain address belongs to (-1 for the program's chain). */
+    static int  slotOfChain (int address)     { return isMidiChain (address) ? address - midiChainBase : address; }
+
     /** Returns the chain a mapping/effect index refers to, or nullptr. */
     const std::vector<EffectDef>* chainFor (int slot) const
     {
         if (slot < 0) return &effects;
-        return slot < (int) slots.size() ? &slots[(size_t) slot].effects : nullptr;
+        const int s = slotOfChain (slot);
+        if (s >= (int) slots.size()) return nullptr;
+        return isMidiChain (slot) ? &slots[(size_t) s].midiEffects : &slots[(size_t) s].effects;
     }
 
     juce::var toVar() const;

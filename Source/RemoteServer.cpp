@@ -1663,6 +1663,7 @@ String RemoteServer::healthJson() const
             for (int s = 0; s < (int) def.slots.size(); ++s)
             {
                 add (tag, engine.getPlugin (i, p, s, -1));
+                for (int e = 0; e < (int) def.slots[(size_t) s].midiEffects.size(); ++e) add (tag + " > MIDI", engine.getPlugin (i, p, ProgramDef::midiChainOf (s), e));
                 for (int e = 0; e < (int) def.slots[(size_t) s].effects.size(); ++e) add (tag + " > FX", engine.getPlugin (i, p, s, e));
             }
             for (int e = 0; e < (int) def.effects.size(); ++e) add (tag + " program FX", engine.getPlugin (i, p, -1, e));
@@ -1723,8 +1724,12 @@ String RemoteServer::slotsJson (int inputIndex) const
             for (int sIdx = 0; sIdx < (int) def.slots.size(); ++sIdx)
             {
                 const auto& slot = def.slots[(size_t) sIdx];
-                // An external instrument has no window of its own; its effects still do.
-                if (slot.plugin.name.isNotEmpty() && ! slot.isExternal())
+                // In the slot's signal order: its MIDI processors (a send has no window), the sound, its effects.
+                for (int e = 0; e < (int) slot.midiEffects.size(); ++e)
+                    if (const auto& md = slot.midiEffects[(size_t) e]; ! md.isSend() && md.plugin.name.isNotEmpty())
+                        add (ProgramDef::midiChainOf (sIdx), e, String (sIdx + 1) + " > MIDI" + String (e + 1) + ": " + md.plugin.name, ! md.bypassed);
+                // An external instrument or an audio input has no window of its own; its effects still do.
+                if (slot.plugin.name.isNotEmpty() && slot.isPlugin())
                     add (sIdx, -1, String (sIdx + 1) + ": " + slot.plugin.name, slot.enabled);
                 for (int e = 0; e < (int) slot.effects.size(); ++e)
                     if (slot.effects[(size_t) e].plugin.name.isNotEmpty())

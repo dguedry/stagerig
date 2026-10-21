@@ -29,10 +29,15 @@ namespace perf
     guarded by a single lock that is held for the duration of each audio block.
 
     Signal flow per program:
-        for each slot:   MIDI -> instrument -> [effect chain] -> * gain  --+
-                                                                            +-> sum -> [program effect chain] -> out
-    Plugins are addressed by (slot, effect): slot >= 0 selects an instrument slot,
-    slot == -1 the program-level chain; effect == -1 means the instrument itself.
+        for each slot:   MIDI -> [MIDI chain] -> sound -> [effect chain] -> * gain  --+
+                                                                                       +-> sum -> [program effect chain] -> out
+    A slot's sound is a plugin, an external instrument (a MIDI port, its audio
+    back on interface inputs) or interface inputs alone. Its MIDI chain holds
+    MIDI processor plugins and MIDI sends.
+
+    Plugins are addressed by (slot, effect): slot >= 0 selects a slot's effect
+    chain, ProgramDef::midiChainOf (slot) its MIDI chain, slot == -1 the
+    program-level chain; effect == -1 means the slot's sound itself.
 */
 class Engine : private juce::AudioIODeviceCallback,
                private juce::MidiInputCallback,
@@ -344,6 +349,24 @@ public:
     /** Is the slot's MIDI port there? False for a plugin slot. */
     bool isSlotPortOpen (int inputIndex, int program, int slot) const;
 
+    /** A slot whose sound is interface inputs (a microphone, a guitar): its
+        effects hear the slot's MIDI too, so a vocoder or a harmoniser can be
+        played from the keyboard. right = -1 for mono. Change the inputs with setSlotReturn. */
+    bool addAudioInSlot (int inputIndex, int program, int left, int right);
+
+    // A slot's MIDI chain: what its notes go through before the sound --------
+    //
+    // Addressed as any chain, with ProgramDef::midiChainOf (slot) for the slot:
+    // addEffect (in, prog, midiChainOf (slot), plugin) puts a MIDI processor
+    // there, and remove/move/bypass, getPlugin and the editors work as for an
+    // effect. A send has functions of its own:
+    bool addMidiSend (int inputIndex, int program, int slot, const juce::MidiDeviceInfo&);
+    void setMidiSendPort (int inputIndex, int program, int slot, int effect, const juce::MidiDeviceInfo&);
+    /** 0 = as the MIDI arrives at the send, 1..16 = rechannelled for its port. */
+    void setMidiSendChannel (int inputIndex, int program, int slot, int effect, int channel);
+    /** Sent from the port when the program is selected, as an external instrument's patch; -1 = not sent. */
+    void setMidiSendPatch (int inputIndex, int program, int slot, int effect, int bankMsb, int bankLsb, int patch);
+
 
     //==============================================================================
     // Effects. slot == -1 addresses the program-level chain.
@@ -569,6 +592,10 @@ private:
     const float* const* chunkIn = nullptr;        // audio thread: this chunk's device inputs
     int chunkNumIn = 0;
     void sendPatches (ProgramRuntime&, const ProgramDef&);
+    EffectDef* sendDefFor (int inputIndex, int program, int slot, int effect);
+    EffectRuntime* sendRuntimeFor (int inputIndex, int program, int slot, int effect) const;
+    /** Audio thread: every slot's MIDI chain, on the slot's MIDI for this block. */
+    void runMidiChains (ProgramRuntime&, int numSamples, bool notesOffNow, bool panicNow);
     std::unique_ptr<SongPlayer> player;           // swapped under `lock`
     bool trackProblemsReported = true;            // message thread
     std::atomic<int> sectionCCAtomic { 0 };

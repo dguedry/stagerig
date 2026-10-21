@@ -119,8 +119,9 @@ public:
         Safe from any thread. */
     void resetMusicalPosition()                             { positionReset.store (true, std::memory_order_relaxed); }
     /** Waits for the block until `deadline` (CLOCK_MONOTONIC). Returns false if the
-        plugin is late or dead; the caller must then treat the output as silence. */
-    bool finishProcess (float* outL, float* outR, const timespec& deadline);
+        plugin is late or dead; the caller must then treat the output as silence.
+        `midiOut`, when given, is replaced by the MIDI the plugin played. */
+    bool finishProcess (float* outL, float* outR, const timespec& deadline, juce::MidiBuffer* midiOut = nullptr);
     int getMissedBlocks() const                             { return missedBlocks.load(); }
 
     /** Asks the process to quit and reaps it (or kills it after a grace period). */
