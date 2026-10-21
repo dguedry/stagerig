@@ -38,8 +38,6 @@ int main()
         send.channel = 4; send.patch = 12; send.bypassed = true;
         ext.midiEffects = { arp, send };
         upper.programs[7].slots.push_back (ext);
-        SlotDef mic; mic.kind = SlotDef::Kind::audioIn; mic.returnLeft = 1;
-        upper.programs[7].slots.push_back (mic);
     }
 
     OutputDef mon; mon.name = "Monitors"; mon.left = 2; mon.right = 3; mon.gainDb = -3.0f; mon.volumeCC = 7;
@@ -127,8 +125,6 @@ int main()
                && ext.midiEffects[1].isSend() && ext.midiEffects[1].portIdentifier == "24-0" && ext.midiEffects[1].portName == "MicroFreak"
                && ext.midiEffects[1].channel == 4 && ext.midiEffects[1].patch == 12 && ext.midiEffects[1].bankMsb == -1 && ext.midiEffects[1].bypassed);
         CHECK (loaded.inputs[0].programs[5].slots[0].midiEffects.empty());
-        const auto& mic = loaded.inputs[0].programs[7].slots[1];
-        CHECK (mic.isAudioIn() && mic.returnLeft == 1 && mic.returnRight == -1 && mic.displayName() == "Audio in 2");
         // The MIDI chain is addressed through the slot number.
         CHECK (loaded.inputs[0].programs[7].chainFor (ProgramDef::midiChainOf (0)) == &ext.midiEffects);
         CHECK (ProgramDef::slotOfChain (ProgramDef::midiChainOf (3)) == 3 && ! ProgramDef::isMidiChain (3));

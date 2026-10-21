@@ -114,8 +114,6 @@ var SlotDef::toVar() const
         if (bankLsb >= 0) o->setProperty ("bankLsb", bankLsb);
         if (patch >= 0)   o->setProperty ("patch", patch);
     }
-    else if (isAudioIn())
-        o->setProperty ("kind", "audioIn");
     if (! isPlugin() && returnLeft >= 0)
     {
         o->setProperty ("returnLeft", returnLeft);
@@ -152,8 +150,6 @@ SlotDef SlotDef::fromVar (const var& v)
         s.bankLsb = juce::jlimit (-1, 127, prop<int> (v, "bankLsb", -1));
         s.patch   = juce::jlimit (-1, 127, prop<int> (v, "patch", -1));
     }
-    else if (propStr (v, "kind") == "audioIn")
-        s.kind = Kind::audioIn;
     if (! s.isPlugin())
     {
         s.returnLeft  = juce::jlimit (-1, 63, prop<int> (v, "returnLeft", -1));

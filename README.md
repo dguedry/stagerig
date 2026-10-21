@@ -36,10 +36,9 @@ other plugin.
 - **External instruments too.** A slot can play a hardware synth through a
   MIDI port -- with patch recall when the program is selected, and its audio
   back through the interface into the program's effects and outputs.
-- **Every slot is a chain.** MIDI processors (arpeggiators, chord generators)
-  and MIDI sends before the sound, effects after it. The sound is a plugin,
-  an external instrument, or an interface input -- a mic into a vocoder that
-  the keyboard plays.
+- **Every slot is a chain.** MIDI effects (arpeggiators, chord generators)
+  before the instrument, audio effects after it, and any hardware synth that
+  should play along.
 - **Audio runs through effects.** An audio input's programs are effect chains
   with an input trim -- reverb on the vocal for the ballad, drive on the guitar
   for the solo -- and a level meter on the laptop and on the tablet. Effects

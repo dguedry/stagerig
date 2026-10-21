@@ -31,8 +31,8 @@ namespace perf
     Signal flow per program:
         for each slot:   MIDI -> [MIDI chain] -> sound -> [effect chain] -> * gain  --+
                                                                                        +-> sum -> [program effect chain] -> out
-    A slot's sound is a plugin, an external instrument (a MIDI port, its audio
-    back on interface inputs) or interface inputs alone. Its MIDI chain holds
+    A slot's sound is a plugin or an external instrument (a MIDI port, its
+    audio back on interface inputs). Its MIDI chain holds
     MIDI processor plugins and MIDI sends.
 
     Plugins are addressed by (slot, effect): slot >= 0 selects a slot's effect
@@ -349,10 +349,6 @@ public:
     /** Is the slot's MIDI port there? False for a plugin slot. */
     bool isSlotPortOpen (int inputIndex, int program, int slot) const;
 
-    /** A slot whose sound is interface inputs (a microphone, a guitar): its
-        effects hear the slot's MIDI too, so a vocoder or a harmoniser can be
-        played from the keyboard. right = -1 for mono. Change the inputs with setSlotReturn. */
-    bool addAudioInSlot (int inputIndex, int program, int left, int right);
 
     // A slot's MIDI chain: what its notes go through before the sound --------
     //

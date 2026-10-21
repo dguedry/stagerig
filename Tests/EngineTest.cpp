@@ -2071,27 +2071,6 @@ int main()
         }
     }
 
-    // --- an audio-in slot: interface inputs are the sound ------------------------------------
-    {
-        engine.clearProgram (0, 92);
-        engine.selectProgram (0, 92); settle();
-        CHECK (engine.addAudioInSlot (0, 92, 0, -1));
-        CHECK (engine.isPluginAlive (0, 92, 0));
-        engine.setSlotGainDb (0, 92, 0, -6.0f);
-        AudioBuffer<float> tone (1, kBlock), outBuf (2, kBlock);
-        for (int i = 0; i < kBlock; ++i) tone.setSample (0, i, 0.4f * (float) std::sin (MathConstants<double>::twoPi * 330.0 * i / 48000.0));
-        float heard = 0.0f;
-        for (int i = 0; i < 4; ++i)
-        {
-            outBuf.clear();
-            engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock);
-            heard = jmax (heard, outBuf.getMagnitude (0, 0, kBlock));
-        }
-        std::printf ("     audio-in slot at -6 dB: %.3f (input peak 0.4)\n", heard);
-        CHECK (std::abs (heard - 0.4f * Decibels::decibelsToGain (-6.0f)) < 0.03f);
-        engine.clearProgram (0, 92);
-    }
-
     // CLAP has to be loadable by the synchronous API, because that is the one
     // the out-of-process host calls. A format claiming it needs an unblocked
     // message thread is refused outright by JUCE with "cannot be instantiated

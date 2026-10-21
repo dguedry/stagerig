@@ -73,12 +73,10 @@ struct Engine::SlotRuntime : public PluginNode
     /** An external instrument: played through a MIDI port, heard (if at all)
         through interface inputs. Fixed when the slot is built. */
     bool external = false;
-    /** Audio from interface inputs is the sound (the return pair carries it). */
-    bool audioIn = false;
     std::atomic<int> outPort { -1 }, returnLeft { -1 }, returnRight { -1 };
     /** Whether it takes notes: a running plugin, an external instrument, or
         anything with a MIDI chain (whose sends and processors want them). */
-    bool playable() const { return external || audioIn || alive() || ! midiEffects.empty(); }
+    bool playable() const { return external || alive() || ! midiEffects.empty(); }
 
     void applyDef (const SlotDef& d)
     {
@@ -1562,8 +1560,6 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
         slot->external = true;
         slot->outPort.store (midiOuts.portFor (def.midiOutIdentifier, def.midiOutName));
     }
-    else if (def.isAudioIn())
-        slot->audioIn = true;      // nothing to start: the interface inputs are the sound
     else
         queueLoad (*slot, def.plugin, def.state);
     for (int e = 0; e < (int) def.midiEffects.size(); ++e)
@@ -2106,7 +2102,6 @@ bool Engine::isPluginAlive (int inputIndex, int program, int slot, int effect) c
     {
         auto* s = static_cast<SlotRuntime*> (node);
         if (s->external) return midiOuts.isOpen (s->outPort.load());
-        if (s->audioIn)  return true;
     }
     if (node != nullptr && effect >= 0)
         if (auto* fx = static_cast<EffectRuntime*> (node); fx->send)
@@ -2186,27 +2181,6 @@ void Engine::setSlotReturn (int inputIndex, int program, int slotIndex, int left
             rt->slots[(size_t) slotIndex]->returnLeft.store (def.slots[(size_t) slotIndex].returnLeft);
             rt->slots[(size_t) slotIndex]->returnRight.store (def.slots[(size_t) slotIndex].returnRight);
         }
-}
-
-bool Engine::addAudioInSlot (int inputIndex, int program, int left, int right)
-{
-    if (! validInput (inputIndex) || ! validProgram (program)) return false;
-    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
-    SlotDef sd;
-    sd.kind = SlotDef::Kind::audioIn;
-    sd.returnLeft = jlimit (-1, 63, left);
-    sd.returnRight = jlimit (-1, 63, right);
-    def.slots.push_back (sd);
-    if (left >= 0) ensureAudioInputsOpen();
-    const int slotIndex = (int) def.slots.size() - 1;
-    if (auto* rt = getLoaded (inputIndex, program))
-    {
-        auto slot = buildSlot (inputIndex, program, slotIndex, sd);
-        const ScopedLock sl (lock);
-        rt->slots.push_back (std::move (slot));
-    }
-    notifyContent (inputIndex, program);
-    return true;
 }
 
 bool Engine::addMidiSend (int inputIndex, int program, int slotIndex, const MidiDeviceInfo& port)
@@ -2322,8 +2296,6 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
         auto* s = static_cast<SlotRuntime*> (node);
         if (s->external)
             return midiOuts.isOpen (s->outPort.load()) ? String() : "MIDI port not connected: " + midiOuts.getName (s->outPort.load());
-        if (s->audioIn)
-            return s->returnLeft.load() < 0 ? String ("No interface input chosen: pick one under Setup...") : String();
     }
     else if (auto* fx = static_cast<EffectRuntime*> (node); fx->send)
         return midiOuts.isOpen (fx->outPort.load()) ? String() : "MIDI port not connected: " + midiOuts.getName (fx->outPort.load());
@@ -2335,7 +2307,7 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
 void Engine::reloadPlugin (int inputIndex, int program, int slot, int effect)
 {
     auto* node = getNode (inputIndex, program, slot, effect);
-    if (node != nullptr && ((effect < 0 && (static_cast<SlotRuntime*> (node)->external || static_cast<SlotRuntime*> (node)->audioIn))
+    if (node != nullptr && ((effect < 0 && static_cast<SlotRuntime*> (node)->external)
                             || (effect >= 0 && static_cast<EffectRuntime*> (node)->send)))
     {
         // An external instrument: "reload" is looking for its port again.
@@ -3267,13 +3239,12 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
     {
         AudioBuffer<float> stereo (slot->stereo.getArrayOfWritePointers(), 2, numSamples);
 
-        if (slot->external || slot->audioIn)
+        if (slot->external)
         {
-            /* An external instrument's notes leave for the port, each at the
-               moment its sample will be heard; its sound, if it comes back on
-               interface inputs, joins the mix from here like a plugin's
-               would. An audio-in slot is only that sound. */
-            if (const int port = slot->outPort.load (std::memory_order_relaxed); slot->external && port >= 0)
+            /* Its notes leave for the port, each at the moment its sample
+               will be heard; its sound, if it comes back on interface
+               inputs, joins the mix from here like a plugin's would. */
+            if (const int port = slot->outPort.load (std::memory_order_relaxed); port >= 0)
                 for (const auto meta : slot->midi)
                     midiOuts.push (port, meta.getMessage(), chunkStartMs + meta.samplePosition * 1000.0 / sampleRate);
 

@@ -81,7 +81,7 @@ vocal can go to the desk on separate channels.
    hangs cannot take the scan down with it.
 4. Select **Upper** on the left, choose its **MIDI device** and **Channel**.
 5. Click program **000** in the middle list, name it, and press
-   **+ Add sound...**.
+   **+ Add instrument... ▸ Plugin instrument**.
 6. Play. Press **Save As...** when the set is worth keeping.
 
 **Help** in the toolbar opens this manual inside StageRig, so the answer to
@@ -418,7 +418,7 @@ The tablet's **GUI** chooser lists an output's master effects under every input
 that lands on it. Removing an output moves its inputs to the first one; the
 last output cannot be removed.
 
-## Slots: the sounds inside a program
+## Slots: the instruments inside a program
 
 Each slot is one lane of the program, and a chain, in this order:
 
@@ -426,12 +426,11 @@ Each slot is one lane of the program, and a chain, in this order:
 the slot's notes -> [ MIDI chain ] -> the sound -> [ effects ] -> gain, pan
 ```
 
-- **The sound** is a plugin instrument; an external instrument -- a hardware
-  synth or module played through a MIDI port; or **audio in** -- interface
-  inputs, a microphone or a guitar (see below).
+- **The sound** is a plugin instrument, or a hardware synth or module played
+  through a MIDI port (see *External instruments*).
 - **The MIDI chain** works on the notes before the sound hears them: MIDI
-  processor plugins (an arpeggiator, a chord generator) and MIDI sends. See
-  *A slot's MIDI chain* below.
+  effects (an arpeggiator, a chord generator), and hardware synths that
+  should play along. See *A slot's MIDI chain* below.
 - **The effects** work on the sound -- see *Effects*.
 
 The slot's own controls come first: its key and velocity ranges, transpose,
@@ -442,7 +441,7 @@ curve and channels decide which notes enter the chain at all. Left to right:
 | **Checkbox** | Enables the slot. Off is silent but stays loaded. |
 | **Icon** | The plugin's own icon where it has one, otherwise a coloured badge with its initials. |
 | **Name** | Plugin name and format. Red means it failed to load; hover for the reason. |
-| **Edit GUI** | Opens the plugin's own editor in its own window. Shows **Reload** instead if the plugin died, and **Setup...** for an external instrument or audio in. |
+| **Edit GUI** | Opens the plugin's own editor in its own window. Shows **Reload** instead if the plugin died, and **Setup...** for a hardware synth. |
 | **X** | Removes the slot. |
 | **GAIN** | Level of this slot, applied after its effects. Double-click for 0 dB. |
 | **PAN** | Stereo position, `centre`, `L 40`, `R 25`. Double-click for centre. |
@@ -453,13 +452,19 @@ curve and channels decide which notes enter the chain at all. Left to right:
 | **VELOCITY** | Two handles: the softest and loudest note-on that reach this slot. |
 | **VELOCITY CURVE** | Reshapes how hard your playing appears to the plugin, from `100 % softer` through `linear` to `+100 % louder`. |
 
-**+ Add sound...** adds a slot. The menu is grouped by manufacturer with
-each plugin's icon, and ends with **External MIDI instrument**, listing your
-MIDI output ports, and **Audio in**, listing the interface's inputs.
+**+ Add instrument...** adds a slot, and asks which kind:
 
-**+ Add...** under a slot adds to its chain, and offers only what can go
-there: an **Audio effect** after the sound, or -- before it, on its notes -- a
-**MIDI processor** or a **MIDI send**.
+- **Plugin instrument** -- your instrument plugins, grouped by manufacturer.
+- **Hardware synth (MIDI out)** -- the MIDI ports of the interfaces plugged in.
+  With none connected it says so; plug one in and use
+  **Options ▸ Rescan MIDI devices**.
+
+**+ Add...** under a slot adds to its chain:
+
+- **Effect on the sound** -- reverb, EQ, an amp: after the instrument.
+- **MIDI effect on the notes** -- an arpeggiator, a chord generator: before it.
+- **Also play a hardware synth** -- the slot's notes go out of a MIDI port as
+  well, so a hardware synth doubles the plugin.
 
 ### Routing by channel
 
@@ -479,7 +484,7 @@ program -- no extra inputs needed.
 ### External instruments
 
 A slot can play a hardware synth, sound module or another computer instead
-of a plugin: **+ Add sound... ▸ External MIDI instrument**, then the port.
+of a plugin: **+ Add instrument... ▸ Hardware synth (MIDI out)**, then the port.
 Everything about a slot still applies -- key and velocity ranges, transpose,
 curves, listening to a channel, holding notes across a program change -- and
 the notes leave through the port, each timed to when StageRig's own audio is
@@ -497,37 +502,28 @@ is particular to it:
   plugged into. Then its sound joins the program: its effects, gain, pan and
   output, like a plugin. *None* leaves it to go to the desk on its own.
 
-### Audio in
-
-**+ Add sound... ▸ Audio in** makes a slot whose sound is one or two of the
-interface's inputs -- a microphone, a guitar, a hardware synth's outputs.
-**Setup...** changes which. Unlike an audio *input* (see *Inputs: keyboards, and audio*), it sits in a
-keyboard's program, so its effects hear that slot's notes: a vocoder or a
-harmoniser on the vocal mic, played from the keys, with the slot's key range
-and channel deciding which notes it gets.
-
 ### A slot's MIDI chain
 
 The blocks between the slot's notes and its sound, shown above the slot's
 effects with a coloured line. Add them with the slot's **+ Add...**:
 
-- **MIDI processor** -- any plugin, run for the notes it plays: an
+- **MIDI effect on the notes** -- any plugin, run for the notes it plays: an
   arpeggiator, a chord generator, a harmoniser, a MIDI filter. Its output is
   what the next block hears; **Edit GUI** opens it like any plugin, and its
   parameters can be mapped to knobs. Every plugin is offered, because an
   arpeggiator is filed as an instrument as often as an effect; one that
   plays no MIDI simply passes nothing on.
-- **MIDI send** -- a copy of the notes at that point goes out of a MIDI port,
-  and they carry on unchanged. **Setup...** chooses the port, the channel it
+- **Also play a hardware synth** -- a copy of the notes at that point goes
+  out of a MIDI port, and they carry on unchanged. **Setup...** chooses the port, the channel it
   **sends on** (or *Same channel*), and a **patch recall** sent when the
   program is selected. So one keyboard can play a plugin piano and double it
   on a hardware synth; with the send after an arpeggiator, the synth gets the
   arpeggio.
 
 The blocks run top to bottom; **^** and **v** reorder them, the checkbox
-bypasses one (the notes go past it), **X** removes it. A processor that is
+bypasses one (the notes go past it), **X** removes it. A MIDI effect that is
 still loading, or has crashed, is passed by the same way. **PANIC** reaches
-everything after a processor even if the processor does not pass it on.
+everything after a MIDI effect even if the effect does not pass it on.
 
 ## Splits and layers
 
@@ -560,7 +556,7 @@ The extremes of your playing are untouched, only the feel in between changes.
 
 There are two places for effects:
 
-- **Per slot** — **+ Add... ▸ Audio effect** under a slot inserts an effect
+- **Per slot** — **+ Add... ▸ Effect on the sound** under a slot inserts an effect
   after its sound. The order is instrument, then the effects top to bottom, then the
   slot's gain and pan.
 - **Per program** — the **PROGRAM EFFECTS** section at the bottom processes the

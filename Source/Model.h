@@ -39,11 +39,9 @@ struct EffectDef
 /** One instrument inside a program, with its own insert-effect chain. */
 struct SlotDef
 {
-    /** What makes the sound: a hosted plugin; an external instrument -- a
-        hardware synth or module played through a MIDI output port; or audio
-        coming in on interface inputs (a microphone into a vocoder, a guitar
-        into an amp), which the slot's effects hear with its MIDI. */
-    enum class Kind { plugin, external, audioIn };
+    /** What makes the sound: a hosted plugin, or an external instrument -- a
+        hardware synth or module played through a MIDI output port. */
+    enum class Kind { plugin, external };
     Kind kind = Kind::plugin;
 
     juce::PluginDescription plugin;   // which plugin
@@ -70,19 +68,13 @@ struct SlotDef
     /** Its audio, back into the mix: the interface inputs it is plugged into
         (open device input channels, from 0), or -1 for none -- then it goes
         to the desk on its own and only its notes come from here. A right of
-        -1 with a left set is mono. An audio-in slot's signal is the same pair. */
+        -1 with a left set is mono. */
     int returnLeft = -1, returnRight = -1;
 
     bool isExternal() const           { return kind == Kind::external; }
-    bool isAudioIn() const            { return kind == Kind::audioIn; }
     bool isPlugin() const             { return kind == Kind::plugin; }
     /** What to call it: the plugin's name, or the port's. */
-    juce::String displayName() const
-    {
-        if (isExternal()) return midiOutName + " (MIDI)";
-        if (isAudioIn())  return "Audio in " + juce::String (returnLeft + 1) + (returnRight >= 0 ? "+" + juce::String (returnRight + 1) : juce::String());
-        return plugin.name;
-    }
+    juce::String displayName() const  { return isExternal() ? midiOutName + " (MIDI)" : plugin.name; }
 
     /** The slot as a chain, in signal order:
             [MIDI chain] -> sound -> [effects]

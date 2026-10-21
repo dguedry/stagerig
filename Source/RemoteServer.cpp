@@ -1728,7 +1728,7 @@ String RemoteServer::slotsJson (int inputIndex) const
                 for (int e = 0; e < (int) slot.midiEffects.size(); ++e)
                     if (const auto& md = slot.midiEffects[(size_t) e]; ! md.isSend() && md.plugin.name.isNotEmpty())
                         add (ProgramDef::midiChainOf (sIdx), e, String (sIdx + 1) + " > MIDI" + String (e + 1) + ": " + md.plugin.name, ! md.bypassed);
-                // An external instrument or an audio input has no window of its own; its effects still do.
+                // An external instrument has no window of its own; its effects still do.
                 if (slot.plugin.name.isNotEmpty() && slot.isPlugin())
                     add (sIdx, -1, String (sIdx + 1) + ": " + slot.plugin.name, slot.enabled);
                 for (int e = 0; e < (int) slot.effects.size(); ++e)
