@@ -261,6 +261,14 @@ struct StemDef
         channel of the file (0 = all), so one file can feed Upper and Lower. */
     int input = 0;
     int midiChannel = 0;
+    /** Or straight to one plugin: slot `slot` (>= 0) of that input's program
+        `program` -- or of whatever program the input is on, for -1. The
+        notes skip the slot's key range and LISTENS TO, and arrive on the
+        channel the plugin listens on, so the file's channel 5 can play a
+        sound that only hears channel 1. A named program keeps playing the
+        file even while the keys play another. */
+    int program = -1, slot = -1;
+    bool isDirect() const { return isMidi() && slot >= 0; }
 
     bool isMidi() const { return juce::File (file).hasFileExtension ("mid;midi;smf"); }
     juce::String displayName() const { return name.isNotEmpty() ? name : juce::File (file).getFileNameWithoutExtension(); }

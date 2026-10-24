@@ -350,7 +350,8 @@ void SongPlayer::addClicks (float* l, float* r, int n)
     }
 }
 
-SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, MidiBuffer* const* inputMidi, int numInputs, int n)
+SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, MidiBuffer* const* inputMidi, int numInputs, int n,
+                                         MidiBuffer* const* stemMidi, int numStemMidi)
 {
     auto st = getState();
     if (st == State::idle || stems.empty()) return Happened::nothing;
@@ -446,9 +447,14 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
     {
         if (s->midi)
         {
-            const int in = s->input.load (std::memory_order_relaxed);
-            if (in < 0 || in >= numInputs || inputMidi[in] == nullptr) continue;
-            auto& out = *inputMidi[in];
+            MidiBuffer* dest = stemMidi != nullptr && s->defIndex < numStemMidi ? stemMidi[s->defIndex] : nullptr;
+            if (dest == nullptr)
+            {
+                const int in = s->input.load (std::memory_order_relaxed);
+                if (in < 0 || in >= numInputs || inputMidi[in] == nullptr) continue;
+                dest = inputMidi[in];
+            }
+            auto& out = *dest;
             for (int r = 0; r < numRuns; ++r)
             {
                 /* A run that does not follow on from the one before -- a vamp

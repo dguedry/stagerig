@@ -379,6 +379,11 @@ var StemDef::toVar() const
     {
         o->setProperty ("input", input);
         if (midiChannel > 0) o->setProperty ("midiChannel", midiChannel);
+        if (slot >= 0)
+        {
+            o->setProperty ("slot", slot);
+            if (program >= 0) o->setProperty ("program", program);
+        }
     }
     return var (o);
 }
@@ -392,6 +397,8 @@ StemDef StemDef::fromVar (const var& v)
     d.gainDb = (float) prop<double> (v, "gainDb", 0.0);
     d.input  = jmax (0, prop<int> (v, "input", 0));
     d.midiChannel = jlimit (0, 16, prop<int> (v, "midiChannel", 0));
+    d.slot    = jlimit (-1, 255, prop<int> (v, "slot", -1));
+    d.program = jlimit (-1, InputDef::numPrograms - 1, prop<int> (v, "program", -1));
     return d;
 }
 

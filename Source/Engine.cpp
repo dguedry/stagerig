@@ -98,6 +98,7 @@ struct Engine::SlotRuntime : public PluginNode
     std::atomic<bool> enabled { true };
     std::atomic<float> gain { 1.0f }, velocityCurve { 0.0f }, pan { 0.0f };
     std::atomic<int> transpose { 0 }, lowKey { 0 }, highKey { 127 }, lowVelocity { 1 }, highVelocity { 127 }, outChannel { 0 }, receiveChannel { 0 };
+    MidiBuffer trackMidi;          // a backing-track MIDI stem aimed straight at this slot, for this block
     std::vector<std::unique_ptr<EffectRuntime>> midiEffects;   // before the sound: processors and sends
     std::vector<std::unique_ptr<EffectRuntime>> effects;
     AudioBuffer<float> stereo;     // the slot's signal as it travels down the chain
@@ -185,7 +186,14 @@ struct Engine::InputRuntime
     std::map<int, std::unique_ptr<ProgramRuntime>> loaded;
     ProgramRuntime* active = nullptr;
     std::vector<ProgramRuntime*> releasing;
+    /** Programs a backing track plays into by name: kept loaded, and
+        rendered every block even when the keys are on another program. */
+    std::vector<ProgramRuntime*> pinned;
 
+    bool isPinned (const ProgramRuntime* p) const
+    {
+        return std::find (pinned.begin(), pinned.end(), p) != pinned.end();
+    }
     bool isReleasing (const ProgramRuntime* p) const
     {
         return std::find (releasing.begin(), releasing.end(), p) != releasing.end();
@@ -1144,10 +1152,13 @@ void Engine::setSongStem (int songIndex, int stemIndex, const StemDef& d)
     const bool fileChanged = stems[(size_t) stemIndex].file != d.file || stems[(size_t) stemIndex].midiChannel != d.midiChannel;
     stems[(size_t) stemIndex] = d;
     if (songIndex != trackSong) return;
-    /* A new output or level takes effect at once, even mid-song; only a
-       different file needs the track loaded again. */
+    /* A new output, level or destination takes effect at once, even
+       mid-song; only a different file needs the track loaded again. */
     if (! fileChanged && player != nullptr)
+    {
         player->setStemMix (stemIndex, d.output, d.gainDb, d.input);
+        updateStemRoutes();
+    }
     else
         armTrack (songIndex);
 }
@@ -1225,7 +1236,86 @@ void Engine::armTrack (int songIndex)
         player = std::move (fresh);
     }
     trackSong = songIndex;
+    updateStemRoutes();
     listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+void Engine::updateStemRoutes()
+{
+    StemRoute routes[kMaxDirectStems];
+    bool direct[kMaxDirectStems] {};
+    std::vector<std::pair<int, ProgramRuntime*>> pins;
+    if (player != nullptr && trackSong >= 0 && trackSong < (int) setup.songs.size())
+    {
+        const auto& stems = setup.songs[(size_t) trackSong].stems;
+        for (int i = 0; i < jmin ((int) stems.size(), kMaxDirectStems); ++i)
+        {
+            const auto& d = stems[(size_t) i];
+            if (! d.isDirect() || ! validInput (d.input) || setup.inputs[(size_t) d.input].isAudio()) continue;
+            routes[i] = { d.input, d.program, d.slot };
+            direct[i] = true;
+            if (validProgram (d.program))
+                pins.push_back ({ d.input, ensureProgramLoaded (d.input, d.program) });
+        }
+    }
+
+    const ScopedLock sl (lock);
+    bool same = true;
+    for (int i = 0; i < kMaxDirectStems && same; ++i)
+        same = (stemMidiPtrs[i] != nullptr) == direct[i] && stemRoutes[i].input == routes[i].input
+            && stemRoutes[i].program == routes[i].program && stemRoutes[i].slot == routes[i].slot;
+    for (int i = 0; i < kMaxDirectStems; ++i)
+    {
+        stemRoutes[i] = routes[i];
+        if (! same) stemMidi[i].clear();
+        if (direct[i] && stemMidi[i].getNumEvents() == 0) stemMidi[i].ensureSize (2048);
+        stemMidiPtrs[i] = direct[i] ? &stemMidi[i] : nullptr;
+    }
+    for (auto& in : runtimes) in->pinned.clear();
+    for (auto& [input, rt] : pins)
+        if (rt != nullptr && input < (int) runtimes.size() && ! runtimes[(size_t) input]->isPinned (rt))
+            runtimes[(size_t) input]->pinned.push_back (rt);
+}
+
+void Engine::deliverStemMidi()
+{
+    for (int i = 0; i < kMaxDirectStems; ++i)
+    {
+        if (stemMidiPtrs[i] == nullptr || stemMidi[i].isEmpty()) continue;
+        const auto& r = stemRoutes[i];
+        ProgramRuntime* prog = nullptr;
+        if (r.input >= 0 && r.input < (int) runtimes.size())
+        {
+            auto& in = *runtimes[(size_t) r.input];
+            if (r.program < 0) prog = in.active;
+            else if (auto it = in.loaded.find (r.program); it != in.loaded.end() && (it->second.get() == in.active || in.isPinned (it->second.get())))
+                prog = it->second.get();
+        }
+        if (prog != nullptr && r.slot < (int) prog->slots.size())
+        {
+            /* The channel the plugin listens on: the one the slot plays on,
+               else the one it listens to, else the input's -- so it sounds as
+               if played on that keyboard, whatever channel the file used. */
+            auto& slot = *prog->slots[(size_t) r.slot];
+            int ch = slot.outChannel.load (std::memory_order_relaxed);
+            if (ch <= 0) ch = slot.receiveChannel.load (std::memory_order_relaxed);
+            if (ch <= 0) ch = runtimes[(size_t) r.input]->channel.load (std::memory_order_relaxed);
+            const int transpose = slot.transpose.load (std::memory_order_relaxed);
+            for (const auto meta : stemMidi[i])
+            {
+                auto m = meta.getMessage();
+                if (ch > 0 && m.getChannel() > 0) m.setChannel (ch);
+                if (m.isNoteOnOrOff())
+                {
+                    const int note = m.getNoteNumber() + transpose;
+                    if (note < 0 || note > 127) continue;
+                    m.setNoteNumber (note);
+                }
+                slot.trackMidi.addEvent (m, meta.samplePosition);
+            }
+        }
+        stemMidi[i].clear();
+    }
 }
 
 void Engine::startTrack()
@@ -1553,6 +1643,7 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
     slot->applyDef (def);
     slot->stereo.setSize (2, blockSize);
     slot->midi.ensureSize (2048);
+    slot->trackMidi.ensureSize (1024);
     nodeRegistry[slot->id] = slot.get();
     if (def.isExternal())
     {
@@ -1729,6 +1820,7 @@ void Engine::unloadProgram (InputRuntime& in, int program)
         in.loaded.erase (it);
         if (in.active == rt.get()) in.active = nullptr;
         in.stopReleasing (rt.get());
+        in.pinned.erase (std::remove (in.pinned.begin(), in.pinned.end(), rt.get()), in.pinned.end());
     }
 
     // Find our input index to capture state into the right definition.
@@ -2619,6 +2711,9 @@ void Engine::timerCallback() { housekeeping(); }
 
 void Engine::housekeeping()
 {
+    // A program a track plays into by name may have been rebuilt or unloaded meanwhile.
+    updateStemRoutes();
+
     if (! trackProblemsReported && player != nullptr && player->isReady())
     {
         trackProblemsReported = true;
@@ -2650,7 +2745,7 @@ void Engine::housekeeping()
             {
                 const ScopedLock sl (lock);
                 for (auto& [p, rt] : in.loaded)
-                    if (rt.get() != in.active && ! in.isReleasing (rt.get()))
+                    if (rt.get() != in.active && ! in.isReleasing (rt.get()) && ! in.isPinned (rt.get()))
                         idle.push_back (p);
             }
             for (int p : idle)
@@ -2931,7 +3026,8 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
             MidiBuffer* trackMidi[64];
             const int numTrackInputs = jmin ((int) runtimes.size(), 64);
             for (int i = 0; i < numTrackInputs; ++i) trackMidi[i] = &runtimes[(size_t) i]->trackMidi;
-            const auto happened = player->render (trackOut, numTrackOutputs, trackMidi, numTrackInputs, n);
+            const auto happened = player->render (trackOut, numTrackOutputs, trackMidi, numTrackInputs, n, stemMidiPtrs, kMaxDirectStems);
+            deliverStemMidi();
             if (happened == SongPlayer::Happened::stemsStarted)
                 resetPluginPositions();
             else if (happened == SongPlayer::Happened::ended || happened == SongPlayer::Happened::stopped)
@@ -3040,6 +3136,11 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
         else
             ++it;
     }
+
+    // Programs a backing track plays into by name, while the keys are elsewhere: the track's notes only.
+    for (auto* p : in.pinned)
+        if (p != in.active && ! in.isReleasing (p))
+            processProgram (*p, emptyMidi, nullptr, nullptr, out, numOut, numSamples, panicNow);
 }
 
 static inline float normalisedValueOf (const MidiMessage& m, MappingDef::Source s)
@@ -3210,6 +3311,14 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
             slot->midi.addEvent (mm, pos);
         }
     }
+
+    // A backing track's part aimed straight at a slot joins what the keys gave it.
+    for (auto& slot : prog.slots)
+        if (! slot->trackMidi.isEmpty())
+        {
+            if (slot->enabled.load()) slot->midi.addEvents (slot->trackMidi, 0, -1, 0);
+            slot->trackMidi.clear();
+        }
 
     // Each slot's MIDI chain, then its sound hears what comes out of it.
     runMidiChains (prog, numSamples, notesOffNow, panicNow);

@@ -2066,6 +2066,56 @@ int main()
                 CHECK (engine.getPlugin (0, 91, midiChain, 0) == nullptr);
                 engine.clearProgram (0, 91);
             }
+            // --- a MIDI stem straight into one plugin, of a program the keys are not on ---
+            {
+                const auto folder = engine.getChartsFolder();
+                folder.createDirectory();
+                MidiMessageSequence seq;
+                seq.addEvent (MidiMessage::noteOn  (5, 67, (uint8) 100), 0);      // the file's channel 5
+                seq.addEvent (MidiMessage::noteOff (5, 67), 960 * 2);
+                seq.updateMatchedPairs();
+                MidiFile mf;
+                mf.setTicksPerQuarterNote (960);
+                mf.addTrack (seq);
+                const auto f = folder.getChildFile ("strings.mid");
+                f.deleteFile();
+                { FileOutputStream os (f); CHECK (os.openedOk() && mf.writeTo (os)); }
+
+                engine.clearProgram (0, 93);
+                engine.clearProgram (0, 94);
+                engine.selectProgram (0, 93); settle();
+                CHECK (engine.addExternalSlot (0, 93, port));
+                engine.setSlotOutChannel (0, 93, 0, 0);
+                engine.setSlotReceiveChannel (0, 93, 0, 3);       // listens to 3 only: the file's 5 would never get in by the keys' route
+                engine.selectProgram (0, 94); settle();           // the keys move on
+                renderAndWait();
+
+                const int song = engine.addSong ("Strings by name");
+                StemDef st; st.file = "strings.mid"; st.input = 0; st.program = 93; st.slot = 0;
+                engine.addSongStem (song, st);
+                engine.selectSong (song);
+                for (int i = 0; i < 400 && ! engine.isTrackReady(); ++i) pump (10);
+                CHECK (engine.isTrackReady());
+                pump (50);
+                CHECK (engine.isProgramLoaded (0, 93));
+                engine.startTrack();
+                auto got = renderAndWait();
+                std::printf ("     MIDI stem into program 93's slot while on 94: %d messages\n", (int) got.size());
+                CHECK (has (got, [] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == 67 && m.getChannel() == 3; }));
+                engine.stopTrack();
+                renderAndWait(); pump (50);
+
+                TemporaryFile sf (".stagerig.json");
+                CHECK (engine.captureSetup().saveToFile (sf.getFile()).wasOk());
+                Setup back4;
+                CHECK (Setup::loadFromFile (sf.getFile(), back4).wasOk());
+                const auto& stBack = back4.songs[(size_t) song].stems[0];
+                CHECK (stBack.isDirect() && stBack.program == 93 && stBack.slot == 0);
+
+                engine.removeSong (song);
+                engine.clearProgram (0, 93);
+                engine.clearProgram (0, 94);
+            }
             engine.setInputChannel (0, oldChannel);
             virt->stop();
         }

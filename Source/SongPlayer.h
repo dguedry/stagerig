@@ -83,8 +83,11 @@ public:
     enum class Happened { nothing, stemsStarted, ended, stopped };
     /** Audio thread: adds this block of the track to the outputs' mixes, and
         its MIDI to the inputs'. `outputs[i]` holds output i's left and right
-        mix buffers; `inputMidi[i]` is input i's MIDI for this block. */
-    Happened render (float* (*outputs)[2], int numOutputs, juce::MidiBuffer* const* inputMidi, int numInputs, int numSamples);
+        mix buffers; `inputMidi[i]` is input i's MIDI for this block. A MIDI
+        stem whose `stemMidi[stem index]` is not null goes there instead (a
+        stem aimed at one plugin, which the engine delivers). */
+    Happened render (float* (*outputs)[2], int numOutputs, juce::MidiBuffer* const* inputMidi, int numInputs, int numSamples,
+                     juce::MidiBuffer* const* stemMidi = nullptr, int numStemMidi = 0);
 
 private:
     struct Stem

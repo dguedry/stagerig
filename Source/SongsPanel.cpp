@@ -951,26 +951,44 @@ private:
                    like the keys -- and can keep just one of the file's channels. */
                 owner.fillInputs (output, d.input);
                 output.setTooltip ("The keyboard this MIDI file plays through: its current program, as if played");
-                output.onChange = [this] { def.input = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
+                output.onChange = [this] { def.input = output.getSelectedId() - 1; def.slot = -1; def.program = -1;
+                                           owner.engine.setSongStem (owner.songIndex, index, def); fillPlays(); };
                 addAndMakeVisible (channel);
                 channel.addItem ("All channels", 1);
                 for (int c = 1; c <= 16; ++c) channel.addItem ("Channel " + String (c), c + 1);
                 channel.setSelectedId (d.midiChannel + 1, dontSendNotification);
                 channel.setTooltip ("Only this channel of the file -- add the file twice to send one part to each keyboard");
                 channel.onChange = [this] { def.midiChannel = channel.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
-                return;
+
+                /* Which sound: the keyboard's, sorted by each slot's LISTENS
+                   TO like your playing -- or one plugin by name, whatever
+                   channel it listens on. */
+                addAndMakeVisible (plays);
+                plays.setTooltip ("Play through the keyboard's program like your hands do, or straight into one of its plugins: "
+                                  "the part arrives on the channel that plugin listens on, and keeps playing it even when you "
+                                  "switch the keyboard to another program");
+                plays.onChange = [this]
+                {
+                    const int id = plays.getSelectedId();
+                    if (id == 1) { def.slot = -1; def.program = -1; }
+                    else if (id >= 1000 && playsProgram >= 0) { def.slot = id - 1000; def.program = playsProgram; }
+                    owner.engine.setSongStem (owner.songIndex, index, def);
+                };
+                fillPlays();
             }
-            owner.fillOutputs (output, d.output);
-            output.onChange = [this] { def.output = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
+            else
+            {
+                owner.fillOutputs (output, d.output);
+                output.onChange = [this] { def.output = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
 
-            addAndMakeVisible (gain);
-            gain.setRange (-60.0, 12.0, 0.5);
-            gain.setSliderStyle (Slider::LinearBar);
-            gain.setTextValueSuffix (" dB");
-            gain.setDoubleClickReturnValue (true, 0.0);
-            gain.setValue (d.gainDb, dontSendNotification);
-            gain.onValueChange = [this] { def.gainDb = (float) gain.getValue(); owner.engine.setSongStem (owner.songIndex, index, def); };
-
+                addAndMakeVisible (gain);
+                gain.setRange (-60.0, 12.0, 0.5);
+                gain.setSliderStyle (Slider::LinearBar);
+                gain.setTextValueSuffix (" dB");
+                gain.setDoubleClickReturnValue (true, 0.0);
+                gain.setValue (d.gainDb, dontSendNotification);
+                gain.onValueChange = [this] { def.gainDb = (float) gain.getValue(); owner.engine.setSongStem (owner.songIndex, index, def); };
+            }
             addAndMakeVisible (remove);
             remove.setTooltip ("Take this stem off the song. The file stays in the setup's folder.");
             remove.onClick = [this] { owner.engine.removeSongStem (owner.songIndex, index); MessageManager::callAsync ([o = &owner] { o->rebuild(); }); };
@@ -979,17 +997,52 @@ private:
         {
             auto r = getLocalBounds().reduced (0, 2);
             remove.setBounds (r.removeFromRight (28));     r.removeFromRight (6);
-            if (def.isMidi()) channel.setBounds (r.removeFromRight (110));
-            else              gain.setBounds (r.removeFromRight (110));
+            if (def.isMidi())
+            {
+                plays.setBounds (r.removeFromRight (220));  r.removeFromRight (6);
+                channel.setBounds (r.removeFromRight (110));
+            }
+            else gain.setBounds (r.removeFromRight (110));
             r.removeFromRight (6);
-            output.setBounds (r.removeFromRight (180));    r.removeFromRight (6);
+            output.setBounds (r.removeFromRight (def.isMidi() ? 130 : 180));    r.removeFromRight (6);
             name.setBounds (r);
+        }
+
+        /** The program whose slots are offered: the one the song puts this
+            keyboard on, else the one it is on now; the stem's own if it
+            already names one. */
+        void fillPlays()
+        {
+            plays.clear (dontSendNotification);
+            plays.addItem ("Its sounds (by LISTENS TO)", 1);
+            const auto& setup = owner.engine.getSetup();
+            playsProgram = -1;
+            if (def.input >= 0 && def.input < (int) setup.inputs.size() && ! setup.inputs[(size_t) def.input].isAudio())
+            {
+                const auto& in = setup.inputs[(size_t) def.input];
+                const auto& songs = owner.engine.getSongs();
+                int prog = in.currentProgram;
+                if (owner.songIndex >= 0 && owner.songIndex < (int) songs.size())
+                    if (const auto& sp = songs[(size_t) owner.songIndex].programs; def.input < (int) sp.size() && sp[(size_t) def.input] >= 0)
+                        prog = sp[(size_t) def.input];
+                if (def.slot >= 0 && def.program >= 0) prog = def.program;
+                playsProgram = jlimit (0, InputDef::numPrograms - 1, prog);
+                const auto& pd = in.programs[(size_t) playsProgram];
+                const String progName = String (playsProgram).paddedLeft ('0', 3) + (pd.name.isNotEmpty() ? " " + pd.name : String());
+                plays.addSectionHeading ("Straight into a plugin of " + progName);
+                for (int sl = 0; sl < (int) pd.slots.size(); ++sl)
+                    plays.addItem ("Only " + pd.slots[(size_t) sl].displayName(), 1000 + sl);
+                if (def.slot >= (int) pd.slots.size())
+                    plays.addItem ("Slot " + String (def.slot + 1) + " (no longer there)", 1000 + def.slot);
+            }
+            plays.setSelectedId (def.slot >= 0 ? 1000 + def.slot : 1, dontSendNotification);
         }
         TracksComponent& owner;
         int index;
         StemDef def;
         Label name;
-        ComboBox output, channel;
+        ComboBox output, channel, plays;
+        int playsProgram = -1;
         Slider gain;
         TextButton remove { "X" };
     };
@@ -1159,7 +1212,7 @@ void SongsPanel::showTracksDialog (int songIndex)
     const auto& songs = engine.getSongs();
     if (songIndex < 0 || songIndex >= (int) songs.size()) return;
     auto* content = new TracksComponent (engine, *this, songIndex);
-    content->setSize (640, 560);
+    content->setSize (780, 560);
     DialogWindow::LaunchOptions o;
     o.content.setOwned (content);
     o.dialogTitle = "Backing track: " + songs[(size_t) songIndex].name;

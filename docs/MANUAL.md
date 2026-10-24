@@ -347,6 +347,16 @@ your sounds), its notes follow sections, vamps and jumps like the audio does,
 and every note is let go when the track stops or jumps. Set the song's
 programs (Capture) to what the MIDI parts should play.
 
+**Plays** on a MIDI stem picks the sound by name instead. *Its sounds* is
+the way above, through the keyboard's program. Or choose one plugin of the
+program the song puts that keyboard on: the part goes straight to it,
+past its key range and **LISTENS TO**, and arrives on the channel that
+plugin listens on (what the slot **PLAYS ON**, else what it **LISTENS TO**,
+else the keyboard's channel). So the file's channel 5 strings can play a
+Kontakt that only hears channel 1. A part aimed at a plugin keeps playing it
+even while you switch that keyboard to another program -- that program
+stays loaded for the song.
+
 **Count-in** clicks a number of beats at the song's tempo before the stems
 start, on the output you choose -- usually the in-ears.
 

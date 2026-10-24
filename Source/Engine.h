@@ -593,6 +593,18 @@ private:
     /** Audio thread: every slot's MIDI chain, on the slot's MIDI for this block. */
     void runMidiChains (ProgramRuntime&, int numSamples, bool notesOffNow, bool panicNow);
     std::unique_ptr<SongPlayer> player;           // swapped under `lock`
+
+    /* MIDI stems aimed at one plugin (StemDef::isDirect). The player writes
+       such a stem into its own buffer; the audio thread then hands it to the
+       slot. All under `lock`. */
+    static constexpr int kMaxDirectStems = 64;
+    struct StemRoute { int input = -1, program = -1, slot = -1; };
+    StemRoute stemRoutes[kMaxDirectStems];
+    juce::MidiBuffer stemMidi[kMaxDirectStems];
+    juce::MidiBuffer* stemMidiPtrs[kMaxDirectStems] {};
+    /** Message thread: routes for the armed song's stems; loads and pins the programs they name. */
+    void updateStemRoutes();
+    void deliverStemMidi();                       // audio thread, under lock
     bool trackProblemsReported = true;            // message thread
     std::atomic<int> sectionCCAtomic { 0 };
     std::atomic<bool> sectionLearnArmed { false };
