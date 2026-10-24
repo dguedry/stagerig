@@ -530,8 +530,12 @@ curve and channels decide which notes enter the chain at all. Left to right:
 - **MIDI device** -- a hardware synth, a module, a lighting controller: the
   MIDI ports of the interfaces plugged in. With none connected it says so;
   plug one in and use **Options ▸ Rescan MIDI devices**.
-- **General MIDI player** -- the built-in FluidSynth player, a multitimbral
-  instrument with the standard 128 sounds and drum kits (see *Backing tracks*).
+- **General MIDI player** -- the built-in FluidSynth player, with the
+  standard 128 sounds and drum kits. **Sound...** on the slot picks the one
+  it plays -- a piano, strings, a kit on channel 10 -- or leaves it *as the
+  notes say*, which lets program changes choose: what a MIDI file's parts do
+  (see *Backing tracks*). A quick sound with nothing to install beyond
+  FluidSynth and a soundfont.
 - **Another keyboard's program** -- the notes go to one of that input's
   programs by name (*Upper: Big Strings*), kept loaded and playing beside
   whatever Upper itself is on; or to **whatever that keyboard is playing**.

@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "GmSynth.h"
 #include "PatchDialog.h"
+#include "GmMixer.h"
 #include "LevelMeter.h"
 #include "PluginView.h"
 #include "QrCode.h"
@@ -1177,6 +1178,7 @@ public:
             outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); o.markDirty(); };
             inCh.onClick      = [this] { showListensToMenu(); };
             guiBtn.onClick    = [this, &e, &o] { if (external)    showExternalMenu();
+                                                 else if (gm && alive) showGmSoundMenu();
                                                  else if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
                                                  else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
             removeBtn.onClick = [this, &e, &o] { e.removeSlot (o.getSelectedInput(), o.getEditedProgram(), index); };
@@ -1207,9 +1209,10 @@ public:
             }
             else if (gm)
             {
-                name.setText ("General MIDI player  [built in" + String (loading ? ", loading..." : "") + "]", dontSendNotification);
+                name.setText ("General MIDI player: " + gmSoundName (def) + (loading ? "   loading..." : String()), dontSendNotification);
                 name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
-                name.setTooltip (error.isNotEmpty() ? error : "FluidSynth with a General MIDI soundfont: a MIDI file's own instruments on every channel it listens to. Each part's instrument and level are set in the song's Backing track window.");
+                name.setTooltip (error.isNotEmpty() ? error : "FluidSynth with a General MIDI soundfont, the standard 128 sounds and drum kits. Sound... picks the one this plays; "
+                                                             "\"as the notes say\" lets program changes choose, which is what a MIDI file's parts do (each part's sound is then set in the song's Backing track window).");
             }
             else if (inputSlot)
             {
@@ -1246,10 +1249,10 @@ public:
             }
             else if (gm)
             {
-                // Nothing to open while it is running: a blank button would look broken.
-                guiBtn.setButtonText (loading ? "Loading" : "Retry");
-                guiBtn.setEnabled (! loading && ! loaded);
-                guiBtn.setVisible (loading || ! loaded);
+                // Running, its button picks the sound; not running, it retries the soundfont.
+                guiBtn.setButtonText (loading ? "Loading" : loaded ? "Sound..." : "Retry");
+                guiBtn.setEnabled (! loading);
+                guiBtn.setVisible (true);
                 guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
             }
             else if (inputSlot)
@@ -1357,6 +1360,64 @@ public:
         }
 
         /** An external instrument's port, patch recall and audio return. */
+        /** The General MIDI player's sound on the channels this slot takes
+            notes from: one name when they agree, as a keyboard's do. */
+        static String gmSoundName (const SlotDef& def)
+        {
+            int program = -2;
+            bool drums = true;
+            for (int c = 1; c <= 16; ++c)
+            {
+                if (! def.hears (c)) continue;
+                const int p = def.gmChannels[(size_t) c - 1].program;
+                if (c != 10) drums = false;
+                if (program == -2) program = p;
+                else if (program != p) return "mixed sounds";
+            }
+            if (program == -2) return "no channel";
+            if (program < 0)   return "as the notes say";
+            return drums ? gmKitName (program) : String (GmSynth::programName (program));
+        }
+
+        /** Sound...: the General MIDI instrument for the channels this slot hears
+            (a kit for channel 10), or back to the program changes in the notes. */
+        void showGmSoundMenu()
+        {
+            const auto def = slotDef;
+            int current = -2;
+            for (int c = 1; c <= 16; ++c)
+                if (def.hears (c) && c != 10) { current = def.gmChannels[(size_t) c - 1].program; break; }
+            PopupMenu m;
+            m.addItem (1, "As the notes say  (program changes choose, as a MIDI file's do)", true, current == -1);
+            m.addSeparator();
+            addGmInstrumentsToMenu (m, 1000, current);
+            if (def.hears (10))
+            {
+                PopupMenu kits;
+                addGmKitsToMenu (kits, 2000, def.gmChannels[9].program);
+                m.addSubMenu ("Drum kit (channel 10)", kits);
+            }
+            auto& e = panel.engine;
+            auto& o = panel.owner;
+            auto& p = panel;
+            const int in = o.getSelectedInput(), prog = o.getEditedProgram(), slot = index;
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (&guiBtn), [&e, &o, &p, in, prog, slot, def] (int r)
+            {
+                if (r < 1) return;
+                for (int c = 1; c <= 16; ++c)
+                {
+                    if (! def.hears (c)) continue;
+                    if (r >= 2000 && c != 10) continue;            // a kit is channel 10's
+                    if (r >= 1000 && r < 2000 && c == 10) continue; // an instrument is the others'
+                    auto gc = def.gmChannels[(size_t) c - 1];
+                    gc.program = r == 1 ? -1 : r >= 2000 ? r - 2000 : r - 1000;
+                    e.setGmChannel (in, prog, slot, c, gc);
+                }
+                o.markDirty();
+                p.refresh();          // last: it rebuilds the rows, this one included
+            });
+        }
+
         void showExternalMenu()
         {
             auto& e = panel.engine;
