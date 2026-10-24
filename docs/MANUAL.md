@@ -1166,5 +1166,5 @@ plugins load at once, default 4), `parallelBridgedLoads`, `bridgedColdStartSolo`
 | `A S D F G H J K` / `W E T Y U` | White and black keys on the on-screen keyboard. |
 | `Z` / `X` | Shift the on-screen keyboard down or up an octave. |
 | Double-click a part's level in the Backing track window | Back to 0 dB: the part as the file has it. |
-| Notes window's piano roll | Double-click adds a note; drag its ends to resize; Delete removes the selection; arrows move it a step (Shift: an octave); Space plays; **Undo** / **Redo** on the bar. |
+| Notes window's piano roll | Double-click adds a note; drag its ends to resize; Delete removes the selection; arrows move it a step (Shift: an octave); Space plays; `Ctrl+Z` / `Ctrl+Shift+Z` undo and redo. |
 | Escape | Closes a dialog. |
