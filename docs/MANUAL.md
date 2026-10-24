@@ -1175,6 +1175,15 @@ While a vendor's installer replaces a plugin, the bridged file is briefly
 missing. StageRig reports *yabridge link points to a missing file* rather than
 blacklisting the plugin; scan again once the install has finished.
 
+**A Spitfire plugin's window locks up or crashes the plugin** (BBC Symphony
+Orchestra, LABS, Originals) the first time it opens. Those plugins draw with
+OpenGL by default, and under Wine that can fault in the driver on the way to
+the first frame -- StageRig itself carries on, since the plugin was in its
+own process. Switch the plugin to ordinary drawing: in the prefix, open
+`drive_c/users/<you>/AppData/Roaming/Spitfire Audio/Settings/<plugin>.settings`
+and change `defaultOpenGL` from `1` to `0`, then reload the plugin. It looks
+the same and no longer needs the GPU.
+
 ## When something goes wrong
 
 | What you see | What it means | What to do |
