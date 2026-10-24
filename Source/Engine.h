@@ -306,6 +306,9 @@ public:
     int  getTrackInput() const                      { return setup.trackInput(); }
     /** Makes the backing-track input if there is none, and returns its index. */
     int  ensureTrackInput();
+    /** The song's program on the backing-track input, made (named after the
+        song, with the General MIDI player) if the song has none yet. */
+    int  ensureTrackProgram (int songIndex);
     /** The one instrument of `program` that plays channel `channel`: it
         listens to it (alone, if it was hearing every channel) and every
         other one stops. -1 = none plays it. */

@@ -1,6 +1,5 @@
 #include "MainComponent.h"
 #include "GmSynth.h"
-#include "GmMixer.h"
 #include "LevelMeter.h"
 #include "PluginView.h"
 #include "QrCode.h"
@@ -325,7 +324,7 @@ public:
         g.setColour (textDim);
         String info;
         if (def.isTrack())
-            info = "the songs' MIDI files play here";
+            info = "plays the songs' MIDI files";
         else if (def.isAudio())
         {
             info << "audio in " << (def.audioLeft + 1);
@@ -337,9 +336,12 @@ public:
         if (def.channel > 0 && ! def.isTrack()) info << "  ch " << def.channel;
         g.drawText (info, 8, 22, w - 80, 16, Justification::centredLeft, true);
 
-        g.setColour (accent);
-        g.setFont (FontOptions (13.0f, Font::bold));
-        g.drawText ("PC " + String (def.currentProgram).paddedLeft ('0', 3), w - 72, 22, 64, 16, Justification::centredRight, true);
+        if (! def.isTrack())      // its program follows the song, not a number anyone sends
+        {
+            g.setColour (accent);
+            g.setFont (FontOptions (13.0f, Font::bold));
+            g.drawText ("PC " + String (def.currentProgram).paddedLeft ('0', 3), w - 72, 22, 64, 16, Justification::centredRight, true);
+        }
 
         if (def.isAudio())
             LevelMeterPainter::paint (g, { w - 104, 6, 96, 12 }, engine.getInputLevel (row));
@@ -1123,8 +1125,8 @@ public:
             }
             gainCap.setText ("GAIN", dontSendNotification);
             transposeCap.setText ("TRANSPOSE", dontSendNotification);
-            chCap.setText ("PLAYS ON", dontSendNotification);
-            inChCap.setText ("LISTENS TO", dontSendNotification);
+            chCap.setText ("TO CHANNEL", dontSendNotification);
+            inChCap.setText ("FROM CHANNEL", dontSendNotification);
             panCap.setText ("PAN", dontSendNotification);
             curveCap.setText ("VELOCITY CURVE", dontSendNotification);
 
@@ -1178,9 +1180,10 @@ public:
 
             outCh.addItem ("Same channel", 1);
             for (int c = 1; c <= 16; ++c) outCh.addItem ("Channel " + String (c), c + 1);
-            inCh.setTooltip ("Which incoming MIDI channels this instrument plays. With the input on Omni, one program can give each "
-                             "channel its own sound: a bass on channel 2 and a pad on channel 1, from one keyboard or one MIDI file.");
-            outCh.setTooltip ("MIDI channel the plugin receives on. Keep the input's channel, or force one (multi-timbral plugins like Kontakt play the instrument on that channel).");
+            inCh.setTooltip ("Which MIDI channels this instrument takes notes from. Normally all of them. Pick channels when one keyboard "
+                             "sends its zones on different channels, or to give each part of a MIDI file its own sound.");
+            outCh.setTooltip ("Which MIDI channel the instrument itself is on. Normally the same channel the notes came in on. "
+                              "Set one for a hardware synth, or a multitimbral plugin like Kontakt with a sound per channel.");
 
             auto& e = panel.engine;
             auto& o = panel.owner;
@@ -1196,7 +1199,6 @@ public:
             outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); o.markDirty(); };
             inCh.onClick      = [this] { showListensToMenu(); };
             guiBtn.onClick    = [this, &e, &o] { if (external)    showExternalMenu();
-                                                 else if (gm && alive) showGmMixer (e, o.getSelectedInput(), o.getEditedProgram(), index);
                                                  else if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
                                                  else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
             removeBtn.onClick = [this, &e, &o] { e.removeSlot (o.getSelectedInput(), o.getEditedProgram(), index); };
@@ -1228,13 +1230,13 @@ public:
             {
                 name.setText ("General MIDI player  [built in" + String (loading ? ", loading..." : "") + "]", dontSendNotification);
                 name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
-                name.setTooltip (error.isNotEmpty() ? error : "FluidSynth with a General MIDI soundfont: a MIDI file's own instruments on every channel. Mixer... sets an instrument, level or pan of your own per channel.");
+                name.setTooltip (error.isNotEmpty() ? error : "FluidSynth with a General MIDI soundfont: a MIDI file's own instruments on every channel it listens to. Each part's instrument and level are set in the song's Backing track window.");
             }
             else if (inputSlot)
             {
                 name.setText (def.targetInputName + "'s sounds  [whatever that keyboard is playing]", dontSendNotification);
                 name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : Colours::white);
-                name.setTooltip (error.isNotEmpty() ? error : "The notes this instrument gets go to that input's current program, on its channel: a layer from another keyboard, or a MIDI file part played by it.");
+                name.setTooltip (error.isNotEmpty() ? error : "The notes this gets are played by whatever that keyboard is playing right now: a layer from another keyboard, or a MIDI file part.");
             }
             else
             {
@@ -1252,6 +1254,8 @@ public:
             updateVelCaption();
             outCh.setSelectedId (def.outChannel + 1, dontSendNotification);
             inCh.setButtonText (def.listensToText());
+            // A keyboard's instruments rarely need the channel controls; they stay for the multi-channel cases.
+            inCh.setColour (TextButton::textColourOffId, def.hearsAll() ? textDim : Colours::white);
             slotDef = def;
             if (external)
             {
@@ -1261,8 +1265,8 @@ public:
             }
             else if (gm)
             {
-                guiBtn.setButtonText (loading ? "Loading" : loaded ? "Mixer..." : "Retry");
-                guiBtn.setEnabled (! loading);
+                guiBtn.setButtonText (loading ? "Loading" : loaded ? "" : "Retry");
+                guiBtn.setEnabled (! loading && ! loaded);
                 guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
             }
             else if (inputSlot)

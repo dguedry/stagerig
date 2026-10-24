@@ -36,6 +36,8 @@ struct MidiDoc
 
     /** What the file plays on a channel: its first program, and a track name if it has one. */
     int firstProgram (int channel) const;
+    /** The first value the file sets for controller `cc` on `channel`, or -1. */
+    int firstController (int channel, int cc) const;
     juce::String partName (int channel) const;
     bool channelUsed (int channel) const;
     int trackFor (int channel) const;             // the track new notes on this channel go to

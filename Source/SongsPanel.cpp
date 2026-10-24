@@ -1,7 +1,9 @@
 #include "SongsPanel.h"
 #include "Charts.h"
 #include "GmSynth.h"
+#include "GmMixer.h"
 #include "MidiEditor.h"
+#include <cmath>
 #include <map>
 
 namespace perf
@@ -58,7 +60,7 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
 
     addAndMakeVisible (chartBtn);
     chartBtn.setTooltip ("What this song brings with it: sheet music for the tablet (a PDF, an image, a text "
-                         "chart or a ChordPro file) and a backing track of audio stems. Or drop files on the song.");
+                         "chart or a ChordPro file) and a backing track: audio files and MIDI files. Or drop files on the song.");
     chartBtn.onClick = [this] { showChartMenu(); };
 
     addAndMakeVisible (playBtn);
@@ -714,7 +716,7 @@ void SongsPanel::showChartMenu()
 
     PopupMenu m;
     m.addItem (1, "Attach a chart...");
-    m.addItem (2, "Backing track..." + (sg.stems.empty() ? String() : "  (" + String ((int) sg.stems.size()) + (sg.stems.size() == 1 ? " stem)" : " stems)")));
+    m.addItem (2, "Backing track..." + (sg.stems.empty() ? String() : "  (" + String ((int) sg.stems.size()) + (sg.stems.size() == 1 ? " file)" : " files)")));
     if (! sg.charts.empty())
     {
         m.addSectionHeader ("Attached");
@@ -874,10 +876,10 @@ public:
         hint.setColour (Label::textColourId, textDim);
         hint.setFont (FontOptions (12.0f));
         hint.setJustificationType (Justification::topLeft);
-        hint.setText ("Audio stems play on an output; a MIDI file plays through a keyboard's current sounds. "
-                      "Each stem plays on its own output from the start of the song when the track is started "
-                      "-- Play in the songs panel, the tablet, or the start/stop footswitch. Put a click or cue "
-                      "stem on your in-ear output. The count-in clicks at the song's tempo.\n"
+        hint.setText ("Audio files play on an output. A MIDI file plays parts, like another player in the band: "
+                      "each part plays on what you choose -- a General MIDI instrument, a keyboard's sounds, a plugin, "
+                      "a MIDI device. Everything starts together with Play in the songs panel, the tablet, or the "
+                      "start/stop footswitch. Put a click or cue file on your in-ear output. The count-in clicks at the song's tempo.\n"
                       "Sections start at their time and run to the next. A vamp section repeats until released "
                       "(Next, the tablet, or the section footswitch); asking for a section takes you there when "
                       "the current one ends.", dontSendNotification);
@@ -917,7 +919,7 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced (10);
-        for (auto& row : rows) row->setBounds (r.removeFromTop (30));
+        for (auto& row : rows) row->setBounds (r.removeFromTop (row->preferredHeight()));
         r.removeFromTop (6);
         addBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
         r.removeFromTop (12);
@@ -949,13 +951,23 @@ private:
 
             if (d.isMidi())
             {
-                /* A MIDI file plays into the backing-track input; the song's
-                   program there says what each part plays. Nothing to set
-                   here but the notes and the parts, in the editor. */
-                addAndMakeVisible (channels);
-                channels.setButtonText ("Edit MIDI...");
-                channels.setTooltip ("The MIDI editor: each part's instrument (a General MIDI instrument or one of yours), its mix, and the notes");
-                channels.onClick = [this] { owner.showChannelRoutes (index); };
+                /* A MIDI file is another player in the band: it plays parts,
+                   and each part plays on an instrument. The parts are listed
+                   here with what plays them; the notes have a window of their own. */
+                addAndMakeVisible (notes);
+                notes.setTooltip ("The notes: a piano roll to move, add and delete them, and change velocities");
+                notes.onClick = [this] { owner.showChannelRoutes (index); };
+                String err;
+                if (doc.load (owner.engine.getChartsFolder().getChildFile (d.file), err))
+                    for (int ch = 1; ch <= 16; ++ch)
+                        if (doc.channelUsed (ch)) addPart (ch);
+                if (parts.empty())
+                {
+                    addAndMakeVisible (empty);
+                    empty.setColour (Label::textColourId, err.isNotEmpty() ? Colours::orange : textDim);
+                    empty.setText (err.isNotEmpty() ? err : String ("No notes in this file"), dontSendNotification);
+                }
+                refreshParts();
             }
             else
             {
@@ -972,15 +984,19 @@ private:
                 gain.onValueChange = [this] { def.gainDb = (float) gain.getValue(); owner.engine.setSongStem (owner.songIndex, index, def); };
             }
             addAndMakeVisible (remove);
-            remove.setTooltip ("Take this stem off the song. The file stays in the setup's folder.");
+            remove.setTooltip ("Take this file off the song. It stays in the setup's folder.");
             remove.onClick = [this] { owner.engine.removeSongStem (owner.songIndex, index); MessageManager::callAsync ([o = &owner] { o->rebuild(); }); };
         }
+
+        int preferredHeight() const { return 30 + (int) parts.size() * 28 + (parts.empty() && def.isMidi() ? 24 : 0); }
+
         void resized() override
         {
-            auto r = getLocalBounds().reduced (0, 2);
+            auto all = getLocalBounds();
+            auto r = all.removeFromTop (30).reduced (0, 2);
             remove.setBounds (r.removeFromRight (28));     r.removeFromRight (6);
             if (def.isMidi())
-                channels.setBounds (r.removeFromRight (120));
+                notes.setBounds (r.removeFromRight (100));
             else
             {
                 gain.setBounds (r.removeFromRight (110));
@@ -989,16 +1005,261 @@ private:
             }
             r.removeFromRight (6);
             name.setBounds (r);
+            if (parts.empty()) empty.setBounds (all.removeFromTop (24).withTrimmedLeft (24));
+            for (auto& p : parts)
+            {
+                auto line = all.removeFromTop (28).reduced (0, 3);
+                line.removeFromLeft (24);
+                line.removeFromRight (34);                 // under the X
+                p->mute.setBounds (line.removeFromRight (28));  line.removeFromRight (6);
+                p->level.setBounds (line.removeFromRight (100)); line.removeFromRight (6);
+                p->plays.setBounds (line.removeFromRight (jmin (300, line.getWidth() / 2))); line.removeFromRight (6);
+                p->label.setBounds (line);
+            }
+        }
+
+        void paint (Graphics& g) override
+        {
+            if (parts.empty()) return;
+            g.setColour (textDim.withAlpha (0.35f));
+            g.drawVerticalLine (12, 30.0f, (float) getHeight() - 4.0f);
+        }
+
+        // --- the parts -----------------------------------------------------------
+        struct Part
+        {
+            int channel = 1;
+            Label label;
+            TextButton plays, mute { "M" };
+            Slider level;
+        };
+
+        void addPart (int ch)
+        {
+            auto p = std::make_unique<Part>();
+            p->channel = ch;
+            const auto partName = doc.partName (ch);
+            p->label.setText ("Ch " + String (ch) + "   " + (partName.isNotEmpty() ? partName : (ch == 10 ? String ("Drums") : String (GmSynth::programName (doc.firstProgram (ch))))), dontSendNotification);
+            p->label.setFont (FontOptions (13.0f));
+            p->plays.setTooltip ("What plays this part");
+            p->plays.onClick = [this, ch] { choosePlays (ch); };
+            p->level.setSliderStyle (Slider::LinearBar);
+            p->level.setRange (-60.0, 12.0, 0.5);
+            p->level.setTextValueSuffix (" dB");
+            p->level.setTooltip ("This part's level. 0 dB is as the file has it; double-click to go back there");
+            p->level.onValueChange = [this, ch] { setLevel (ch, (float) partFor (ch)->level.getValue()); };
+            p->mute.setClickingTogglesState (true);
+            p->mute.setColour (TextButton::buttonOnColourId, Colours::orangered);
+            p->mute.setTooltip ("Mute this part");
+            p->mute.onClick = [this, ch] { setMuted (ch, partFor (ch)->mute.getToggleState()); };
+            for (auto* c : std::initializer_list<Component*> { &p->label, &p->plays, &p->level, &p->mute })
+                addAndMakeVisible (c);
+            parts.push_back (std::move (p));
+        }
+
+        Part* partFor (int ch) { for (auto& p : parts) if (p->channel == ch) return p.get(); return nullptr; }
+
+        int track() const      { return owner.engine.getTrackInput(); }
+        int program() const    { const auto& songs = owner.engine.getSongs(); return owner.songIndex < (int) songs.size() ? songs[(size_t) owner.songIndex].programFor (track()) : -1; }
+        const ProgramDef* programDef() const
+        {
+            const auto& inputs = owner.engine.getSetup().inputs;
+            const int t = track(), p = program();
+            return t >= 0 && t < (int) inputs.size() && p >= 0 ? &inputs[(size_t) t].programs[(size_t) p] : nullptr;
+        }
+        const SlotDef* instrumentFor (int ch, int* indexOut = nullptr) const
+        {
+            auto* pd = programDef();
+            if (pd == nullptr) return nullptr;
+            const int sl = owner.engine.partInstrument (track(), program(), ch);
+            if (indexOut != nullptr) *indexOut = sl;
+            return sl >= 0 ? &pd->slots[(size_t) sl] : nullptr;
+        }
+
+        /** A GM part's level is relative to what the file asks for: 0 dB is
+            the file's own CC 7 (100 when it sets none), by a fader's law. */
+        int fileCc (int ch) const      { const int v = doc.firstController (ch, 7); return v > 0 ? v : 100; }
+        static float ccToDb (int cc, int base) { return cc <= 0 ? -60.0f : jmax (-60.0f, 40.0f * std::log10 ((float) cc / (float) base)); }
+        static int   dbToCc (float dB, int base) { return jlimit (0, 127, (int) std::lround ((float) base * std::pow (10.0f, dB / 40.0f))); }
+
+        void refreshParts()
+        {
+            for (auto& p : parts)
+            {
+                const auto* sd = instrumentFor (p->channel);
+                p->plays.setButtonText (partInstrumentName (owner.engine, track(), program(), p->channel, doc.firstProgram (p->channel)));
+                const bool loading = sd != nullptr && ! sd->isGm() && owner.engine.isPluginLoading (track(), program(), owner.engine.partInstrument (track(), program(), p->channel));
+                p->plays.setColour (TextButton::textColourOffId, sd == nullptr || loading ? textDim : Colours::white);
+                p->level.setEnabled (sd != nullptr);
+                p->mute.setEnabled (sd != nullptr);
+                if (sd == nullptr) { p->mute.setToggleState (false, dontSendNotification); continue; }
+                if (sd->isGm())
+                {
+                    const auto& gc = sd->gmChannels[(size_t) p->channel - 1];
+                    p->level.setDoubleClickReturnValue (true, 0.0);
+                    p->level.setValue (gc.volume >= 0 ? ccToDb (gc.volume, fileCc (p->channel)) : 0.0f, dontSendNotification);
+                    p->mute.setToggleState (gc.muted, dontSendNotification);
+                }
+                else
+                {
+                    p->level.setDoubleClickReturnValue (true, 0.0);
+                    p->level.setValue (sd->gainDb, dontSendNotification);
+                    p->mute.setToggleState (! sd->enabled, dontSendNotification);
+                }
+            }
+        }
+
+        void setLevel (int ch, float dB)
+        {
+            int sl = -1;
+            const auto* sd = instrumentFor (ch, &sl);
+            if (sd == nullptr) return;
+            if (sd->isGm())
+            {
+                auto gc = sd->gmChannels[(size_t) ch - 1];
+                gc.volume = std::abs (dB) < 0.01f ? -1 : dbToCc (dB, fileCc (ch));      // at 0 dB the file has it
+                owner.engine.setGmChannel (track(), program(), sl, ch, gc);
+            }
+            else
+                owner.engine.setSlotGainDb (track(), program(), sl, dB);
+        }
+
+        void setMuted (int ch, bool muted)
+        {
+            int sl = -1;
+            const auto* sd = instrumentFor (ch, &sl);
+            if (sd == nullptr) return;
+            if (sd->isGm())
+            {
+                auto gc = sd->gmChannels[(size_t) ch - 1];
+                gc.muted = muted;
+                owner.engine.setGmChannel (track(), program(), sl, ch, gc);
+            }
+            else
+                owner.engine.setSlotEnabled (track(), program(), sl, ! muted);
+        }
+
+        /** What plays this part: a General MIDI instrument, a keyboard's sounds,
+            a plugin, a MIDI device, something already in the song's program, or nothing. */
+        void choosePlays (int ch)
+        {
+            auto& engine = owner.engine;
+            const int p = engine.ensureTrackProgram (owner.songIndex);
+            const int t = engine.getTrackInput();
+            if (p < 0 || t < 0) return;
+            const auto& prog = engine.getSetup().inputs[(size_t) t].programs[(size_t) p];
+            const int current = engine.partInstrument (t, p, ch);
+            const auto* cur = current >= 0 ? &prog.slots[(size_t) current] : nullptr;
+            const int fileProgram = doc.firstProgram (ch);
+
+            PopupMenu m;
+            const bool gmNow = cur != nullptr && cur->isGm();
+            const int gmChoice = gmNow ? cur->gmChannels[(size_t) ch - 1].program : -2;
+            m.addItem (2, (ch == 10 ? gmKitName (fileProgram) : String (GmSynth::programName (fileProgram))) + "   (what the file asks for, General MIDI)",
+                       GmSynth::isAvailable(), gmChoice == -1);
+            {
+                PopupMenu gm;
+                if (ch == 10) { addGmKitsToMenu (gm, 1000, gmChoice); gm.addSeparator(); }
+                addGmInstrumentsToMenu (gm, 1000, gmChoice);
+                m.addSubMenu (ch == 10 ? "Another General MIDI kit or instrument" : "Another General MIDI instrument", gm, GmSynth::isAvailable(), nullptr, gmChoice >= 0);
+            }
+            m.addSeparator();
+            const auto& inputs = engine.getSetup().inputs;
+            for (int i = 0; i < (int) inputs.size(); ++i)
+                if (! inputs[(size_t) i].isAudio() && ! inputs[(size_t) i].isTrack())
+                    m.addItem (2000 + i, inputs[(size_t) i].name + "'s sounds  (whatever it is playing)", true,
+                               cur != nullptr && cur->isInput() && cur->targetInput == i);
+            Array<PluginDescription> types;
+            for (auto& d : engine.getPluginHost().getKnownPlugins().getTypes()) if (d.isInstrument) types.add (d);
+            {
+                PopupMenu plugins;
+                StringArray makers;
+                for (auto& d : types) makers.addIfNotAlreadyThere (d.manufacturerName.isNotEmpty() ? d.manufacturerName : "Other");
+                makers.sortNatural();
+                for (auto& maker : makers)
+                {
+                    PopupMenu sub;
+                    for (int k = 0; k < types.size(); ++k)
+                        if ((types[k].manufacturerName.isNotEmpty() ? types[k].manufacturerName : "Other") == maker)
+                            sub.addItem (3000 + k, types[k].name + "  [" + types[k].pluginFormatName + "]");
+                    if (makers.size() == 1) plugins = sub; else plugins.addSubMenu (maker, sub);
+                }
+                if (types.isEmpty()) plugins.addItem (2999, "No instrument plugins known yet: scan under Plugins...", false);
+                m.addSubMenu ("A plugin instrument", plugins);
+            }
+            Array<MidiDeviceInfo> ports;
+            for (const auto& d : MidiOutput::getAvailableDevices()) if (! d.name.containsIgnoreCase ("Midi Through")) ports.add (d);
+            {
+                PopupMenu devices;
+                for (int k = 0; k < ports.size(); ++k) devices.addItem (4000 + k, ports[k].name);
+                if (ports.isEmpty()) devices.addItem (3999, "No MIDI interface connected", false);
+                m.addSubMenu ("A MIDI device (hardware synth, lights)", devices);
+            }
+            bool header = false;
+            for (int sl = 0; sl < (int) prog.slots.size(); ++sl)
+            {
+                const auto& sd = prog.slots[(size_t) sl];
+                if (sd.isGm() || sd.isInput()) continue;
+                if (! header) { m.addSectionHeader ("Already in this song"); header = true; }
+                m.addItem (100 + sl, sd.displayName(), true, sl == current);
+            }
+            m.addSeparator();
+            m.addItem (1, "Nothing", true, cur == nullptr);
+
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (partFor (ch)->plays), [this, ch, t, p, types, ports] (int r)
+            {
+                auto& e = owner.engine;
+                if (r < 1) return;
+                auto slotsNow = [&] { return (int) e.getSetup().inputs[(size_t) t].programs[(size_t) p].slots.size(); };
+                auto gmSlot = [&]
+                {
+                    const auto& slots = e.getSetup().inputs[(size_t) t].programs[(size_t) p].slots;
+                    for (int sl = 0; sl < (int) slots.size(); ++sl) if (slots[(size_t) sl].isGm()) return sl;
+                    e.addGmSlot (t, p);
+                    return slotsNow() - 1;
+                };
+                if (r == 1) e.assignPart (t, p, ch, -1);
+                else if (r == 2 || (r >= 1000 && r < 1128))
+                {
+                    const int g = gmSlot();
+                    e.assignPart (t, p, ch, g);
+                    auto gc = e.getSetup().inputs[(size_t) t].programs[(size_t) p].slots[(size_t) g].gmChannels[(size_t) ch - 1];
+                    gc.program = r == 2 ? -1 : r - 1000;
+                    e.setGmChannel (t, p, g, ch, gc);
+                }
+                else if (r >= 100 && r < 1000) e.assignPart (t, p, ch, r - 100);
+                else if (r >= 2000 && r < 3000)
+                {
+                    const int target = r - 2000;
+                    const auto& slots = e.getSetup().inputs[(size_t) t].programs[(size_t) p].slots;
+                    int sl = -1;
+                    for (int k = 0; k < (int) slots.size(); ++k) if (slots[(size_t) k].isInput() && slots[(size_t) k].targetInput == target) sl = k;
+                    if (sl < 0 && e.addInputSlot (t, p, target)) sl = slotsNow() - 1;
+                    if (sl >= 0) e.assignPart (t, p, ch, sl);
+                }
+                else if (r >= 3000 && r < 3000 + types.size())
+                {
+                    String err;
+                    if (e.addSlot (t, p, types[r - 3000], err)) e.assignPart (t, p, ch, slotsNow() - 1);
+                }
+                else if (r >= 4000 && r < 4000 + ports.size())
+                {
+                    if (e.addExternalSlot (t, p, ports[r - 4000])) e.assignPart (t, p, ch, slotsNow() - 1);
+                }
+                refreshParts();
+            });
         }
 
         TracksComponent& owner;
         int index;
         StemDef def;
-        Label name;
+        MidiDoc doc;
+        Label name, empty;
         ComboBox output;
-        TextButton channels;
+        TextButton notes { "Notes..." };
         Slider gain;
         TextButton remove { "X" };
+        std::vector<std::unique_ptr<Part>> parts;
     };
 
     struct SectionRow : public Component
@@ -1152,6 +1413,8 @@ private:
         if (songIndex >= 0 && songIndex < (int) songs.size()
             && (songs[(size_t) songIndex].stems.size() != rows.size() || songs[(size_t) songIndex].markers.size() != sectionRows.size()))
             rebuild();
+        else
+            for (auto& row : rows) if (row->def.isMidi()) row->refreshParts();     // a plugin finished loading, a part was changed elsewhere
     }
 
     Engine& engine;
@@ -1172,7 +1435,7 @@ void SongsPanel::showTracksDialog (int songIndex)
     const auto& songs = engine.getSongs();
     if (songIndex < 0 || songIndex >= (int) songs.size()) return;
     auto* content = new TracksComponent (engine, *this, songIndex);
-    content->setSize (780, 560);
+    content->setSize (820, 640);
     DialogWindow::LaunchOptions o;
     o.content.setOwned (content);
     o.dialogTitle = "Backing track: " + songs[(size_t) songIndex].name;

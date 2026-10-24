@@ -351,20 +351,21 @@ channel's program change says. The player is FluidSynth with the FluidR3_GM
 soundfont; choose another (GeneralUser GS, a commercial GM bank) under
 **Options ▸ General MIDI soundfont...**.
 
-To give a part a better sound, select **Backing track** on the left and the
-song's program in the middle, and add an instrument under INSTRUMENTS as
-you would for a keyboard: a plugin, a MIDI device, or ***Upper*'s sounds**
-(the part goes to whatever that keyboard is playing). Set what it
-**LISTENS TO** to the part's channel, and take that channel away from the
-General MIDI player. Or do the same in one move from the file's
-**Edit MIDI...** window, where each part has a **Plays on** menu: a General
-MIDI instrument (the file's own, or any other), or one of the instruments in
-the program. One instrument per part; layering is for the INSTRUMENTS panel.
+Under the file, the window lists its **parts** -- the channels it uses, each
+with the name the file gives it -- and for each: what it **plays on**, its
+**level**, and **M** to mute it. **Plays on** offers a General MIDI
+instrument (the file's own, or any of the 128 and the drum kits), a
+keyboard's sounds (***Upper*'s sounds**: whatever that keyboard is playing),
+a plugin instrument, a MIDI device, anything already in the song, or nothing.
+One instrument per part. **Notes...** opens a piano roll for the file's
+notes. That is the whole job; the mechanics underneath are ordinary: the
+song's program on the **Backing track** input holds those instruments, and
+INSTRUMENTS shows them when that input is selected -- with their effects,
+MIDI chains and everything else an instrument has.
 
 The file's program changes and bank selects reach only the General MIDI
-player: your own instruments keep their patches. **Mixer...** on the player
-sets, per channel, an instrument, volume, pan or mute of your own over the
-file's. Notes follow sections, vamps and jumps like the audio does, every
+player: your own instruments keep their patches. Notes follow sections,
+vamps and jumps like the audio does, every
 note is let go when the track stops or jumps, and starting from a section in
 the middle tells the instruments what the file had set by then.
 
@@ -468,13 +469,13 @@ curve and channels decide which notes enter the chain at all. Left to right:
 | **Checkbox** | Enables the slot. Off is silent but stays loaded. |
 | **Icon** | The plugin's own icon where it has one, otherwise a coloured badge with its initials. |
 | **Name** | Plugin name and format. Red means it failed to load; hover for the reason. |
-| **Edit GUI** | Opens the plugin's own editor in its own window. Shows **Reload** instead if the plugin died, **Setup...** for a MIDI device, **Mixer...** for the General MIDI player. |
+| **Edit GUI** | Opens the plugin's own editor in its own window. Shows **Reload** instead if the plugin died, and **Setup...** for a MIDI device. |
 | **X** | Removes the slot. |
 | **GAIN** | Level of this slot, applied after its effects. Double-click for 0 dB. |
 | **PAN** | Stereo position, `centre`, `L 40`, `R 25`. Double-click for centre. |
 | **TRANSPOSE** | Shifts incoming notes in semitones; `+12 st` is an octave up. |
-| **LISTENS TO** | Which incoming MIDI channels this slot plays: *All channels*, or any set of them. With the input on *Omni*, one program can give each channel its own sound -- see *Routing by channel* below. |
-| **PLAYS ON** | *Same channel*, or a fixed one the slot sends on. Multi-timbral plugins such as Kontakt play the instrument assigned to that channel; an external instrument listens on one channel, usually 1. |
+| **FROM CHANNEL** | Which MIDI channels this instrument takes notes from: *All channels*, normally, or any set of them. With the input on *Omni*, one program can give each channel its own sound -- see *Routing by channel* below. |
+| **TO CHANNEL** | Which channel the instrument itself is on: *Same channel* as the notes came in on, normally. Set one for a hardware synth, or a multitimbral plugin such as Kontakt with a sound per channel. |
 | **KEY RANGE** | Two handles: the lowest and highest key that reach this slot. The caption spells the range out. |
 | **VELOCITY** | Two handles: the softest and loudest note-on that reach this slot. |
 | **VELOCITY CURVE** | Reshapes how hard your playing appears to the plugin, from `100 % softer` through `linear` to `+100 % louder`. |
@@ -502,7 +503,7 @@ curve and channels decide which notes enter the chain at all. Left to right:
 ### Routing by channel
 
 A program's slots hear everything their input lets through, unless a slot
-**listens to** some channels only. Set the input's channel to *Omni* and give
+takes notes **from** some channels only. Set the input's channel to *Omni* and give
 each slot its channel, and one program sorts the parts by itself:
 
 | Slot | Listens to | Plays |

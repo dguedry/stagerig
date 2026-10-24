@@ -1086,7 +1086,12 @@ int Engine::moveSong (int songIndex, int delta)
 void Engine::setSongName (int songIndex, const String& name)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
-    setup.songs[(size_t) songIndex].name = name;
+    auto& song = setup.songs[(size_t) songIndex];
+    // The song's program on the backing track was named after it: it follows.
+    if (const int track = setup.trackInput(); track >= 0)
+        if (const int p = song.programFor (track); p >= 0 && setup.inputs[(size_t) track].programs[(size_t) p].name == song.name)
+            setProgramName (track, p, name);
+    song.name = name;
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
@@ -1173,30 +1178,33 @@ void Engine::addSongStem (int songIndex, const StemDef& d)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
     setup.songs[(size_t) songIndex].stems.push_back (d);
-    if (d.isMidi())
-    {
-        /* A MIDI file plays into the backing-track input, on the program
-           this song selects there. The first file gives the song that
-           program -- named after it, with the General MIDI player, so the
-           file plays at once -- and the Instruments panel takes it from there. */
-        const int track = ensureTrackInput();
-        auto& song = setup.songs[(size_t) songIndex];
-        if (song.programFor (track) < 0)
-        {
-            auto& programs = setup.inputs[(size_t) track].programs;
-            int p = -1;
-            for (int i = 0; i < (int) programs.size() && p < 0; ++i)
-                if (programs[(size_t) i].isEmpty() && programs[(size_t) i].name.isEmpty()) p = i;
-            if (p < 0) p = InputDef::numPrograms - 1;
-            if (song.programs.size() <= (size_t) track) song.programs.resize ((size_t) track + 1, -1);
-            song.programs[(size_t) track] = p;
-            setProgramName (track, p, song.name);
-            addGmSlot (track, p);
-            if (songIndex == trackSong) selectProgram (track, p);
-        }
-    }
+    if (d.isMidi()) ensureTrackProgram (songIndex);
     if (songIndex == trackSong) armTrack (songIndex);
     listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+int Engine::ensureTrackProgram (int songIndex)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return -1;
+    /* A MIDI file plays into the backing-track input, on the program this
+       song selects there. The first file gives the song that program --
+       named after it, with the General MIDI player, so the file plays at
+       once -- and its parts are given other instruments from the song's
+       Backing track window. */
+    const int track = ensureTrackInput();
+    auto& song = setup.songs[(size_t) songIndex];
+    if (const int have = song.programFor (track); have >= 0) return have;
+    auto& programs = setup.inputs[(size_t) track].programs;
+    int p = -1;
+    for (int i = 0; i < (int) programs.size() && p < 0; ++i)
+        if (programs[(size_t) i].isEmpty() && programs[(size_t) i].name.isEmpty()) p = i;
+    if (p < 0) p = InputDef::numPrograms - 1;
+    if (song.programs.size() <= (size_t) track) song.programs.resize ((size_t) track + 1, -1);
+    song.programs[(size_t) track] = p;
+    setProgramName (track, p, song.name);
+    addGmSlot (track, p);
+    if (songIndex == trackSong) selectProgram (track, p);
+    return p;
 }
 
 int Engine::ensureTrackInput()
