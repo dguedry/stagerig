@@ -5,6 +5,7 @@
 #include "MappingSuggestions.h"
 #include "ClapPluginFormat.h"
 #include "GmSynth.h"
+#include "MidiEditor.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
 #include <cmath>
@@ -1931,6 +1932,62 @@ int main()
             std::printf ("     channel 1 to Upper instead: %.3f\n", viaKeys);
             CHECK (viaKeys > 0.01f);
             engine.stopTrack(); levels (4); pump (50); levels (60);
+
+            // The editor's mix: volume 0 on the part silences the GM player; muted, the same; soloing another part, the same.
+            auto quietWith = [&] (std::function<void (MidiRoute&)> f)
+            {
+                StemDef m; m.file = "part.mid";
+                f (m.route (1));
+                engine.setSongStem (gmSong, 0, m);
+                engine.startTrack();
+                const float l = levels (24)[0];
+                engine.stopTrack(); levels (4); pump (50); levels (60);
+                return l;
+            };
+            const float atZero = quietWith ([] (MidiRoute& r) { r.volume = 0; });
+            const float muted  = quietWith ([] (MidiRoute& r) { r.muted = true; });
+            const float other  = quietWith ([] (MidiRoute&) {});
+            const float legacyMute = quietWith ([] (MidiRoute& r) { r.kind = MidiRoute::Kind::mute; });
+            StemDef soloed; soloed.file = "part.mid"; soloed.route (2).solo = true;
+            engine.setSongStem (gmSong, 0, soloed);
+            engine.startTrack();
+            const float soloAway = levels (24)[0];
+            engine.stopTrack(); levels (4); pump (50); levels (60);
+            std::printf ("     GM part at volume 0: %.4f, muted: %.4f, another soloed: %.4f, as the file has it: %.3f\n", atZero, muted, soloAway, other);
+            CHECK (atZero < 3e-3f && muted < 1e-3f && soloAway < 1e-3f && legacyMute < 1e-3f && other > 0.01f);
+
+            // An instrument of our choosing instead of the file's: still sounds, and is saved.
+            StemDef chosen; chosen.file = "part.mid"; chosen.route (1).gmProgram = 48;   // String Ensemble 1
+            engine.setSongStem (gmSong, 0, chosen);
+            engine.startTrack();
+            CHECK (levels (24)[0] > 0.005f);
+            engine.stopTrack(); levels (4); pump (50); levels (60);
+            CHECK (StemDef::fromVar (chosen.toVar()).route (1).gmProgram == 48);
+
+            // The editor's file round trip: a note added and saved, the first version kept, the tempo and program change intact.
+            {
+                const auto f = folder.getChildFile ("part.mid");
+                MidiDoc doc;
+                String err;
+                CHECK (doc.load (f, err));
+                CHECK (doc.notes.size() == 1 && doc.notes[0].key == 60 && doc.firstProgram (1) == 5);
+                const int before = (int) doc.notes.size();
+                MidiDoc::Note n; n.channel = 1; n.key = 67; n.velocity = 90; n.start = 960; n.end = 1920; n.track = doc.trackFor (1);
+                doc.notes.push_back (n);
+                doc.notes[0].velocity = 55;
+                CHECK (doc.save (f, err));
+                CHECK (f.getSiblingFile ("part.orig.mid").existsAsFile());
+                MidiDoc back;
+                CHECK (back.load (f, err));
+                bool found = false;
+                for (auto& x : back.notes) if (x.key == 67 && x.start == 960 && x.end == 1920 && x.velocity == 90) found = true;
+                CHECK ((int) back.notes.size() == before + 1 && found && back.firstProgram (1) == 5);
+                CHECK (std::abs (back.tickToSeconds (960) - 0.5) < 1e-6);          // 120 bpm: a quarter is half a second
+                // The player hears the saved file.
+                engine.reloadTrack (gmSong);
+                CHECK (waitReady());
+                std::printf ("     edited MIDI file: %d notes, length %.2f s\n", (int) back.notes.size(), engine.getTrackLength());
+            }
             engine.removeSong (gmSong);
         }
 

@@ -75,6 +75,8 @@ public:
     /** Goes to section `index` when the current one ends; while stopped,
         that is where Play will start. -1 cancels a queued section. */
     void queueSection (int index);
+    /** While stopped: Play starts here (seconds). */
+    void cue (double seconds);
     /** Lets a vamp play on at the end of the current repetition. */
     void releaseVamp()                            { vampHold.store (false); }
     /** The one-pedal control: releases a vamp, or else queues the next section. */
@@ -109,6 +111,10 @@ private:
         bool midi = false;
         bool wantsGm = false;                     // some channel played on the GM player when it was loaded
         std::atomic<int> routeKind[16], routeInput[16];
+        std::atomic<int> gmProgram[16], volume[16], pan[16];      // -1 = the file's
+        std::atomic<bool> silent[16];                              // muted, or another part is soloed
+        std::atomic<bool> chaseRequested { false };                // the mix changed: the GM player catches up
+        int lastDest[16];                                          // audio thread: where each channel went last block
         struct Event { juce::int64 at; uint8_t data[3]; uint8_t size; };
         std::vector<Event> events;
         juce::int64 midiLength = 0;
@@ -122,6 +128,8 @@ private:
     /** Where this block's MIDI goes, for dispatch(). */
     struct MidiDest { juce::MidiBuffer* const* inputMidi; int numInputs; juce::MidiBuffer* const* slotMidi; int numSlotMidi; };
     void dispatch (Stem&, const juce::MidiMessage&, int at, const MidiDest&);
+    void dispatchTo (Stem&, const juce::MidiMessage&, int at, MidiRoute::Kind, int input, const MidiDest&);
+    void applyRoutes (Stem&, const std::array<MidiRoute, 16>&);
     void midiForRun (Stem&, juce::int64 from, int count, int at, const MidiDest&);
     void allNotesOff (Stem&, int at, const MidiDest&);
     /** The GM player's channels as they would be at `from`: programs, banks, volume, pan... */

@@ -36,6 +36,8 @@ public:
     void handle (const juce::MidiMessage&);
     /** Audio thread: every note and sound off, now (a stop; not a vamp's seam, which lets notes go). */
     void silence();
+    /** Audio thread: back to how it started, reverb and chorus emptied (before playing again). */
+    void reset();
     /** Audio thread: renders `numSamples` with the events in `midi` at their
         sample positions, adding gain * the result into left and right. */
     void renderAdding (const juce::MidiBuffer& midi, float* left, float* right, int numSamples, float startGain, float endGain);

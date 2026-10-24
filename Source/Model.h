@@ -263,7 +263,18 @@ struct MidiRoute
     int program = -1;             // slot: which of its programs; -1 = whatever it is on
     int slot = -1;                // slot: which plugin in it
 
-    bool operator== (const MidiRoute& o) const { return kind == o.kind && input == o.input && program == o.program && slot == o.slot; }
+    // The part's mix, as the MIDI editor sets it. -1 = as the file has it.
+    int gmProgram = -1;           // GM player: this instrument (a kit, on channel 10) instead of the file's
+    int volume = -1, pan = -1;    // GM player: CC 7 and CC 10 instead of the file's, 0..127
+    bool muted = false, solo = false;
+
+    bool isSilent (bool anySolo) const { return kind == Kind::mute || muted || (anySolo && ! solo); }
+
+    bool operator== (const MidiRoute& o) const
+    {
+        return kind == o.kind && input == o.input && program == o.program && slot == o.slot
+            && gmProgram == o.gmProgram && volume == o.volume && pan == o.pan && muted == o.muted && solo == o.solo;
+    }
     bool operator!= (const MidiRoute& o) const { return ! (*this == o); }
 };
 
@@ -286,6 +297,7 @@ struct StemDef
     const MidiRoute& route (int channel) const    { return channels[(size_t) juce::jlimit (1, 16, channel) - 1]; }
     MidiRoute& route (int channel)                { return channels[(size_t) juce::jlimit (1, 16, channel) - 1]; }
     bool usesGm() const                           { for (auto& r : channels) if (r.kind == MidiRoute::Kind::gm) return true; return false; }
+    bool anySolo() const                          { for (auto& r : channels) if (r.solo) return true; return false; }
 
     bool isMidi() const { return juce::File (file).hasFileExtension ("mid;midi;smf"); }
     juce::String displayName() const { return name.isNotEmpty() ? name : juce::File (file).getFileNameWithoutExtension(); }

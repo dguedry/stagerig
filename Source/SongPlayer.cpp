@@ -25,11 +25,8 @@ SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef
         {
             stem->wantsGm = def.usesGm();
             stem->gmEvents.ensureSize (8192);
-            for (int c = 0; c < 16; ++c)
-            {
-                stem->routeKind[c].store ((int) def.channels[(size_t) c].kind);
-                stem->routeInput[c].store (jmax (0, def.channels[(size_t) c].input));
-            }
+            for (int c = 0; c < 16; ++c) stem->lastDest[c] = -2;
+            applyRoutes (*stem, def.channels);
         }
         stems.push_back (std::move (stem));
     }
@@ -200,8 +197,26 @@ bool SongPlayer::loadMidiStem (Stem& s)
 void SongPlayer::dispatch (Stem& s, const MidiMessage& m, int at, const MidiDest& d)
 {
     const int ch = m.getChannel();
-    if (ch < 1 || ch > 16) return;
+    if (ch < 1 || ch > 16 || s.silent[ch - 1].load (std::memory_order_relaxed)) return;
     const auto kind = (MidiRoute::Kind) s.routeKind[ch - 1].load (std::memory_order_relaxed);
+    if (kind == MidiRoute::Kind::gm)
+    {
+        // The editor's choices for this part replace the file's own.
+        if (m.isProgramChange() && s.gmProgram[ch - 1].load (std::memory_order_relaxed) >= 0) return;
+        if (m.isController())
+        {
+            const int cc = m.getControllerNumber();
+            if ((cc == 0 || cc == 32) && s.gmProgram[ch - 1].load (std::memory_order_relaxed) >= 0) return;
+            if (cc == 7  && s.volume[ch - 1].load (std::memory_order_relaxed) >= 0) return;
+            if (cc == 10 && s.pan[ch - 1].load (std::memory_order_relaxed) >= 0) return;
+        }
+    }
+    dispatchTo (s, m, at, kind, s.routeInput[ch - 1].load (std::memory_order_relaxed), d);
+}
+
+void SongPlayer::dispatchTo (Stem& s, const MidiMessage& m, int at, MidiRoute::Kind kind, int input, const MidiDest& d)
+{
+    const int ch = m.getChannel();
     if (kind == MidiRoute::Kind::gm)
     {
         if (s.gm != nullptr) s.gmEvents.addEvent (m, at);
@@ -212,8 +227,7 @@ void SongPlayer::dispatch (Stem& s, const MidiMessage& m, int at, const MidiDest
     if (m.isProgramChange() || (m.isController() && (m.getControllerNumber() == 0 || m.getControllerNumber() == 32))) return;
     if (kind == MidiRoute::Kind::keys)
     {
-        const int in = s.routeInput[ch - 1].load (std::memory_order_relaxed);
-        if (in >= 0 && in < d.numInputs && d.inputMidi[in] != nullptr) d.inputMidi[in]->addEvent (m, at);
+        if (input >= 0 && input < d.numInputs && d.inputMidi[input] != nullptr) d.inputMidi[input]->addEvent (m, at);
         return;
     }
     const int idx = s.defIndex * 16 + ch - 1;
@@ -271,6 +285,14 @@ void SongPlayer::chase (Stem& s, int64 from, int at)
         if ((MidiRoute::Kind) s.routeKind[c].load (std::memory_order_relaxed) != MidiRoute::Kind::gm) continue;
         for (int k = 0; k < 2; ++k)
             if (cc[c][k] >= 0) s.gmEvents.addEvent (MidiMessage::controllerEvent (c + 1, ccs[k], cc[c][k]), at);
+        // The editor's instrument, volume and pan win over the file's.
+        if (const int p = s.gmProgram[c].load (std::memory_order_relaxed); p >= 0)
+        {
+            if (c != 9) { s.gmEvents.addEvent (MidiMessage::controllerEvent (c + 1, 0, 0), at); s.gmEvents.addEvent (MidiMessage::controllerEvent (c + 1, 32, 0), at); }
+            program[c] = p;
+        }
+        if (const int v = s.volume[c].load (std::memory_order_relaxed); v >= 0) cc[c][3] = v;
+        if (const int p = s.pan[c].load (std::memory_order_relaxed); p >= 0)    cc[c][4] = p;
         s.gmEvents.addEvent (MidiMessage::programChange (c + 1, program[c]), at);
         for (int k = 2; k < 8; ++k)
             s.gmEvents.addEvent (MidiMessage::controllerEvent (c + 1, ccs[k], cc[c][k]), at);
@@ -391,6 +413,17 @@ void SongPlayer::queueSection (int index)
     queuedSection.store (index);
 }
 
+void SongPlayer::cue (double seconds)
+{
+    if (getState() != State::idle) return;
+    // Before loading has finished the length is not known yet: the cue is taken as it is.
+    const auto wanted = jmax ((int64) 0, (int64) (seconds * sampleRate));
+    const auto p = ready.load() ? jmin (wanted, lengthSamples) : wanted;
+    cuedPosition.store (p);
+    position.store (p);
+    currentSection.store (sectionAt (p));
+}
+
 void SongPlayer::advance()
 {
     if (vamping.load() && vampHold.load()) { releaseVamp(); return; }
@@ -413,11 +446,26 @@ void SongPlayer::setStemRoutes (int stemIndex, const std::array<MidiRoute, 16>& 
 {
     for (auto& s : stems)
         if (s->defIndex == stemIndex && s->midi)
-            for (int c = 0; c < 16; ++c)
-            {
-                s->routeKind[c].store ((int) routes[(size_t) c].kind);
-                s->routeInput[c].store (jmax (0, routes[(size_t) c].input));
-            }
+        {
+            applyRoutes (*s, routes);
+            s->chaseRequested.store (true);
+        }
+}
+
+void SongPlayer::applyRoutes (Stem& s, const std::array<MidiRoute, 16>& routes)
+{
+    bool anySolo = false;
+    for (auto& r : routes) anySolo = anySolo || r.solo;
+    for (int c = 0; c < 16; ++c)
+    {
+        const auto& r = routes[(size_t) c];
+        s.routeKind[c].store ((int) r.kind);
+        s.routeInput[c].store (jmax (0, r.input));
+        s.gmProgram[c].store (r.gmProgram);
+        s.volume[c].store (r.volume);
+        s.pan[c].store (r.pan);
+        s.silent[c].store (r.isSilent (anySolo));
+    }
 }
 
 bool SongPlayer::stemHasGm (int stemIndex) const
@@ -486,7 +534,7 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
         gmTail = 0;
         // A fresh start: nothing left sounding from last time, and every GM channel set as it is at the start point.
         for (auto& stem : stems)
-            if (stem->midi) { stem->needsChase = true; if (stem->gm != nullptr) stem->gm->silence(); }
+            if (stem->midi) { stem->needsChase = true; if (stem->gm != nullptr) stem->gm->reset(); }
         if (countInRemaining > 0) { state.store ((int) State::countIn); st = State::countIn; }
         else                      { state.store ((int) State::playing); st = State::playing; happened = Happened::stemsStarted; }
     }
@@ -568,6 +616,22 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
         if (s->midi)
         {
             s->gmEvents.clear();
+            if (s->chaseRequested.exchange (false)) s->needsChase = true;
+            /* A part muted, soloed away or sent somewhere else: whatever it
+               left sounding where it was is let go there. */
+            for (int c = 0; c < 16; ++c)
+            {
+                const auto kind = (MidiRoute::Kind) s->routeKind[c].load (std::memory_order_relaxed);
+                const int input = s->routeInput[c].load (std::memory_order_relaxed);
+                const int now = s->silent[c].load (std::memory_order_relaxed) ? -1 : (int) kind * 256 + input;
+                if (s->lastDest[c] >= 0 && s->lastDest[c] != now)
+                {
+                    const auto wasKind = (MidiRoute::Kind) (s->lastDest[c] / 256);
+                    dispatchTo (*s, MidiMessage::allNotesOff (c + 1), offset, wasKind, s->lastDest[c] % 256, dest);
+                    dispatchTo (*s, MidiMessage::controllerEvent (c + 1, 64, 0), offset, wasKind, s->lastDest[c] % 256, dest);
+                }
+                s->lastDest[c] = now;
+            }
             for (int r = 0; r < numRuns; ++r)
             {
                 /* A run that does not follow on from the one before -- a vamp

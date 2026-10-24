@@ -301,6 +301,10 @@ public:
     int  getSectionCC() const                       { return setup.sectionCC; }
     void setSectionCC (int cc);
     void armSectionLearn()                          { sectionLearnArmed.store (true); }
+    /** While stopped: the armed track starts from here (seconds) on the next Play. */
+    void cueTrack (double seconds)                  { if (player != nullptr) player->cue (seconds); }
+    /** Reads a song's files again (after the MIDI editor saved one), if it is the armed song. */
+    void reloadTrack (int songIndex)                { if (songIndex == trackSong) armTrack (songIndex); }
     /** Loads (or reloads) the track for this song, stopping whatever was playing. */
     void armTrack (int songIndex);
 

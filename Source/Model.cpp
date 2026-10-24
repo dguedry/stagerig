@@ -382,16 +382,22 @@ var StemDef::toVar() const
         for (int ch = 1; ch <= 16; ++ch)
         {
             const auto& r = route (ch);
-            if (r.kind == MidiRoute::Kind::gm) continue;
+            if (r == MidiRoute {}) continue;
             auto* ro = new DynamicObject();
             ro->setProperty ("ch", ch);
-            ro->setProperty ("kind", r.kind == MidiRoute::Kind::keys ? "keys" : r.kind == MidiRoute::Kind::slot ? "slot" : "mute");
-            if (r.kind != MidiRoute::Kind::mute) ro->setProperty ("input", r.input);
+            ro->setProperty ("kind", r.kind == MidiRoute::Kind::keys ? "keys" : r.kind == MidiRoute::Kind::slot ? "slot"
+                                   : r.kind == MidiRoute::Kind::mute ? "mute" : "gm");
+            if (r.kind == MidiRoute::Kind::keys || r.kind == MidiRoute::Kind::slot) ro->setProperty ("input", r.input);
             if (r.kind == MidiRoute::Kind::slot)
             {
                 ro->setProperty ("slot", r.slot);
                 if (r.program >= 0) ro->setProperty ("program", r.program);
             }
+            if (r.gmProgram >= 0) ro->setProperty ("gmProgram", r.gmProgram);
+            if (r.volume >= 0)    ro->setProperty ("volume", r.volume);
+            if (r.pan >= 0)       ro->setProperty ("pan", r.pan);
+            if (r.muted)          ro->setProperty ("muted", true);
+            if (r.solo)           ro->setProperty ("solo", true);
             routes.add (var (ro));
         }
         o->setProperty ("channels", routes);
@@ -422,6 +428,11 @@ StemDef StemDef::fromVar (const var& v)
             r.slot    = jlimit (-1, 255, prop<int> (rv, "slot", -1));
             r.program = jlimit (-1, InputDef::numPrograms - 1, prop<int> (rv, "program", -1));
             if (r.kind == MidiRoute::Kind::slot && r.slot < 0) r.kind = MidiRoute::Kind::keys;
+            r.gmProgram = jlimit (-1, 127, prop<int> (rv, "gmProgram", -1));
+            r.volume    = jlimit (-1, 127, prop<int> (rv, "volume", -1));
+            r.pan       = jlimit (-1, 127, prop<int> (rv, "pan", -1));
+            r.muted     = prop<bool> (rv, "muted", false);
+            r.solo      = prop<bool> (rv, "solo", false);
         }
     }
     else if (obj (v) != nullptr && obj (v)->hasProperty ("input"))

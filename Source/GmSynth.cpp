@@ -29,6 +29,7 @@ namespace
         int   (*keyPressure) (void*, int, int, int) = nullptr;
         int   (*allSoundsOff) (void*, int) = nullptr;
         int   (*allNotesOff) (void*, int) = nullptr;
+        int   (*systemReset) (void*) = nullptr;
         int   (*writeFloat) (void*, int, void*, int, int, void*, int, int) = nullptr;
         void* (*setLogFunction) (int, void*, void*) = nullptr;
         bool ok = false;
@@ -52,7 +53,7 @@ namespace
                 && get (r.programChange, "fluid_synth_program_change") && get (r.pitchBend, "fluid_synth_pitch_bend")
                 && get (r.channelPressure, "fluid_synth_channel_pressure") && get (r.keyPressure, "fluid_synth_key_pressure")
                 && get (r.allSoundsOff, "fluid_synth_all_sounds_off") && get (r.allNotesOff, "fluid_synth_all_notes_off")
-                && get (r.writeFloat, "fluid_synth_write_float");
+                && get (r.writeFloat, "fluid_synth_write_float") && get (r.systemReset, "fluid_synth_system_reset");
             // Its own messages go nowhere: a missing preset is not worth a line on stderr per note.
             if (r.ok && get (r.setLogFunction, "fluid_set_log_function"))
                 for (int level = 0; level <= 4; ++level) r.setLogFunction (level, nullptr, nullptr);
@@ -162,6 +163,17 @@ void GmSynth::silence()
     const auto& f = fluid();
     f.allNotesOff (synth, -1);
     f.allSoundsOff (synth, -1);
+}
+
+void GmSynth::reset()
+{
+    // Voices, controllers and the reverb and chorus tails: a stopped track left them frozen mid-decay.
+    const auto& f = fluid();
+    f.systemReset (synth);
+    /* FluidSynth renders in blocks of 64 and hands out what is left of the
+       last one first: up to 64 samples of the sound from before. Drawn off
+       here, unheard. */
+    f.writeFloat (synth, 64, scratch.getWritePointer (0), 0, 1, scratch.getWritePointer (1), 0, 1);
 }
 
 void GmSynth::renderAdding (const MidiBuffer& midi, float* left, float* right, int numSamples, float startGain, float endGain)
