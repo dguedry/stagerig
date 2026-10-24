@@ -665,7 +665,7 @@ void RemotePlugin::beginProcess (const float* inL, const float* inR, const MidiB
     inFlightSamples = n;
 }
 
-bool RemotePlugin::finishProcess (float* outL, float* outR, const timespec& deadline)
+bool RemotePlugin::finishProcess (float* outL, float* outR, const timespec& deadline, MidiBuffer* midiOut)
 {
     if (! blockInFlight) return false;
     blockInFlight = false;
@@ -682,6 +682,16 @@ bool RemotePlugin::finishProcess (float* outL, float* outR, const timespec& dead
 
     if (outL != nullptr) FloatVectorOperations::copy (outL, shm->outL, inFlightSamples);
     if (outR != nullptr) FloatVectorOperations::copy (outR, shm->outR, inFlightSamples);
+    if (midiOut != nullptr)
+    {
+        midiOut->clear();
+        const auto count = jmin (shm->midiOutCount, (uint32_t) ipc::kMaxMidi);
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            const auto& ev = shm->midiOut[i];
+            midiOut->addEvent (ev.data, (int) jlimit ((uint8_t) 1, (uint8_t) 3, ev.size), ev.samplePosition);
+        }
+    }
     return true;
 }
 

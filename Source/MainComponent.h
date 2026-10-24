@@ -72,6 +72,8 @@ private:
     void showAudioSettings();
     void showOutputs();
     void printProgramMap();
+    void chooseGmSoundfont();
+    std::unique_ptr<juce::FileChooser> gmChooser;
     void showTempoMenu();
     void updateTempoLabel();
     void showRemote();

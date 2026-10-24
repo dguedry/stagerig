@@ -30,7 +30,16 @@ other plugin.
   same way. Group programs by kind -- organs, strings, brass -- to find things
   quickly.
 - **Keyboards play instruments**, with splits and layers: per-slot key range,
-  velocity range, velocity curve, transpose, gain and pan.
+  velocity range, velocity curve, transpose, gain and pan, and the MIDI
+  channels each slot takes notes from, so one program can sort a
+  multi-channel keyboard or a MIDI file into its parts.
+- **MIDI devices too.** An instrument can be a hardware synth or a lighting
+  controller on a MIDI port -- with patch recall when the program is
+  selected, and a synth's audio back through the interface into the
+  program's effects and outputs.
+- **Every instrument is a chain.** MIDI effects (arpeggiators, chord
+  generators) before it, audio effects after it, and any MIDI device that
+  should play along.
 - **Audio runs through effects.** An audio input's programs are effect chains
   with an input trim -- reverb on the vocal for the ballad, drive on the guitar
   for the solo -- and a level meter on the laptop and on the tablet. Effects
@@ -56,11 +65,16 @@ other plugin.
   page or a B-3X's drawbars without walking back to the computer. Nothing to
   install -- scan the code or type a short one, and add it to the home screen if
   you like. StageRig can serve its own wifi network when the venue has none.
-- **Backing tracks.** A song can carry audio stems -- a full mix, or drums,
-  bass and pads apart, plus a click and cues for the in-ears -- each on its own
-  output, and MIDI files that play through your keyboards' own sounds, with a count-in, started and stopped from a footswitch, the laptop
-  or the tablet. Mark its sections and jump between them in time, and vamp
-  an intro until a pedal lets it go on. Tempo-synced effects lock to the track.
+- **Backing tracks.** A song can carry audio files -- a full mix, or drums,
+  bass and pads apart, plus a click and cues for the in-ears -- each on its
+  own output, and MIDI files whose parts each play on what you choose: the
+  built-in General MIDI player (FluidSynth), one of your own programs by
+  keyboard and by name (*Upper: Big Strings*, kept playing whatever Upper
+  itself is on), or a MIDI device. A piano roll edits the notes. With a
+  count-in, started and stopped from a footswitch, the laptop or the tablet,
+  where parts can be muted from the stand. Mark its sections and jump between
+  them in time, and vamp an intro until a pedal lets it go on. Tempo-synced
+  effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
   song -- PDF, image, text or ChordPro -- and the tablet shows it, turning
   PDF pages a tap at a time and following the set from song to song. Files
@@ -77,13 +91,15 @@ Licensed under the [GPL-3.0](LICENSE).
 
 | Term | Meaning |
 |------|---------|
-| **Input** | A keyboard (a MIDI device plus an optional channel filter) or an audio input (device channels, with a MIDI device for program changes and pedals). Each input has its own current program. Two inputs may share one device (e.g. channel 1 = Upper, channel 2 = Lower). |
-| **Program** | One of 128 per input, selected by MIDI Program Change or by clicking. Holds plugin slots and MIDI mappings. |
-| **Slot** | One instrument inside a program, with enable, gain, pan, transpose, key range, velocity range, velocity curve and MIDI-channel settings, plus its own insert-effect chain. Key and velocity ranges make splits and touch-switched layers; the curve matches a controller's feel to a library. |
-| **Effect chain** | Ordered effects with bypass. Each slot has one (instrument → effects → gain); the program has one more applied to the sum of all slots. Effects receive the same MIDI as their slot. |
+| **Input** | A keyboard (a MIDI device plus an optional channel filter), an audio input (device channels, with a MIDI device for program changes and pedals), or the **Backing track** -- the songs' MIDI files, which play instruments as a keyboard would. Each input has its own current program. Two inputs may share one device (e.g. channel 1 = Upper, channel 2 = Lower). |
+| **Program** | One of 128 per input, selected by MIDI Program Change or by clicking. Holds instrument slots and MIDI mappings. |
+| **Slot** | One instrument inside a program -- a plugin, a MIDI device (hardware synth, lights) on a port, the built-in General MIDI player, or another keyboard's program -- with enable, gain, pan, transpose, key range, velocity range, velocity curve and the channels it takes notes from, plus its MIDI chain and insert-effect chain. Key and velocity ranges make splits and touch-switched layers; the curve matches a controller's feel to a library. |
+| **Effect chain** | Ordered effects with bypass. Each slot has one (MIDI chain → instrument → effects → gain), the MIDI chain holding MIDI effects and sends to MIDI devices; the program has one more applied to the sum of all slots. Effects receive the same MIDI as their slot. |
 | **Mapping** | A CC / pitch-bend / aftertouch message → one parameter on any instrument or effect, scaled between min and max. Optionally also passed through to the plugin. |
 | **Output** | A pair of the interface's channels with a master effects chain and a volume. Every input lands on one; the default setup has one, "Main", on channels 1-2. |
-| **Setup** | The whole document (inputs, outputs, programs, plugin states). Saved as `*.stagerig.json`. |
+| **Song** | What to load for one number: a program per input, a tempo, stage notes, charts, and its backing track -- audio and MIDI files with sections and vamps. A MIDI file's **parts** (its channels) each play on an instrument of the song's program on the Backing track input. |
+| **Set** | Songs in order, stepped from a footswitch or the tablet. |
+| **Setup** | The whole document (inputs, outputs, programs, songs, sets, plugin states). Saved as `*.stagerig.json`, with the songs' charts and track files in a `.charts/` folder beside it. |
 
 A program change leaves what you are holding to the previous program: keys
 down and the sustain pedal keep sounding there until you let go, and then a
@@ -215,6 +231,12 @@ Wayland desktops as well as X11 ones -- StageRig and plugin editors are X11
 windows, so they run through XWayland, which `x11vnc` reads and writes
 normally. A Wayland session with no XWayland is the one case that does not
 work, and StageRig says so rather than showing a black screen.
+
+With a song armed, the set list page carries **Play / Stop**, the track's
+sections (tap one to go there when the current one ends, or let a vamp go
+on), and **Parts** -- the MIDI files' parts, each with what plays it, a
+**Mute** for the one you will play yourself tonight, and **GUI** when a
+plugin in the song's own program plays it.
 
 If the tablet cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which

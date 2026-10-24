@@ -1,4 +1,7 @@
 #include "RemoteServer.h"
+#include "MidiEditor.h"
+#include "GmMixer.h"
+#include "GmSynth.h"
 #include "MappingSuggestions.h"
 #include "PluginView.h"
 #include "Charts.h"
@@ -77,6 +80,14 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .sheet button { background:var(--row); color:#fff; border:0; border-radius:12px;
                   padding:16px; font-size:16px; font-weight:700; text-align:left; }
   .sheet button.cancel { background:none; color:var(--dim); text-align:center; font-size:15px; }
+  .sheet .part { display:flex; align-items:center; gap:8px; background:var(--row); border-radius:12px; padding:10px 12px; }
+  .sheet .part .who { flex:1; min-width:0; }
+  .sheet .part .who b { display:block; font-size:16px; }
+  .sheet .part .who span { display:block; color:var(--dim); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sheet .part button { flex:none; padding:10px 14px; font-size:14px; background:var(--bg); }
+  .sheet .part button.on { background:#a3282d; }
+  .sheet .part.muted .who { opacity:.45; }
+  .transport button.parts { background:var(--row); color:#fff; font-weight:700; }
   .loading { color:#d8a657; font-size:14px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
   button.p { background:var(--row); color:#fff; border:0; border-radius:10px; padding:14px 12px; text-align:left;
@@ -294,6 +305,10 @@ function showTransport(t) {
      queues that section; during a vamp, "Go on" lets it play through. */
   const list = t.sections || [];
   const key = JSON.stringify([list.map(x => x.name + x.vamp), t.section, t.queued, t.vamping, t.running]);
+  transportUi.parts = t.parts || [];
+  transportUi.partsBtn.style.display = transportUi.parts.length ? "" : "none";
+  if (partsSheet) partsSheet.refresh();
+
   if (key === transportUi.key) return;
   transportUi.key = key;
   const host = transportUi.sections;
@@ -316,6 +331,51 @@ function showTransport(t) {
     host.appendChild(b);
   });
 }
+/* The MIDI files' parts, from the stand: mute one, or open the plugin that
+   plays it. What plays each part is chosen in StageRig; here it is read. */
+let partsSheet = null;
+function showParts() {
+  if (!transportUi || !transportUi.parts.length) return;
+  const back = document.createElement("div"); back.className = "sheet";
+  const card = document.createElement("div"); card.className = "card";
+  const t = document.createElement("div"); t.className = "sheet-title"; t.textContent = "Parts of the backing track";
+  card.appendChild(t);
+  const rows = document.createElement("div"); rows.style.display = "flex"; rows.style.flexDirection = "column"; rows.style.gap = "8px";
+  card.appendChild(rows);
+  const cancel = document.createElement("button"); cancel.className = "cancel"; cancel.textContent = "Done";
+  cancel.onclick = () => { back.remove(); partsSheet = null; };
+  card.appendChild(cancel);
+  back.appendChild(card);
+  back.onclick = e => { if (e.target === back) { back.remove(); partsSheet = null; } };
+  document.body.appendChild(back);
+
+  const refresh = () => {
+    rows.innerHTML = "";
+    (transportUi ? transportUi.parts : []).forEach(p => {
+      const row = document.createElement("div"); row.className = "part" + (p.muted ? " muted" : "");
+      const who = document.createElement("div"); who.className = "who";
+      who.innerHTML = "<b></b><span></span>";
+      who.querySelector("b").textContent = p.name;
+      who.querySelector("span").textContent = p.plays;
+      row.appendChild(who);
+      if (p.slot >= 0) {
+        const g = document.createElement("button"); g.textContent = "GUI";
+        g.onclick = () => openPluginWindow(p.input, p.slot, -1, p.name, g, "GUI", -1);
+        row.appendChild(g);
+      }
+      const m = document.createElement("button"); m.textContent = p.muted ? "Muted" : "Mute"; if (p.muted) m.className = "on";
+      m.onclick = async () => {
+        try { showTransport(await api("/api/part?ch=" + p.ch + "&muted=" + (p.muted ? 0 : 1), { method: "POST" })); }
+        catch (e) { if (!e.gate) show(e.message); }
+      };
+      row.appendChild(m);
+      rows.appendChild(row);
+    });
+  };
+  partsSheet = { refresh };
+  refresh();
+}
+
 async function pollTransport() {
   try { showTransport(await api("/api/transport")); } catch (e) { /* the next poll is half a second away */ }
 }
@@ -349,11 +409,14 @@ function renderSets(s) {
       try { showTransport(await api("/api/transport?do=toggle", { method: "POST" })); }
       catch (e) { if (!e.gate) show(e.message); }
     };
-    bar.appendChild(b); bar.appendChild(t);
+    const parts = document.createElement("button"); parts.className = "parts"; parts.textContent = "Parts";
+    parts.style.display = "none";
+    parts.onclick = showParts;
+    bar.appendChild(b); bar.appendChild(t); bar.appendChild(parts);
     wrap.appendChild(bar);
     const secs = document.createElement("div"); secs.className = "sections";
     wrap.appendChild(secs);
-    transportUi = { button: b, text: t, sections: secs, key: "" };
+    transportUi = { button: b, text: t, sections: secs, partsBtn: parts, parts: [], key: "" };
   } else {
     transportUi = null;
   }
@@ -562,6 +625,7 @@ function render(s) {
   const root = document.getElementById("inputs");
   root.innerHTML = "";
   s.inputs.forEach((inp, i) => {
+    if (inp.track) return;
     const wrap = document.createElement("div"); wrap.className = "input";
     const now = document.createElement("div"); now.className = "now";
     now.innerHTML = '<div class="name"></div><div class="prog"><span class="num"></span><span class="title"></span></div>';
@@ -1495,6 +1559,7 @@ String RemoteServer::stateJson() const
             loading = engine.isPluginLoading (i, in.currentProgram, -1, e);
         o->setProperty ("loading", loading);
         if (in.isAudio()) o->setProperty ("audio", true);
+        if (in.isTrack()) o->setProperty ("track", true);     // its program follows the song: nothing to pick
         Array<var> progs;
         for (int p = 0; p < InputDef::numPrograms; ++p)
         {
@@ -1556,6 +1621,7 @@ String RemoteServer::stateJson() const
             for (int i = 0; i < (int) setup.inputs.size(); ++i)
             {
                 const int prog = sg.programFor (i);
+                if (setup.inputs[(size_t) i].isTrack()) continue;     // the track's program is the song itself
                 if (prog < 0) continue;
                 DynamicObject::Ptr pd (new DynamicObject());
                 pd->setProperty ("input", setup.inputs[(size_t) i].name);
@@ -1585,6 +1651,25 @@ String RemoteServer::stateJson() const
     return JSON::toString (var (root.get()), true);
 }
 
+const std::vector<RemoteServer::FilePart>& RemoteServer::partsOf (const File& f) const
+{
+    const auto key = f.getFullPathName() + "|" + String (f.getLastModificationTime().toMilliseconds());
+    auto it = partCache.find (key);
+    if (it != partCache.end()) return it->second;
+    std::vector<FilePart> parts;
+    MidiDoc doc;
+    String err;
+    if (doc.load (f, err))
+        for (int ch = 1; ch <= 16; ++ch)
+            if (doc.channelUsed (ch))
+            {
+                const auto name = doc.partName (ch);
+                parts.push_back ({ ch, name.isNotEmpty() ? name : (ch == 10 ? String ("Drums") : String (GmSynth::programName (doc.firstProgram (ch)))), doc.firstProgram (ch) });
+            }
+    if (partCache.size() > 64) partCache.clear();
+    return partCache[key] = std::move (parts);
+}
+
 String RemoteServer::transportJson() const
 {
     DynamicObject::Ptr o (new DynamicObject());
@@ -1611,6 +1696,35 @@ String RemoteServer::transportJson() const
         sections.add (var (sec.get()));
     }
     o->setProperty ("sections", sections);
+
+    /* The MIDI files' parts: what each plays, whether it is muted, and the
+       plugin to look at when one plays it -- so a part can be muted from the
+       stand ("I'll play the piano myself tonight") and its sound opened. */
+    Array<var> parts;
+    const int track = engine.getTrackInput();
+    if (song >= 0 && song < (int) songs.size() && track >= 0)
+    {
+        const int prog = songs[(size_t) song].programFor (track);
+        const auto& setup = engine.getSetup();
+        for (const auto& st : songs[(size_t) song].stems)
+        {
+            if (! st.isMidi() || prog < 0) continue;
+            for (const auto& fp : partsOf (engine.getChartsFolder().getChildFile (st.file)))
+            {
+                DynamicObject::Ptr p (new DynamicObject());
+                p->setProperty ("ch", fp.channel);
+                p->setProperty ("name", fp.name);
+                p->setProperty ("plays", partInstrumentName (engine, track, prog, fp.channel, fp.program));
+                p->setProperty ("muted", engine.isPartMuted (track, prog, fp.channel));
+                const int sl = engine.partInstrument (track, prog, fp.channel);
+                const bool plugin = sl >= 0 && setup.inputs[(size_t) track].programs[(size_t) prog].slots[(size_t) sl].isPlugin();
+                p->setProperty ("input", track);
+                p->setProperty ("slot", plugin ? sl : -1);
+                parts.add (var (p.get()));
+            }
+        }
+    }
+    o->setProperty ("parts", parts);
     return JSON::toString (var (o.get()), true);
 }
 
@@ -1663,6 +1777,7 @@ String RemoteServer::healthJson() const
             for (int s = 0; s < (int) def.slots.size(); ++s)
             {
                 add (tag, engine.getPlugin (i, p, s, -1));
+                for (int e = 0; e < (int) def.slots[(size_t) s].midiEffects.size(); ++e) add (tag + " > MIDI", engine.getPlugin (i, p, ProgramDef::midiChainOf (s), e));
                 for (int e = 0; e < (int) def.slots[(size_t) s].effects.size(); ++e) add (tag + " > FX", engine.getPlugin (i, p, s, e));
             }
             for (int e = 0; e < (int) def.effects.size(); ++e) add (tag + " program FX", engine.getPlugin (i, p, -1, e));
@@ -1723,8 +1838,13 @@ String RemoteServer::slotsJson (int inputIndex) const
             for (int sIdx = 0; sIdx < (int) def.slots.size(); ++sIdx)
             {
                 const auto& slot = def.slots[(size_t) sIdx];
-                if (slot.plugin.name.isEmpty()) continue;        // a slot with no plugin has nothing to show
-                add (sIdx, -1, String (sIdx + 1) + ": " + slot.plugin.name, slot.enabled);
+                // In the slot's signal order: its MIDI processors (a send has no window), the sound, its effects.
+                for (int e = 0; e < (int) slot.midiEffects.size(); ++e)
+                    if (const auto& md = slot.midiEffects[(size_t) e]; ! md.isSend() && md.plugin.name.isNotEmpty())
+                        add (ProgramDef::midiChainOf (sIdx), e, String (sIdx + 1) + " > MIDI" + String (e + 1) + ": " + md.plugin.name, ! md.bypassed);
+                // An external instrument has no window of its own; its effects still do.
+                if (slot.plugin.name.isNotEmpty() && slot.isPlugin())
+                    add (sIdx, -1, String (sIdx + 1) + ": " + slot.plugin.name, slot.enabled);
                 for (int e = 0; e < (int) slot.effects.size(); ++e)
                     if (slot.effects[(size_t) e].plugin.name.isNotEmpty())
                         add (sIdx, e, String (sIdx + 1) + " > FX" + String (e + 1) + ": " + slot.effects[(size_t) e].plugin.name,
@@ -2000,6 +2120,27 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                 else if (what == "stop")    engine.stopTrack();
                 else if (what == "next")    engine.advanceTrack();
                 else if (what == "section") engine.queueTrackSection (sectionIndex);
+                return transportJson();
+            }, body, 3000))
+            sendResponse (sock, "200 OK", "application/json", body);
+        else
+            sendBusy (sock, sendResponse);
+        return;
+    }
+
+    if (path.startsWith ("/api/part"))
+    {
+        // POST ...?ch=N&muted=0|1 mutes a part of the armed song's MIDI files; answers with the transport.
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const int ch = path.fromFirstOccurrenceOf ("ch=", false, false).getIntValue();
+        const bool muted = path.fromFirstOccurrenceOf ("muted=", false, false).getIntValue() != 0;
+        String body;
+        if (produceOnMessageThread ([this, ch, muted]
+            {
+                const int track = engine.getTrackInput(), song = engine.getTrackSong();
+                if (track >= 0 && song >= 0 && song < (int) engine.getSongs().size())
+                    if (const int prog = engine.getSongs()[(size_t) song].programFor (track); prog >= 0)
+                        engine.setPartMuted (track, prog, ch, muted);
                 return transportJson();
             }, body, 3000))
             sendResponse (sock, "200 OK", "application/json", body);

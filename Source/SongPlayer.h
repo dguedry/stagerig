@@ -73,18 +73,22 @@ public:
     /** Goes to section `index` when the current one ends; while stopped,
         that is where Play will start. -1 cancels a queued section. */
     void queueSection (int index);
+    /** While stopped: Play starts here (seconds). */
+    void cue (double seconds);
     /** Lets a vamp play on at the end of the current repetition. */
     void releaseVamp()                            { vampHold.store (false); }
     /** The one-pedal control: releases a vamp, or else queues the next section. */
     void advance();
 
-    void setStemMix (int stemIndex, int output, float gainDb, int input);
+    void setStemMix (int stemIndex, int output, float gainDb);
 
     enum class Happened { nothing, stemsStarted, ended, stopped };
     /** Audio thread: adds this block of the track to the outputs' mixes, and
-        its MIDI to the inputs'. `outputs[i]` holds output i's left and right
-        mix buffers; `inputMidi[i]` is input i's MIDI for this block. */
-    Happened render (float* (*outputs)[2], int numOutputs, juce::MidiBuffer* const* inputMidi, int numInputs, int numSamples);
+        its MIDI files' events to `trackMidi` -- the backing-track input's
+        MIDI for this block, every channel as the file has it (null when
+        there is no such input). `outputs[i]` holds output i's left and
+        right mix buffers. */
+    Happened render (float* (*outputs)[2], int numOutputs, juce::MidiBuffer* trackMidi, int numSamples);
 
 private:
     struct Stem
@@ -97,16 +101,18 @@ private:
 
         // A MIDI stem: its events at device-rate sample positions, in order.
         bool midi = false;
-        int midiChannel = 0;
-        std::atomic<int> input { 0 };
         struct Event { juce::int64 at; uint8_t data[3]; uint8_t size; };
         std::vector<Event> events;
         juce::int64 midiLength = 0;
         bool notesSounding = false;               // audio thread: notes may be held, so a jump sends notes-off
+        bool needsChase = true;                   // audio thread: catch the instruments up on programs and controllers first
     };
     bool loadMidiStem (Stem&);
     void midiForRun (Stem&, juce::MidiBuffer&, juce::int64 from, int count, int at);
-    void allNotesOff (juce::MidiBuffer&, int at);
+    static void allNotesOff (juce::MidiBuffer&, int at);
+    /** What the file had set by `from` -- programs, banks, volumes, pans,
+        wheels -- so starting or jumping mid-file sounds as it does arriving there. */
+    static void chase (const Stem&, juce::MidiBuffer&, juce::int64 from, int at);
 
     void startLoading();
     void stopLoading();

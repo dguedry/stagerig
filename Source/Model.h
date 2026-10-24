@@ -2,18 +2,35 @@
 
 #include <juce_core/juce_core.h>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <array>
 #include <vector>
 
 namespace perf
 {
 
 //==============================================================================
-/** An effect plugin in an insert chain (per slot, or per program). */
+/** A block in a chain: an effect plugin in an insert chain (per slot, or
+    per program), or, in a slot's MIDI chain, a MIDI processor plugin or a
+    MIDI send. */
 struct EffectDef
 {
+    /** A plugin, or -- in a slot's MIDI chain only -- a send: the MIDI at
+        that point also goes out of a port, to a hardware synth or another
+        program, and carries on unchanged to the next block. */
+    enum class Kind { plugin, midiSend };
+    Kind kind = Kind::plugin;
+
     juce::PluginDescription plugin;
     juce::MemoryBlock state;
     bool bypassed = false;
+
+    // A MIDI send ------------------------------------------------------------
+    juce::String portIdentifier, portName;
+    int channel = 0;                  // 0 = as it arrives, 1..16 = rechannelled for the port
+    int bankMsb = -1, bankLsb = -1, patch = -1;   // patch recall, as an external instrument's
+
+    bool isSend() const               { return kind == Kind::midiSend; }
+    juce::String displayName() const  { return isSend() ? portName : plugin.name; }
 
     juce::var toVar() const;
     static EffectDef fromVar (const juce::var&);
@@ -23,6 +40,13 @@ struct EffectDef
 /** One instrument inside a program, with its own insert-effect chain. */
 struct SlotDef
 {
+    /** What makes the sound: a hosted plugin; a MIDI device -- a hardware
+        synth, a module, a lighting controller -- played through a MIDI output
+        port; the built-in General MIDI player; or another input's sounds
+        (the notes go to that keyboard's current program). */
+    enum class Kind { plugin, external, gm, input };
+    Kind kind = Kind::plugin;
+
     juce::PluginDescription plugin;   // which plugin
     juce::MemoryBlock state;          // last saved plugin state
     bool enabled = true;
@@ -33,6 +57,81 @@ struct SlotDef
     float velocityCurve = 0.0f;       // -1..1: <0 softer, 0 linear, >0 louder for the same touch
     float pan = 0.0f;                 // -1 (left) .. 1 (right); a balance on the stereo output, unity at centre
     int outChannel = 0;               // 0 = keep incoming channel, 1..16 = force
+    /** Which incoming channels this slot listens to, one bit per channel
+        (bit 0 = channel 1); all of them by default. With the input on Omni,
+        one program can then give each channel its own sound -- a bass on 2
+        and a pad on 1, from one keyboard or one MIDI file. Messages without
+        a channel reach every slot. */
+    static constexpr int kAllChannels = 0xffff;
+    int listensTo = kAllChannels;
+    bool hears (int channel) const    { return channel < 1 || channel > 16 || (listensTo & (1 << (channel - 1))) != 0; }
+    bool hearsAll() const             { return (listensTo & kAllChannels) == kAllChannels; }
+    void setHears (int channel, bool on)
+    {
+        if (channel < 1 || channel > 16) return;
+        listensTo = on ? (listensTo | (1 << (channel - 1))) : (listensTo & ~(1 << (channel - 1)));
+    }
+    /** "All channels", "Channel 5", "Channels 1, 2, 5". */
+    juce::String listensToText() const;
+
+    // Another input's sounds ------------------------------------------------------
+    int targetInput = -1;                          // Kind::input: index into Setup::inputs
+    juce::String targetInputName;                  // for display, kept up to date on rename
+    /** Which of that input's programs plays the notes: one of them by
+        number, or -1 for whatever the input is playing at the time. A
+        program named here is kept loaded and sounding alongside the
+        keyboard's own, so a MIDI file's part can play "Upper: Strings"
+        while Upper itself is on the piano. */
+    int targetProgram = -1;
+    juce::String targetProgramName;                // for display, kept up to date on rename
+
+    // The General MIDI player ------------------------------------------------------
+    /** Per channel, what the player's own mixer sets over what the file
+        says: -1 = as the file has it. */
+    struct GmChannel
+    {
+        int program = -1;             // the instrument (a kit, on channel 10)
+        int volume = -1, pan = -1;    // CC 7, CC 10
+        bool muted = false;
+        bool isDefault() const { return program < 0 && volume < 0 && pan < 0 && ! muted; }
+    };
+    std::array<GmChannel, 16> gmChannels {};
+
+    // An external instrument ----------------------------------------------------
+    juce::String midiOutIdentifier, midiOutName;   // the port it plays through
+    /** Patch recall: sent to the instrument when the program is selected,
+        on the channel it plays on. -1 = not sent. */
+    int bankMsb = -1, bankLsb = -1, patch = -1;
+    /** Its audio, back into the mix: the interface inputs it is plugged into
+        (open device input channels, from 0), or -1 for none -- then it goes
+        to the desk on its own and only its notes come from here. A right of
+        -1 with a left set is mono. */
+    int returnLeft = -1, returnRight = -1;
+
+    bool isExternal() const           { return kind == Kind::external; }
+    bool isPlugin() const             { return kind == Kind::plugin; }
+    bool isGm() const                 { return kind == Kind::gm; }
+    bool isInput() const              { return kind == Kind::input; }
+    /** What to call it: the plugin's name, the port's, the player's, the keyboard's. */
+    juce::String displayName() const
+    {
+        switch (kind)
+        {
+            case Kind::external: return midiOutName + " (MIDI)";
+            case Kind::gm:       return "General MIDI player";
+            case Kind::input:    return targetProgram >= 0 ? targetInputName + ": " + targetProgramName : targetInputName + "'s sounds";
+            case Kind::plugin:   break;
+        }
+        return plugin.name;
+    }
+
+    /** The slot as a chain, in signal order:
+            [MIDI chain] -> sound -> [effects]
+        The MIDI chain works on the notes after the slot's own key range,
+        transpose and channels, before the sound hears them: MIDI processor
+        plugins (an arpeggiator, a chord generator) and MIDI sends, in order.
+        The effects work on the sound, and hear the MIDI the sound heard. */
+    std::vector<EffectDef> midiEffects;
     std::vector<EffectDef> effects;   // processed in order after the instrument
 
     juce::var toVar() const;
@@ -79,11 +178,23 @@ struct ProgramDef
 
     bool isEmpty() const { return slots.empty() && effects.empty(); }
 
+    /** Chains are addressed by a slot number: -1 is the program's own chain,
+        a slot's index its effects, and midiChainOf (slot) that slot's MIDI
+        chain. One number keeps every (slot, effect) address -- mappings, the
+        engine's add/move/remove, the editors -- working for all three. */
+    static constexpr int midiChainBase = 1 << 16;
+    static int  midiChainOf (int slot)        { return midiChainBase + slot; }
+    static bool isMidiChain (int address)     { return address >= midiChainBase; }
+    /** The slot a chain address belongs to (-1 for the program's chain). */
+    static int  slotOfChain (int address)     { return isMidiChain (address) ? address - midiChainBase : address; }
+
     /** Returns the chain a mapping/effect index refers to, or nullptr. */
     const std::vector<EffectDef>* chainFor (int slot) const
     {
         if (slot < 0) return &effects;
-        return slot < (int) slots.size() ? &slots[(size_t) slot].effects : nullptr;
+        const int s = slotOfChain (slot);
+        if (s >= (int) slots.size()) return nullptr;
+        return isMidiChain (slot) ? &slots[(size_t) s].midiEffects : &slots[(size_t) s].effects;
     }
 
     juce::var toVar() const;
@@ -124,10 +235,16 @@ struct InputDef
         in a program's slots. An audio input -- a microphone, a guitar, a
         hardware synth -- is the sound itself, so its programs are effect
         chains and nothing else. Both take program changes and controllers
-        from the MIDI device below. */
-    enum class Kind { midi, audio };
+        from the MIDI device below. The backing track is an input too: the
+        songs' MIDI files play into it, all channels, and each song selects
+        its program there -- so a file's parts reach instruments exactly as
+        a keyboard's notes do, by what each one listens to. There is at most
+        one, made when the first MIDI file is added. */
+    enum class Kind { midi, audio, track };
     Kind kind = Kind::midi;
     bool isAudio() const { return kind == Kind::audio; }
+    bool isTrack() const { return kind == Kind::track; }
+    static constexpr const char* trackName = "Backing track";
     /** An audio input's device channels, counted from 0 among the channels
         open in Audio settings. audioRight = -1 is mono: the one channel feeds
         both sides. */
@@ -185,6 +302,16 @@ struct ChartRef
     charts in MySetup.stagerig.charts/, beside it. */
 juce::File chartsFolderFor (const juce::File& setupFile);
 
+/** How MIDI files were routed before the backing track became an input:
+    read from older setups, turned into a track program by
+    Setup::migrateMidiFiles(), then dropped. */
+struct LegacyMidiRoute
+{
+    enum class Kind { gm, keys, slot, mute };
+    Kind kind = Kind::gm;
+    int input = 0, program = -1, slot = -1;
+};
+
 /** One audio file of a song's backing track: a stem (drums, bass, pads), a
     full mix, or a click and cue track for the in-ears. Kept in the folder
     beside the setup, like charts, so the two travel together. */
@@ -194,11 +321,13 @@ struct StemDef
     juce::String name;            // shown in the list; the file name when empty
     int output = 0;               // which of the setup's outputs it plays on
     float gainDb = 0.0f;
-    /** A MIDI file (.mid) plays through an input instead: into that input's
-        current program, like the keys do. `midiChannel` keeps only one
-        channel of the file (0 = all), so one file can feed Upper and Lower. */
-    int input = 0;
-    int midiChannel = 0;
+    /** A MIDI file (.mid) plays into the backing-track input, every channel
+        as it is in the file; the song's program there decides what each part
+        plays. Nothing else to set: `output` and `gainDb` are an audio stem's. */
+
+    // Older setups only; see LegacyMidiRoute.
+    std::array<LegacyMidiRoute, 16> legacyRoutes {};
+    bool hasLegacyRoutes = false;
 
     bool isMidi() const { return juce::File (file).hasFileExtension ("mid;midi;smf"); }
     juce::String displayName() const { return name.isNotEmpty() ? name : juce::File (file).getFileNameWithoutExtension(); }
@@ -292,6 +421,13 @@ struct Setup
         left off survives a restart. -1 = no set chosen. */
     int currentSet = -1;
     int currentSongInSet = -1;
+
+    /** The backing-track input's index, or -1 while there is none. */
+    int trackInput() const;
+    /** Turns MIDI files routed the old way (through a keyboard, by channel,
+        or by the short-lived per-channel table) into a program on the
+        backing-track input, making that input if need be. Called on load. */
+    void migrateMidiFiles();
 
     /** Controller that steps to the next song, and to the previous one, or 0
         for none. Global like the tap tempo controller, and for the same reason:

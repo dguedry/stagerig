@@ -29,9 +29,13 @@ public:
         g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
         if (inputs.empty()) return;
 
+        // The backing track's program follows the song: nothing to read off at a glance.
+        std::vector<size_t> shown;
+        for (size_t i = 0; i < inputs.size(); ++i) if (! inputs[i].isTrack()) shown.push_back (i);
+        if (shown.empty()) return;
         auto r = getLocalBounds().reduced (10, 8);
-        const int each = r.getWidth() / (int) inputs.size();
-        for (size_t i = 0; i < inputs.size(); ++i)
+        const int each = r.getWidth() / (int) shown.size();
+        for (size_t i : shown)
         {
             auto cell = r.removeFromLeft (each).reduced (6, 0);
             const auto& def = inputs[i];

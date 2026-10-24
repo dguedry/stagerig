@@ -17,7 +17,7 @@ int main()
 
     Setup s = Setup::makeDefault();
     // References into s.inputs are held while a third input is added below: room for it first.
-    s.inputs.reserve (3);
+    s.inputs.reserve (4);
     s.preloadAllPrograms = true;
     s.releaseTailSeconds = 2.5;
     s.holdAcrossChange = false;
@@ -29,6 +29,16 @@ int main()
     upper.currentProgram = 5;
 
     upper.programChangeChannel = 16;          // a workstation's global channel
+    {
+        SlotDef ext; ext.kind = SlotDef::Kind::external;
+        ext.midiOutIdentifier = "20-0"; ext.midiOutName = "Montage"; ext.outChannel = 3; ext.listensTo = 1 << 1;
+        ext.bankMsb = 63; ext.bankLsb = 1; ext.patch = 9; ext.returnLeft = 2; ext.returnRight = 3;
+        EffectDef arp; arp.plugin.name = "Arp"; arp.plugin.pluginFormatName = "CLAP"; arp.plugin.fileOrIdentifier = "/x/arp.clap|a";
+        EffectDef send; send.kind = EffectDef::Kind::midiSend; send.portIdentifier = "24-0"; send.portName = "MicroFreak";
+        send.channel = 4; send.patch = 12; send.bypassed = true;
+        ext.midiEffects = { arp, send };
+        upper.programs[7].slots.push_back (ext);
+    }
 
     OutputDef mon; mon.name = "Monitors"; mon.left = 2; mon.right = 3; mon.gainDb = -3.0f; mon.volumeCC = 7;
     s.outputs.push_back (mon);
@@ -38,8 +48,9 @@ int main()
         SongDef sg; sg.name = "With a track";
         sg.stems.push_back ({ "mix.wav", "Mix", 0, -3.0f });
         sg.stems.push_back ({ "click.wav", {}, 1, 0.0f });
-        StemDef midiStem; midiStem.file = "bass.mid"; midiStem.input = 1; midiStem.midiChannel = 2;
+        StemDef midiStem; midiStem.file = "bass.mid";
         sg.stems.push_back (midiStem);
+        sg.programs = { 5, -1, -1, 0 };
         sg.countInBeats = 4; sg.countInOutput = 1;
         sg.markers = { { "Intro", 0.0, true }, { "Verse", 8.5, false } };
         s.songs.push_back (sg);
@@ -50,6 +61,16 @@ int main()
     guitar.audioLeft = 2; guitar.audioRight = -1;          // mono on the third open channel
     guitar.programs[3].inputGainDb = -6.0f;
     s.inputs.push_back (guitar);
+    // Where the songs' MIDI files play: the backing-track input's program for this song.
+    InputDef track; track.name = InputDef::trackName; track.kind = InputDef::Kind::track; track.channel = 0; track.respondToProgramChange = false;
+    SlotDef gm; gm.kind = SlotDef::Kind::gm; gm.listensTo = SlotDef::kAllChannels & ~(1 << 1);
+    gm.gmChannels[9].program = 8; gm.gmChannels[9].volume = 90; gm.gmChannels[0].muted = true;
+    SlotDef keys; keys.kind = SlotDef::Kind::input; keys.targetInput = 1; keys.targetInputName = "Lower"; keys.listensTo = 1 << 1;
+    SlotDef pad; pad.kind = SlotDef::Kind::input; pad.targetInput = 0; pad.targetInputName = "Upper"; pad.targetProgram = 4; pad.targetProgramName = "Big pad"; pad.listensTo = 1 << 4;
+    track.programs[0].name = "With a track";
+    track.programs[0].slots = { gm, keys, pad };
+    s.inputs.push_back (track);
+
     auto& prog = upper.programs[5];
     prog.name = "Rhodes + Pad";
 
@@ -105,8 +126,65 @@ int main()
     CHECK (std::abs (loaded.outputs[1].gainDb + 3.0f) < 1e-6f && loaded.outputs[1].volumeCC == 7);
     CHECK (loaded.inputs[0].output == 1 && loaded.inputs[1].output == 0);
     CHECK (Setup::makeDefault().outputs.size() == 1 && Setup::makeDefault().outputs[0].isDefault());
+    {
+        const auto& ext = loaded.inputs[0].programs[7].slots[0];
+        CHECK (ext.isExternal() && ext.midiOutIdentifier == "20-0" && ext.midiOutName == "Montage" && ext.outChannel == 3
+               && ext.hears (2) && ! ext.hears (1) && ext.listensToText() == "Channel 2" && ext.bankMsb == 63 && ext.bankLsb == 1 && ext.patch == 9
+               && ext.returnLeft == 2 && ext.returnRight == 3 && ext.displayName() == "Montage (MIDI)");
+        CHECK (! loaded.inputs[0].programs[5].slots[0].isExternal() && loaded.inputs[0].programs[5].slots[0].hearsAll());
+        CHECK (ext.midiEffects.size() == 2 && ! ext.midiEffects[0].isSend() && ext.midiEffects[0].plugin.name == "Arp"
+               && ext.midiEffects[1].isSend() && ext.midiEffects[1].portIdentifier == "24-0" && ext.midiEffects[1].portName == "MicroFreak"
+               && ext.midiEffects[1].channel == 4 && ext.midiEffects[1].patch == 12 && ext.midiEffects[1].bankMsb == -1 && ext.midiEffects[1].bypassed);
+        CHECK (loaded.inputs[0].programs[5].slots[0].midiEffects.empty());
+        // The MIDI chain is addressed through the slot number.
+        CHECK (loaded.inputs[0].programs[7].chainFor (ProgramDef::midiChainOf (0)) == &ext.midiEffects);
+        CHECK (ProgramDef::slotOfChain (ProgramDef::midiChainOf (3)) == 3 && ! ProgramDef::isMidiChain (3));
+    }
     CHECK (loaded.songs.size() == 1 && loaded.songs[0].stems.size() == 3);
-    CHECK (loaded.songs[0].stems[2].isMidi() && loaded.songs[0].stems[2].input == 1 && loaded.songs[0].stems[2].midiChannel == 2);
+    {
+        CHECK (loaded.songs[0].stems[2].isMidi() && ! loaded.songs[0].stems[2].hasLegacyRoutes);
+        CHECK (loaded.trackInput() == 3 && loaded.inputs[3].isTrack() && loaded.inputs[3].channel == 0 && ! loaded.inputs[3].respondToProgramChange);
+        CHECK (loaded.songs[0].programFor (3) == 0 && loaded.songs[0].programFor (1) == -1);
+        const auto& tp = loaded.inputs[3].programs[0];
+        CHECK (tp.name == "With a track" && tp.slots.size() == 3);
+        CHECK (tp.slots[2].isInput() && tp.slots[2].targetInput == 0 && tp.slots[2].targetProgram == 4 && tp.slots[2].targetProgramName == "Big pad"
+               && tp.slots[2].displayName() == "Upper: Big pad" && tp.slots[2].listensToText() == "Channel 5" && tp.slots[1].targetProgram == -1);
+        CHECK (tp.slots[0].isGm() && ! tp.slots[0].hears (2) && tp.slots[0].hears (1) && tp.slots[0].hears (16)
+               && tp.slots[0].gmChannels[9].program == 8 && tp.slots[0].gmChannels[9].volume == 90 && tp.slots[0].gmChannels[9].pan == -1
+               && tp.slots[0].gmChannels[0].muted && tp.slots[0].gmChannels[1].isDefault() && tp.slots[0].displayName() == "General MIDI player");
+        CHECK (tp.slots[1].isInput() && tp.slots[1].targetInput == 1 && tp.slots[1].targetInputName == "Lower" && tp.slots[1].hears (2)
+               && ! tp.slots[1].hears (1) && tp.slots[1].displayName() == "Lower's sounds" && tp.slots[1].listensToText() == "Channel 2");
+
+        /* Setups from before the backing track was an input: a MIDI file
+           routed through a keyboard (all of it, or one channel), or by the
+           short-lived per-channel table. They come back as a track program. */
+        const auto oldOne = Setup::fromVar (juce::JSON::parse (R"({"format":"stagerig-setup",
+            "inputs":[{"name":"Upper","channel":1},{"name":"Lower","channel":2}],
+            "songs":[{"name":"Old","programs":[3,-1],"stems":[{"file":"a.mid","output":0,"input":1,"midiChannel":3}]}]})"));
+        CHECK (oldOne.trackInput() == 2 && oldOne.songs[0].programFor (2) == 0);
+        {
+            const auto& p = oldOne.inputs[2].programs[0];
+            CHECK (p.name == "Old" && p.slots.size() == 1 && p.slots[0].isInput() && p.slots[0].targetInput == 1
+                   && p.slots[0].targetInputName == "Lower" && p.slots[0].listensToText() == "Channel 3");
+            CHECK (! oldOne.songs[0].stems[0].hasLegacyRoutes);
+        }
+        const auto oldTable = Setup::fromVar (juce::JSON::parse (R"({"format":"stagerig-setup",
+            "inputs":[{"name":"Upper","channel":1},{"name":"Lower","channel":2}],
+            "songs":[{"name":"Table","programs":[],"stems":[{"file":"b.mid","output":0,"channels":[
+               {"ch":2,"kind":"keys","input":0},{"ch":5,"kind":"slot","input":0,"slot":2,"program":7},{"ch":9,"kind":"mute"}]}]}]})"));
+        {
+            const auto& p = oldTable.inputs[2].programs[0];
+            CHECK (p.slots.size() == 2 && p.slots[0].isGm() && p.slots[0].hears (1) && ! p.slots[0].hears (2) && ! p.slots[0].hears (5) && ! p.slots[0].hears (9)
+                   && p.slots[1].isInput() && p.slots[1].targetInput == 0 && p.slots[1].hears (2) && p.slots[1].hears (5) && ! p.slots[1].hears (9));
+            CHECK (oldTable.songs[0].programFor (2) == 0);
+        }
+        // A file with no routing at all plays on the GM player, and a slot's old single channel is a set of one.
+        const auto plain = Setup::fromVar (juce::JSON::parse (R"({"format":"stagerig-setup","inputs":[{"name":"Upper","channel":1,
+            "programs":[{"index":0,"slots":[{"receiveChannel":4}]}]}],"songs":[{"name":"Plain","programs":[],"stems":[{"file":"c.mid","output":0}]}]})"));
+        CHECK (plain.trackInput() == 1 && plain.inputs[1].programs[0].slots.size() == 1 && plain.inputs[1].programs[0].slots[0].isGm()
+               && plain.inputs[1].programs[0].slots[0].hearsAll());
+        CHECK (plain.inputs[0].programs[0].slots.size() == 1 && plain.inputs[0].programs[0].slots[0].listensToText() == "Channel 4");
+    }
     CHECK (! loaded.songs[0].stems[0].isMidi());
     CHECK (loaded.songs[0].stems[0].file == "mix.wav" && loaded.songs[0].stems[0].name == "Mix"
            && std::abs (loaded.songs[0].stems[0].gainDb + 3.0f) < 1e-6f && loaded.songs[0].stems[1].output == 1);
@@ -114,11 +192,11 @@ int main()
     CHECK (loaded.songs[0].markers.size() == 2 && loaded.songs[0].markers[0].vamp && loaded.songs[0].markers[1].name == "Verse"
            && std::abs (loaded.songs[0].markers[1].seconds - 8.5) < 1e-9);
     CHECK (loaded.songs[0].countInBeats == 4 && loaded.songs[0].countInOutput == 1 && loaded.transportCC == 85);
-    CHECK (loaded.inputs.size() == 3 && loaded.inputs[2].isAudio());
+    CHECK (loaded.inputs.size() == 4 && loaded.inputs[2].isAudio());
     CHECK (loaded.inputs[2].audioLeft == 2 && loaded.inputs[2].audioRight == -1);
     CHECK (std::abs (loaded.inputs[2].programs[3].inputGainDb + 6.0f) < 1e-6f);
     CHECK (! loaded.inputs[0].isAudio() && loaded.inputs[0].programs[5].inputGainDb == 0.0f);
-    CHECK (loaded.inputs.size() == 3);
+    CHECK (loaded.inputs.size() == 4);
     CHECK (loaded.inputs[1].name == "Lower");
     CHECK (loaded.inputs[1].channel == 2);
     CHECK (loaded.inputs[0].programChangeChannel == 16);                       // a workstation's global channel

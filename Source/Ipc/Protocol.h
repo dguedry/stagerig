@@ -18,7 +18,7 @@ namespace perf::ipc
 {
 
 constexpr uint32_t kMagic         = 0x50524631;   // "PRF1"
-constexpr uint32_t kVersion       = 2;            // 2 added tempo to the block
+constexpr uint32_t kVersion       = 3;            // 2 added tempo to the block, 3 the plugin's MIDI out
 constexpr int      kMaxBlock      = 8192;         // samples per block we can exchange
 constexpr int      kMaxMidi       = 2048;
 constexpr int      kMaxParamChanges = 512;
@@ -65,6 +65,12 @@ struct SharedBlock
 
     MidiEvent   midi[kMaxMidi];
     ParamChange paramChanges[kMaxParamChanges];
+
+    /* What the plugin played (plugin writes, host reads): an arpeggiator's
+       notes, a chord generator's chords -- what a MIDI processor in a slot's
+       chain hands on to the sound after it. */
+    uint32_t    midiOutCount;
+    MidiEvent   midiOut[kMaxMidi];
 
     // Audio: stereo in (effects), stereo out
     float inL[kMaxBlock], inR[kMaxBlock];

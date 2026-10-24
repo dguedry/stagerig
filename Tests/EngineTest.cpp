@@ -4,6 +4,8 @@
 #include "PluginIcons.h"
 #include "MappingSuggestions.h"
 #include "ClapPluginFormat.h"
+#include "GmSynth.h"
+#include "MidiEditor.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
 #include <cmath>
@@ -1853,12 +1855,14 @@ int main()
         engine.stopTrack();
         levels (4); pump (50);
 
-        // A MIDI file through an input: it plays that input's current sound, like the keys.
+        /* A MIDI file plays into the backing-track input. The first file
+           makes that input, and gives the song a program there named after
+           it, with the General MIDI player: the file plays as it is. */
         {
             MidiMessageSequence seq;
             seq.addEvent (MidiMessage::noteOn  (1, 60, (uint8) 100), 0);       // ticks; 960 per quarter, 120 bpm
             seq.addEvent (MidiMessage::noteOff (1, 60), 960 * 3);              // held for 1.5 s
-            seq.addEvent (MidiMessage::programChange (1, 5), 10);              // must be ignored
+            seq.addEvent (MidiMessage::programChange (1, 5), 10);              // for the GM player only
             seq.updateMatchedPairs();
             MidiFile mf;
             mf.setTicksPerQuarterNote (960);
@@ -1868,19 +1872,62 @@ int main()
             FileOutputStream os (f);
             CHECK (os.openedOk() && mf.writeTo (os));
         }
+        CHECK (engine.getTrackInput() < 0);
         const int midiSong = engine.addSong ("MIDI part");
-        StemDef part; part.file = "part.mid"; part.input = 0;
+        StemDef part; part.file = "part.mid";
         engine.addSongStem (midiSong, part);
+        const int track = engine.getTrackInput();
+        CHECK (track >= 0 && engine.getSetup().inputs[(size_t) track].isTrack() && engine.getSetup().inputs[(size_t) track].channel == 0);
+        const int trackProg = engine.getSongs()[(size_t) midiSong].programFor (track);
+        CHECK (trackProg >= 0);
+        auto trackProgram = [&]() -> const ProgramDef& { return engine.getSetup().inputs[(size_t) track].programs[(size_t) trackProg]; };
+        CHECK (trackProgram().name == "MIDI part" && trackProgram().slots.size() == 1 && trackProgram().slots[0].isGm() && trackProgram().slots[0].hearsAll());
+
         const int programBefore = engine.getSetup().inputs[0].currentProgram;
         engine.selectSong (midiSong);
         CHECK (waitReady() && engine.hasTrack());
+        CHECK (engine.getSetup().inputs[(size_t) track].currentProgram == trackProg);
+        settle();                                                        // the GM player reads its soundfont
         std::printf ("     MIDI track length %.2f s\n", engine.getTrackLength());
         CHECK (std::abs (engine.getTrackLength() - 1.5) < 0.05);
+
+        auto playAndStop = [&] (int blocks)
+        {
+            engine.startTrack();
+            const float l = levels (blocks)[0];                          // about a quarter of a second in
+            engine.stopTrack();
+            levels (4); pump (50); levels (60);
+            return l;
+        };
+
+        const bool gmAvailable = GmSynth::unavailableReason().isEmpty();
+        if (! gmAvailable)
+            std::printf ("     skip General MIDI check (%s)\n", GmSynth::unavailableReason().toRawUTF8());
+        else
+        {
+            CHECK (engine.isPluginAlive (track, trackProg, 0));
+            const float gmLevel = playAndStop (24);
+            std::printf ("     General MIDI player (%s): %.3f\n", GmSynth::findSoundfont().getFileName().toRawUTF8(), gmLevel);
+            CHECK (gmLevel > 0.01f);
+            const float gmAfter = levels (8)[0];
+            std::printf ("     after stopping the GM player: %.5f\n", gmAfter);
+            CHECK (gmAfter < 1e-3f);
+        }
+        CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);    // the file's program change is not Upper's business
+
+        /* The part to Upper's sounds instead -- an instrument that hands the
+           notes to that keyboard's program -- and the GM player stops
+           hearing it: one instrument per part, as the editor assigns them. */
+        CHECK (engine.addInputSlot (track, trackProg, 0));
+        engine.assignPart (track, trackProg, 1, 1);
+        CHECK (! trackProgram().slots[0].hears (1) && trackProgram().slots[1].hears (1) && trackProgram().slots[1].isInput()
+               && trackProgram().slots[1].targetInputName == "Upper" && trackProgram().slots[1].displayName() == "Upper's sounds");
+        CHECK (engine.partInstrument (track, trackProg, 1) == 1 && engine.partInstrument (track, trackProg, 2) == 0);
         engine.startTrack();
-        const float sounding = levels (24)[0];                           // about a quarter of a second in
-        std::printf ("     MIDI through input 0: %.3f\n", sounding);
-        CHECK (sounding > 0.01f);
-        CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);    // its program change was ignored
+        const float viaKeys = levels (24)[0];
+        std::printf ("     channel 1 to Upper's sounds: %.3f\n", viaKeys);
+        CHECK (viaKeys > 0.01f);
+        CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);    // its program change was dropped on the way
         engine.stopTrack();                                              // with the note still held
         levels (4); pump (50);
         levels (120);                                                    // the synth's release
@@ -1888,15 +1935,132 @@ int main()
         std::printf ("     after stopping with a note held: %.5f\n", afterStop);
         CHECK (afterStop < 1e-3f);
 
-        // Only channel 2 of a file that plays on channel 1: nothing.
-        part.midiChannel = 2;
-        engine.setSongStem (midiSong, 0, part);
-        CHECK (waitReady());
-        engine.startTrack();
-        const float otherChannel = levels (24)[0];
-        std::printf ("     channel 2 only: %.5f\n", otherChannel);
-        CHECK (otherChannel < 1e-3f);
-        engine.stopTrack(); levels (4); pump (50);
+        /* The part on one of Upper's programs by name -- program 6, "Pad",
+           which Upper itself is not on. It is loaded for the part and plays
+           beside Upper's own program; Upper's keys still play that one. */
+        {
+            engine.clearProgram (0, 6);
+            engine.setProgramName (0, 6, "Pad");
+            CHECK (engine.addSlot (0, 6, synth, err));
+            CHECK (! engine.isProgramLoaded (0, 6));
+            CHECK (engine.addInputSlot (track, trackProg, 0, 6));
+            const int padSlot = (int) trackProgram().slots.size() - 1;
+            CHECK (trackProgram().slots[(size_t) padSlot].targetProgram == 6 && trackProgram().slots[(size_t) padSlot].displayName() == "Upper: Pad");
+            engine.assignPart (track, trackProg, 1, padSlot);
+            CHECK (engine.isProgramLoaded (0, 6));                      // named by a current program: kept loaded
+            settle();
+            CHECK (engine.isPluginAlive (0, 6, 0));
+            CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);
+            engine.startTrack();
+            const float viaPad = levels (24)[0];
+            std::printf ("     channel 1 to Upper: Pad (Upper on another program): %.3f\n", viaPad);
+            CHECK (viaPad > 0.01f);
+            CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);
+            engine.stopTrack();
+            levels (4); pump (50); levels (120);
+            const float padQuiet = levels (8)[0];
+            std::printf ("     after stopping: %.5f\n", padQuiet);
+            CHECK (padQuiet < 1e-3f);
+            // Renamed, the part follows; housekeeping leaves the program loaded while a part plays it.
+            engine.setProgramName (0, 6, "Big pad");
+            CHECK (trackProgram().slots[(size_t) padSlot].displayName() == "Upper: Big pad");
+            pump (900);
+            CHECK (engine.isProgramLoaded (0, 6));
+            // Nothing names it any more: it is let go like any idle program.
+            engine.removeSlot (track, trackProg, padSlot);
+            pump (900);
+            CHECK (! engine.isProgramLoaded (0, 6));
+        }
+
+        // Nothing plays the part: silence.
+        engine.assignPart (track, trackProg, 1, -1);
+        CHECK (engine.partInstrument (track, trackProg, 1) < 0);
+        const float nobody = playAndStop (24);
+        std::printf ("     no instrument on channel 1: %.5f\n", nobody);
+        CHECK (nobody < 1e-3f);
+
+        if (gmAvailable)
+        {
+            // Back on the GM player, with its mixer: volume 0 or mute silences the part; an instrument of our choosing still sounds.
+            engine.assignPart (track, trackProg, 1, 0);
+            auto quietWith = [&] (SlotDef::GmChannel c) { engine.setGmChannel (track, trackProg, 0, 1, c); return playAndStop (24); };
+            SlotDef::GmChannel atZeroC; atZeroC.volume = 0;
+            SlotDef::GmChannel mutedC; mutedC.muted = true;
+            SlotDef::GmChannel stringsC; stringsC.program = 48;          // String Ensemble 1, over the file's
+            const float atZero = quietWith (atZeroC), muted = quietWith (mutedC), strings = quietWith (stringsC), asFile = quietWith ({});
+            std::printf ("     GM mixer: volume 0 %.4f, muted %.4f, strings %.3f, as the file has it %.3f\n", atZero, muted, strings, asFile);
+            CHECK (atZero < 3e-3f && muted < 3e-3f && strings > 0.005f && asFile > 0.01f);
+            engine.setGmChannel (track, trackProg, 0, 1, stringsC);
+
+            // Saved and read back: the track input, the song's program there, the GM mixer and the keyboard instrument.
+            TemporaryFile gf (".stagerig.json");
+            CHECK (engine.captureSetup().saveToFile (gf.getFile()).wasOk());
+            Setup gback;
+            CHECK (Setup::loadFromFile (gf.getFile(), gback).wasOk());
+            CHECK (gback.trackInput() == track && gback.songs[(size_t) midiSong].programFor (track) == trackProg);
+            const auto& tp = gback.inputs[(size_t) track].programs[(size_t) trackProg];
+            CHECK (tp.slots.size() == 2 && tp.slots[0].isGm() && tp.slots[0].gmChannels[0].program == 48 && tp.slots[0].hears (1)
+                   && tp.slots[1].isInput() && tp.slots[1].targetInput == 0 && ! tp.slots[1].hears (1) && tp.slots[1].listensToText() == "No channel");
+            CHECK (gback.songs[(size_t) midiSong].stems[0].isMidi() && ! gback.songs[(size_t) midiSong].stems[0].hasLegacyRoutes);
+
+            // The editor's file round trip: a note added and saved, the first version kept, the tempo and program change intact.
+            {
+                const auto f = folder.getChildFile ("part.mid");
+                MidiDoc doc;
+                String err;
+                CHECK (doc.load (f, err));
+                CHECK (doc.notes.size() == 1 && doc.notes[0].key == 60 && doc.firstProgram (1) == 5);
+                const int before = (int) doc.notes.size();
+                MidiDoc::Note n; n.channel = 1; n.key = 67; n.velocity = 90; n.start = 960; n.end = 1920; n.track = doc.trackFor (1);
+                doc.notes.push_back (n);
+                doc.notes[0].velocity = 55;
+                CHECK (doc.save (f, err));
+                CHECK (f.getSiblingFile ("part.orig.mid").existsAsFile());
+                MidiDoc back;
+                CHECK (back.load (f, err));
+                bool found = false;
+                for (auto& x : back.notes) if (x.key == 67 && x.start == 960 && x.end == 1920 && x.velocity == 90) found = true;
+                CHECK ((int) back.notes.size() == before + 1 && found && back.firstProgram (1) == 5);
+                CHECK (std::abs (back.tickToSeconds (960) - 0.5) < 1e-6);          // 120 bpm: a quarter is half a second
+                engine.reloadTrack (midiSong);
+                CHECK (waitReady());
+                std::printf ("     edited MIDI file: %d notes, length %.2f s\n", (int) back.notes.size(), engine.getTrackLength());
+            }
+        }
+
+        // --- one keyboard layering the other, both ways: a layer, never an echo -------------------
+        {
+            engine.selectProgram (0, 0); settle();                      // Upper on its synth
+            engine.clearProgram (1, 7);
+            engine.selectProgram (1, 7); settle();
+            CHECK (engine.addInputSlot (1, 7, 0));                      // Lower's program plays Upper's sounds
+            CHECK (engine.addInputSlot (0, 0, 1));                      // and Upper's plays Lower's: a cycle
+            const int upperSlots = (int) engine.getSetup().inputs[0].programs[0].slots.size();
+            CHECK (engine.isPluginAlive (1, 7, 0) && engine.getSetup().inputs[1].programs[7].slots[0].displayName() == "Upper's sounds");
+            engine.injectMidi (1, MidiMessage::noteOn (2, 64, (uint8) 100));   // played on Lower
+            const float layered = levels (8)[0];
+            std::printf ("     Lower's note through Upper's sounds: %.3f\n", layered);
+            CHECK (layered > 0.01f);
+            engine.injectMidi (1, MidiMessage::noteOff (2, 64));
+            levels (120);
+            const float quiet = levels (8)[0];
+            std::printf ("     after letting go, with both keyboards layering each other: %.5f\n", quiet);
+            CHECK (quiet < 1e-3f);
+            engine.removeSlot (0, 0, upperSlots - 1);
+            engine.clearProgram (1, 7);
+        }
+
+        // Removing an input: every song's programs shift with the inputs that are left.
+        {
+            const int extra = engine.addInput ("Extra");
+            const int shifted = engine.addSong ("Shifted");
+            engine.setSongProgram (shifted, 0, 3);
+            engine.setSongProgram (shifted, extra, 9);
+            CHECK (engine.getSongs()[(size_t) shifted].programFor (extra) == 9);
+            engine.removeInput (extra);
+            CHECK (engine.getSongs()[(size_t) shifted].programFor (0) == 3 && (int) engine.getSongs()[(size_t) shifted].programs.size() == extra);
+            engine.removeSong (shifted);
+        }
 
         // A song with no stems arms nothing.
         const int bare = engine.addSong ("No track");
@@ -1911,6 +2075,213 @@ int main()
         CHECK (back.songs[(size_t) song].stems.size() == 1 && back.songs[(size_t) song].stems[0].file == "stem.wav");
         CHECK (back.songs[(size_t) song].countInBeats == 2 && back.songs[(size_t) song].countInOutput == click);
         engine.removeOutput (click);
+    }
+
+    // --- routing: per-slot receive channel, and an external instrument on a MIDI port ----------
+    {
+        struct Catcher : public MidiInputCallback
+        {
+            std::mutex m;
+            std::vector<MidiMessage> got;
+            void handleIncomingMidiMessage (MidiInput*, const MidiMessage& msg) override { std::lock_guard<std::mutex> l (m); got.push_back (msg); }
+            std::vector<MidiMessage> take() { std::lock_guard<std::mutex> l (m); auto r = got; got.clear(); return r; }
+        } catcher;
+        /* ALSA's Midi Through port gives back whatever is sent to it: send to
+           its output side, listen on its input side. (A virtual port of our
+           own would do, but JUCE does not list a process's own ports.) */
+        MidiDeviceInfo port;
+        std::unique_ptr<MidiInput> virt;
+        for (const auto& d : MidiOutput::getAvailableDevices())
+            if (d.name.containsIgnoreCase ("Midi Through")) port = d;
+        if (port.identifier.isNotEmpty())
+            for (const auto& d : MidiInput::getAvailableDevices())
+                if (d.name == port.name) { virt = MidiInput::openDevice (d.identifier, &catcher); break; }
+        if (virt == nullptr) port = {};
+        else { virt->start(); std::printf ("     looping through %s (%s)\n", port.name.toRawUTF8(), port.identifier.toRawUTF8()); }
+        if (port.identifier.isEmpty())
+        {
+            std::printf ("     skip external-instrument check (no Midi Through port here)\n");
+        }
+        else
+        {
+            const int oldChannel = engine.getSetup().inputs[0].channel;
+            engine.setInputChannel (0, 0);                                   // Omni: the slot sorts the channels
+            engine.clearProgram (0, 90);
+            engine.selectProgram (0, 90); settle();
+            CHECK (engine.addExternalSlot (0, 90, port));
+            CHECK (engine.isPluginAlive (0, 90, 0));
+            engine.setSlotPatch (0, 90, 0, 0, 3, 17);                        // playing: sent at once
+            auto renderAndWait = [&] { AudioBuffer<float> b (2, kBlock); for (int i = 0; i < 6; ++i) { b.clear(); engine.renderBlockForTesting (b.getArrayOfWritePointers(), 2, kBlock); } Thread::sleep (150); return catcher.take(); };
+            auto has = [] (const std::vector<MidiMessage>& v, std::function<bool (const MidiMessage&)> f) { for (auto& m : v) if (f (m)) return true; return false; };
+
+            auto patch = renderAndWait();
+            CHECK (has (patch, [] (const MidiMessage& m) { return m.isProgramChange() && m.getProgramChangeNumber() == 17 && m.getChannel() == 1; }));
+            CHECK (has (patch, [] (const MidiMessage& m) { return m.isController() && m.getControllerNumber() == 32 && m.getControllerValue() == 3; }));
+
+            engine.injectMidi (0, MidiMessage::noteOn (5, 64, (uint8) 90));   // plays on channel 1, as the slot is set
+            auto notes = renderAndWait();
+            std::printf ("     external instrument received %d messages\n", (int) notes.size());
+            CHECK (has (notes, [] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == 64 && m.getChannel() == 1; }));
+            engine.injectMidi (0, MidiMessage::noteOff (5, 64));
+            renderAndWait();
+
+            // Listens to channel 2 only.
+            engine.setSlotListensTo (0, 90, 0, 1 << 1);
+            engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));
+            CHECK (! has (renderAndWait(), [] (const MidiMessage& m) { return m.isNoteOn(); }));
+            engine.injectMidi (0, MidiMessage::noteOn (2, 62, (uint8) 90));
+            CHECK (has (renderAndWait(), [] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == 62; }));
+
+            // PANIC reaches the hardware too.
+            engine.panic();
+            CHECK (has (renderAndWait(), [] (const MidiMessage& m) { return m.isAllNotesOff() || (m.isController() && m.getControllerNumber() == 123); }));
+
+            // Its sound back through an interface input joins the program's mix.
+            engine.setSlotReturn (0, 90, 0, 0, -1);
+            AudioBuffer<float> tone (1, kBlock), outBuf (2, kBlock);
+            for (int i = 0; i < kBlock; ++i) tone.setSample (0, i, 0.4f * (float) std::sin (MathConstants<double>::twoPi * 330.0 * i / 48000.0));
+            float back = 0.0f;
+            for (int i = 0; i < 4; ++i)
+            {
+                outBuf.clear();
+                engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock);
+                back = jmax (back, outBuf.getMagnitude (0, 0, kBlock));
+            }
+            std::printf ("     audio return in the mix: %.3f (input peak 0.4)\n", back);
+            CHECK (std::abs (back - 0.4f) < 0.05f);
+
+            // Saved and read back.
+            TemporaryFile ef (".stagerig.json");
+            CHECK (engine.captureSetup().saveToFile (ef.getFile()).wasOk());
+            Setup back2;
+            CHECK (Setup::loadFromFile (ef.getFile(), back2).wasOk());
+            const auto& sd = back2.inputs[0].programs[90].slots[0];
+            CHECK (sd.isExternal() && sd.midiOutIdentifier == port.identifier && sd.patch == 17 && sd.bankLsb == 3
+                   && sd.hears (2) && ! sd.hears (1) && sd.listensToText() == "Channel 2" && sd.returnLeft == 0 && sd.returnRight == -1);
+
+            engine.clearProgram (0, 90);
+
+            // --- a slot's MIDI chain: a processor plugin and a send, before the sound ---
+            perf::ClapPluginFormat clapFmt;
+            OwnedArray<PluginDescription> found;
+            clapFmt.findAllTypesForFile (found, STAGERIG_TEST_NOTE_EFFECT);
+            CHECK (found.size() == 1);
+            if (found.size() == 1)
+            {
+                const int midiChain = ProgramDef::midiChainOf (0);
+                engine.clearProgram (0, 91);
+                engine.selectProgram (0, 91); settle();
+                CHECK (engine.addExternalSlot (0, 91, port));               // the sound: plays on channel 1
+                String fxErr;
+                CHECK (engine.addEffect (0, 91, midiChain, *found[0], fxErr));
+                settle();
+                auto* octave = engine.getPlugin (0, 91, midiChain, 0);
+                CHECK (octave != nullptr && octave->isAlive());
+                renderAndWait();
+
+                auto noteOn = [] (int n, int ch) { return [n, ch] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == n && m.getChannel() == ch; }; };
+                auto play = [&] (int note) { engine.injectMidi (0, MidiMessage::noteOn (1, note, (uint8) 90)); auto got = renderAndWait();
+                                             engine.injectMidi (0, MidiMessage::noteOff (1, note)); renderAndWait(); return got; };
+
+                // Through the processor: the sound hears the octave, not the key.
+                auto got = play (60);
+                std::printf ("     MIDI processor -> external: %d messages\n", (int) got.size());
+                CHECK (has (got, noteOn (72, 1)));
+                CHECK (! has (got, noteOn (60, 1)));
+
+                // Bypassed, the notes go past it.
+                engine.setEffectBypassed (0, 91, midiChain, 0, true);
+                got = play (60);
+                CHECK (has (got, noteOn (60, 1)) && ! has (got, noteOn (72, 1)));
+                engine.setEffectBypassed (0, 91, midiChain, 0, false);
+
+                // A send after it gets the octave too, on its own channel; the sound still plays.
+                CHECK (engine.addMidiSend (0, 91, 0, port));
+                engine.setMidiSendChannel (0, 91, 0, 1, 5);
+                CHECK (engine.isPluginAlive (0, 91, midiChain, 1));
+                got = play (62);
+                CHECK (has (got, noteOn (74, 5)) && has (got, noteOn (74, 1)));
+
+                // Moved ahead of the processor, the send hears the key as played.
+                engine.moveEffect (0, 91, midiChain, 1, 0);
+                got = play (62);
+                CHECK (has (got, noteOn (62, 5)) && has (got, noteOn (74, 1)) && ! has (got, noteOn (74, 5)));
+
+                // The send recalls a patch on its channel.
+                engine.setMidiSendPatch (0, 91, 0, 0, -1, -1, 9);
+                got = renderAndWait();
+                CHECK (has (got, [] (const MidiMessage& m) { return m.isProgramChange() && m.getProgramChangeNumber() == 9 && m.getChannel() == 5; }));
+
+                // PANIC gets past the processor to the sound.
+                engine.panic();
+                CHECK (has (renderAndWait(), [] (const MidiMessage& m) { return m.getChannel() == 1 && (m.isAllNotesOff() || (m.isController() && m.getControllerNumber() == 123)); }));
+
+                TemporaryFile cf (".stagerig.json");
+                CHECK (engine.captureSetup().saveToFile (cf.getFile()).wasOk());
+                Setup back3;
+                CHECK (Setup::loadFromFile (cf.getFile(), back3).wasOk());
+                const auto& chainBack = back3.inputs[0].programs[91].slots[0].midiEffects;
+                CHECK (chainBack.size() == 2 && chainBack[0].isSend() && chainBack[0].channel == 5 && chainBack[0].patch == 9
+                       && chainBack[0].portIdentifier == port.identifier && ! chainBack[1].isSend()
+                       && chainBack[1].plugin.name == found[0]->name);
+
+                // Removing the slot takes its chain with it.
+                engine.removeSlot (0, 91, 0);
+                CHECK (engine.getPlugin (0, 91, midiChain, 0) == nullptr);
+                engine.clearProgram (0, 91);
+            }
+            // --- a MIDI file part to a MIDI device: an instrument in the track's program listens to the file's channel ---
+            {
+                const auto folder = engine.getChartsFolder();
+                folder.createDirectory();
+                MidiMessageSequence seq;
+                seq.addEvent (MidiMessage::noteOn  (5, 67, (uint8) 100), 0);      // the file's channel 5
+                seq.addEvent (MidiMessage::noteOff (5, 67), 960 * 2);
+                seq.addEvent (MidiMessage::programChange (5, 40), 5);             // the file's idea of a sound: not the synth's business
+                seq.updateMatchedPairs();
+                MidiFile mf;
+                mf.setTicksPerQuarterNote (960);
+                mf.addTrack (seq);
+                const auto f = folder.getChildFile ("strings.mid");
+                f.deleteFile();
+                { FileOutputStream os (f); CHECK (os.openedOk() && mf.writeTo (os)); }
+
+                const int song = engine.addSong ("Strings to the synth");
+                StemDef st; st.file = "strings.mid";
+                engine.addSongStem (song, st);
+                const int track = engine.getTrackInput();
+                const int tp = engine.getSongs()[(size_t) song].programFor (track);
+                CHECK (track >= 0 && tp >= 0);
+                CHECK (engine.addExternalSlot (track, tp, port));                 // slot 1; slot 0 is the GM player
+                engine.setSlotOutChannel (track, tp, 1, 3);                       // the synth listens on 3
+                engine.assignPart (track, tp, 5, 1);                              // the file's channel 5 is its part
+                engine.selectSong (song);
+                for (int i = 0; i < 400 && ! engine.isTrackReady(); ++i) pump (10);
+                CHECK (engine.isTrackReady());
+                settle();
+                CHECK (engine.getSetup().inputs[(size_t) track].currentProgram == tp);
+                renderAndWait();
+                engine.startTrack();
+                auto got = renderAndWait();
+                std::printf ("     MIDI file channel 5 to the synth on channel 3: %d messages\n", (int) got.size());
+                CHECK (has (got, [] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == 67 && m.getChannel() == 3; }));
+                CHECK (! has (got, [] (const MidiMessage& m) { return m.isProgramChange(); }));
+                engine.stopTrack();
+                renderAndWait(); pump (50);
+
+                TemporaryFile sf (".stagerig.json");
+                CHECK (engine.captureSetup().saveToFile (sf.getFile()).wasOk());
+                Setup back4;
+                CHECK (Setup::loadFromFile (sf.getFile(), back4).wasOk());
+                const auto& tpd = back4.inputs[(size_t) track].programs[(size_t) tp];
+                CHECK (tpd.slots.size() == 2 && tpd.slots[1].isExternal() && tpd.slots[1].hears (5) && ! tpd.slots[1].hears (1)
+                       && tpd.slots[0].isGm() && ! tpd.slots[0].hears (5) && tpd.slots[0].hears (1)
+                       && back4.songs[(size_t) song].programFor (track) == tp);
+                engine.removeSong (song);
+            }
+            engine.setInputChannel (0, oldChannel);
+            virt->stop();
+        }
     }
 
     // CLAP has to be loadable by the synchronous API, because that is the one

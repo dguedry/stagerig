@@ -336,7 +336,7 @@ public:
     const String getName() const override                   { return description.name; }
     double getTailLengthSeconds() const override            { return 0.0; }
     bool acceptsMidi() const override                       { return hasNoteInput; }
-    bool producesMidi() const override                      { return false; }
+    bool producesMidi() const override                      { return hasNoteOutput; }
 
     void prepareToPlay (double sampleRate, int blockSize) override;
     void releaseResources() override;
@@ -555,7 +555,7 @@ private:
     const clap_plugin_audio_ports_t* audioPorts = nullptr;
     const clap_plugin_note_ports_t* notePorts = nullptr;
 
-    bool active = false, hasNoteInput = false;
+    bool active = false, hasNoteInput = false, hasNoteOutput = false;
     std::atomic<bool> processing { false };     // set by the audio thread
     std::atomic<bool> wantProcessing { false }; // set by whoever prepares us
 
@@ -606,6 +606,7 @@ private:
         std::vector<clap_event_note_t> noteStore;
         std::vector<clap_event_midi_t> midiStore;
     } events;
+    MidiBuffer midiOut;                 // what the plugin plays, collected during process
 
     // Scratch buffers for the process call, sized in prepareToPlay.
     std::vector<float*> inPtrs, outPtrs;
@@ -692,6 +693,9 @@ bool ClapInstance::initialise (double sampleRate, int blockSize, String& error)
         }
     }
 
+    // A note effect -- an arpeggiator, a chord generator -- plays notes back out.
+    hasNoteOutput = notePorts != nullptr && notePorts->count (plugin, false) > 0;
+
     // --- parameters --------------------------------------------------------
     if (params != nullptr && params->count != nullptr)
     {
@@ -761,6 +765,7 @@ void ClapInstance::prepareToPlay (double sampleRate, int blockSize)
     events.paramStore.reserve (evRoom);
     events.noteStore.reserve (evRoom);
     events.midiStore.reserve (evRoom);
+    midiOut.ensureSize (evRoom * 8);
 
     /* Reactivating resets the plugin to its own defaults, so anything the host
        had set is gone. Queue every current value to be re-sent at the first
@@ -936,7 +941,9 @@ void ClapInstance::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
     { return static_cast<Events*> (l->ctx)->list[(size_t) i]; };
 
     /* Output events: the plugin tells us when it changes a parameter itself,
-       which is what makes a knob on the plugin's own GUI move the mapping. */
+       which is what makes a knob on the plugin's own GUI move the mapping;
+       and a note effect hands back the notes it plays. */
+    midiOut.clear();
     clap_output_events_t out {};
     out.ctx = this;
     out.try_push = [] (const clap_output_events_t* l, const clap_event_header_t* h) -> bool
@@ -947,6 +954,22 @@ void ClapInstance::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
             const auto* pv = reinterpret_cast<const clap_event_param_value_t*> (h);
             for (auto* cp : me->clapParams)
                 if (cp->getClapId() == pv->param_id) { cp->setFromPlugin (pv->value); break; }
+        }
+        else if (h->space_id == CLAP_CORE_EVENT_SPACE_ID
+                 && (h->type == CLAP_EVENT_NOTE_ON || h->type == CLAP_EVENT_NOTE_OFF || h->type == CLAP_EVENT_NOTE_CHOKE))
+        {
+            const auto* n = reinterpret_cast<const clap_event_note_t*> (h);
+            const int ch = jlimit (1, 16, n->channel + 1), key = jlimit (0, 127, (int) n->key);
+            if (h->type == CLAP_EVENT_NOTE_ON)
+                me->midiOut.addEvent (MidiMessage::noteOn (ch, key, (float) jlimit (0.0, 1.0, n->velocity)), (int) h->time);
+            else
+                me->midiOut.addEvent (MidiMessage::noteOff (ch, key, (float) jlimit (0.0, 1.0, n->velocity)), (int) h->time);
+        }
+        else if (h->space_id == CLAP_CORE_EVENT_SPACE_ID && h->type == CLAP_EVENT_MIDI)
+        {
+            const auto* e = reinterpret_cast<const clap_event_midi_t*> (h);
+            const int len = MidiMessage::getMessageLengthFromFirstByte (e->data[0]);
+            if (len >= 1 && len <= 3) me->midiOut.addEvent (e->data, len, (int) h->time);
         }
         return true;
     };
@@ -986,7 +1009,7 @@ void ClapInstance::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
     for (int ch = mainOutChannels; ch < buffer.getNumChannels(); ++ch)
         buffer.clear (ch, 0, numSamples);
 
-    midi.clear();                       // we do not produce MIDI
+    midi.swapWith (midiOut);            // what it played, if anything; the input is spent
 }
 
 //==============================================================================

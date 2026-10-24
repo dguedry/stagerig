@@ -4,9 +4,12 @@
 #include "PluginHost.h"
 #include "RemotePlugin.h"
 #include "SongPlayer.h"
+#include "MidiOuts.h"
+#include "GmSynth.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
+#include <set>
 #include <pthread.h>
 #include <condition_variable>
 #include <deque>
@@ -28,10 +31,15 @@ namespace perf
     guarded by a single lock that is held for the duration of each audio block.
 
     Signal flow per program:
-        for each slot:   MIDI -> instrument -> [effect chain] -> * gain  --+
-                                                                            +-> sum -> [program effect chain] -> out
-    Plugins are addressed by (slot, effect): slot >= 0 selects an instrument slot,
-    slot == -1 the program-level chain; effect == -1 means the instrument itself.
+        for each slot:   MIDI -> [MIDI chain] -> sound -> [effect chain] -> * gain  --+
+                                                                                       +-> sum -> [program effect chain] -> out
+    A slot's sound is a plugin or an external instrument (a MIDI port, its
+    audio back on interface inputs). Its MIDI chain holds
+    MIDI processor plugins and MIDI sends.
+
+    Plugins are addressed by (slot, effect): slot >= 0 selects a slot's effect
+    chain, ProgramDef::midiChainOf (slot) its MIDI chain, slot == -1 the
+    program-level chain; effect == -1 means the slot's sound itself.
 */
 class Engine : private juce::AudioIODeviceCallback,
                private juce::MidiInputCallback,
@@ -223,7 +231,8 @@ public:
     /** The file the setup was loaded from or last saved to, or none. The
         charts folder sits beside it, so both the desktop and the tablet
         server derive the same place from here. */
-    void setSetupFile (const juce::File& f)  { setupFile = f; }
+    /** Also makes the current song's track ready again: its files live beside this file. */
+    void setSetupFile (const juce::File& f);
     juce::File getSetupFile() const          { return setupFile; }
     juce::File getChartsFolder() const       { return chartsFolderFor (setupFile); }
 
@@ -295,8 +304,34 @@ public:
     int  getSectionCC() const                       { return setup.sectionCC; }
     void setSectionCC (int cc);
     void armSectionLearn()                          { sectionLearnArmed.store (true); }
+    /** The backing-track input: where the songs' MIDI files play. -1 while none. */
+    int  getTrackInput() const                      { return setup.trackInput(); }
+    /** Makes the backing-track input if there is none, and returns its index. */
+    int  ensureTrackInput();
+    /** The song's program on the backing-track input, made (named after the
+        song, with the General MIDI player) if the song has none yet. */
+    int  ensureTrackProgram (int songIndex);
+    /** The one instrument of `program` that plays channel `channel`: it
+        listens to it (alone, if it was hearing every channel) and every
+        other one stops. -1 = none plays it. */
+    void assignPart (int inputIndex, int program, int channel, int slot);
+    /** Which instrument of `program` plays `channel`, or -1 (the first found). */
+    int  partInstrument (int inputIndex, int program, int channel) const;
+    /** A part's mute: the GM player's channel mute when it plays the part, else the instrument's enable. */
+    void setPartMuted (int inputIndex, int program, int channel, bool muted);
+    bool isPartMuted (int inputIndex, int program, int channel) const;
+
+    /** While stopped: the armed track starts from here (seconds) on the next Play. */
+    void cueTrack (double seconds)                  { if (player != nullptr) player->cue (seconds); }
+    /** Reads a song's files again (after the MIDI editor saved one), if it is the armed song. */
+    void reloadTrack (int songIndex)                { if (songIndex == trackSong) armTrack (songIndex); }
     /** Loads (or reloads) the track for this song, stopping whatever was playing. */
     void armTrack (int songIndex);
+
+    /** The General MIDI soundfont MIDI stems play through; empty = the system's
+        (FluidR3_GM). Kept in the settings, as it belongs to the machine. */
+    juce::File getGmSoundfont() const;
+    void setGmSoundfont (const juce::File&);
 
     int  getTransportCC() const                     { return setup.transportCC; }
     void setTransportCC (int cc);
@@ -331,6 +366,44 @@ public:
     /** Left/right gains for a pan position: a balance law, unity in the centre. */
     static void panGains (float pan, float& left, float& right);
     void setSlotOutChannel(int inputIndex, int program, int slot, int);
+    /** Which incoming channels the slot listens to: a mask, bit 0 = channel 1 (SlotDef::listensTo). */
+    void setSlotListensTo (int inputIndex, int program, int slot, int channelMask);
+    void setSlotHears (int inputIndex, int program, int slot, int channel, bool hears);
+
+    // Other kinds of instrument -------------------------------------------------
+    /** The built-in General MIDI player: a multitimbral instrument, the
+        file's (or its own mixer's) instrument on each channel. */
+    bool addGmSlot (int inputIndex, int program);
+    /** The GM player's mixer for one channel: instrument, volume, pan, mute over the file's. */
+    void setGmChannel (int inputIndex, int program, int slot, int channel, const SlotDef::GmChannel&);
+    /** Another input's sounds: the slot's notes go to that input's current program. */
+    /** An instrument that is another input's sounds: its program number
+        `targetProgram`, or whatever that input is playing (-1). */
+    bool addInputSlot (int inputIndex, int program, int targetInput, int targetProgram = -1);
+
+    // External instruments: a slot played through a MIDI output port ------------
+    bool addExternalSlot (int inputIndex, int program, const juce::MidiDeviceInfo&);
+    void setSlotMidiOut (int inputIndex, int program, int slot, const juce::MidiDeviceInfo&);
+    /** Bank select and program change sent when the program is selected (and now, if it is); -1 = not sent. */
+    void setSlotPatch (int inputIndex, int program, int slot, int bankMsb, int bankLsb, int patch);
+    /** The interface inputs the instrument's audio comes back on; -1 = none. */
+    void setSlotReturn (int inputIndex, int program, int slot, int left, int right);
+    /** Is the slot's MIDI port there? False for a plugin slot. */
+    bool isSlotPortOpen (int inputIndex, int program, int slot) const;
+
+
+    // A slot's MIDI chain: what its notes go through before the sound --------
+    //
+    // Addressed as any chain, with ProgramDef::midiChainOf (slot) for the slot:
+    // addEffect (in, prog, midiChainOf (slot), plugin) puts a MIDI processor
+    // there, and remove/move/bypass, getPlugin and the editors work as for an
+    // effect. A send has functions of its own:
+    bool addMidiSend (int inputIndex, int program, int slot, const juce::MidiDeviceInfo&);
+    void setMidiSendPort (int inputIndex, int program, int slot, int effect, const juce::MidiDeviceInfo&);
+    /** 0 = as the MIDI arrives at the send, 1..16 = rechannelled for its port. */
+    void setMidiSendChannel (int inputIndex, int program, int slot, int effect, int channel);
+    /** Sent from the port when the program is selected, as an external instrument's patch; -1 = not sent. */
+    void setMidiSendPatch (int inputIndex, int program, int slot, int effect, int bankMsb, int bankLsb, int patch);
 
 
     //==============================================================================
@@ -426,11 +499,14 @@ private:
         double sampleRate;
         int blockSize;
         bool bridged = false;    // Wine/yabridge plugin: limited concurrency (see takeJob)
+        bool gm = false;         // the General MIDI player instead: reads the soundfont
+        juce::File soundfont;
     };
     struct LoadResult
     {
         uint64_t nodeId;
         std::unique_ptr<RemotePlugin> plugin;
+        std::unique_ptr<GmSynth> gm;
         juce::String error;
         double sampleRate;
         int blockSize;
@@ -461,10 +537,16 @@ private:
         whole teardown. */
     void teardownRuntimes (bool captureFirst = true, int budgetMs = -1);
     ProgramRuntime* ensureProgramLoaded (int inputIndex, int program);
+    /** The programs named by "another input's sounds" slots in the programs
+        that are current, as (input, program): kept loaded and rendered
+        beside the inputs' own. */
+    std::set<std::pair<int, int>> lentPrograms() const;
+    void ensureLentLoaded();
     std::unique_ptr<ProgramRuntime> buildProgram (int inputIndex, int program);
     std::unique_ptr<SlotRuntime> buildSlot (int inputIndex, int program, int slotIndex, const SlotDef&);
     std::unique_ptr<EffectRuntime> buildEffect (int inputIndex, int program, int slotIndex, int effectIndex, const EffectDef&);
     void queueLoad (PluginNode&, const juce::PluginDescription&, const juce::MemoryBlock& state);
+    void queueGmLoad (SlotRuntime&);
     void loaderThreadFunc();
     void attachLoaded (LoadResult&);
     void unloadProgram (InputRuntime&, int program);
@@ -481,8 +563,15 @@ private:
     // audio thread
     void processInput (InputRuntime&, const float* const* in, int numIn, float* const* out, int numOut, int numSamples, bool panic);
     /** `inL`/`inR` carry an audio input's signal into the program; null for a keyboard. */
-    void processProgram (ProgramRuntime&, const juce::MidiBuffer& in, const float* inL, const float* inR,
-                         float* const* out, int numOut, int numSamples, bool panic);
+    /** `fromTrack`: the input is the backing track, whose files' program
+        changes are for the GM player only. */
+    /** `received`: MIDI another input's "its sounds" instrument sent here
+        this block, which is played but never passed on again (no echoes
+        between two keyboards that each layer the other). May be null. */
+    void processProgram (ProgramRuntime&, const juce::MidiBuffer& in, const juce::MidiBuffer* received, const float* inL, const float* inR,
+                         float* const* out, int numOut, int numSamples, bool panic, bool fromTrack);
+    /** The GM player's view of a slot's MIDI: its mixer's choices over the file's. */
+    void prepareGmMidi (SlotRuntime&, int numSamples);
     static void applyInputDef (InputRuntime&, const InputDef&);
     /** The program definition an address names: a program's, or an output's master chain. */
     ProgramDef* defFor (int inputIndex, int program);
@@ -549,7 +638,22 @@ private:
 
     // Backing tracks
     juce::AudioFormatManager trackFormats;
+
+    // External instruments
+    MidiOuts midiOuts;
+    double chunkStartMs = 0.0;                    // audio thread: when this chunk will be heard, on Time's hi-res clock
+    double outputLatencyMs = 0.0;
+    const float* const* chunkIn = nullptr;        // audio thread: this chunk's device inputs
+    int chunkNumIn = 0;
+    void sendPatches (ProgramRuntime&, const ProgramDef&);
+    /** Arms the song the set is on (not started), so Play works after a load. */
+    void armCurrentSong();
+    EffectDef* sendDefFor (int inputIndex, int program, int slot, int effect);
+    EffectRuntime* sendRuntimeFor (int inputIndex, int program, int slot, int effect) const;
+    /** Audio thread: every slot's MIDI chain, on the slot's MIDI for this block. */
+    void runMidiChains (ProgramRuntime&, int numSamples, bool notesOffNow, bool panicNow);
     std::unique_ptr<SongPlayer> player;           // swapped under `lock`
+
     bool trackProblemsReported = true;            // message thread
     std::atomic<int> sectionCCAtomic { 0 };
     std::atomic<bool> sectionLearnArmed { false };

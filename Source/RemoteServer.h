@@ -3,6 +3,8 @@
 #include "Engine.h"
 #include "PluginView.h"
 #include <juce_core/juce_core.h>
+#include <map>
+#include <vector>
 
 namespace perf
 {
@@ -58,6 +60,10 @@ private:
     juce::String levelsJson() const;
     /** The backing track of the song in play: whether there is one, running, where. */
     juce::String transportJson() const;
+    /** The armed song's MIDI-file parts, read once per file (by path and date). */
+    struct FilePart { int channel = 1; juce::String name; int program = 0; };
+    mutable std::map<juce::String, std::vector<FilePart>> partCache;
+    const std::vector<FilePart>& partsOf (const juce::File&) const;
     /** Where the time goes: blocks the rig missed, and per loaded plugin the
         blocks it did not answer in time. For finding the plugin that crackles. */
     juce::String healthJson() const;
