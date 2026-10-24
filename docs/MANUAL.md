@@ -96,6 +96,52 @@ vocal can go to the desk on separate channels.
 browser. The list on the left jumps to a section, and the search box narrows to
 whichever section answers what you typed.
 
+### Good free plugins to start with
+
+StageRig installs no plugins of its own beyond the General MIDI player, but
+Linux has free ones good enough to gig with, and the distributions package
+them. One line gets a working rig's worth; scan **LV2** (and **VST3**,
+**CLAP** where a plugin ships them) afterwards:
+
+```sh
+# Debian / Ubuntu / Mint
+sudo apt install surge-xt setbfree zynaddsubfx-lv2 avldrums.lv2 \
+                 dragonfly-reverb lsp-plugins-lv2 x42-plugins calf-plugins \
+                 guitarix-lv2 zam-plugins
+# Fedora
+sudo dnf install setBfree zynaddsubfx lsp-plugins-lv2 lv2-calf-plugins guitarix zam-plugins
+```
+
+Instruments:
+
+- **Surge XT** -- a serious synth: pads, leads, basses, keys, with its own
+  effects. The first thing to install. (Fedora: from the Surge site.)
+- **setBfree** -- a tonewheel organ with a Leslie, and a convincing one.
+- **ZynAddSubFX** -- pads, strings, bells, choirs; thousands of presets.
+- **AVL Drumkits** -- acoustic drums that sound like drums, and load fast.
+- The built-in **General MIDI player** covers the piano, the bass and
+  everything else until you have better.
+
+Effects:
+
+- **Dragonfly Reverb** -- hall, room and plate reverbs; the one to put on the
+  master chain.
+- **LSP Plugins** -- a full studio: compressors, EQs, limiters, gates,
+  de-essers. Where to look for any dynamics or EQ job.
+- **x42** -- meters, a stereo tool, a limiter, an EQ, auto-tune.
+- **Calf** -- chorus, vintage delay, phaser, a tube-ish saturator, and an
+  organ and mono synth of their own.
+- **Guitarix** -- amps, cabinets and pedals for a guitar on an audio input.
+- **ZamAudio** -- ZamComp, ZamEQ2, ZamTube: simple and good.
+
+Not packaged, worth fetching from their own sites, all native Linux: **Vital**
+(free tier) and **Odin 2** (synths), **Dexed** (the DX7), u-he's free
+**Tyrell N6**, **Podolski** and **Zebralette**, **sfizz** with the
+**Salamander Grand Piano** (a real piano, in SFZ), **Neural Amp Modeler**
+(amp captures), **Airwindows Consolidated** (hundreds of effects in one
+plugin), **Cardinal** (a modular). Windows-only plugins go through yabridge;
+see *Windows plugins*.
+
 ## The main window
 
 | Area | What it does |
