@@ -219,6 +219,15 @@ public:
     void setSongName (int songIndex, const juce::String&);
     void setSongNotes (int songIndex, const juce::String&);
     void setSongTempo (int songIndex, double bpm);     // 0 = leave the tempo alone
+    void setSongTranspose (int songIndex, int semitones);
+    /** The keyboards' notes shifted by this many semitones on the way in: the
+        song's setting, or a change made on the night. The backing track and
+        the audio inputs are not shifted. A note held across a change is let
+        go at the key it started on. */
+    void setTranspose (int semitones);
+    int  getTranspose() const { return liveTranspose.load(); }
+    /** The song in play -- the set's current one -- or -1. */
+    int  currentSongIndex() const;
     void setSongProgram (int songIndex, int inputIndex, int program);   // -1 = leave that input alone
 
     /** Fills a song from what is loaded right now: every input's current
@@ -620,6 +629,7 @@ private:
     std::atomic<bool> learnArmed { false };
     std::atomic<bool> tapLearnArmed { false };
     std::atomic<bool> panicRequested { false };
+    std::atomic<int> liveTranspose { 0 };
     std::atomic<int> lateBlocks { 0 };
     std::atomic<int> lastBlockSamples { 0 };
     timespec blockDeadline {};

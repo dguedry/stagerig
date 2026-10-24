@@ -45,7 +45,7 @@ int main()
     upper.output = 1;
 
     {
-        SongDef sg; sg.name = "With a track";
+        SongDef sg; sg.name = "With a track"; sg.transpose = -2;
         sg.stems.push_back ({ "mix.wav", "Mix", 0, -3.0f });
         sg.stems.push_back ({ "click.wav", {}, 1, 0.0f });
         StemDef midiStem; midiStem.file = "bass.mid";
@@ -141,6 +141,7 @@ int main()
         CHECK (ProgramDef::slotOfChain (ProgramDef::midiChainOf (3)) == 3 && ! ProgramDef::isMidiChain (3));
     }
     CHECK (loaded.songs.size() == 1 && loaded.songs[0].stems.size() == 3);
+    CHECK (loaded.songs[0].transpose == -2);
     {
         CHECK (loaded.songs[0].stems[2].isMidi() && ! loaded.songs[0].stems[2].hasLegacyRoutes);
         CHECK (loaded.trackInput() == 3 && loaded.inputs[3].isTrack() && loaded.inputs[3].channel == 0 && ! loaded.inputs[3].respondToProgramChange);

@@ -516,6 +516,7 @@ var SongDef::toVar() const
     o->setProperty ("programs", progArr);
     // Only written when set, so a setup without songs stays byte-identical.
     if (tempoBpm > 0.0)    o->setProperty ("tempoBpm", tempoBpm);
+    if (transpose != 0)    o->setProperty ("transpose", transpose);
     if (notes.isNotEmpty()) o->setProperty ("notes", notes);
     if (! charts.empty())
     {
@@ -550,6 +551,7 @@ SongDef SongDef::fromVar (const var& v)
     {
         s.name     = o->getProperty ("name").toString();
         s.tempoBpm = (double) o->getProperty ("tempoBpm");
+        s.transpose = (int) o->getProperty ("transpose");
         s.notes    = o->getProperty ("notes").toString();
         if (auto* arr = o->getProperty ("charts").getArray())
             for (const auto& c : *arr)

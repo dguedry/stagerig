@@ -898,6 +898,33 @@ tonight) and, when a plugin in the song's own program plays it, **GUI** to
 open that plugin's window on the tablet like any other. What plays each part is chosen on the laptop, in
 the song's Backing track window; the tablet reads it.
 
+### Fixing a sound from the stand: Now
+
+The **Now** tab is the song's sound, adjustable from the stand -- the things
+that come up at a gig, and nothing that belongs in rehearsal:
+
+- Each keyboard's program with its **instruments**: **ON / OFF** for a
+  layer, and a fader for its level.
+- Its **effects** -- the instruments' own, the program's, and the MIDI
+  chain's -- each with an on/off that is the effect's bypass: lose the reverb
+  when the room is wet.
+- The **outputs**: each one's volume into the desk, and its master effects.
+- **Transpose**: **−** and **+** shift the keyboards' notes in semitones,
+  down a step for the singer. The backing track's parts are not shifted. A
+  note you are holding when you press it is let go properly.
+- **Save to "song"** makes the song in play remember the programs on every
+  input, the tempo and the transpose as they are now, so a fix made at the
+  sound check is still there at the second set.
+
+Every change is live and saved with the setup, exactly as the same change on
+the laptop would be: turning a layer down on the tablet turns it down in the
+program. Adding or removing instruments and effects, mappings, splits and
+layers stay on the laptop, on purpose: they are slow on a touch screen and
+easy to get wrong two songs before you need the sound.
+
+`?tab=now` on the address opens the page on that tab, for a home-screen
+shortcut straight to it.
+
 ### If the tablet cannot connect
 
 The most common cause is a firewall on the computer, not anything wrong with

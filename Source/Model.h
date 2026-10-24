@@ -362,6 +362,10 @@ struct SongDef
         silently reset one you tapped. */
     double tempoBpm = 0.0;
 
+    /** Semitones the keyboards are shifted for this song -- down a step for
+        the singer -- applied to their notes on the way in. 0 for most songs. */
+    int transpose = 0;
+
     /** Free text: a key, a count-in, "capo 2", whatever helps on stage. Shown
         on the tablet under the song name. */
     juce::String notes;

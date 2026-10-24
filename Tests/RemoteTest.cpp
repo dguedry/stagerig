@@ -208,6 +208,17 @@ int main()
         engine.setProgramName (0, 1, "Second");
 
         perf::RemoteServer rs (engine, props);
+        {
+            // The Now page's JSON: the inputs with their instruments and effects, the outputs, the transpose.
+            engine.setTranspose (-2);
+            const auto now = JSON::parse (rs.nowJson());
+            check (now.getProperty ("transpose", 0) == var (-2), "the Now page carries the transpose");
+            check (now.getProperty ("inputs", var()).size() == (int) engine.getSetup().inputs.size(), "the Now page lists every input");
+            const auto first = now.getProperty ("inputs", var())[0];
+            check (first.hasProperty ("instruments") && first.hasProperty ("effects") && first.hasProperty ("programName"), "each input has its instruments, effects and program");
+            check (now.getProperty ("outputs", var()).size() >= 1 && now.getProperty ("outputs", var())[0].hasProperty ("gainDb"), "the outputs come with their volume");
+            engine.setTranspose (0);
+        }
         if (rs.start (0) || rs.start (7791))
         {
             const auto before = engine.getSetup().inputs[0].currentProgram;

@@ -907,6 +907,24 @@ void ClapInstance::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
             }
             else
             {
+                /* All notes off and all sound off, when the notes went in as
+                   CLAP note events: say it in that dialect too -- a wildcard
+                   note-off (every key, every channel) and a choke -- since a
+                   plugin that takes CLAP notes need not map CC 123 to them. */
+                if (! noteDialectMidi && m.isController() && (m.getControllerNumber() == 123 || m.getControllerNumber() == 120))
+                {
+                    clap_event_note_t n {};
+                    n.header.size = sizeof (n);
+                    n.header.type = m.getControllerNumber() == 120 ? CLAP_EVENT_NOTE_CHOKE : CLAP_EVENT_NOTE_OFF;
+                    n.header.time = time;
+                    n.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+                    n.note_id = -1;
+                    n.port_index = 0;
+                    n.channel = -1;
+                    n.key = -1;
+                    n.velocity = 0.0;
+                    ev.noteStore.push_back (n);
+                }
                 // Everything else -- CC, bend, pressure -- goes as MIDI 1.0.
                 const auto* raw = m.getRawData();
                 const int len = m.getRawDataSize();
