@@ -947,29 +947,19 @@ private:
             name.setTooltip (d.file);
             name.onTextChange = [this] { def.name = name.getText().trim(); owner.engine.setSongStem (owner.songIndex, index, def); };
 
-            addAndMakeVisible (output);
             if (d.isMidi())
             {
-                /* A MIDI file: the GM player's output and level, and where
-                   each channel goes. */
-                owner.fillOutputs (output, d.output);
-                output.setTooltip ("Where the General MIDI player is heard -- the channels you send to your own sounds go where those sounds go");
-                output.onChange = [this] { def.output = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
-                addAndMakeVisible (gain);
-                gain.setRange (-60.0, 12.0, 0.5);
-                gain.setSliderStyle (Slider::LinearBar);
-                gain.setTextValueSuffix (" dB");
-                gain.setDoubleClickReturnValue (true, 0.0);
-                gain.setValue (d.gainDb, dontSendNotification);
-                gain.setTooltip ("Level of the General MIDI player");
-                gain.onValueChange = [this] { def.gainDb = (float) gain.getValue(); owner.engine.setSongStem (owner.songIndex, index, def); };
+                /* A MIDI file plays into the backing-track input; the song's
+                   program there says what each part plays. Nothing to set
+                   here but the notes and the parts, in the editor. */
                 addAndMakeVisible (channels);
-                channels.setButtonText (channelsSummary());
-                channels.setTooltip ("Open the MIDI editor: each part's sound (a General MIDI instrument or one of your own), its mix, and its notes");
+                channels.setButtonText ("Edit MIDI...");
+                channels.setTooltip ("The MIDI editor: each part's instrument (a General MIDI instrument or one of yours), its mix, and the notes");
                 channels.onClick = [this] { owner.showChannelRoutes (index); };
             }
             else
             {
+                addAndMakeVisible (output);
                 owner.fillOutputs (output, d.output);
                 output.onChange = [this] { def.output = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
 
@@ -989,25 +979,16 @@ private:
         {
             auto r = getLocalBounds().reduced (0, 2);
             remove.setBounds (r.removeFromRight (28));     r.removeFromRight (6);
-            gain.setBounds (r.removeFromRight (110));
-            r.removeFromRight (6);
-            if (def.isMidi()) { channels.setBounds (r.removeFromRight (190)); r.removeFromRight (6); }
-            output.setBounds (r.removeFromRight (def.isMidi() ? 150 : 180));    r.removeFromRight (6);
-            name.setBounds (r);
-        }
-
-        String channelsSummary() const
-        {
-            int own = 0, muted = 0;
-            for (auto& rt : def.channels)
+            if (def.isMidi())
+                channels.setBounds (r.removeFromRight (120));
+            else
             {
-                if (rt.kind == MidiRoute::Kind::keys || rt.kind == MidiRoute::Kind::slot) ++own;
-                if (rt.kind == MidiRoute::Kind::mute || rt.muted) ++muted;
+                gain.setBounds (r.removeFromRight (110));
+                r.removeFromRight (6);
+                output.setBounds (r.removeFromRight (180));
             }
-            if (own == 0 && muted == 0) return "Edit MIDI...  (General MIDI)";
-            String t = "Edit MIDI...  (" + String (own) + " yours";
-            if (muted > 0) t << ", " << muted << " muted";
-            return t + ")";
+            r.removeFromRight (6);
+            name.setBounds (r);
         }
 
         TracksComponent& owner;

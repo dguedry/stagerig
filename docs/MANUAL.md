@@ -94,9 +94,9 @@ whichever section answers what you typed.
 | Area | What it does |
 |---|---|
 | **Toolbar** (top) | New / Open / Save / Save As, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options** (preload all programs, hold notes across program changes, show songs and set lists, outputs and master effects, rescan MIDI, print the program map), the tempo and **Tap**, release **Tail**, **Stage**, **Keyboard**, **PANIC**. |
-| **Inputs** (left) | Your keyboards. Select one to edit its programs; its device, channel and Program Change setting are below the list. |
+| **Inputs** (left) | Your keyboards, audio inputs, and the backing track. Select one to edit its programs; its device, channel and Program Change setting are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, **Copy**, **Paste** and **Clear** are below. |
-| **Plugins** (right, top) | The slots of the current program, each with its controls and effect chain, plus the program effect chain. |
+| **Instruments** (right, top) | The instruments of the current program, each with its controls, MIDI chain and effects, plus the program effect chain. |
 | **MIDI mappings** (right, bottom) | Controller-to-parameter mappings for this program, with Learn and Suggest. |
 | **Keyboard** (bottom, optional) | An on-screen keyboard for testing without a controller. |
 | **Status bar** | Current file, CPU, sample rate, block size and latency, and warnings such as *late N* or *clock held by another app*. |
@@ -119,6 +119,12 @@ the signal is the instrument -- and in every other way it is an input like the
 others: it has 128 programs, it changes them from a footswitch, a song or the
 tablet, its effects take MIDI mappings, and a program change leaves the
 outgoing chain to ring out for the tail. See *Audio inputs* below.
+
+The third kind is the **Backing track**: the input the songs' MIDI files
+play into. It appears by itself when the first MIDI file is added to a song
+(or from **+ Add**), and each song selects its program there, so the
+instruments in that program are what the file's parts play -- see *MIDI
+files* under *Backing tracks*. It has no device or channel of its own.
 
 Each keyboard input has:
 
@@ -335,40 +341,36 @@ setup and its tracks travel together. For each stem:
 - **Level** -- in dB, and it can be changed while the track plays.
 - **X** takes the stem off the song; the file stays in the folder.
 
-**MIDI files** can be stems too (*.mid*). By default the whole file plays
-on StageRig's **General MIDI player** -- FluidSynth with the FluidR3_GM
-soundfont -- with the instruments the file asks for: drums on channel 10,
-bass, strings, whatever each channel's program change says. Its **output**
-and **level** are the stem's, like an audio stem's. Choose a different
-soundfont (GeneralUser GS, a commercial GM bank) under
+**MIDI files** play too (*.mid*), and they work like a keyboard: the file
+plays into the **Backing track** input, every channel as it is in the file,
+and the program the song selects there decides what each part plays. The
+first MIDI file in a song makes that program -- named after the song, with
+the **General MIDI player** in it -- so the file plays at once with the
+instruments it asks for: drums on channel 10, bass, strings, whatever each
+channel's program change says. The player is FluidSynth with the FluidR3_GM
+soundfont; choose another (GeneralUser GS, a commercial GM bank) under
 **Options ▸ General MIDI soundfont...**.
 
-**Channels...** on the stem lists the channels the file uses, each with the
-instrument the file plays on it, and where it plays:
+To give a part a better sound, select **Backing track** on the left and the
+song's program in the middle, and add an instrument under INSTRUMENTS as
+you would for a keyboard: a plugin, a MIDI device, or ***Upper*'s sounds**
+(the part goes to whatever that keyboard is playing). Set what it
+**LISTENS TO** to the part's channel, and take that channel away from the
+General MIDI player. Or do the same in one move from the file's
+**Edit MIDI...** window, where each part has a **Plays on** menu: a General
+MIDI instrument (the file's own, or any other), or one of the instruments in
+the program. One instrument per part; layering is for the INSTRUMENTS panel.
 
-- **General MIDI** -- the default, the file's own instrument.
-- ***Upper*: its sounds** -- through that keyboard's program, exactly as if
-  played on the keys: splits, layers, effects and all, each slot taking what
-  its **LISTENS TO** lets in (the notes arrive on the keyboard's channel
-  unless it is on *Omni*).
-- **Only *Kontakt 8*** -- straight into one plugin of the program the song
-  puts that keyboard on, past its key range and **LISTENS TO**, on the
-  channel that plugin listens on (what the slot **PLAYS ON**, else what it
-  **LISTENS TO**, else the keyboard's channel). So the file's channel 5
-  strings can play a Kontakt that only hears channel 1. It keeps playing
-  even while you switch that keyboard to another program -- that program
-  stays loaded for the song.
-- **Mute** -- not at all (the part you play yourself).
-
-Your own sounds keep their own patches: the file's program changes and bank
-selects only reach the General MIDI player. Notes follow sections, vamps and
-jumps like the audio does, every note is let go when the track stops or
-jumps, and starting from a section in the middle sets the GM instruments,
-volumes and pans as the file has them by then.
+The file's program changes and bank selects reach only the General MIDI
+player: your own instruments keep their patches. **Mixer...** on the player
+sets, per channel, an instrument, volume, pan or mute of your own over the
+file's. Notes follow sections, vamps and jumps like the audio does, every
+note is let go when the track stops or jumps, and starting from a section in
+the middle tells the instruments what the file had set by then.
 
 Without FluidSynth (*libfluidsynth3*, Fedora's *fluidsynth-libs*) or a GM
-soundfont (*fluid-soundfont-gm*) the Channels window says so, and the
-channels can still go to your own sounds.
+soundfont (*fluid-soundfont-gm*) the player's row says so, and the parts
+can go to your own instruments meanwhile.
 
 **Count-in** clicks a number of beats at the song's tempo before the stems
 start, on the output you choose -- usually the in-ears.
@@ -449,11 +451,13 @@ Each slot is one lane of the program, and a chain, in this order:
 the slot's notes -> [ MIDI chain ] -> the sound -> [ effects ] -> gain, pan
 ```
 
-- **The sound** is a plugin instrument, or a hardware synth or module played
-  through a MIDI port (see *External instruments*).
+- **The sound** is a plugin instrument; a MIDI device -- a hardware synth or
+  module, a lighting controller -- played through a MIDI port (see *MIDI
+  devices*); the built-in **General MIDI player**; or **another keyboard's
+  sounds**, which hands the notes to whatever that input is playing.
 - **The MIDI chain** works on the notes before the sound hears them: MIDI
-  effects (an arpeggiator, a chord generator), and hardware synths that
-  should play along. See *A slot's MIDI chain* below.
+  effects (an arpeggiator, a chord generator), and MIDI devices that should
+  play along. See *A slot's MIDI chain* below.
 - **The effects** work on the sound -- see *Effects*.
 
 The slot's own controls come first: its key and velocity ranges, transpose,
@@ -464,12 +468,12 @@ curve and channels decide which notes enter the chain at all. Left to right:
 | **Checkbox** | Enables the slot. Off is silent but stays loaded. |
 | **Icon** | The plugin's own icon where it has one, otherwise a coloured badge with its initials. |
 | **Name** | Plugin name and format. Red means it failed to load; hover for the reason. |
-| **Edit GUI** | Opens the plugin's own editor in its own window. Shows **Reload** instead if the plugin died, and **Setup...** for a hardware synth. |
+| **Edit GUI** | Opens the plugin's own editor in its own window. Shows **Reload** instead if the plugin died, **Setup...** for a MIDI device, **Mixer...** for the General MIDI player. |
 | **X** | Removes the slot. |
 | **GAIN** | Level of this slot, applied after its effects. Double-click for 0 dB. |
 | **PAN** | Stereo position, `centre`, `L 40`, `R 25`. Double-click for centre. |
 | **TRANSPOSE** | Shifts incoming notes in semitones; `+12 st` is an octave up. |
-| **LISTENS TO** | Which incoming MIDI channel this slot plays: *All channels*, or one. With the input on *Omni*, one program can give each channel its own sound -- see *Routing by channel* below. |
+| **LISTENS TO** | Which incoming MIDI channels this slot plays: *All channels*, or any set of them. With the input on *Omni*, one program can give each channel its own sound -- see *Routing by channel* below. |
 | **PLAYS ON** | *Same channel*, or a fixed one the slot sends on. Multi-timbral plugins such as Kontakt play the instrument assigned to that channel; an external instrument listens on one channel, usually 1. |
 | **KEY RANGE** | Two handles: the lowest and highest key that reach this slot. The caption spells the range out. |
 | **VELOCITY** | Two handles: the softest and loudest note-on that reach this slot. |
@@ -478,22 +482,28 @@ curve and channels decide which notes enter the chain at all. Left to right:
 **+ Add instrument...** adds a slot, and asks which kind:
 
 - **Plugin instrument** -- your instrument plugins, grouped by manufacturer.
-- **Hardware synth (MIDI out)** -- the MIDI ports of the interfaces plugged in.
-  With none connected it says so; plug one in and use
-  **Options ▸ Rescan MIDI devices**.
+- **MIDI device** -- a hardware synth, a module, a lighting controller: the
+  MIDI ports of the interfaces plugged in. With none connected it says so;
+  plug one in and use **Options ▸ Rescan MIDI devices**.
+- **General MIDI player** -- the built-in FluidSynth player, a multitimbral
+  instrument with the standard 128 sounds and drum kits (see *Backing tracks*).
+- **Another keyboard's sounds** -- the notes go to that input's current
+  program: a layer from one keyboard on the other, or a MIDI file part played
+  by whatever that keyboard is on.
 
 **+ Add...** under a slot adds to its chain:
 
 - **Effect on the sound** -- reverb, EQ, an amp: after the instrument.
 - **MIDI effect on the notes** -- an arpeggiator, a chord generator: before it.
-- **Also play a hardware synth** -- the slot's notes go out of a MIDI port as
-  well, so a hardware synth doubles the plugin.
+- **Send to a MIDI device too** -- the slot's notes go out of a MIDI port as
+  well, so a hardware synth doubles the plugin, or a lighting controller
+  follows the keys.
 
 ### Routing by channel
 
 A program's slots hear everything their input lets through, unless a slot
-**listens to** one channel. Set the input's channel to *Omni* and give each
-slot its channel, and one program sorts the parts by itself:
+**listens to** some channels only. Set the input's channel to *Omni* and give
+each slot its channel, and one program sorts the parts by itself:
 
 | Slot | Listens to | Plays |
 |---|---|---|
@@ -504,10 +514,11 @@ That is how a keyboard which sends its zones on different channels, or a
 multi-part MIDI file on a backing track, plays several sounds from one
 program -- no extra inputs needed.
 
-### External instruments
+### MIDI devices
 
-A slot can play a hardware synth, sound module or another computer instead
-of a plugin: **+ Add instrument... ▸ Hardware synth (MIDI out)**, then the port.
+A slot can play a hardware synth, a sound module, a lighting controller or
+another computer instead of a plugin: **+ Add instrument... ▸ MIDI device**,
+then the port.
 Everything about a slot still applies -- key and velocity ranges, transpose,
 curves, listening to a channel, holding notes across a program change -- and
 the notes leave through the port, each timed to when StageRig's own audio is
@@ -536,7 +547,7 @@ effects with a coloured line. Add them with the slot's **+ Add...**:
   parameters can be mapped to knobs. Every plugin is offered, because an
   arpeggiator is filed as an instrument as often as an effect; one that
   plays no MIDI simply passes nothing on.
-- **Also play a hardware synth** -- a copy of the notes at that point goes
+- **Send to a MIDI device too** -- a copy of the notes at that point goes
   out of a MIDI port, and they carry on unchanged. **Setup...** chooses the port, the channel it
   **sends on** (or *Same channel*), and a **patch recall** sent when the
   program is selected. So one keyboard can play a plugin piano and double it

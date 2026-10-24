@@ -1,4 +1,5 @@
 #include "Model.h"
+#include <map>
 
 using namespace juce;
 
@@ -104,8 +105,37 @@ var SlotDef::toVar() const
     o->setProperty ("velocityCurve", velocityCurve);
     o->setProperty ("pan", pan);
     o->setProperty ("outChannel", outChannel);
-    if (receiveChannel > 0) o->setProperty ("receiveChannel", receiveChannel);
-    if (isExternal())
+    if (! hearsAll())
+    {
+        Array<var> chans;
+        for (int ch = 1; ch <= 16; ++ch) if (hears (ch)) chans.add (ch);
+        o->setProperty ("listensTo", chans);
+    }
+    if (isGm())
+    {
+        o->setProperty ("kind", "gm");
+        Array<var> mix;
+        for (int ch = 1; ch <= 16; ++ch)
+        {
+            const auto& c = gmChannels[(size_t) ch - 1];
+            if (c.isDefault()) continue;
+            auto* co = new DynamicObject();
+            co->setProperty ("ch", ch);
+            if (c.program >= 0) co->setProperty ("program", c.program);
+            if (c.volume >= 0)  co->setProperty ("volume", c.volume);
+            if (c.pan >= 0)     co->setProperty ("pan", c.pan);
+            if (c.muted)        co->setProperty ("muted", true);
+            mix.add (var (co));
+        }
+        if (! mix.isEmpty()) o->setProperty ("gmChannels", mix);
+    }
+    else if (isInput())
+    {
+        o->setProperty ("kind", "input");
+        o->setProperty ("targetInput", targetInput);
+        o->setProperty ("targetInputName", targetInputName);
+    }
+    else if (isExternal())
     {
         o->setProperty ("kind", "external");
         o->setProperty ("midiOut", midiOutIdentifier);
@@ -140,8 +170,39 @@ SlotDef SlotDef::fromVar (const var& v)
     s.velocityCurve = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "velocityCurve", 0.0f));
     s.pan           = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "pan", 0.0f));
     s.outChannel = prop<int>   (v, "outChannel", 0);
-    s.receiveChannel = juce::jlimit (0, 16, prop<int> (v, "receiveChannel", 0));
-    if (propStr (v, "kind") == "external")
+    if (auto* chans = obj (v) != nullptr ? obj (v)->getProperty ("listensTo").getArray() : nullptr)
+    {
+        s.listensTo = 0;
+        for (auto& c : *chans) s.setHears ((int) c, true);
+    }
+    else if (const int one = juce::jlimit (0, 16, prop<int> (v, "receiveChannel", 0)); one > 0)   // older: one channel or all
+    {
+        s.listensTo = 0;
+        s.setHears (one, true);
+    }
+    const auto kind = propStr (v, "kind");
+    if (kind == "gm")
+    {
+        s.kind = Kind::gm;
+        if (auto* mix = obj (v)->getProperty ("gmChannels").getArray())
+            for (auto& cv : *mix)
+            {
+                const int ch = prop<int> (cv, "ch", 0);
+                if (ch < 1 || ch > 16) continue;
+                auto& c = s.gmChannels[(size_t) ch - 1];
+                c.program = juce::jlimit (-1, 127, prop<int> (cv, "program", -1));
+                c.volume  = juce::jlimit (-1, 127, prop<int> (cv, "volume", -1));
+                c.pan     = juce::jlimit (-1, 127, prop<int> (cv, "pan", -1));
+                c.muted   = prop<bool> (cv, "muted", false);
+            }
+    }
+    else if (kind == "input")
+    {
+        s.kind = Kind::input;
+        s.targetInput = prop<int> (v, "targetInput", -1);
+        s.targetInputName = propStr (v, "targetInputName");
+    }
+    else if (kind == "external")
     {
         s.kind = Kind::external;
         s.midiOutIdentifier = propStr (v, "midiOut");
@@ -160,6 +221,15 @@ SlotDef SlotDef::fromVar (const var& v)
     for (auto& e : effectsFromVar (v))
         if (! e.isSend()) s.effects.push_back (std::move (e));
     return s;
+}
+
+String SlotDef::listensToText() const
+{
+    if (hearsAll()) return "All channels";
+    StringArray parts;
+    for (int ch = 1; ch <= 16; ++ch) if (hears (ch)) parts.add (String (ch));
+    if (parts.isEmpty()) return "No channel";
+    return (parts.size() == 1 ? "Channel " : "Channels ") + parts.joinIntoString (", ");
 }
 
 //==============================================================================
@@ -269,7 +339,9 @@ var InputDef::toVar() const
     auto* o = new DynamicObject();
     o->setProperty ("name", name);
     // Only written for an audio input, so keyboard setups stay byte-identical.
-    if (kind == Kind::audio)
+    if (kind == Kind::track)
+        o->setProperty ("kind", "track");
+    else if (kind == Kind::audio)
     {
         o->setProperty ("kind", "audio");
         o->setProperty ("audioLeft", audioLeft);
@@ -301,7 +373,8 @@ InputDef InputDef::fromVar (const var& v)
 {
     InputDef in;
     in.name                   = propStr (v, "name", "Input");
-    in.kind                   = propStr (v, "kind", "midi") == "audio" ? Kind::audio : Kind::midi;
+    in.kind                   = propStr (v, "kind", "midi") == "audio" ? Kind::audio
+                              : propStr (v, "kind", "midi") == "track" ? Kind::track : Kind::midi;
     in.audioLeft              = jlimit (0, 63, prop<int> (v, "audioLeft", 0));
     in.audioRight             = jlimit (-1, 63, prop<int> (v, "audioRight", 1));
     in.output                 = jmax (0, prop<int> (v, "output", 0));
@@ -373,34 +446,10 @@ var StemDef::toVar() const
     auto* o = new DynamicObject();
     o->setProperty ("file", file);
     if (name.isNotEmpty()) o->setProperty ("name", name);
-    o->setProperty ("output", output);
-    if (gainDb != 0.0f) o->setProperty ("gainDb", gainDb);
-    if (isMidi())
+    if (! isMidi())
     {
-        // Only the channels that do not go to the GM player.
-        Array<var> routes;
-        for (int ch = 1; ch <= 16; ++ch)
-        {
-            const auto& r = route (ch);
-            if (r == MidiRoute {}) continue;
-            auto* ro = new DynamicObject();
-            ro->setProperty ("ch", ch);
-            ro->setProperty ("kind", r.kind == MidiRoute::Kind::keys ? "keys" : r.kind == MidiRoute::Kind::slot ? "slot"
-                                   : r.kind == MidiRoute::Kind::mute ? "mute" : "gm");
-            if (r.kind == MidiRoute::Kind::keys || r.kind == MidiRoute::Kind::slot) ro->setProperty ("input", r.input);
-            if (r.kind == MidiRoute::Kind::slot)
-            {
-                ro->setProperty ("slot", r.slot);
-                if (r.program >= 0) ro->setProperty ("program", r.program);
-            }
-            if (r.gmProgram >= 0) ro->setProperty ("gmProgram", r.gmProgram);
-            if (r.volume >= 0)    ro->setProperty ("volume", r.volume);
-            if (r.pan >= 0)       ro->setProperty ("pan", r.pan);
-            if (r.muted)          ro->setProperty ("muted", true);
-            if (r.solo)           ro->setProperty ("solo", true);
-            routes.add (var (ro));
-        }
-        o->setProperty ("channels", routes);
+        o->setProperty ("output", output);
+        if (gainDb != 0.0f) o->setProperty ("gainDb", gainDb);
     }
     return var (o);
 }
@@ -414,42 +463,38 @@ StemDef StemDef::fromVar (const var& v)
     d.gainDb = (float) prop<double> (v, "gainDb", 0.0);
     if (! d.isMidi()) return d;
 
+    /* Older setups: either a per-channel table, or before that one input
+       (and perhaps one channel) for the whole file. Kept for the migration. */
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("channels").getArray() : nullptr)
     {
+        d.hasLegacyRoutes = true;
         for (auto& rv : *arr)
         {
             const int ch = prop<int> (rv, "ch", 0);
             if (ch < 1 || ch > 16) continue;
-            auto& r = d.route (ch);
+            auto& r = d.legacyRoutes[(size_t) ch - 1];
             const auto kind = propStr (rv, "kind");
-            r.kind = kind == "keys" ? MidiRoute::Kind::keys : kind == "slot" ? MidiRoute::Kind::slot
-                   : kind == "mute" ? MidiRoute::Kind::mute : MidiRoute::Kind::gm;
+            r.kind = kind == "keys" ? LegacyMidiRoute::Kind::keys : kind == "slot" ? LegacyMidiRoute::Kind::slot
+                   : kind == "mute" ? LegacyMidiRoute::Kind::mute : LegacyMidiRoute::Kind::gm;
             r.input   = jmax (0, prop<int> (rv, "input", 0));
             r.slot    = jlimit (-1, 255, prop<int> (rv, "slot", -1));
             r.program = jlimit (-1, InputDef::numPrograms - 1, prop<int> (rv, "program", -1));
-            if (r.kind == MidiRoute::Kind::slot && r.slot < 0) r.kind = MidiRoute::Kind::keys;
-            r.gmProgram = jlimit (-1, 127, prop<int> (rv, "gmProgram", -1));
-            r.volume    = jlimit (-1, 127, prop<int> (rv, "volume", -1));
-            r.pan       = jlimit (-1, 127, prop<int> (rv, "pan", -1));
-            r.muted     = prop<bool> (rv, "muted", false);
-            r.solo      = prop<bool> (rv, "solo", false);
         }
     }
     else if (obj (v) != nullptr && obj (v)->hasProperty ("input"))
     {
-        /* Written before the GM player: the whole file (or its one chosen
-           channel) through a keyboard, or straight into one of its plugins. */
+        d.hasLegacyRoutes = true;
         const int input = jmax (0, prop<int> (v, "input", 0));
         const int only = jlimit (0, 16, prop<int> (v, "midiChannel", 0));
         const int slot = jlimit (-1, 255, prop<int> (v, "slot", -1));
         const int program = jlimit (-1, InputDef::numPrograms - 1, prop<int> (v, "program", -1));
         for (int ch = 1; ch <= 16; ++ch)
         {
-            auto& r = d.route (ch);
+            auto& r = d.legacyRoutes[(size_t) ch - 1];
             r.input = input;
-            if (only > 0 && ch != only)   r.kind = MidiRoute::Kind::mute;
-            else if (slot >= 0)           { r.kind = MidiRoute::Kind::slot; r.slot = slot; r.program = program; }
-            else                          r.kind = MidiRoute::Kind::keys;
+            if (only > 0 && ch != only)   r.kind = LegacyMidiRoute::Kind::mute;
+            else if (slot >= 0)           { r.kind = LegacyMidiRoute::Kind::slot; r.slot = slot; r.program = program; }
+            else                          r.kind = LegacyMidiRoute::Kind::keys;
         }
     }
     return d;
@@ -630,7 +675,83 @@ Setup Setup::fromVar (const var& v)
         st.songs.erase (std::remove_if (st.songs.begin(), st.songs.end(),
                                         [&] (int i) { return i < 0 || i >= (int) s.songs.size(); }),
                         st.songs.end());
+    s.migrateMidiFiles();
     return s;
+}
+
+int Setup::trackInput() const
+{
+    for (int i = 0; i < (int) inputs.size(); ++i)
+        if (inputs[(size_t) i].isTrack()) return i;
+    return -1;
+}
+
+void Setup::migrateMidiFiles()
+{
+    for (auto& song : songs)
+    {
+        bool any = false, legacy = false;
+        for (auto& st : song.stems) if (st.isMidi()) { any = true; legacy = legacy || st.hasLegacyRoutes; }
+        if (! any) continue;
+
+        int track = trackInput();
+        if (track < 0)
+        {
+            InputDef in;
+            in.name = InputDef::trackName;
+            in.kind = InputDef::Kind::track;
+            in.channel = 0;
+            in.respondToProgramChange = false;
+            inputs.push_back (in);
+            track = (int) inputs.size() - 1;
+        }
+        if (song.programFor (track) >= 0 && ! legacy) continue;      // already the new way
+
+        // An unused program on the track input, named after the song.
+        auto& programs = inputs[(size_t) track].programs;
+        int p = -1;
+        for (int i = 0; i < (int) programs.size(); ++i)
+            if (programs[(size_t) i].isEmpty() && programs[(size_t) i].name.isEmpty()) { p = i; break; }
+        if (p < 0) p = InputDef::numPrograms - 1;
+        auto& prog = programs[(size_t) p];
+        prog = ProgramDef();
+        prog.name = song.name;
+
+        /* What the old routes said, as instruments: the GM player for the
+           channels that went to it (or everything, for a file routed no
+           way at all), and another input's sounds for channels that went
+           through a keyboard -- or into one of its plugins, which is the
+           nearest thing without copying the plugin. */
+        int gmMask = 0;
+        std::map<int, int> toInput;                 // input index -> channels
+        for (auto& st : song.stems)
+        {
+            if (! st.isMidi()) continue;
+            if (! st.hasLegacyRoutes) { gmMask = SlotDef::kAllChannels; continue; }
+            for (int ch = 1; ch <= 16; ++ch)
+            {
+                const auto& r = st.legacyRoutes[(size_t) ch - 1];
+                const int bit = 1 << (ch - 1);
+                if (r.kind == LegacyMidiRoute::Kind::gm) gmMask |= bit;
+                else if (r.kind != LegacyMidiRoute::Kind::mute && r.input >= 0 && r.input < (int) inputs.size() && ! inputs[(size_t) r.input].isTrack())
+                    toInput[r.input] |= bit;
+            }
+            st.hasLegacyRoutes = false;
+        }
+        if (gmMask != 0)
+        {
+            SlotDef gm; gm.kind = SlotDef::Kind::gm; gm.listensTo = gmMask;
+            prog.slots.push_back (gm);
+        }
+        for (auto& [input, mask] : toInput)
+        {
+            SlotDef sd; sd.kind = SlotDef::Kind::input; sd.targetInput = input;
+            sd.targetInputName = inputs[(size_t) input].name; sd.listensTo = mask;
+            prog.slots.push_back (sd);
+        }
+        if (song.programs.size() <= (size_t) track) song.programs.resize ((size_t) track + 1, -1);
+        song.programs[(size_t) track] = p;
+    }
 }
 
 Result Setup::saveToFile (const File& f) const

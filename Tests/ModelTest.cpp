@@ -17,7 +17,7 @@ int main()
 
     Setup s = Setup::makeDefault();
     // References into s.inputs are held while a third input is added below: room for it first.
-    s.inputs.reserve (3);
+    s.inputs.reserve (4);
     s.preloadAllPrograms = true;
     s.releaseTailSeconds = 2.5;
     s.holdAcrossChange = false;
@@ -31,7 +31,7 @@ int main()
     upper.programChangeChannel = 16;          // a workstation's global channel
     {
         SlotDef ext; ext.kind = SlotDef::Kind::external;
-        ext.midiOutIdentifier = "20-0"; ext.midiOutName = "Montage"; ext.outChannel = 3; ext.receiveChannel = 2;
+        ext.midiOutIdentifier = "20-0"; ext.midiOutName = "Montage"; ext.outChannel = 3; ext.listensTo = 1 << 1;
         ext.bankMsb = 63; ext.bankLsb = 1; ext.patch = 9; ext.returnLeft = 2; ext.returnRight = 3;
         EffectDef arp; arp.plugin.name = "Arp"; arp.plugin.pluginFormatName = "CLAP"; arp.plugin.fileOrIdentifier = "/x/arp.clap|a";
         EffectDef send; send.kind = EffectDef::Kind::midiSend; send.portIdentifier = "24-0"; send.portName = "MicroFreak";
@@ -49,10 +49,8 @@ int main()
         sg.stems.push_back ({ "mix.wav", "Mix", 0, -3.0f });
         sg.stems.push_back ({ "click.wav", {}, 1, 0.0f });
         StemDef midiStem; midiStem.file = "bass.mid";
-        midiStem.route (2) = MidiRoute { MidiRoute::Kind::keys, 1 };
-        midiStem.route (5) = MidiRoute { MidiRoute::Kind::slot, 0, 12, 3 };
-        midiStem.route (9) = MidiRoute { MidiRoute::Kind::mute };
         sg.stems.push_back (midiStem);
+        sg.programs = { 5, -1, -1, 0 };
         sg.countInBeats = 4; sg.countInOutput = 1;
         sg.markers = { { "Intro", 0.0, true }, { "Verse", 8.5, false } };
         s.songs.push_back (sg);
@@ -63,6 +61,15 @@ int main()
     guitar.audioLeft = 2; guitar.audioRight = -1;          // mono on the third open channel
     guitar.programs[3].inputGainDb = -6.0f;
     s.inputs.push_back (guitar);
+    // Where the songs' MIDI files play: the backing-track input's program for this song.
+    InputDef track; track.name = InputDef::trackName; track.kind = InputDef::Kind::track; track.channel = 0; track.respondToProgramChange = false;
+    SlotDef gm; gm.kind = SlotDef::Kind::gm; gm.listensTo = SlotDef::kAllChannels & ~(1 << 1);
+    gm.gmChannels[9].program = 8; gm.gmChannels[9].volume = 90; gm.gmChannels[0].muted = true;
+    SlotDef keys; keys.kind = SlotDef::Kind::input; keys.targetInput = 1; keys.targetInputName = "Lower"; keys.listensTo = 1 << 1;
+    track.programs[0].name = "With a track";
+    track.programs[0].slots = { gm, keys };
+    s.inputs.push_back (track);
+
     auto& prog = upper.programs[5];
     prog.name = "Rhodes + Pad";
 
@@ -121,9 +128,9 @@ int main()
     {
         const auto& ext = loaded.inputs[0].programs[7].slots[0];
         CHECK (ext.isExternal() && ext.midiOutIdentifier == "20-0" && ext.midiOutName == "Montage" && ext.outChannel == 3
-               && ext.receiveChannel == 2 && ext.bankMsb == 63 && ext.bankLsb == 1 && ext.patch == 9
+               && ext.hears (2) && ! ext.hears (1) && ext.listensToText() == "Channel 2" && ext.bankMsb == 63 && ext.bankLsb == 1 && ext.patch == 9
                && ext.returnLeft == 2 && ext.returnRight == 3 && ext.displayName() == "Montage (MIDI)");
-        CHECK (! loaded.inputs[0].programs[5].slots[0].isExternal() && loaded.inputs[0].programs[5].slots[0].receiveChannel == 0);
+        CHECK (! loaded.inputs[0].programs[5].slots[0].isExternal() && loaded.inputs[0].programs[5].slots[0].hearsAll());
         CHECK (ext.midiEffects.size() == 2 && ! ext.midiEffects[0].isSend() && ext.midiEffects[0].plugin.name == "Arp"
                && ext.midiEffects[1].isSend() && ext.midiEffects[1].portIdentifier == "24-0" && ext.midiEffects[1].portName == "MicroFreak"
                && ext.midiEffects[1].channel == 4 && ext.midiEffects[1].patch == 12 && ext.midiEffects[1].bankMsb == -1 && ext.midiEffects[1].bypassed);
@@ -134,16 +141,46 @@ int main()
     }
     CHECK (loaded.songs.size() == 1 && loaded.songs[0].stems.size() == 3);
     {
-        const auto& ms = loaded.songs[0].stems[2];
-        CHECK (ms.isMidi() && ms.route (2) == (MidiRoute { MidiRoute::Kind::keys, 1 }) && ms.route (5) == (MidiRoute { MidiRoute::Kind::slot, 0, 12, 3 })
-               && ms.route (9).kind == MidiRoute::Kind::mute && ms.route (1).kind == MidiRoute::Kind::gm && ms.usesGm());
+        CHECK (loaded.songs[0].stems[2].isMidi() && ! loaded.songs[0].stems[2].hasLegacyRoutes);
+        CHECK (loaded.trackInput() == 3 && loaded.inputs[3].isTrack() && loaded.inputs[3].channel == 0 && ! loaded.inputs[3].respondToProgramChange);
+        CHECK (loaded.songs[0].programFor (3) == 0 && loaded.songs[0].programFor (1) == -1);
+        const auto& tp = loaded.inputs[3].programs[0];
+        CHECK (tp.name == "With a track" && tp.slots.size() == 2);
+        CHECK (tp.slots[0].isGm() && ! tp.slots[0].hears (2) && tp.slots[0].hears (1) && tp.slots[0].hears (16)
+               && tp.slots[0].gmChannels[9].program == 8 && tp.slots[0].gmChannels[9].volume == 90 && tp.slots[0].gmChannels[9].pan == -1
+               && tp.slots[0].gmChannels[0].muted && tp.slots[0].gmChannels[1].isDefault() && tp.slots[0].displayName() == "General MIDI player");
+        CHECK (tp.slots[1].isInput() && tp.slots[1].targetInput == 1 && tp.slots[1].targetInputName == "Lower" && tp.slots[1].hears (2)
+               && ! tp.slots[1].hears (1) && tp.slots[1].displayName() == "Lower's sounds" && tp.slots[1].listensToText() == "Channel 2");
 
-        // A MIDI stem saved before the GM player: all of it (or its one channel) through a keyboard, as it played then.
-        auto old = StemDef::fromVar (juce::JSON::parse (R"({"file":"a.mid","output":0,"input":1,"midiChannel":3})"));
-        CHECK (old.route (3) == (MidiRoute { MidiRoute::Kind::keys, 1 }) && old.route (1).kind == MidiRoute::Kind::mute && ! old.usesGm());
-        auto oldSlot = StemDef::fromVar (juce::JSON::parse (R"({"file":"a.mid","output":0,"input":0,"slot":2,"program":7})"));
-        CHECK (oldSlot.route (16) == (MidiRoute { MidiRoute::Kind::slot, 0, 7, 2 }));
-        CHECK (StemDef::fromVar (juce::JSON::parse (R"({"file":"new.mid","output":0})")).usesGm());
+        /* Setups from before the backing track was an input: a MIDI file
+           routed through a keyboard (all of it, or one channel), or by the
+           short-lived per-channel table. They come back as a track program. */
+        const auto oldOne = Setup::fromVar (juce::JSON::parse (R"({"format":"stagerig-setup",
+            "inputs":[{"name":"Upper","channel":1},{"name":"Lower","channel":2}],
+            "songs":[{"name":"Old","programs":[3,-1],"stems":[{"file":"a.mid","output":0,"input":1,"midiChannel":3}]}]})"));
+        CHECK (oldOne.trackInput() == 2 && oldOne.songs[0].programFor (2) == 0);
+        {
+            const auto& p = oldOne.inputs[2].programs[0];
+            CHECK (p.name == "Old" && p.slots.size() == 1 && p.slots[0].isInput() && p.slots[0].targetInput == 1
+                   && p.slots[0].targetInputName == "Lower" && p.slots[0].listensToText() == "Channel 3");
+            CHECK (! oldOne.songs[0].stems[0].hasLegacyRoutes);
+        }
+        const auto oldTable = Setup::fromVar (juce::JSON::parse (R"({"format":"stagerig-setup",
+            "inputs":[{"name":"Upper","channel":1},{"name":"Lower","channel":2}],
+            "songs":[{"name":"Table","programs":[],"stems":[{"file":"b.mid","output":0,"channels":[
+               {"ch":2,"kind":"keys","input":0},{"ch":5,"kind":"slot","input":0,"slot":2,"program":7},{"ch":9,"kind":"mute"}]}]}]})"));
+        {
+            const auto& p = oldTable.inputs[2].programs[0];
+            CHECK (p.slots.size() == 2 && p.slots[0].isGm() && p.slots[0].hears (1) && ! p.slots[0].hears (2) && ! p.slots[0].hears (5) && ! p.slots[0].hears (9)
+                   && p.slots[1].isInput() && p.slots[1].targetInput == 0 && p.slots[1].hears (2) && p.slots[1].hears (5) && ! p.slots[1].hears (9));
+            CHECK (oldTable.songs[0].programFor (2) == 0);
+        }
+        // A file with no routing at all plays on the GM player, and a slot's old single channel is a set of one.
+        const auto plain = Setup::fromVar (juce::JSON::parse (R"({"format":"stagerig-setup","inputs":[{"name":"Upper","channel":1,
+            "programs":[{"index":0,"slots":[{"receiveChannel":4}]}]}],"songs":[{"name":"Plain","programs":[],"stems":[{"file":"c.mid","output":0}]}]})"));
+        CHECK (plain.trackInput() == 1 && plain.inputs[1].programs[0].slots.size() == 1 && plain.inputs[1].programs[0].slots[0].isGm()
+               && plain.inputs[1].programs[0].slots[0].hearsAll());
+        CHECK (plain.inputs[0].programs[0].slots.size() == 1 && plain.inputs[0].programs[0].slots[0].listensToText() == "Channel 4");
     }
     CHECK (! loaded.songs[0].stems[0].isMidi());
     CHECK (loaded.songs[0].stems[0].file == "mix.wav" && loaded.songs[0].stems[0].name == "Mix"
@@ -152,11 +189,11 @@ int main()
     CHECK (loaded.songs[0].markers.size() == 2 && loaded.songs[0].markers[0].vamp && loaded.songs[0].markers[1].name == "Verse"
            && std::abs (loaded.songs[0].markers[1].seconds - 8.5) < 1e-9);
     CHECK (loaded.songs[0].countInBeats == 4 && loaded.songs[0].countInOutput == 1 && loaded.transportCC == 85);
-    CHECK (loaded.inputs.size() == 3 && loaded.inputs[2].isAudio());
+    CHECK (loaded.inputs.size() == 4 && loaded.inputs[2].isAudio());
     CHECK (loaded.inputs[2].audioLeft == 2 && loaded.inputs[2].audioRight == -1);
     CHECK (std::abs (loaded.inputs[2].programs[3].inputGainDb + 6.0f) < 1e-6f);
     CHECK (! loaded.inputs[0].isAudio() && loaded.inputs[0].programs[5].inputGainDb == 0.0f);
-    CHECK (loaded.inputs.size() == 3);
+    CHECK (loaded.inputs.size() == 4);
     CHECK (loaded.inputs[1].name == "Lower");
     CHECK (loaded.inputs[1].channel == 2);
     CHECK (loaded.inputs[0].programChangeChannel == 16);                       // a workstation's global channel

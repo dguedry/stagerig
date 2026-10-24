@@ -1,5 +1,6 @@
 #include "MidiEditor.h"
 #include "GmSynth.h"
+#include "GmMixer.h"
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -206,92 +207,64 @@ int MidiDoc::trackFor (int channel) const
 }
 
 //==============================================================================
-// The sound picker: the GM instrument, or one of your sounds.
+// The sound picker: which instrument of the track's program plays a part.
 //==============================================================================
 namespace
 {
-    const char* const familyNames[16] = { "Piano", "Chromatic percussion", "Organ", "Guitar", "Bass", "Strings", "Ensemble", "Brass",
-                                          "Reed", "Pipe", "Synth lead", "Synth pad", "Synth effects", "Ethnic", "Percussive", "Sound effects" };
-    struct Kit { int program; const char* name; };
-    const Kit kits[] = { { 0, "Standard kit" }, { 8, "Room kit" }, { 16, "Power kit" }, { 24, "Electronic kit" }, { 25, "TR-808 kit" },
-                         { 32, "Jazz kit" }, { 40, "Brush kit" }, { 48, "Orchestra kit" }, { 56, "Sound FX kit" } };
-
-    String kitName (int p)
+    /** What plays `channel` in `prog`: the instrument's name, with the GM
+        player's instrument for that channel spelled out. */
+    String soundName (const ProgramDef& prog, int channel, int fileProgram)
     {
-        for (auto& k : kits) if (k.program == p) return k.name;
-        return "Kit " + String (p);
-    }
-
-    String soundName (Engine& engine, int channel, int fileProgram, const MidiRoute& r)
-    {
-        const auto& setup = engine.getSetup();
-        switch (r.kind)
+        for (const auto& sd : prog.slots)
         {
-            case MidiRoute::Kind::gm:
-                if (channel == 10) return "GM: " + kitName (r.gmProgram >= 0 ? r.gmProgram : fileProgram);
-                return "GM: " + String (GmSynth::programName (r.gmProgram >= 0 ? r.gmProgram : fileProgram));
-            case MidiRoute::Kind::keys:
-                return r.input < (int) setup.inputs.size() ? setup.inputs[(size_t) r.input].name + ": its sounds" : String ("A keyboard");
-            case MidiRoute::Kind::slot:
-                if (r.input < (int) setup.inputs.size())
-                {
-                    const auto& in = setup.inputs[(size_t) r.input];
-                    const int prog = r.program >= 0 ? r.program : in.currentProgram;
-                    const auto& pd = in.programs[(size_t) prog];
-                    if (r.slot < (int) pd.slots.size()) return pd.slots[(size_t) r.slot].displayName() + " (" + in.name + " " + String (prog).paddedLeft ('0', 3) + ")";
-                }
-                return "A plugin no longer there";
-            case MidiRoute::Kind::mute: return "Muted";
-        }
-        return {};
-    }
-
-    /** Fills `menu`, numbering each choice into `ids`. */
-    void buildSoundMenu (PopupMenu& menu, Engine& engine, int songIndex, int channel, int fileProgram, std::map<int, MidiRoute>& ids)
-    {
-        int next = 1;
-        auto add = [&] (PopupMenu& m, const String& text, const MidiRoute& r) { ids[next] = r; m.addItem (next++, text); };
-
-        MidiRoute own; own.kind = MidiRoute::Kind::gm;
-        add (menu, channel == 10 ? "GM: the file's kit (" + kitName (fileProgram) + ")"
-                                 : "GM: the file's instrument (" + String (GmSynth::programName (fileProgram)) + ")", own);
-        if (channel == 10)
-        {
-            PopupMenu k;
-            for (auto& kit : kits) { MidiRoute r; r.gmProgram = kit.program; add (k, kit.name, r); }
-            menu.addSubMenu ("GM drum kits", k);
-        }
-        PopupMenu gm;
-        for (int f = 0; f < 16; ++f)
-        {
-            PopupMenu fam;
-            for (int p = f * 8; p < f * 8 + 8; ++p) { MidiRoute r; r.gmProgram = p; add (fam, String (p + 1) + "  " + GmSynth::programName (p), r); }
-            gm.addSubMenu (familyNames[f], fam);
-        }
-        menu.addSubMenu (channel == 10 ? "GM instruments (not drums)" : "GM instruments", gm);
-
-        const auto& setup = engine.getSetup();
-        const auto& song = engine.getSongs()[(size_t) songIndex];
-        bool header = false;
-        for (int i = 0; i < (int) setup.inputs.size(); ++i)
-        {
-            const auto& in = setup.inputs[(size_t) i];
-            if (in.isAudio()) continue;
-            if (! header) { menu.addSectionHeader ("Your sounds"); header = true; }
-            PopupMenu sub;
-            MidiRoute keys; keys.kind = MidiRoute::Kind::keys; keys.input = i;
-            add (sub, "Its sounds (by LISTENS TO)", keys);
-            int prog = in.currentProgram;
-            if (i < (int) song.programs.size() && song.programs[(size_t) i] >= 0) prog = song.programs[(size_t) i];
-            const auto& pd = in.programs[(size_t) prog];
-            if (! pd.slots.empty()) sub.addSectionHeader ("Only one plugin of " + String (prog).paddedLeft ('0', 3) + (pd.name.isNotEmpty() ? " " + pd.name : String()));
-            for (int sl = 0; sl < (int) pd.slots.size(); ++sl)
+            if (! sd.hears (channel)) continue;
+            if (sd.isGm())
             {
-                MidiRoute r; r.kind = MidiRoute::Kind::slot; r.input = i; r.program = prog; r.slot = sl;
-                add (sub, pd.slots[(size_t) sl].displayName(), r);
+                const int p = sd.gmChannels[(size_t) channel - 1].program;
+                const int shown = p >= 0 ? p : fileProgram;
+                return "GM: " + (channel == 10 ? gmKitName (shown) : String (GmSynth::programName (shown))) + (p < 0 ? " (file)" : "");
             }
-            menu.addSubMenu (in.name, sub);
+            return sd.displayName();
         }
+        return "Nothing";
+    }
+
+    /** Fills `menu`: a GM instrument (through the program's GM player; ids
+        1000 + program), each other instrument (ids 100 + slot), or nothing (1). */
+    void buildSoundMenu (PopupMenu& menu, const ProgramDef& prog, int channel, int fileProgram, int gmSlot)
+    {
+        if (gmSlot >= 0)
+        {
+            const int current = prog.slots[(size_t) gmSlot].hears (channel) ? prog.slots[(size_t) gmSlot].gmChannels[(size_t) channel - 1].program : -2;
+            menu.addItem (2, channel == 10 ? "GM: the file's kit (" + gmKitName (fileProgram) + ")"
+                                           : "GM: the file's instrument (" + String (GmSynth::programName (fileProgram)) + ")", true, current == -1);
+            if (channel == 10)
+            {
+                PopupMenu k;
+                addGmKitsToMenu (k, 1000, current);
+                menu.addSubMenu ("GM drum kits", k);
+                PopupMenu gm;
+                addGmInstrumentsToMenu (gm, 1000, current);
+                menu.addSubMenu ("GM instruments (not drums)", gm);
+            }
+            else
+            {
+                PopupMenu gm;
+                addGmInstrumentsToMenu (gm, 1000, current);
+                menu.addSubMenu ("GM instruments", gm, true, nullptr, current >= 0);
+            }
+        }
+        bool header = false;
+        for (int sl = 0; sl < (int) prog.slots.size(); ++sl)
+        {
+            const auto& sd = prog.slots[(size_t) sl];
+            if (sd.isGm()) continue;
+            if (! header) { menu.addSectionHeader ("Your instruments"); header = true; }
+            menu.addItem (100 + sl, sd.displayName(), true, sd.hears (channel));
+        }
+        menu.addSeparator();
+        menu.addItem (1, "Nothing", true, false);
+        menu.addItem (3, "Add instruments under INSTRUMENTS, with Backing track selected", false);
     }
 }
 
@@ -304,7 +277,7 @@ class MidiEditorComponent;
 class LaneRow : public Component
 {
 public:
-    static constexpr int height = 36, headerWidth = 610;
+    static constexpr int height = 36, headerWidth = 584;
 
     LaneRow (MidiEditorComponent& e, int ch);
     void refresh();
@@ -317,7 +290,7 @@ public:
 private:
     MidiEditorComponent& editor;
     Label chLabel, name;
-    TextButton sound, mute { "M" }, solo { "S" };
+    TextButton sound, mute { "M" };
     Slider volume, pan;
 };
 
@@ -395,6 +368,8 @@ public:
         def = engine.getSongs()[(size_t) songIndex].stems[(size_t) stemIndex];
         file = engine.getChartsFolder().getChildFile (def.file);
         loaded = doc.load (file, loadError);
+        trackInput = engine.getTrackInput();
+        trackProgram = engine.getSongs()[(size_t) songIndex].programFor (trackInput);
 
         for (auto* b : { &playBtn, &saveBtn, &undoBtn, &redoBtn, &zoomIn, &zoomOut, &addPart })
             addAndMakeVisible (b);
@@ -448,6 +423,33 @@ public:
     StemDef def;
     UndoManager undo;
     int selectedChannel = 1;
+    int trackInput = -1, trackProgram = -1;      // where the file plays: the backing-track input's program for this song
+
+    /** The track program, or null when the song has none (nothing plays the file). */
+    const ProgramDef* program() const
+    {
+        const auto& inputs = engine.getSetup().inputs;
+        if (trackInput < 0 || trackInput >= (int) inputs.size() || trackProgram < 0) return nullptr;
+        return &inputs[(size_t) trackInput].programs[(size_t) trackProgram];
+    }
+    int gmSlot() const
+    {
+        if (auto* p = program())
+            for (int sl = 0; sl < (int) p->slots.size(); ++sl) if (p->slots[(size_t) sl].isGm()) return sl;
+        return -1;
+    }
+    /** The GM player's settings for a channel, when it plays it. */
+    SlotDef::GmChannel gmChannel (int ch) const
+    {
+        if (auto* p = program(); p != nullptr && gmSlot() >= 0) return p->slots[(size_t) gmSlot()].gmChannels[(size_t) ch - 1];
+        return {};
+    }
+    bool gmPlays (int ch) const
+    {
+        auto* p = program();
+        const int g = gmSlot();
+        return p != nullptr && g >= 0 && engine.partInstrument (trackInput, trackProgram, ch) == g;
+    }
 
     bool isDirty() const          { return dirty; }
     const File& getFile() const   { return file; }
@@ -459,11 +461,19 @@ public:
         for (auto& l : laneRows) l->repaint();
     }
 
-    void setRoute (int ch, const MidiRoute& r)
+    /** `slot` plays channel `ch`, and nothing else does. */
+    void setPart (int ch, int slot)
     {
-        def.route (ch) = r;
-        engine.setSongStem (songIndex, stemIndex, def);
-        for (auto& l : laneRows) l->refresh();       // a solo changes what the others sound like
+        if (trackInput < 0 || trackProgram < 0) return;
+        engine.assignPart (trackInput, trackProgram, ch, slot);
+        for (auto& l : laneRows) l->refresh();
+        if (changed) changed();
+    }
+    void setGm (int ch, const SlotDef::GmChannel& c)
+    {
+        if (trackInput < 0 || trackProgram < 0 || gmSlot() < 0) return;
+        engine.setGmChannel (trackInput, trackProgram, gmSlot(), ch, c);
+        for (auto& l : laneRows) l->refresh();
         if (changed) changed();
     }
 
@@ -620,7 +630,7 @@ private:
 LaneRow::LaneRow (MidiEditorComponent& e, int ch) : channel (ch), editor (e)
 {
     for (auto* c : { (Component*) &chLabel, (Component*) &name, (Component*) &sound, (Component*) &volume, (Component*) &pan,
-                     (Component*) &mute, (Component*) &solo })
+                     (Component*) &mute })
         addAndMakeVisible (c);
     chLabel.setText ("Ch " + String (ch), dontSendNotification);
     chLabel.setFont (FontOptions (13.0f, Font::bold));
@@ -631,23 +641,31 @@ LaneRow::LaneRow (MidiEditorComponent& e, int ch) : channel (ch), editor (e)
     sound.onClick = [this]
     {
         editor.selectChannel (channel);
-        auto ids = std::make_shared<std::map<int, MidiRoute>>();
-        PopupMenu m;
-        buildSoundMenu (m, editor.engine, editor.songIndex, channel, editor.doc.firstProgram (channel), *ids);
-        m.showMenuAsync (PopupMenu::Options().withTargetComponent (sound), [this, ids] (int r)
+        auto* prog = editor.program();
+        if (prog == nullptr)
         {
-            const auto it = ids->find (r);
-            if (it == ids->end()) return;
-            auto route = editor.def.route (channel);
-            route.kind = it->second.kind;
-            route.input = it->second.input;
-            route.program = it->second.program;
-            route.slot = it->second.slot;
-            route.gmProgram = it->second.gmProgram;
-            editor.setRoute (channel, route);
+            editor.showStatus ("This song has no backing-track program: add the file again, or select the Backing track input and give it one");
+            return;
+        }
+        PopupMenu m;
+        buildSoundMenu (m, *prog, channel, editor.doc.firstProgram (channel), editor.gmSlot());
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (sound), [this] (int r)
+        {
+            if (r < 1) return;
+            if (r == 1) { editor.setPart (channel, -1); return; }
+            if (r == 2 || r >= 1000)
+            {
+                // A GM instrument: the GM player plays the part, with that instrument (or the file's).
+                auto c = editor.gmChannel (channel);
+                c.program = r == 2 ? -1 : r - 1000;
+                editor.setPart (channel, editor.gmSlot());
+                editor.setGm (channel, c);
+                return;
+            }
+            if (r >= 100) editor.setPart (channel, r - 100);
         });
     };
-    sound.setTooltip ("What plays this part: a General MIDI instrument (the file's own, or any other), or one of your sounds");
+    sound.setTooltip ("What plays this part: a General MIDI instrument (the file's own, or any other), or one of the instruments in the song's backing-track program");
 
     auto setupSlider = [] (Slider& s, double def, std::function<String (double)> text)
     {
@@ -661,39 +679,30 @@ LaneRow::LaneRow (MidiEditorComponent& e, int ch) : channel (ch), editor (e)
     setupSlider (pan, -1.0, [] (double v) { if (v < 0) return String ("pan: file"); const int p = (int) v - 64; return p == 0 ? String ("C") : (p < 0 ? "L" : "R") + String (std::abs (p)); });
     volume.setTooltip ("The GM player's volume for this part (CC 7). Double-click: as the file has it");
     pan.setTooltip ("The GM player's pan for this part (CC 10). Double-click: as the file has it");
-    volume.onValueChange = [this] { auto r = editor.def.route (channel); r.volume = (int) volume.getValue(); editor.setRoute (channel, r); };
-    pan.onValueChange    = [this] { auto r = editor.def.route (channel); r.pan = (int) pan.getValue(); editor.setRoute (channel, r); };
+    volume.onValueChange = [this] { auto c = editor.gmChannel (channel); c.volume = (int) volume.getValue(); editor.setGm (channel, c); };
+    pan.onValueChange    = [this] { auto c = editor.gmChannel (channel); c.pan = (int) pan.getValue(); editor.setGm (channel, c); };
 
     mute.setClickingTogglesState (true);
-    solo.setClickingTogglesState (true);
     mute.setColour (TextButton::buttonOnColourId, Colours::orangered);
-    solo.setColour (TextButton::buttonOnColourId, Colours::gold.darker (0.2f));
-    mute.setTooltip ("Mute this part");
-    solo.setTooltip ("Hear only the soloed parts");
-    mute.onClick = [this]
-    {
-        auto r = editor.def.route (channel);
-        if (r.kind == MidiRoute::Kind::mute) { r.kind = MidiRoute::Kind::gm; r.muted = false; }
-        else r.muted = mute.getToggleState();
-        editor.setRoute (channel, r);
-    };
-    solo.onClick = [this] { auto r = editor.def.route (channel); r.solo = solo.getToggleState(); editor.setRoute (channel, r); };
+    mute.setTooltip ("Mute this part on the GM player");
+    mute.onClick = [this] { auto c = editor.gmChannel (channel); c.muted = mute.getToggleState(); editor.setGm (channel, c); };
     refresh();
 }
 
 void LaneRow::refresh()
 {
-    const auto& r = editor.def.route (channel);
     const auto part = editor.doc.partName (channel);
     name.setText (part.isNotEmpty() ? part : (channel == 10 ? String ("Drums") : String ("Part")), dontSendNotification);
-    sound.setButtonText (soundName (editor.engine, channel, editor.doc.firstProgram (channel), r));
-    const bool gm = r.kind == MidiRoute::Kind::gm;
+    auto* prog = editor.program();
+    sound.setButtonText (prog != nullptr ? soundName (*prog, channel, editor.doc.firstProgram (channel)) : String ("No program for the track"));
+    const bool gm = editor.gmPlays (channel);
+    const auto c = editor.gmChannel (channel);
     volume.setEnabled (gm);
     pan.setEnabled (gm);
-    volume.setValue (r.volume, dontSendNotification);
-    pan.setValue (r.pan, dontSendNotification);
-    mute.setToggleState (r.muted || r.kind == MidiRoute::Kind::mute, dontSendNotification);
-    solo.setToggleState (r.solo, dontSendNotification);
+    mute.setEnabled (gm);
+    volume.setValue (c.volume, dontSendNotification);
+    pan.setValue (c.pan, dontSendNotification);
+    mute.setToggleState (gm && c.muted, dontSendNotification);
     repaint();
 }
 
@@ -705,8 +714,7 @@ void LaneRow::resized()
     sound.setBounds (r.removeFromLeft (220)); r.removeFromLeft (6);
     volume.setBounds (r.removeFromLeft (80)); r.removeFromLeft (4);
     pan.setBounds (r.removeFromLeft (64));    r.removeFromLeft (6);
-    mute.setBounds (r.removeFromLeft (26));   r.removeFromLeft (2);
-    solo.setBounds (r.removeFromLeft (26));
+    mute.setBounds (r.removeFromLeft (26));
 }
 
 void LaneRow::paint (Graphics& g)
@@ -723,8 +731,8 @@ void LaneRow::paint (Graphics& g)
     g.fillRect (ov);
     const auto& doc = editor.doc;
     const double len = (double) jmax ((int64) 1, doc.lengthTicks());
-    const auto& r = editor.def.route (channel);
-    const bool silent = r.isSilent (editor.def.anySolo());
+    const bool silent = editor.engine.partInstrument (editor.trackInput, editor.trackProgram, channel) < 0
+                     || (editor.gmPlays (channel) && editor.gmChannel (channel).muted);
     g.setColour ((silent ? textDim.withAlpha (0.4f) : accent.withAlpha (0.85f)));
     int lo = 127, hi = 0;
     for (auto& n : doc.notes) if (n.channel == channel) { lo = jmin (lo, n.key); hi = jmax (hi, n.key); }

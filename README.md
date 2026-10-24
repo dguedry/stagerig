@@ -33,11 +33,12 @@ other plugin.
   velocity range, velocity curve, transpose, gain and pan, and the MIDI
   channel each slot listens to, so one program can sort a multi-channel
   keyboard or a MIDI file into its parts.
-- **External instruments too.** A slot can play a hardware synth through a
-  MIDI port -- with patch recall when the program is selected, and its audio
-  back through the interface into the program's effects and outputs.
-- **Every slot is a chain.** MIDI effects (arpeggiators, chord generators)
-  before the instrument, audio effects after it, and any hardware synth that
+- **MIDI devices too.** An instrument can be a hardware synth or a lighting
+  controller on a MIDI port -- with patch recall when the program is
+  selected, and a synth's audio back through the interface into the
+  program's effects and outputs.
+- **Every instrument is a chain.** MIDI effects (arpeggiators, chord
+  generators) before it, audio effects after it, and any MIDI device that
   should play along.
 - **Audio runs through effects.** An audio input's programs are effect chains
   with an input trim -- reverb on the vocal for the ballad, drive on the guitar
@@ -66,9 +67,10 @@ other plugin.
   you like. StageRig can serve its own wifi network when the venue has none.
 - **Backing tracks.** A song can carry audio stems -- a full mix, or drums,
   bass and pads apart, plus a click and cues for the in-ears -- each on its own
-  output, and MIDI files on a built-in General MIDI player (FluidSynth),
-  any channel of which can play one of your own sounds instead. With a
-  count-in, started and stopped from a footswitch, the laptop or the tablet. Mark its sections and jump between them in time, and vamp
+  output, and MIDI files that play like a keyboard would: into a backing-track
+  input whose program decides what each part plays -- the built-in General
+  MIDI player (FluidSynth), your plugins, a hardware synth. With a count-in,
+  started and stopped from a footswitch, the laptop or the tablet. Mark its sections and jump between them in time, and vamp
   an intro until a pedal lets it go on. Tempo-synced effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
   song -- PDF, image, text or ChordPro -- and the tablet shows it, turning

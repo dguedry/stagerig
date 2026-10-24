@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "GmSynth.h"
+#include "GmMixer.h"
 #include "LevelMeter.h"
 #include "PluginView.h"
 #include "QrCode.h"
@@ -70,9 +71,16 @@ public:
             PopupMenu m;
             m.addItem (1, "Keyboard (MIDI)");
             m.addItem (2, "Audio input (microphone, guitar, hardware synth)");
+            m.addItem (3, "Backing track (the songs' MIDI files)", engine.getTrackInput() < 0);
             m.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this] (int r)
             {
                 if (r == 0) return;
+                if (r == 3)
+                {
+                    lastNotified = -1; setSelected (engine.ensureTrackInput());
+                    owner.showStatus ("The backing track is an input: each song's program here decides what its MIDI file's parts play");
+                    return;
+                }
                 const bool audio = r == 2;
                 const auto n = String (engine.getSetup().inputs.size() + 1);
                 auto idx = engine.addInput (audio ? "Audio " + n : "Input " + n,
@@ -207,9 +215,12 @@ public:
         }
         outputBox.setSelectedId (def.output + 1, dontSendNotification);
 
-        // The audio channel row only means something for an audio input.
+        // The audio channel row only means something for an audio input; the
+        // backing track has no device, channel or program changes at all.
         audioLabel.setVisible (def.isAudio());
         audioBox.setVisible (def.isAudio());
+        for (auto* c : std::initializer_list<Component*> { &deviceLabel, &deviceBox, &channelLabel, &channelBox, &pcToggle, &pcChannelLabel, &pcChannelBox })
+            c->setVisible (! def.isTrack());
         deviceLabel.setText (def.isAudio() ? "Control MIDI device (program changes, pedals)" : "MIDI device", dontSendNotification);
         if (def.isAudio())
         {
@@ -313,7 +324,9 @@ public:
         g.setFont (FontOptions (12.0f));
         g.setColour (textDim);
         String info;
-        if (def.isAudio())
+        if (def.isTrack())
+            info = "the songs' MIDI files play here";
+        else if (def.isAudio())
         {
             info << "audio in " << (def.audioLeft + 1);
             if (def.audioRight >= 0) info << "+" << (def.audioRight + 1);
@@ -321,7 +334,7 @@ public:
         }
         else
             info = def.midiDeviceName.isNotEmpty() ? def.midiDeviceName : "no device";
-        if (def.channel > 0) info << "  ch " << def.channel;
+        if (def.channel > 0 && ! def.isTrack()) info << "  ch " << def.channel;
         g.drawText (info, 8, 22, w - 80, 16, Justification::centredLeft, true);
 
         g.setColour (accent);
@@ -850,7 +863,7 @@ private:
             addPortItems (sendMenu, ports, sendBase);
             menu.addSubMenu ("Effect on the sound (reverb, EQ, amp...)", fxMenu);
             menu.addSubMenu ("MIDI effect on the notes (arpeggiator, chords...)", procMenu);
-            menu.addSubMenu ("Also play a hardware synth (MIDI out)", sendMenu);
+            menu.addSubMenu ("Send to a MIDI device too (hardware synth, lights)", sendMenu);
         }
 
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, effects, all, ports] (int result)
@@ -1165,9 +1178,7 @@ public:
 
             outCh.addItem ("Same channel", 1);
             for (int c = 1; c <= 16; ++c) outCh.addItem ("Channel " + String (c), c + 1);
-            inCh.addItem ("All channels", 1);
-            for (int c = 1; c <= 16; ++c) inCh.addItem ("Channel " + String (c), c + 1);
-            inCh.setTooltip ("Which incoming MIDI channel this slot plays. With the input on Omni, one program can give each "
+            inCh.setTooltip ("Which incoming MIDI channels this instrument plays. With the input on Omni, one program can give each "
                              "channel its own sound: a bass on channel 2 and a pad on channel 1, from one keyboard or one MIDI file.");
             outCh.setTooltip ("MIDI channel the plugin receives on. Keep the input's channel, or force one (multi-timbral plugins like Kontakt play the instrument on that channel).");
 
@@ -1183,8 +1194,9 @@ public:
             velRange.onValueChange  = [this, &e, &o] { e.setSlotVelocityRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) velRange.getMinValue(), (int) velRange.getMaxValue());
                                                        updateVelCaption(); o.markDirty(); };
             outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); o.markDirty(); };
-            inCh.onChange     = [this, &e, &o] { e.setSlotReceiveChannel (o.getSelectedInput(), o.getEditedProgram(), index, inCh.getSelectedId() - 1); o.markDirty(); };
-            guiBtn.onClick    = [this, &e, &o] { if (external) showExternalMenu();
+            inCh.onClick      = [this] { showListensToMenu(); };
+            guiBtn.onClick    = [this, &e, &o] { if (external)    showExternalMenu();
+                                                 else if (gm && alive) showGmMixer (e, o.getSelectedInput(), o.getEditedProgram(), index);
                                                  else if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
                                                  else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
             removeBtn.onClick = [this, &e, &o] { e.removeSlot (o.getSelectedInput(), o.getEditedProgram(), index); };
@@ -1195,8 +1207,12 @@ public:
             alive = loaded;
             enabled.setToggleState (def.enabled, dontSendNotification);
             external = def.isExternal();
+            gm = def.isGm();
+            inputSlot = def.isInput();
             PluginDescription forIcon = def.plugin;
-            if (external) { forIcon = {}; forIcon.name = def.midiOutName; forIcon.pluginFormatName = "MIDI"; }   // a badge with the port's initials
+            if (external)  { forIcon = {}; forIcon.name = def.midiOutName; forIcon.pluginFormatName = "MIDI"; }   // a badge with the port's initials
+            if (gm)        { forIcon = {}; forIcon.name = "General MIDI"; forIcon.pluginFormatName = "GM"; }
+            if (inputSlot) { forIcon = {}; forIcon.name = def.targetInputName; forIcon.pluginFormatName = "Keys"; }
             icon.setImage (panel.engine.getPluginHost().getIcons().get (forIcon, 48), RectanglePlacement::centred);
             icon.setAlpha (def.enabled ? 1.0f : 0.45f);
             if (external)
@@ -1207,6 +1223,18 @@ public:
                 name.setText (what, dontSendNotification);
                 name.setColour (Label::textColourId, loaded ? Colours::white : Colours::orangered);
                 name.setTooltip (loaded ? "An external instrument, played through this MIDI port" : error);
+            }
+            else if (gm)
+            {
+                name.setText ("General MIDI player  [built in" + String (loading ? ", loading..." : "") + "]", dontSendNotification);
+                name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
+                name.setTooltip (error.isNotEmpty() ? error : "FluidSynth with a General MIDI soundfont: a MIDI file's own instruments on every channel. Mixer... sets an instrument, level or pan of your own per channel.");
+            }
+            else if (inputSlot)
+            {
+                name.setText (def.targetInputName + "'s sounds  [whatever that keyboard is playing]", dontSendNotification);
+                name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : Colours::white);
+                name.setTooltip (error.isNotEmpty() ? error : "The notes this instrument gets go to that input's current program, on its channel: a layer from another keyboard, or a MIDI file part played by it.");
             }
             else
             {
@@ -1223,12 +1251,24 @@ public:
             velRange.setMinAndMaxValues (def.lowVelocity, def.highVelocity, dontSendNotification);
             updateVelCaption();
             outCh.setSelectedId (def.outChannel + 1, dontSendNotification);
-            inCh.setSelectedId (def.receiveChannel + 1, dontSendNotification);
+            inCh.setButtonText (def.listensToText());
             slotDef = def;
             if (external)
             {
                 guiBtn.setButtonText ("Setup...");
                 guiBtn.setEnabled (true);
+                guiBtn.setColour (TextButton::buttonColourId, getLookAndFeel().findColour (TextButton::buttonColourId));
+            }
+            else if (gm)
+            {
+                guiBtn.setButtonText (loading ? "Loading" : loaded ? "Mixer..." : "Retry");
+                guiBtn.setEnabled (! loading);
+                guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
+            }
+            else if (inputSlot)
+            {
+                guiBtn.setButtonText ("");
+                guiBtn.setEnabled (false);
                 guiBtn.setColour (TextButton::buttonColourId, getLookAndFeel().findColour (TextButton::buttonColourId));
             }
             else
@@ -1305,6 +1345,34 @@ public:
             chain.setBounds (r.withTrimmedLeft (24));
         }
 
+        /** Which channels this instrument plays: all, or any set of them. */
+        void showListensToMenu()
+        {
+            PopupMenu m;
+            m.addItem (1, "All channels", true, slotDef.hearsAll());
+            m.addSeparator();
+            for (int c = 1; c <= 16; ++c)
+                m.addItem (1 + c, "Channel " + String (c), true, ! slotDef.hearsAll() && slotDef.hears (c));
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (inCh), [this] (int r)
+            {
+                if (r < 1) return;
+                auto& e = panel.engine;
+                auto& o = panel.owner;
+                int mask = slotDef.listensTo;
+                if (r == 1) mask = SlotDef::kAllChannels;
+                else
+                {
+                    const int bit = 1 << (r - 2);
+                    // From "all", picking one channel means that one only; otherwise it toggles.
+                    mask = slotDef.hearsAll() ? bit : (mask ^ bit);
+                    if (mask == 0) mask = SlotDef::kAllChannels;
+                }
+                e.setSlotListensTo (o.getSelectedInput(), o.getEditedProgram(), index, mask);
+                o.markDirty();
+                panel.refresh();
+            });
+        }
+
         /** An external instrument's port, patch recall and audio return. */
         void showExternalMenu()
         {
@@ -1357,14 +1425,15 @@ public:
 
         SlotsPanel& panel;
         int index;
-        bool alive = false, external = false;
+        bool alive = false, external = false, gm = false, inputSlot = false;
         SlotDef slotDef;
         ImageComponent icon;
         ToggleButton enabled;
         Label name;
         Slider gain, transpose, pan, velCurve, keyRange { Slider::TwoValueHorizontal, Slider::NoTextBox }, velRange { Slider::TwoValueHorizontal, Slider::NoTextBox };
         Label gainCap, transposeCap, keysCap, chCap, inChCap, panCap, velCap, curveCap;
-        ComboBox outCh, inCh;
+        ComboBox outCh;
+        TextButton inCh { "All channels" };
         TextButton guiBtn { "Edit GUI" }, removeBtn { "X" };
         EffectChainComponent midiChain, chain;
     };
@@ -1461,7 +1530,7 @@ public:
         }
         /* An audio input has no instruments to add: the signal is the
            instrument. Its chain's own "+ Add effect" is the way in. */
-        header.setText (audioInput ? "EFFECTS" : "PLUGINS", dontSendNotification);
+        header.setText (audioInput ? "EFFECTS" : "INSTRUMENTS", dontSendNotification);
         addBtn.setVisible (! audioInput);
         meter.setVisible (audioInput);
         trimCap.setVisible (audioInput);
@@ -1516,9 +1585,12 @@ private:
 
     void showAddMenu()
     {
-        /* Two kinds of instrument: a plugin, or a hardware synth or module
-           played through a MIDI port -- with everything a plugin slot does
-           (splits, layers, curves, MIDI effects), the notes going out to it. */
+        /* The kinds of instrument: a plugin; a MIDI device -- a hardware
+           synth or module, a lighting controller -- played through a MIDI
+           port, with everything a plugin slot does (splits, layers, curves,
+           MIDI effects); the built-in General MIDI player; or another
+           keyboard's sounds, for a layer from one keyboard to the other or a
+           MIDI file part played by what that keyboard is on. */
         Array<PluginDescription> types;
         for (auto& d : engine.getPluginHost().getKnownPlugins().getTypes())
             if (d.isInstrument) types.add (d);
@@ -1531,9 +1603,19 @@ private:
         PopupMenu external;
         addPortItems (external, ports, 100000);
 
+        const auto& inputs = engine.getSetup().inputs;
+        const int self = owner.getSelectedInput();
+        PopupMenu others;
+        for (int i = 0; i < (int) inputs.size(); ++i)
+            if (i != self && ! inputs[(size_t) i].isAudio() && ! inputs[(size_t) i].isTrack())
+                others.addItem (200000 + i, inputs[(size_t) i].name);
+        if (others.getNumItems() == 0) others.addItem (199999, "No other keyboard", false);
+
         PopupMenu menu;
         menu.addSubMenu ("Plugin instrument", plugins);
-        menu.addSubMenu ("Hardware synth (MIDI out)", external);
+        menu.addSubMenu ("MIDI device (hardware synth, module, lights)", external);
+        menu.addItem (300000, "General MIDI player (built in)", GmSynth::isAvailable());
+        menu.addSubMenu ("Another keyboard's sounds", others);
 
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types, ports] (int result)
         {
@@ -1542,6 +1624,20 @@ private:
             {
                 engine.addExternalSlot (in, prog, ports[result - 100000]);
                 owner.showStatus ("Added " + ports[result - 100000].name + ": set its channel, patch and audio return under Setup...");
+                owner.markDirty();
+                return;
+            }
+            if (result == 300000)
+            {
+                engine.addGmSlot (in, prog);
+                owner.showStatus ("Added the General MIDI player: a MIDI file's own instruments on every channel it listens to");
+                owner.markDirty();
+                return;
+            }
+            if (result >= 200000 && result < 200000 + (int) engine.getSetup().inputs.size())
+            {
+                engine.addInputSlot (in, prog, result - 200000);
+                owner.showStatus ("Added " + engine.getSetup().inputs[(size_t) (result - 200000)].name + "'s sounds: what this gets is played by whatever that keyboard is on");
                 owner.markDirty();
                 return;
             }
@@ -1559,7 +1655,7 @@ private:
 
     Engine& engine;
     MainComponent& owner;
-    Label header { {}, "PLUGINS" };
+    Label header { {}, "INSTRUMENTS" };
     TextButton addBtn { "+ Add instrument..." };
     Viewport viewport;
     Component container;

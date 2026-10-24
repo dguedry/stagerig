@@ -74,9 +74,20 @@ struct Engine::SlotRuntime : public PluginNode
         through interface inputs. Fixed when the slot is built. */
     bool external = false;
     std::atomic<int> outPort { -1 }, returnLeft { -1 }, returnRight { -1 };
-    /** Whether it takes notes: a running plugin, an external instrument, or
-        anything with a MIDI chain (whose sends and processors want them). */
-    bool playable() const { return external || alive() || ! midiEffects.empty(); }
+    /** The General MIDI player: the synth lives here instead of in a process. */
+    bool isGm = false;
+    std::unique_ptr<GmSynth> gm;                 // set by the loader, swapped under the lock
+    std::atomic<int> gmProgram[16], gmVolume[16], gmPan[16];
+    std::atomic<bool> gmMuted[16];
+    std::atomic<bool> gmDirty { true };          // its mixer changed: tell the synth
+    MidiBuffer gmMidi;                           // the slot's MIDI as the player should see it
+    /** Another input's sounds: the notes go there. */
+    bool isInputSlot = false;
+    std::atomic<int> targetInput { -1 };
+    /** Whether it takes notes: a running plugin, a running GM player, an
+        external instrument, another input, or anything with a MIDI chain
+        (whose sends and processors want them). */
+    bool playable() const { return external || isInputSlot || alive() || (isGm && gm != nullptr) || ! midiEffects.empty(); }
 
     void applyDef (const SlotDef& d)
     {
@@ -90,15 +101,27 @@ struct Engine::SlotRuntime : public PluginNode
         velocityCurve.store (d.velocityCurve);
         pan.store (d.pan);
         outChannel.store (d.outChannel);
-        receiveChannel.store (d.receiveChannel);
+        listensTo.store (d.listensTo);
         returnLeft.store (d.returnLeft);
         returnRight.store (d.returnRight);
+        targetInput.store (d.targetInput);
+        for (int c = 0; c < 16; ++c)
+        {
+            gmProgram[c].store (d.gmChannels[(size_t) c].program);
+            gmVolume[c].store (d.gmChannels[(size_t) c].volume);
+            gmPan[c].store (d.gmChannels[(size_t) c].pan);
+            gmMuted[c].store (d.gmChannels[(size_t) c].muted);
+        }
+        gmDirty.store (true);
+    }
+    bool hears (int channel) const
+    {
+        return channel < 1 || channel > 16 || (listensTo.load (std::memory_order_relaxed) & (1 << (channel - 1))) != 0;
     }
 
     std::atomic<bool> enabled { true };
     std::atomic<float> gain { 1.0f }, velocityCurve { 0.0f }, pan { 0.0f };
-    std::atomic<int> transpose { 0 }, lowKey { 0 }, highKey { 127 }, lowVelocity { 1 }, highVelocity { 127 }, outChannel { 0 }, receiveChannel { 0 };
-    MidiBuffer trackMidi;          // a backing-track MIDI stem aimed straight at this slot, for this block
+    std::atomic<int> transpose { 0 }, lowKey { 0 }, highKey { 127 }, lowVelocity { 1 }, highVelocity { 127 }, outChannel { 0 }, listensTo { SlotDef::kAllChannels };
     std::vector<std::unique_ptr<EffectRuntime>> midiEffects;   // before the sound: processors and sends
     std::vector<std::unique_ptr<EffectRuntime>> effects;
     AudioBuffer<float> stereo;     // the slot's signal as it travels down the chain
@@ -175,6 +198,7 @@ struct Engine::InputRuntime
     std::atomic<bool> respondToProgramChange { true };
     std::atomic<int> programChangeChannel { InputDef::pcChannelSameAsNotes };
     std::atomic<bool> audio { false };                       // an audio input: the signal is the instrument
+    std::atomic<bool> track { false };                       // the backing track: its MIDI files play here
     std::atomic<int> audioLeft { 0 }, audioRight { 1 };      // device input channels; right -1 = mono
     std::atomic<float> levelL { 0.0f }, levelR { 0.0f };     // the meter: pre-trim peaks, falling 20 dB/s
     std::atomic<uint32_t> clipMs { 0 };                      // when the input last touched full scale
@@ -182,18 +206,11 @@ struct Engine::InputRuntime
     MidiMessageCollector collector;
     MidiBuffer block;
     MidiBuffer trackMidi;          // the backing track's MIDI for this block, merged into `block`
+    MidiBuffer sentMidi;           // what other inputs' "its sounds" slots sent here, merged into the next block
     MidiBuffer holdBlock;          // this block's MIDI less the note-ons, for programs left sounding
     std::map<int, std::unique_ptr<ProgramRuntime>> loaded;
     ProgramRuntime* active = nullptr;
     std::vector<ProgramRuntime*> releasing;
-    /** Programs a backing track plays into by name: kept loaded, and
-        rendered every block even when the keys are on another program. */
-    std::vector<ProgramRuntime*> pinned;
-
-    bool isPinned (const ProgramRuntime* p) const
-    {
-        return std::find (pinned.begin(), pinned.end(), p) != pinned.end();
-    }
     bool isReleasing (const ProgramRuntime* p) const
     {
         return std::find (releasing.begin(), releasing.end(), p) != releasing.end();
@@ -585,6 +602,7 @@ void Engine::applyInputDef (InputRuntime& rt, const InputDef& def)
     rt.respondToProgramChange.store (def.respondToProgramChange);
     rt.programChangeChannel.store (def.programChangeChannel);
     rt.audio.store (def.isAudio());
+    rt.track.store (def.isTrack());
     rt.audioLeft.store (def.audioLeft);
     rt.audioRight.store (def.audioRight);
     rt.output.store (def.output);
@@ -774,7 +792,8 @@ int Engine::addInput (const String& name, InputDef::Kind kind)
 
     auto rt = std::make_unique<InputRuntime>();
     rt->collector.reset (sampleRate);
-        rt->trackMidi.ensureSize (4096);
+    rt->trackMidi.ensureSize (4096);
+    rt->sentMidi.ensureSize (2048);
     applyInputDef (*rt, def);
     {
         const ScopedLock sl (lock);
@@ -816,14 +835,39 @@ void Engine::removeInput (int inputIndex)
         destroyProgramPlugins (*rt);
 
     setup.inputs.erase (setup.inputs.begin() + inputIndex);
+    // Slots that played this input's sounds, or a later input's, follow the renumbering.
+    for (auto& other : setup.inputs)
+        for (auto& prog : other.programs)
+            for (auto& sd : prog.slots)
+                if (sd.isInput())
+                {
+                    if (sd.targetInput == inputIndex)     { sd.targetInput = -1; sd.targetInputName = "(removed input)"; }
+                    else if (sd.targetInput > inputIndex) --sd.targetInput;
+                }
+    {
+        const ScopedLock sl (lock);
+        for (auto& r : runtimes)
+            for (auto& [p, rt] : r->loaded)
+                for (auto& sd : rt->slots)
+                    if (sd->isInputSlot)
+                    {
+                        const int t = sd->targetInput.load();
+                        if (t == inputIndex) sd->targetInput.store (-1);
+                        else if (t > inputIndex) sd->targetInput.store (t - 1);
+                    }
+    }
     openMidiDevices();
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
 void Engine::setInputName (int inputIndex, const String& name)
 {
-    if (validInput (inputIndex))
-        setup.inputs[(size_t) inputIndex].name = name;
+    if (! validInput (inputIndex)) return;
+    setup.inputs[(size_t) inputIndex].name = name;
+    for (auto& in : setup.inputs)
+        for (auto& prog : in.programs)
+            for (auto& sd : prog.slots)
+                if (sd.isInput() && sd.targetInput == inputIndex) sd.targetInputName = name;
 }
 
 void Engine::setInputMidiDevice (int inputIndex, const MidiDeviceInfo& info)
@@ -1129,8 +1173,64 @@ void Engine::addSongStem (int songIndex, const StemDef& d)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
     setup.songs[(size_t) songIndex].stems.push_back (d);
+    if (d.isMidi())
+    {
+        /* A MIDI file plays into the backing-track input, on the program
+           this song selects there. The first file gives the song that
+           program -- named after it, with the General MIDI player, so the
+           file plays at once -- and the Instruments panel takes it from there. */
+        const int track = ensureTrackInput();
+        auto& song = setup.songs[(size_t) songIndex];
+        if (song.programFor (track) < 0)
+        {
+            auto& programs = setup.inputs[(size_t) track].programs;
+            int p = -1;
+            for (int i = 0; i < (int) programs.size() && p < 0; ++i)
+                if (programs[(size_t) i].isEmpty() && programs[(size_t) i].name.isEmpty()) p = i;
+            if (p < 0) p = InputDef::numPrograms - 1;
+            if (song.programs.size() <= (size_t) track) song.programs.resize ((size_t) track + 1, -1);
+            song.programs[(size_t) track] = p;
+            setProgramName (track, p, song.name);
+            addGmSlot (track, p);
+            if (songIndex == trackSong) selectProgram (track, p);
+        }
+    }
     if (songIndex == trackSong) armTrack (songIndex);
     listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+int Engine::ensureTrackInput()
+{
+    if (const int t = setup.trackInput(); t >= 0) return t;
+    const int idx = addInput (InputDef::trackName, InputDef::Kind::track);
+    setInputChannel (idx, 0);
+    setInputRespondToProgramChange (idx, false);
+    return idx;
+}
+
+void Engine::assignPart (int inputIndex, int program, int channel, int slot)
+{
+    if (! validInput (inputIndex) || ! validProgram (program) || channel < 1 || channel > 16) return;
+    const auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    for (int s = 0; s < (int) def.slots.size(); ++s)
+    {
+        const auto& sd = def.slots[(size_t) s];
+        /* The chosen one takes the channel: an instrument that was hearing
+           everything now hears this part alone, so the parts stay one each;
+           one already on a few channels gets one more. The rest let it go. */
+        if (s == slot && sd.hearsAll()) setSlotListensTo (inputIndex, program, s, 1 << (channel - 1));
+        else                            setSlotHears (inputIndex, program, s, channel, s == slot);
+    }
+    notifyContent (inputIndex, program);
+}
+
+int Engine::partInstrument (int inputIndex, int program, int channel) const
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return -1;
+    const auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    for (int s = 0; s < (int) def.slots.size(); ++s)
+        if (def.slots[(size_t) s].hears (channel)) return s;
+    return -1;
 }
 
 void Engine::removeSongStem (int songIndex, int stemIndex)
@@ -1148,20 +1248,13 @@ void Engine::setSongStem (int songIndex, int stemIndex, const StemDef& d)
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
     auto& stems = setup.songs[(size_t) songIndex].stems;
     if (stemIndex < 0 || stemIndex >= (int) stems.size()) return;
-    // A different file needs reading again, and so does a GM player that is now wanted and was not made.
-    const bool fileChanged = stems[(size_t) stemIndex].file != d.file
-                          || (d.isMidi() && d.usesGm() && player != nullptr && player->isReady() && ! player->stemHasGm (stemIndex)
-                              && GmSynth::unavailableReason (getGmSoundfont()).isEmpty());
+    const bool fileChanged = stems[(size_t) stemIndex].file != d.file;
     stems[(size_t) stemIndex] = d;
     if (songIndex != trackSong) return;
-    /* A new output, level or destination takes effect at once, even
-       mid-song; only a different file needs the track loaded again. */
+    /* A new output or level takes effect at once, even mid-song; only a
+       different file needs the track loaded again. */
     if (! fileChanged && player != nullptr)
-    {
         player->setStemMix (stemIndex, d.output, d.gainDb);
-        player->setStemRoutes (stemIndex, d.channels);
-        updateStemRoutes();
-    }
     else
         armTrack (songIndex);
 }
@@ -1228,7 +1321,7 @@ void Engine::armTrack (int songIndex)
     if (songIndex >= 0 && songIndex < (int) setup.songs.size() && ! setup.songs[(size_t) songIndex].stems.empty())
     {
         fresh = std::make_unique<SongPlayer> (trackFormats, getChartsFolder(),
-                                              setup.songs[(size_t) songIndex], sampleRate, blockSize, getGmSoundfont());
+                                              setup.songs[(size_t) songIndex], sampleRate, blockSize);
         trackProblemsReported = false;
     }
 
@@ -1239,7 +1332,6 @@ void Engine::armTrack (int songIndex)
         player = std::move (fresh);
     }
     trackSong = songIndex;
-    updateStemRoutes();
     listeners.call ([] (Listener& l) { l.transportChanged(); });
 }
 
@@ -1253,91 +1345,11 @@ void Engine::setGmSoundfont (const File& f)
 {
     settings.setValue ("gmSoundfont", f.getFullPathName());
     settings.saveIfNeeded();
-    if (trackSong >= 0) armTrack (trackSong);
-}
-
-void Engine::updateStemRoutes()
-{
-    StemRoute routes[kMaxDirectStems];
-    bool direct[kMaxDirectStems] {};
-    std::vector<std::pair<int, ProgramRuntime*>> pins;
-    if (player != nullptr && trackSong >= 0 && trackSong < (int) setup.songs.size())
-    {
-        const auto& stems = setup.songs[(size_t) trackSong].stems;
-        for (int st = 0; st < jmin ((int) stems.size(), kMaxDirectStems / 16); ++st)
-        {
-            const auto& d = stems[(size_t) st];
-            if (! d.isMidi()) continue;
-            for (int c = 0; c < 16; ++c)
-            {
-                const auto& r = d.channels[(size_t) c];
-                if (r.kind != MidiRoute::Kind::slot || r.slot < 0 || ! validInput (r.input) || setup.inputs[(size_t) r.input].isAudio()) continue;
-                const int i = st * 16 + c;
-                routes[i] = { r.input, r.program, r.slot };
-                direct[i] = true;
-                if (validProgram (r.program))
-                    pins.push_back ({ r.input, ensureProgramLoaded (r.input, r.program) });
-            }
-        }
-    }
-
-    const ScopedLock sl (lock);
-    bool same = true;
-    for (int i = 0; i < kMaxDirectStems && same; ++i)
-        same = (stemMidiPtrs[i] != nullptr) == direct[i] && stemRoutes[i].input == routes[i].input
-            && stemRoutes[i].program == routes[i].program && stemRoutes[i].slot == routes[i].slot;
-    for (int i = 0; i < kMaxDirectStems; ++i)
-    {
-        stemRoutes[i] = routes[i];
-        if (! same) stemMidi[i].clear();
-        if (direct[i] && stemMidi[i].getNumEvents() == 0) stemMidi[i].ensureSize (2048);
-        stemMidiPtrs[i] = direct[i] ? &stemMidi[i] : nullptr;
-    }
-    for (auto& in : runtimes) in->pinned.clear();
-    for (auto& [input, rt] : pins)
-        if (rt != nullptr && input < (int) runtimes.size() && ! runtimes[(size_t) input]->isPinned (rt))
-            runtimes[(size_t) input]->pinned.push_back (rt);
-}
-
-void Engine::deliverStemMidi()
-{
-    for (int i = 0; i < kMaxDirectStems; ++i)
-    {
-        if (stemMidiPtrs[i] == nullptr || stemMidi[i].isEmpty()) continue;
-        const auto& r = stemRoutes[i];
-        ProgramRuntime* prog = nullptr;
-        if (r.input >= 0 && r.input < (int) runtimes.size())
-        {
-            auto& in = *runtimes[(size_t) r.input];
-            if (r.program < 0) prog = in.active;
-            else if (auto it = in.loaded.find (r.program); it != in.loaded.end() && (it->second.get() == in.active || in.isPinned (it->second.get())))
-                prog = it->second.get();
-        }
-        if (prog != nullptr && r.slot < (int) prog->slots.size())
-        {
-            /* The channel the plugin listens on: the one the slot plays on,
-               else the one it listens to, else the input's -- so it sounds as
-               if played on that keyboard, whatever channel the file used. */
-            auto& slot = *prog->slots[(size_t) r.slot];
-            int ch = slot.outChannel.load (std::memory_order_relaxed);
-            if (ch <= 0) ch = slot.receiveChannel.load (std::memory_order_relaxed);
-            if (ch <= 0) ch = runtimes[(size_t) r.input]->channel.load (std::memory_order_relaxed);
-            const int transpose = slot.transpose.load (std::memory_order_relaxed);
-            for (const auto meta : stemMidi[i])
-            {
-                auto m = meta.getMessage();
-                if (ch > 0 && m.getChannel() > 0) m.setChannel (ch);
-                if (m.isNoteOnOrOff())
-                {
-                    const int note = m.getNoteNumber() + transpose;
-                    if (note < 0 || note > 127) continue;
-                    m.setNoteNumber (note);
-                }
-                slot.trackMidi.addEvent (m, meta.samplePosition);
-            }
-        }
-        stemMidi[i].clear();
-    }
+    // Every GM player reads the new soundfont.
+    for (auto& in : runtimes)
+        for (auto& [p, rt] : in->loaded)
+            for (auto& sd : rt->slots)
+                if (sd->isGm) queueGmLoad (*sd);
 }
 
 void Engine::startTrack()
@@ -1390,6 +1402,7 @@ void Engine::resetPluginPositions()
             for (auto& s : rt->slots)
             {
                 if (s->plugin != nullptr) s->plugin->resetMusicalPosition();
+                if (s->gm != nullptr) { s->gm->reset(); s->gmDirty.store (true); }   // the GM player starts the song clean
                 for (auto* ch : { &s->midiEffects, &s->effects }) for (auto& e : *ch) if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
             }
             for (auto& e : rt->effects) if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
@@ -1665,7 +1678,6 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
     slot->applyDef (def);
     slot->stereo.setSize (2, blockSize);
     slot->midi.ensureSize (2048);
-    slot->trackMidi.ensureSize (1024);
     nodeRegistry[slot->id] = slot.get();
     if (def.isExternal())
     {
@@ -1673,6 +1685,14 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
         slot->external = true;
         slot->outPort.store (midiOuts.portFor (def.midiOutIdentifier, def.midiOutName));
     }
+    else if (def.isGm())
+    {
+        slot->isGm = true;
+        slot->gmMidi.ensureSize (4096);
+        queueGmLoad (*slot);
+    }
+    else if (def.isInput())
+        slot->isInputSlot = true;      // nothing to start: the notes go to another input
     else
         queueLoad (*slot, def.plugin, def.state);
     for (int e = 0; e < (int) def.midiEffects.size(); ++e)
@@ -1709,6 +1729,24 @@ void Engine::queueLoad (PluginNode& node, const PluginDescription& desc, const M
     {
         std::lock_guard<std::mutex> l (loaderMutex);
         loadQueue.push_back ({ node.id, desc, state, sampleRate, blockSize, bridged });
+    }
+    loaderCv.notify_one();
+}
+
+void Engine::queueGmLoad (SlotRuntime& slot)
+{
+    slot.loading.store (true);
+    slot.loadError.clear();
+    ++pendingLoads;
+    LoadJob job;
+    job.nodeId = slot.id;
+    job.sampleRate = sampleRate;
+    job.blockSize = blockSize;
+    job.gm = true;
+    job.soundfont = GmSynth::findSoundfont (getGmSoundfont());
+    {
+        std::lock_guard<std::mutex> l (loaderMutex);
+        loadQueue.push_back (std::move (job));
     }
     loaderCv.notify_one();
 }
@@ -1752,7 +1790,23 @@ void Engine::loaderThreadFunc()
             if (loaderQuit.load()) return;
         }
 
-        LoadResult result { job.nodeId, std::make_unique<RemotePlugin>(), {}, job.sampleRate, job.blockSize };
+        if (job.gm)
+        {
+            // The General MIDI player: a soundfont read, not a process.
+            LoadResult result { job.nodeId, nullptr, nullptr, {}, job.sampleRate, job.blockSize };
+            ++loadsInFlight;
+            if (job.soundfont == File()) result.error = GmSynth::unavailableReason (getGmSoundfont());
+            else result.gm = GmSynth::create (job.sampleRate, job.soundfont, result.error);
+            {
+                std::lock_guard<std::mutex> l (loaderMutex);
+                loadResults.push_back (std::move (result));
+            }
+            --loadsInFlight;
+            postEvent ({ Event::pluginLoaded, 0, 0, 0, 0, 0 });
+            continue;
+        }
+
+        LoadResult result { job.nodeId, std::make_unique<RemotePlugin>(), nullptr, {}, job.sampleRate, job.blockSize };
         {
             std::lock_guard<std::mutex> l (loaderMutex);
             loadsInProgress.push_back (result.plugin.get());
@@ -1802,6 +1856,27 @@ void Engine::attachLoaded (LoadResult& r)
     auto* node = it->second;
     node->loading.store (false);
 
+    if (auto* slot = dynamic_cast<SlotRuntime*> (node); slot != nullptr && slot->isGm)
+    {
+        if (r.gm == nullptr)
+        {
+            node->loadError = r.error;
+            listeners.call ([&] (Listener& l) { l.statusMessage ("General MIDI player: " + r.error); });
+        }
+        else
+        {
+            std::unique_ptr<GmSynth> old;
+            {
+                const ScopedLock sl (lock);
+                old = std::move (slot->gm);
+                slot->gm = std::move (r.gm);
+                slot->gmDirty.store (true);
+            }
+        }
+        notifyContent (node->inputIndex.load(), node->program);
+        return;
+    }
+
     if (r.plugin == nullptr)
     {
         node->loadError = r.error;
@@ -1842,7 +1917,6 @@ void Engine::unloadProgram (InputRuntime& in, int program)
         in.loaded.erase (it);
         if (in.active == rt.get()) in.active = nullptr;
         in.stopReleasing (rt.get());
-        in.pinned.erase (std::remove (in.pinned.begin(), in.pinned.end(), rt.get()), in.pinned.end());
     }
 
     // Find our input index to capture state into the right definition.
@@ -1996,7 +2070,77 @@ PERF_SLOT_SETTER (setSlotEnabled,    enabled,    enabled.store (v))
 PERF_SLOT_SETTER (setSlotGainDb,     gainDb,     gain.store (Decibels::decibelsToGain (v, -60.0f)))
 PERF_SLOT_SETTER (setSlotTranspose,  transpose,  transpose.store (v))
 PERF_SLOT_SETTER (setSlotOutChannel, outChannel, outChannel.store (v))
-PERF_SLOT_SETTER (setSlotReceiveChannel, receiveChannel, receiveChannel.store (jlimit (0, 16, v)))
+PERF_SLOT_SETTER (setSlotListensTo, listensTo, listensTo.store (v & SlotDef::kAllChannels))
+
+void Engine::setSlotHears (int inputIndex, int program, int slotIndex, int channel, bool hears)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size()) return;
+    auto sd = def.slots[(size_t) slotIndex];
+    sd.setHears (channel, hears);
+    setSlotListensTo (inputIndex, program, slotIndex, sd.listensTo);
+}
+
+bool Engine::addGmSlot (int inputIndex, int program)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return false;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    SlotDef sd;
+    sd.kind = SlotDef::Kind::gm;
+    def.slots.push_back (sd);
+    const int slotIndex = (int) def.slots.size() - 1;
+    if (auto* rt = getLoaded (inputIndex, program))
+    {
+        auto slot = buildSlot (inputIndex, program, slotIndex, sd);
+        const ScopedLock sl (lock);
+        rt->slots.push_back (std::move (slot));
+    }
+    notifyContent (inputIndex, program);
+    return true;
+}
+
+void Engine::setGmChannel (int inputIndex, int program, int slotIndex, int channel, const SlotDef::GmChannel& c)
+{
+    if (! validInput (inputIndex) || ! validProgram (program) || channel < 1 || channel > 16) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size() || ! def.slots[(size_t) slotIndex].isGm()) return;
+    auto& gc = def.slots[(size_t) slotIndex].gmChannels[(size_t) channel - 1];
+    gc.program = jlimit (-1, 127, c.program);
+    gc.volume = jlimit (-1, 127, c.volume);
+    gc.pan = jlimit (-1, 127, c.pan);
+    gc.muted = c.muted;
+    if (auto* rt = getLoaded (inputIndex, program))
+        if (slotIndex < (int) rt->slots.size())
+        {
+            auto& s = *rt->slots[(size_t) slotIndex];
+            s.gmProgram[channel - 1].store (gc.program);
+            s.gmVolume[channel - 1].store (gc.volume);
+            s.gmPan[channel - 1].store (gc.pan);
+            s.gmMuted[channel - 1].store (gc.muted);
+            s.gmDirty.store (true);
+        }
+}
+
+bool Engine::addInputSlot (int inputIndex, int program, int targetInput)
+{
+    if (! validInput (inputIndex) || ! validProgram (program) || ! validInput (targetInput) || targetInput == inputIndex) return false;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    SlotDef sd;
+    sd.kind = SlotDef::Kind::input;
+    sd.targetInput = targetInput;
+    sd.targetInputName = setup.inputs[(size_t) targetInput].name;
+    def.slots.push_back (sd);
+    const int slotIndex = (int) def.slots.size() - 1;
+    if (auto* rt = getLoaded (inputIndex, program))
+    {
+        auto slot = buildSlot (inputIndex, program, slotIndex, sd);
+        const ScopedLock sl (lock);
+        rt->slots.push_back (std::move (slot));
+    }
+    notifyContent (inputIndex, program);
+    return true;
+}
 PERF_SLOT_SETTER (setSlotVelocityCurve, velocityCurve, velocityCurve.store (jlimit (-1.0f, 1.0f, v)))
 PERF_SLOT_SETTER (setSlotPan,        pan,        pan.store (jlimit (-1.0f, 1.0f, v)))
 #undef PERF_SLOT_SETTER
@@ -2215,7 +2359,9 @@ bool Engine::isPluginAlive (int inputIndex, int program, int slot, int effect) c
     if (node != nullptr && effect < 0)
     {
         auto* s = static_cast<SlotRuntime*> (node);
-        if (s->external) return midiOuts.isOpen (s->outPort.load());
+        if (s->external)    return midiOuts.isOpen (s->outPort.load());
+        if (s->isGm)        return s->gm != nullptr;
+        if (s->isInputSlot) return validInput (s->targetInput.load());
     }
     if (node != nullptr && effect >= 0)
         if (auto* fx = static_cast<EffectRuntime*> (node); fx->send)
@@ -2410,6 +2556,8 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
         auto* s = static_cast<SlotRuntime*> (node);
         if (s->external)
             return midiOuts.isOpen (s->outPort.load()) ? String() : "MIDI port not connected: " + midiOuts.getName (s->outPort.load());
+        if (s->isInputSlot)
+            return validInput (s->targetInput.load()) ? String() : String ("That input is gone: remove this and add another");
     }
     else if (auto* fx = static_cast<EffectRuntime*> (node); fx->send)
         return midiOuts.isOpen (fx->outPort.load()) ? String() : "MIDI port not connected: " + midiOuts.getName (fx->outPort.load());
@@ -2421,7 +2569,12 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
 void Engine::reloadPlugin (int inputIndex, int program, int slot, int effect)
 {
     auto* node = getNode (inputIndex, program, slot, effect);
-    if (node != nullptr && ((effect < 0 && static_cast<SlotRuntime*> (node)->external)
+    if (node != nullptr && effect < 0 && static_cast<SlotRuntime*> (node)->isGm)
+    {
+        if (! node->loading.load()) queueGmLoad (*static_cast<SlotRuntime*> (node));
+        return;
+    }
+    if (node != nullptr && ((effect < 0 && (static_cast<SlotRuntime*> (node)->external || static_cast<SlotRuntime*> (node)->isInputSlot))
                             || (effect >= 0 && static_cast<EffectRuntime*> (node)->send)))
     {
         // An external instrument: "reload" is looking for its port again.
@@ -2733,8 +2886,6 @@ void Engine::timerCallback() { housekeeping(); }
 
 void Engine::housekeeping()
 {
-    // A program a track plays into by name may have been rebuilt or unloaded meanwhile.
-    updateStemRoutes();
 
     if (! trackProblemsReported && player != nullptr && player->isReady())
     {
@@ -2767,7 +2918,7 @@ void Engine::housekeeping()
             {
                 const ScopedLock sl (lock);
                 for (auto& [p, rt] : in.loaded)
-                    if (rt.get() != in.active && ! in.isReleasing (rt.get()) && ! in.isPinned (rt.get()))
+                    if (rt.get() != in.active && ! in.isReleasing (rt.get()))
                         idle.push_back (p);
             }
             for (int p : idle)
@@ -2957,6 +3108,7 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
             for (auto& s : rt->slots)
             {
                 s->stereo.setSize (2, blockSize, false, false, true);
+                if (s->isGm && ! s->loading.load()) queueGmLoad (*s);     // a synth is made for one rate
                 prep (*s);
                 for (auto* ch : { &s->midiEffects, &s->effects }) for (auto& e : *ch) prep (*e);
             }
@@ -3045,11 +3197,9 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
                 trackOut[o][0] = outputs[(size_t) o]->mix.getWritePointer (0);
                 trackOut[o][1] = outputs[(size_t) o]->mix.getWritePointer (1);
             }
-            MidiBuffer* trackMidi[64];
-            const int numTrackInputs = jmin ((int) runtimes.size(), 64);
-            for (int i = 0; i < numTrackInputs; ++i) trackMidi[i] = &runtimes[(size_t) i]->trackMidi;
-            const auto happened = player->render (trackOut, numTrackOutputs, trackMidi, numTrackInputs, n, stemMidiPtrs, kMaxDirectStems);
-            deliverStemMidi();
+            MidiBuffer* trackMidi = nullptr;
+            for (auto& rt : runtimes) if (rt->track.load (std::memory_order_relaxed)) trackMidi = &rt->trackMidi;
+            const auto happened = player->render (trackOut, numTrackOutputs, trackMidi, n);
             if (happened == SongPlayer::Happened::stemsStarted)
                 resetPluginPositions();
             else if (happened == SongPlayer::Happened::ended || happened == SongPlayer::Happened::stopped)
@@ -3087,16 +3237,22 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
     in.collector.removeNextBlockOfMessages (in.block, numSamples);
     if (! in.trackMidi.isEmpty())
     {
-        /* A MIDI file playing through this input, on the input's own channel
-           so the channel filter and the slots treat it as the keyboard. */
+        // The songs' MIDI files, every channel as the file has it: the slots sort them out.
+        in.block.addEvents (in.trackMidi, 0, -1, 0);
+        in.trackMidi.clear();
+    }
+    if (! in.sentMidi.isEmpty())
+    {
+        /* Another input's "its sounds" slot sent these, on that input's own
+           channel so this input's channel filter lets them through. */
         const int ch = in.channel.load (std::memory_order_relaxed);
-        for (const auto meta : in.trackMidi)
+        for (const auto meta : in.sentMidi)
         {
             auto m = meta.getMessage();
             if (ch > 0 && m.getChannel() > 0) m.setChannel (ch);
             in.block.addEvent (m, meta.samplePosition);
         }
-        in.trackMidi.clear();
+        in.sentMidi.clear();
     }
 
     /* An audio input's signal goes to the program that is current. One left
@@ -3126,8 +3282,9 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
         }
     }
 
+    const bool fromTrack = in.track.load (std::memory_order_relaxed);
     if (in.active != nullptr)
-        processProgram (*in.active, in.block, inL, inR, out, numOut, numSamples, panicNow);
+        processProgram (*in.active, in.block, inL, inR, out, numOut, numSamples, panicNow, fromTrack);
 
     static const MidiBuffer emptyMidi;
     bool holdBlockBuilt = false;
@@ -3148,7 +3305,7 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
             }
             midi = &in.holdBlock;
         }
-        processProgram (*p, *midi, nullptr, nullptr, out, numOut, numSamples, panicNow);
+        processProgram (*p, *midi, nullptr, nullptr, out, numOut, numSamples, panicNow, fromTrack);
 
         if (p->holding && ! panicNow && p->anythingHeld()) { ++it; continue; }    // still held: the tail waits
         p->holding = false;
@@ -3159,10 +3316,6 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
             ++it;
     }
 
-    // Programs a backing track plays into by name, while the keys are elsewhere: the track's notes only.
-    for (auto* p : in.pinned)
-        if (p != in.active && ! in.isReleasing (p))
-            processProgram (*p, emptyMidi, nullptr, nullptr, out, numOut, numSamples, panicNow);
 }
 
 static inline float normalisedValueOf (const MidiMessage& m, MappingDef::Source s)
@@ -3267,7 +3420,7 @@ void Engine::runMidiChains (ProgramRuntime& prog, int numSamples, bool notesOffN
 }
 
 void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const float* inL, const float* inR,
-                             float* const* out, int numOut, int numSamples, bool panicNow)
+                             float* const* out, int numOut, int numSamples, bool panicNow, bool fromTrack)
 {
     for (auto& slot : prog.slots)
         slot->midi.clear();
@@ -3307,8 +3460,12 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
         for (auto& slot : prog.slots)
         {
             if (! slot->playable() || ! slot->enabled.load()) continue;
-            // Only its own channel, when it names one; channel-less messages reach every slot.
-            if (const int rc = slot->receiveChannel.load(); rc > 0 && m.getChannel() > 0 && m.getChannel() != rc) continue;
+            // Only the channels it listens to; channel-less messages reach every slot.
+            if (! slot->hears (m.getChannel())) continue;
+            /* A MIDI file's program changes and bank selects choose the GM
+               player's instruments; your own sounds keep their patches. */
+            if (fromTrack && ! slot->isGm && (m.isProgramChange() || (m.isController() && (m.getControllerNumber() == 0 || m.getControllerNumber() == 32))))
+                continue;
 
             MidiMessage mm (m);
             if (mm.isNoteOnOrOff())
@@ -3333,14 +3490,6 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
             slot->midi.addEvent (mm, pos);
         }
     }
-
-    // A backing track's part aimed straight at a slot joins what the keys gave it.
-    for (auto& slot : prog.slots)
-        if (! slot->trackMidi.isEmpty())
-        {
-            if (slot->enabled.load()) slot->midi.addEvents (slot->trackMidi, 0, -1, 0);
-            slot->trackMidi.clear();
-        }
 
     // Each slot's MIDI chain, then its sound hears what comes out of it.
     runMidiChains (prog, numSamples, notesOffNow, panicNow);
@@ -3370,7 +3519,21 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
     {
         AudioBuffer<float> stereo (slot->stereo.getArrayOfWritePointers(), 2, numSamples);
 
-        if (slot->external)
+        if (slot->isGm)
+        {
+            if (slot->gm == nullptr) continue;
+            prepareGmMidi (*slot, numSamples);
+            stereo.clear();
+            slot->gm->renderAdding (slot->gmMidi, stereo.getWritePointer (0), stereo.getWritePointer (1), numSamples, 1.0f, 1.0f);
+        }
+        else if (slot->isInputSlot)
+        {
+            // Its notes go to another input, heard in that input's next block (or this one, if it comes later).
+            if (const int t = slot->targetInput.load (std::memory_order_relaxed); t >= 0 && t < (int) runtimes.size() && ! slot->midi.isEmpty())
+                runtimes[(size_t) t]->sentMidi.addEvents (slot->midi, 0, -1, 0);
+            continue;
+        }
+        else if (slot->external)
         {
             /* Its notes leave for the port, each at the moment its sample
                will be heard; its sound, if it comes back on interface
@@ -3411,6 +3574,43 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
     for (int c = 0; c < jmin (numOut, 2); ++c)
         if (out[c] != nullptr)
             FloatVectorOperations::add (out[c], mix.getReadPointer (c), numSamples);
+}
+
+void Engine::prepareGmMidi (SlotRuntime& slot, int numSamples)
+{
+    ignoreUnused (numSamples);
+    auto& out = slot.gmMidi;
+    out.clear();
+    /* The mixer's choices first, when they have changed: the instrument
+       (bank 0 and a program change, the kit on channel 10), volume, pan,
+       and every note off on a channel that was just muted. */
+    if (slot.gmDirty.exchange (false))
+        for (int c = 0; c < 16; ++c)
+        {
+            if (const int p = slot.gmProgram[c].load (std::memory_order_relaxed); p >= 0)
+            {
+                if (c != 9) { out.addEvent (MidiMessage::controllerEvent (c + 1, 0, 0), 0); out.addEvent (MidiMessage::controllerEvent (c + 1, 32, 0), 0); }
+                out.addEvent (MidiMessage::programChange (c + 1, p), 0);
+            }
+            if (const int v = slot.gmVolume[c].load (std::memory_order_relaxed); v >= 0) out.addEvent (MidiMessage::controllerEvent (c + 1, 7, v), 0);
+            if (const int p = slot.gmPan[c].load (std::memory_order_relaxed); p >= 0)    out.addEvent (MidiMessage::controllerEvent (c + 1, 10, p), 0);
+            if (slot.gmMuted[c].load (std::memory_order_relaxed)) out.addEvent (MidiMessage::allNotesOff (c + 1), 0);
+        }
+    for (const auto meta : slot.midi)
+    {
+        const auto m = meta.getMessage();
+        const int c = m.getChannel() - 1;
+        if (c >= 0 && c < 16)
+        {
+            if (slot.gmMuted[c].load (std::memory_order_relaxed) && m.isNoteOn()) continue;
+            // What the mixer sets, the file does not get to change.
+            if (slot.gmProgram[c].load (std::memory_order_relaxed) >= 0
+                && (m.isProgramChange() || (m.isController() && (m.getControllerNumber() == 0 || m.getControllerNumber() == 32)))) continue;
+            if (m.isController() && m.getControllerNumber() == 7  && slot.gmVolume[c].load (std::memory_order_relaxed) >= 0) continue;
+            if (m.isController() && m.getControllerNumber() == 10 && slot.gmPan[c].load (std::memory_order_relaxed) >= 0) continue;
+        }
+        out.addEvent (m, meta.samplePosition);
+    }
 }
 
 } // namespace perf
