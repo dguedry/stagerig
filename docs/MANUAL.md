@@ -19,7 +19,7 @@ and the code layout, see the [README](../README.md).
 - [Charts on the stand](#charts-on-the-stand)
 - [Backing tracks](#backing-tracks)
 - [Outputs and the master chain](#outputs-and-the-master-chain)
-- [Slots: instruments inside a program](#slots-instruments-inside-a-program)
+- [Instruments inside a program](#instruments-inside-a-program)
 - [Splits and layers](#splits-and-layers)
 - [Effects](#effects)
 - [MIDI mappings: knobs and pedals](#midi-mappings-knobs-and-pedals)
@@ -39,30 +39,37 @@ and the code layout, see the [README](../README.md).
 
 ## The idea in one minute
 
-An **input** is a source of sound or of notes, and there are two kinds:
+An **input** is where notes or sound come from, and there are three kinds:
 
 - a **keyboard** -- a MIDI device, or one MIDI channel of it -- which plays
   instruments;
 - an **audio input** -- one or two of the audio interface's input channels: a
-  microphone, a guitar, a hardware synth -- which runs through effects.
+  microphone, a guitar, a hardware synth -- which runs through effects;
+- the **backing track** -- the songs' MIDI files, which play instruments
+  exactly as a keyboard would. It appears when you add the first MIDI file.
 
 Each input holds **128 programs**. On a keyboard, a program is one sound of
-your set: one or more **slots**, each a plugin instrument with its own key
-range, velocity range, transpose, gain, pan and effects. On an audio input, a
-program is an **effect chain** with an input trim -- the clean vocal, the
-vocal with the long reverb, the vocoder.
+your set: one or more **instruments**, each with its own key range, velocity
+range, transpose, gain, pan and effects. An instrument is a plugin, a MIDI
+device (a hardware synth, a lighting controller), the built-in General MIDI
+player, or another keyboard's sounds. On an audio input, a program is an
+**effect chain** with an input trim -- the clean vocal, the vocal with the
+long reverb, the vocoder.
 
 While you play, a Program Change message selects the program on that input --
 from the keyboard itself, or from a footswitch for an audio input. Every input
 changes independently, so the left hand can stay on a bass while the right
 hand moves through leads, and the vocal can go to its ballad reverb without
-touching either.
+touching either. A **song** selects every input's program at once, with its
+tempo, and can bring a backing track; a **set** is the songs in order.
 
 ```
-Keyboard ──> Input "Upper" (ch 1)    ──> Program 007 "Solo"   ──> Slot 1  Lead synth   C4-C8
-                                                              └─> Slot 2  String pad   C4-C8, soft only
-Keyboard ──> Input "Lower" (ch 2)    ──> Program 002 "Bass"   ──> Slot 1  Electric bass C0-B3
-Mic      ──> Input "Vocal" (in 1)    ──> Program 004 "Ballad" ──> EQ ──> Plate reverb
+Keyboard  ──> Input "Upper" (ch 1)  ──> Program 007 "Solo"    ──> Lead synth   C4-C8
+                                                              └─> String pad   C4-C8, soft only
+Keyboard  ──> Input "Lower" (ch 2)  ──> Program 002 "Bass"    ──> Electric bass C0-B3
+Mic       ──> Input "Vocal" (in 1)  ──> Program 004 "Ballad"  ──> EQ ──> Plate reverb
+MIDI file ──> Input "Backing track" ──> Program "Oye Como Va" ──> General MIDI player (drums, bass)
+                                                              └─> Kontakt 8 (the strings part, channel 5)
 ```
 
 Every input lands on an **output** -- a pair of the interface's output
@@ -326,54 +333,77 @@ does not fit on one line.
 
 ## Backing tracks
 
-A song can bring a backing track: one or more audio files -- **stems** -- that
-play together when you start them. A full mix, or drums, bass and
-pads on their own, plus a click and spoken cues for your in-ears.
+A song can bring a backing track: audio files that play together -- a full
+mix, or drums, bass and pads on their own, plus a click and spoken cues for
+your in-ears -- and MIDI files, whose parts play on instruments of your
+choosing.
 
-**Files... ▸ Backing track...** on a song opens its track. **+ Add audio or MIDI...**
-adds WAV, AIFF, FLAC, Ogg or MP3 files, or MIDI files, (or drop them on the song in the songs
-panel). Like charts, they are copied into the folder beside the setup, so the
-setup and its tracks travel together. For each stem:
+**Files... ▸ Backing track...** on a song opens its track. **+ Add audio or
+MIDI...** adds WAV, AIFF, FLAC, Ogg or MP3 files, or MIDI files (or drop them
+on the song in the songs panel). Like charts, they are copied into the folder
+beside the setup, so the setup and its tracks travel together. Adding a file
+also selects the song, so **Play** plays it straight away.
 
-- **Output** -- which output it plays on. Stems go through that output's master
-  effects and volume like everything else on it. Put the click and cue stem on
-  your in-ear output and nothing else there, and the audience never hears it.
+### Audio files
+
+- **Output** -- which output it plays on. Files go through that output's
+  master effects and volume like everything else on it. Put the click and cue
+  file on your in-ear output and nothing else there, and the audience never
+  hears it.
 - **Level** -- in dB, and it can be changed while the track plays.
-- **X** takes the stem off the song; the file stays in the folder.
+- **X** takes the file off the song; it stays in the folder.
 
-**MIDI files** play too (*.mid*), and they work like a keyboard: the file
-plays into the **Backing track** input, every channel as it is in the file,
-and the program the song selects there decides what each part plays. The
-first MIDI file in a song makes that program -- named after the song, with
-the **General MIDI player** in it -- so the file plays at once with the
-instruments it asks for: drums on channel 10, bass, strings, whatever each
-channel's program change says. The player is FluidSynth with the FluidR3_GM
-soundfont; choose another (GeneralUser GS, a commercial GM bank) under
-**Options ▸ General MIDI soundfont...**.
+### MIDI files
 
-Under the file, the window lists its **parts** -- the channels it uses, each
-with the name the file gives it -- and for each: what it **plays on**, its
-**level**, and **M** to mute it. **Plays on** offers a General MIDI
-instrument (the file's own, or any of the 128 and the drum kits), a
-keyboard's sounds (***Upper*'s sounds**: whatever that keyboard is playing),
-a plugin instrument, a MIDI device, anything already in the song, or nothing.
-One instrument per part. A plugin part gets an **Edit GUI** button for its
-window; a MIDI device part gets **Patch...** for its patch recall.
-**Notes...** opens a piano roll for the file's notes. Adding a file also
-selects the song, so **Play** plays it straight away. That is the whole job; the mechanics underneath are ordinary: the
-song's program on the **Backing track** input holds those instruments, and
-INSTRUMENTS shows them when that input is selected -- with their effects,
-MIDI chains and everything else an instrument has.
+A MIDI file is another player in the band: it plays **parts** -- the
+channels it uses, each with the name the file gives it -- and you say what
+each part plays on. Under the file, the window lists them:
+
+```
+demo.mid                                                   [Notes...] [X]
+   Ch 1   Piano     [Acoustic Grand Piano · General MIDI]    0.0 dB  [M]
+   Ch 2   Bass      [Fingered Bass · General MIDI]           0.0 dB  [M]
+   Ch 5   Strings   [Kontakt 8]              [Edit GUI]      0.0 dB  [M]
+   Ch 10  Drums     [Standard kit · General MIDI]            0.0 dB  [M]
+```
+
+1. **A new file plays on the General MIDI player** with the instruments it
+   asks for: drums on channel 10, bass, strings, whatever each channel's
+   program change says. Nothing to set up. The player is FluidSynth with the
+   FluidR3_GM soundfont; choose another (GeneralUser GS, a commercial GM
+   bank) under **Options ▸ General MIDI soundfont...**.
+2. **Click a part's sound to change it.** The menu offers: the General MIDI
+   instrument the file asks for; any other General MIDI instrument or drum
+   kit; ***Upper*'s sounds** (whatever that keyboard is playing right now);
+   **a plugin instrument**; **a MIDI device** (a hardware synth, lights);
+   anything already in the song; or **Nothing**. One instrument per part.
+3. **Level** is the part's level: 0 dB is as the file has it, double-click
+   goes back there. **M** mutes the part -- the one you will play yourself.
+4. A part on a plugin gets **Edit GUI**, to open that plugin's window and
+   pick its patch; a part on a MIDI device gets **Patch...** for the bank
+   and program to send it.
+5. **Notes...** opens a piano roll for the file's notes: move, resize, add
+   (double-click), delete, change velocities, undo, save. The first version
+   of the file is kept beside it as *.orig.mid*.
 
 The file's program changes and bank selects reach only the General MIDI
-player: your own instruments keep their patches. Notes follow sections,
-vamps and jumps like the audio does, every
-note is let go when the track stops or jumps, and starting from a section in
-the middle tells the instruments what the file had set by then.
+player: your own instruments keep their patches. Notes follow sections, vamps
+and jumps like the audio does, every note is let go when the track stops or
+jumps, and starting from a section in the middle tells the instruments what
+the file had set by then.
 
-Without FluidSynth (*libfluidsynth3*, Fedora's *fluidsynth-libs*) or a GM
-soundfont (*fluid-soundfont-gm*) the player's row says so, and the parts
-can go to your own instruments meanwhile.
+On the tablet, the same parts appear under **Parts** on the transport bar,
+to mute one or open its plugin from the stand (see *The backing track from
+the tablet*).
+
+**What is underneath.** The instruments a file's parts play on are ordinary
+instruments in a program on the **Backing track** input, which the song
+selects; INSTRUMENTS shows them when that input is selected on the left, with
+their effects, MIDI chains and everything else an instrument has. The parts
+window is the short way to the same thing. Without FluidSynth
+(*libfluidsynth3*, Fedora's *fluidsynth-libs*) or a GM soundfont
+(*fluid-soundfont-gm*) the parts window says so, and the parts can play on
+your own instruments meanwhile.
 
 **Count-in** clicks a number of beats at the song's tempo before the stems
 start, on the output you choose -- usually the in-ears.
@@ -446,9 +476,9 @@ The tablet's **GUI** chooser lists an output's master effects under every input
 that lands on it. Removing an output moves its inputs to the first one; the
 last output cannot be removed.
 
-## Slots: the instruments inside a program
+## Instruments inside a program
 
-Each slot is one lane of the program, and a chain, in this order:
+Each instrument is one lane of the program -- a **slot** -- and a chain, in this order:
 
 ```
 the slot's notes -> [ MIDI chain ] -> the sound -> [ effects ] -> gain, pan
@@ -482,7 +512,7 @@ curve and channels decide which notes enter the chain at all. Left to right:
 | **VELOCITY** | Two handles: the softest and loudest note-on that reach this slot. |
 | **VELOCITY CURVE** | Reshapes how hard your playing appears to the plugin, from `100 % softer` through `linear` to `+100 % louder`. |
 
-**+ Add instrument...** adds a slot, and asks which kind:
+**+ Add instrument...** asks which kind:
 
 - **Plugin instrument** -- your instrument plugins, grouped by manufacturer.
 - **MIDI device** -- a hardware synth, a module, a lighting controller: the
@@ -793,6 +823,17 @@ covering the plugin.
 It is for setting up and adjusting rather than playing. A plugin window on a
 tablet is a picture of an interface built for a mouse, so expect to tap
 precisely and to miss sometimes.
+
+### The backing track from the tablet
+
+With a song armed, the set list page has a **Play / Stop** bar with the
+song's sections under it: tap a section to go there when the current one
+ends, **Go on** to let a vamp through. **Parts** lists the MIDI files'
+parts -- *Piano: Acoustic Grand Piano · General MIDI*, *Strings: Kontakt 8*
+-- each with **Mute** (for the part you will play yourself tonight) and,
+when a plugin plays it, **GUI** to open that plugin's window on the
+tablet like any other. What plays each part is chosen on the laptop, in
+the song's Backing track window; the tablet reads it.
 
 ### If the tablet cannot connect
 

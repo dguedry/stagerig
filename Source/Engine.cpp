@@ -206,7 +206,8 @@ struct Engine::InputRuntime
     MidiMessageCollector collector;
     MidiBuffer block;
     MidiBuffer trackMidi;          // the backing track's MIDI for this block, merged into `block`
-    MidiBuffer sentMidi;           // what other inputs' "its sounds" slots sent here, merged into the next block
+    MidiBuffer sentMidi;           // what other inputs' "its sounds" slots sent here, for the next block
+    MidiBuffer received;           // the same, as this block plays it (never forwarded again)
     MidiBuffer holdBlock;          // this block's MIDI less the note-ons, for programs left sounding
     std::map<int, std::unique_ptr<ProgramRuntime>> loaded;
     ProgramRuntime* active = nullptr;
@@ -405,7 +406,28 @@ void Engine::loadSetup (Setup newSetup)
     sectionCCAtomic.store (jlimit (0, 127, setup.sectionCC), std::memory_order_relaxed);
     tapTimes.clear();
     rebuildRuntimes();
+    /* The song the set was on gets its track back once setSetupFile() says
+       where the files are -- the caller sets that right after this. */
     listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSetupFile (const File& f)
+{
+    const bool moved = f != setupFile;
+    setupFile = f;
+    if (moved || (trackSong < 0 && player == nullptr)) armCurrentSong();
+}
+
+void Engine::armCurrentSong()
+{
+    /* Ready to play, as it was when the setup was saved: the track armed,
+       not started. The programs are already where the file left them. */
+    if (setup.currentSet < 0 || setup.currentSet >= (int) setup.sets.size()) return;
+    const auto& st = setup.sets[(size_t) setup.currentSet];
+    if (setup.currentSongInSet < 0 || setup.currentSongInSet >= (int) st.songs.size()) return;
+    const int song = st.songs[(size_t) setup.currentSongInSet];
+    if (song >= 0 && song < (int) setup.songs.size() && ! setup.songs[(size_t) song].stems.empty())
+        armTrack (song);
 }
 
 Setup Engine::captureSetup (int budgetMs, bool onlyChanged)
@@ -794,6 +816,7 @@ int Engine::addInput (const String& name, InputDef::Kind kind)
     rt->collector.reset (sampleRate);
     rt->trackMidi.ensureSize (4096);
     rt->sentMidi.ensureSize (2048);
+    rt->received.ensureSize (2048);
     applyInputDef (*rt, def);
     {
         const ScopedLock sl (lock);
@@ -835,6 +858,10 @@ void Engine::removeInput (int inputIndex)
         destroyProgramPlugins (*rt);
 
     setup.inputs.erase (setup.inputs.begin() + inputIndex);
+    // Songs hold one program per input, by index: the entry for this input goes, the rest shift.
+    for (auto& song : setup.songs)
+        if ((size_t) inputIndex < song.programs.size())
+            song.programs.erase (song.programs.begin() + inputIndex);
     // Slots that played this input's sounds, or a later input's, follow the renumbering.
     for (auto& other : setup.inputs)
         for (auto& prog : other.programs)
@@ -1239,6 +1266,29 @@ void Engine::assignPart (int inputIndex, int program, int channel, int slot)
         else                            setSlotHears (inputIndex, program, s, channel, s == slot);
     }
     notifyContent (inputIndex, program);
+}
+
+void Engine::setPartMuted (int inputIndex, int program, int channel, bool muted)
+{
+    const int sl = partInstrument (inputIndex, program, channel);
+    if (sl < 0) return;
+    const auto& sd = setup.inputs[(size_t) inputIndex].programs[(size_t) program].slots[(size_t) sl];
+    if (sd.isGm())
+    {
+        auto gc = sd.gmChannels[(size_t) channel - 1];
+        gc.muted = muted;
+        setGmChannel (inputIndex, program, sl, channel, gc);
+    }
+    else
+        setSlotEnabled (inputIndex, program, sl, ! muted);
+}
+
+bool Engine::isPartMuted (int inputIndex, int program, int channel) const
+{
+    const int sl = partInstrument (inputIndex, program, channel);
+    if (sl < 0) return true;
+    const auto& sd = setup.inputs[(size_t) inputIndex].programs[(size_t) program].slots[(size_t) sl];
+    return sd.isGm() ? sd.gmChannels[(size_t) channel - 1].muted : ! sd.enabled;
 }
 
 int Engine::partInstrument (int inputIndex, int program, int channel) const
@@ -3258,16 +3308,18 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
         in.block.addEvents (in.trackMidi, 0, -1, 0);
         in.trackMidi.clear();
     }
+    in.received.clear();
     if (! in.sentMidi.isEmpty())
     {
         /* Another input's "its sounds" slot sent these, on that input's own
-           channel so this input's channel filter lets them through. */
+           channel so they play as its keys would. Kept apart from the
+           keys' own MIDI: played, never passed on to a third input. */
         const int ch = in.channel.load (std::memory_order_relaxed);
         for (const auto meta : in.sentMidi)
         {
             auto m = meta.getMessage();
             if (ch > 0 && m.getChannel() > 0) m.setChannel (ch);
-            in.block.addEvent (m, meta.samplePosition);
+            in.received.addEvent (m, meta.samplePosition);
         }
         in.sentMidi.clear();
     }
@@ -3301,7 +3353,7 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
 
     const bool fromTrack = in.track.load (std::memory_order_relaxed);
     if (in.active != nullptr)
-        processProgram (*in.active, in.block, inL, inR, out, numOut, numSamples, panicNow, fromTrack);
+        processProgram (*in.active, in.block, &in.received, inL, inR, out, numOut, numSamples, panicNow, fromTrack);
 
     static const MidiBuffer emptyMidi;
     bool holdBlockBuilt = false;
@@ -3322,7 +3374,7 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
             }
             midi = &in.holdBlock;
         }
-        processProgram (*p, *midi, nullptr, nullptr, out, numOut, numSamples, panicNow, fromTrack);
+        processProgram (*p, *midi, nullptr, nullptr, nullptr, out, numOut, numSamples, panicNow, fromTrack);
 
         if (p->holding && ! panicNow && p->anythingHeld()) { ++it; continue; }    // still held: the tail waits
         p->holding = false;
@@ -3436,7 +3488,7 @@ void Engine::runMidiChains (ProgramRuntime& prog, int numSamples, bool notesOffN
     }
 }
 
-void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const float* inL, const float* inR,
+void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const MidiBuffer* received, const float* inL, const float* inR,
                              float* const* out, int numOut, int numSamples, bool panicNow, bool fromTrack)
 {
     for (auto& slot : prog.slots)
@@ -3455,10 +3507,8 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
     }
 
     // Route incoming MIDI: mappings first, then per-slot filtering.
-    for (const auto meta : in)
+    auto route = [&] (const MidiMessage& m, int pos, bool fromOtherInput)
     {
-        const auto m = meta.getMessage();
-        const int pos = meta.samplePosition;
         prog.track (m);
 
         bool consumed = false;
@@ -3470,7 +3520,7 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
             map.plugin->queueParameterChange (map.paramIndex, jlimit (0.0f, 1.0f, value));
             if (! map.def.passThrough) consumed = true;
         }
-        if (consumed) continue;
+        if (consumed) return;
 
         prog.programMidi.addEvent (m, pos);
 
@@ -3479,6 +3529,8 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
             if (! slot->playable() || ! slot->enabled.load()) continue;
             // Only the channels it listens to; channel-less messages reach every slot.
             if (! slot->hears (m.getChannel())) continue;
+            // What another keyboard's program handed us is played here, not handed on again.
+            if (fromOtherInput && slot->isInputSlot) continue;
             /* A MIDI file's program changes and bank selects choose the GM
                player's instruments; your own sounds keep their patches. */
             if (fromTrack && ! slot->isGm && (m.isProgramChange() || (m.isController() && (m.getControllerNumber() == 0 || m.getControllerNumber() == 32))))
@@ -3506,7 +3558,10 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const f
             if (oc > 0) mm.setChannel (oc);
             slot->midi.addEvent (mm, pos);
         }
-    }
+    };
+    for (const auto meta : in) route (meta.getMessage(), meta.samplePosition, false);
+    if (received != nullptr)
+        for (const auto meta : *received) route (meta.getMessage(), meta.samplePosition, true);
 
     // Each slot's MIDI chain, then its sound hears what comes out of it.
     runMidiChains (prog, numSamples, notesOffNow, panicNow);

@@ -1991,6 +1991,40 @@ int main()
             }
         }
 
+        // --- one keyboard layering the other, both ways: a layer, never an echo -------------------
+        {
+            engine.selectProgram (0, 0); settle();                      // Upper on its synth
+            engine.clearProgram (1, 7);
+            engine.selectProgram (1, 7); settle();
+            CHECK (engine.addInputSlot (1, 7, 0));                      // Lower's program plays Upper's sounds
+            CHECK (engine.addInputSlot (0, 0, 1));                      // and Upper's plays Lower's: a cycle
+            const int upperSlots = (int) engine.getSetup().inputs[0].programs[0].slots.size();
+            CHECK (engine.isPluginAlive (1, 7, 0) && engine.getSetup().inputs[1].programs[7].slots[0].displayName() == "Upper's sounds");
+            engine.injectMidi (1, MidiMessage::noteOn (2, 64, (uint8) 100));   // played on Lower
+            const float layered = levels (8)[0];
+            std::printf ("     Lower's note through Upper's sounds: %.3f\n", layered);
+            CHECK (layered > 0.01f);
+            engine.injectMidi (1, MidiMessage::noteOff (2, 64));
+            levels (120);
+            const float quiet = levels (8)[0];
+            std::printf ("     after letting go, with both keyboards layering each other: %.5f\n", quiet);
+            CHECK (quiet < 1e-3f);
+            engine.removeSlot (0, 0, upperSlots - 1);
+            engine.clearProgram (1, 7);
+        }
+
+        // Removing an input: every song's programs shift with the inputs that are left.
+        {
+            const int extra = engine.addInput ("Extra");
+            const int shifted = engine.addSong ("Shifted");
+            engine.setSongProgram (shifted, 0, 3);
+            engine.setSongProgram (shifted, extra, 9);
+            CHECK (engine.getSongs()[(size_t) shifted].programFor (extra) == 9);
+            engine.removeInput (extra);
+            CHECK (engine.getSongs()[(size_t) shifted].programFor (0) == 3 && (int) engine.getSongs()[(size_t) shifted].programs.size() == extra);
+            engine.removeSong (shifted);
+        }
+
         // A song with no stems arms nothing.
         const int bare = engine.addSong ("No track");
         engine.selectSong (bare);

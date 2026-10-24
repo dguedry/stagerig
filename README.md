@@ -67,10 +67,11 @@ other plugin.
   you like. StageRig can serve its own wifi network when the venue has none.
 - **Backing tracks.** A song can carry audio stems -- a full mix, or drums,
   bass and pads apart, plus a click and cues for the in-ears -- each on its own
-  output, and MIDI files that play like a keyboard would: into a backing-track
-  input whose program decides what each part plays -- the built-in General
-  MIDI player (FluidSynth), your plugins, a hardware synth. With a count-in,
-  started and stopped from a footswitch, the laptop or the tablet. Mark its sections and jump between them in time, and vamp
+  output, and MIDI files whose parts each play on what you choose -- the
+  built-in General MIDI player (FluidSynth), one of your plugins, a hardware
+  synth, or whatever a keyboard is playing. With a count-in, started and
+  stopped from a footswitch, the laptop or the tablet, where parts can be
+  muted and their plugins opened from the stand. Mark its sections and jump between them in time, and vamp
   an intro until a pedal lets it go on. Tempo-synced effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
   song -- PDF, image, text or ChordPro -- and the tablet shows it, turning

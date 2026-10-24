@@ -1115,13 +1115,13 @@ private:
                     const auto& gc = sd->gmChannels[(size_t) p->channel - 1];
                     p->level.setDoubleClickReturnValue (true, 0.0);
                     p->level.setValue (gc.volume >= 0 ? ccToDb (gc.volume, fileCc (p->channel)) : 0.0f, dontSendNotification);
-                    p->mute.setToggleState (gc.muted, dontSendNotification);
+                    p->mute.setToggleState (owner.engine.isPartMuted (track(), program(), p->channel), dontSendNotification);
                 }
                 else
                 {
                     p->level.setDoubleClickReturnValue (true, 0.0);
                     p->level.setValue (sd->gainDb, dontSendNotification);
-                    p->mute.setToggleState (! sd->enabled, dontSendNotification);
+                    p->mute.setToggleState (owner.engine.isPartMuted (track(), program(), p->channel), dontSendNotification);
                 }
             }
         }
@@ -1141,20 +1141,7 @@ private:
                 owner.engine.setSlotGainDb (track(), program(), sl, dB);
         }
 
-        void setMuted (int ch, bool muted)
-        {
-            int sl = -1;
-            const auto* sd = instrumentFor (ch, &sl);
-            if (sd == nullptr) return;
-            if (sd->isGm())
-            {
-                auto gc = sd->gmChannels[(size_t) ch - 1];
-                gc.muted = muted;
-                owner.engine.setGmChannel (track(), program(), sl, ch, gc);
-            }
-            else
-                owner.engine.setSlotEnabled (track(), program(), sl, ! muted);
-        }
+        void setMuted (int ch, bool muted)   { owner.engine.setPartMuted (track(), program(), ch, muted); }
 
         void openPart (int ch)
         {
@@ -1172,10 +1159,11 @@ private:
             else if (sd->isExternal())
             {
                 const int t = track(), p = program();
-                showPatchRecallDialog (sd->midiOutName, sd->bankMsb, sd->bankLsb, sd->patch, [this, t, p, sl] (int msb, int lsb, int patch)
+                Component::SafePointer<Row> self (this);
+                showPatchRecallDialog (sd->midiOutName, sd->bankMsb, sd->bankLsb, sd->patch, [self, &engine, t, p, sl] (int msb, int lsb, int patch)
                 {
-                    owner.engine.setSlotPatch (t, p, sl, msb, lsb, patch);
-                    refreshParts();
+                    engine.setSlotPatch (t, p, sl, msb, lsb, patch);
+                    if (self != nullptr) self->refreshParts();
                 });
             }
         }
@@ -1247,10 +1235,12 @@ private:
             m.addSeparator();
             m.addItem (1, "Nothing", true, cur == nullptr);
 
-            m.showMenuAsync (PopupMenu::Options().withTargetComponent (partFor (ch)->plays), [this, ch, t, p, types, ports] (int r)
+            Component::SafePointer<Row> self (this);
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (partFor (ch)->plays), [self, ch, t, p, types, ports] (int r)
             {
-                auto& e = owner.engine;
-                if (r < 1) return;
+                if (self == nullptr || r < 1) return;
+                auto* thisRow = self.getComponent();
+                auto& e = thisRow->owner.engine;
                 auto slotsNow = [&] { return (int) e.getSetup().inputs[(size_t) t].programs[(size_t) p].slots.size(); };
                 auto gmSlot = [&]
                 {
@@ -1287,7 +1277,7 @@ private:
                 {
                     if (e.addExternalSlot (t, p, ports[r - 4000])) e.assignPart (t, p, ch, slotsNow() - 1);
                 }
-                refreshParts();
+                thisRow->refreshParts();
             });
         }
 

@@ -230,7 +230,8 @@ public:
     /** The file the setup was loaded from or last saved to, or none. The
         charts folder sits beside it, so both the desktop and the tablet
         server derive the same place from here. */
-    void setSetupFile (const juce::File& f)  { setupFile = f; }
+    /** Also makes the current song's track ready again: its files live beside this file. */
+    void setSetupFile (const juce::File& f);
     juce::File getSetupFile() const          { return setupFile; }
     juce::File getChartsFolder() const       { return chartsFolderFor (setupFile); }
 
@@ -315,6 +316,9 @@ public:
     void assignPart (int inputIndex, int program, int channel, int slot);
     /** Which instrument of `program` plays `channel`, or -1 (the first found). */
     int  partInstrument (int inputIndex, int program, int channel) const;
+    /** A part's mute: the GM player's channel mute when it plays the part, else the instrument's enable. */
+    void setPartMuted (int inputIndex, int program, int channel, bool muted);
+    bool isPartMuted (int inputIndex, int program, int channel) const;
 
     /** While stopped: the armed track starts from here (seconds) on the next Play. */
     void cueTrack (double seconds)                  { if (player != nullptr) player->cue (seconds); }
@@ -553,7 +557,10 @@ private:
     /** `inL`/`inR` carry an audio input's signal into the program; null for a keyboard. */
     /** `fromTrack`: the input is the backing track, whose files' program
         changes are for the GM player only. */
-    void processProgram (ProgramRuntime&, const juce::MidiBuffer& in, const float* inL, const float* inR,
+    /** `received`: MIDI another input's "its sounds" instrument sent here
+        this block, which is played but never passed on again (no echoes
+        between two keyboards that each layer the other). May be null. */
+    void processProgram (ProgramRuntime&, const juce::MidiBuffer& in, const juce::MidiBuffer* received, const float* inL, const float* inR,
                          float* const* out, int numOut, int numSamples, bool panic, bool fromTrack);
     /** The GM player's view of a slot's MIDI: its mixer's choices over the file's. */
     void prepareGmMidi (SlotRuntime&, int numSamples);
@@ -631,6 +638,8 @@ private:
     const float* const* chunkIn = nullptr;        // audio thread: this chunk's device inputs
     int chunkNumIn = 0;
     void sendPatches (ProgramRuntime&, const ProgramDef&);
+    /** Arms the song the set is on (not started), so Play works after a load. */
+    void armCurrentSong();
     EffectDef* sendDefFor (int inputIndex, int program, int slot, int effect);
     EffectRuntime* sendRuntimeFor (int inputIndex, int program, int slot, int effect) const;
     /** Audio thread: every slot's MIDI chain, on the slot's MIDI for this block. */
