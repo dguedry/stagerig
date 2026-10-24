@@ -107,6 +107,25 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
          padding:9px 14px; font-size:13px; font-weight:800; letter-spacing:.04em; }
   #tap:active { background:var(--accent); color:#06121f; }
 
+  /* The Now page: the song's sound, adjustable from the stand. Rows big
+     enough for a thumb; faders that a finger can land on. */
+  .nowtop { display:flex; align-items:center; gap:8px; margin:14px 12px 0; flex-wrap:wrap; }
+  .nowtop .tr { display:flex; align-items:center; gap:6px; background:var(--panel); border-radius:12px; padding:6px 8px; }
+  .nowtop .tr span { color:var(--dim); font-size:12px; font-weight:700; letter-spacing:.08em; margin:0 4px; }
+  .nowtop .tr button { background:var(--row); color:#fff; border:0; border-radius:8px; width:44px; height:40px; font-size:20px; font-weight:800; }
+  .nowtop .tr b { min-width:64px; text-align:center; font-variant-numeric:tabular-nums; font-size:17px; }
+  .nowtop .save { margin-left:auto; background:var(--accent); color:#06121f; border:0; border-radius:12px; padding:12px 16px; font-weight:800; font-size:14px; }
+  .nowtop .save:disabled { opacity:.45; }
+  .nowtop .saved { color:var(--dim); font-size:13px; }
+  .nrow { display:flex; align-items:center; gap:10px; background:var(--row); border-radius:10px; padding:8px 10px; margin-top:6px; }
+  .nrow .tog { flex:none; width:54px; padding:11px 0; border:0; border-radius:8px; background:#2a2e38; color:var(--dim); font-weight:800; font-size:12px; letter-spacing:.04em; }
+  .nrow .tog.on { background:#4fb86a; color:#06121f; }
+  .nrow .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; }
+  .nrow.off .nm { opacity:.45; }
+  .nrow input[type=range] { flex:2; min-width:90px; accent-color:var(--accent); height:28px; }
+  .nrow .db { flex:none; width:62px; text-align:right; font-variant-numeric:tabular-nums; color:var(--dim); font-size:13px; }
+  .nrow.fx .nm { font-size:14px; color:#d7dbe2; }
+  .nsec { color:var(--dim); font-size:12px; font-weight:700; letter-spacing:.08em; margin:12px 0 2px; }
   /* Tabs: the set list is what you look at during a gig, the programs are
      what you look at while building one. */
   .tabs { display:flex; gap:8px; padding:10px 12px 0; }
@@ -209,9 +228,11 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 </div>
 <div class="tabs">
   <button id="tabSongs" class="on">Set list</button>
+  <button id="tabNow">Now</button>
   <button id="tabProgs">Programs</button>
 </div>
 <div id="setview"></div>
+<div id="nowview"></div>
 <div id="inputs"></div>
 </div>
 <script>
@@ -270,20 +291,27 @@ const filters = {};          // input index -> chosen group, "" for all
    Programs, someone playing a gig works in the set list, and neither should
    have to re-pick it every time the page reloads. */
 let tab = localStorage.getItem("tab") || "songs";
+/* ?tab=now (or songs, programs) opens on that page: a home-screen shortcut
+   straight to the Now page for the player who only ever adjusts. */
+{ const want = new URLSearchParams(location.search).get("tab"); if (want) { tab = want; localStorage.setItem("tab", tab); } }
 let songFilter = "";          // what is typed in the song search, if anything
 
 function syncTabs() {
   const hasSongs = !!(lastState && lastState.sets && lastState.sets.length);
   /* Nothing to show and no way to make one from here: a setup with no songs
      goes straight to the programs rather than an empty list. */
-  const t = hasSongs ? tab : "programs";
+  const t = (tab === "songs" && !hasSongs) ? "programs" : tab;
   document.getElementById("tabSongs").className = t === "songs" ? "on" : "";
+  document.getElementById("tabNow").className   = t === "now" ? "on" : "";
   document.getElementById("tabProgs").className = t === "programs" ? "on" : "";
   document.getElementById("setview").style.display = t === "songs" ? "" : "none";
-  document.getElementById("inputs").style.display  = t === "songs" ? "none" : "";
+  document.getElementById("nowview").style.display = t === "now" ? "" : "none";
+  document.getElementById("inputs").style.display  = t === "programs" ? "" : "none";
+  if (t === "now") startNow(); else stopNow();
 }
 
 document.getElementById("tabSongs").onclick = () => { tab = "songs";    localStorage.setItem("tab", tab); syncTabs(); };
+document.getElementById("tabNow").onclick   = () => { tab = "now";      localStorage.setItem("tab", tab); syncTabs(); };
 document.getElementById("tabProgs").onclick = () => { tab = "programs"; localStorage.setItem("tab", tab); syncTabs(); };
 
 /* The backing track's button and clock, kept current twice a second while the
@@ -832,6 +860,116 @@ document.getElementById("panic").onclick = async () => {
 };
 if (token) refresh(true); else askForCode("");
 setInterval(() => { if (token) refresh(false); }, 1000);
+
+/* The Now page: the song's sound, from the stand. What actually comes up
+   at a gig -- a layer too loud, lose the reverb, down a step for the singer,
+   the keyboards' output into the desk -- and nothing that belongs in
+   rehearsal (no adding plugins, no mappings). Every change is live and saved
+   with the setup like the same change on the laptop; "Save to song" also
+   makes the song remember the programs, tempo and transpose as they are now.
+   Polled once a second while showing, never while a finger is on a fader. */
+let nowTimer = null, nowDragging = 0, nowKey = "";
+async function pollNow() {
+  if (nowDragging) return;
+  try {
+    const d = await api("/api/now");
+    const key = JSON.stringify(d);
+    if (key !== nowKey) { nowKey = key; renderNow(d); }
+  } catch (e) { if (e.gate) askForCode(""); }
+}
+function startNow() { if (!nowTimer) { nowTimer = setInterval(pollNow, 1000); pollNow(); } }
+function stopNow()  { if (nowTimer) { clearInterval(nowTimer); nowTimer = null; nowKey = ""; } }
+async function nowPost(path) {
+  try { await api(path, { method: "POST" }); }
+  catch (e) { if (e.gate) askForCode(""); else show(e.message); }
+}
+const dbText = v => v <= -60 ? "\u2212\u221e dB" : (v > 0 ? "+" : "") + Number(v).toFixed(1) + " dB";
+function fader(value, label, send) {
+  const r = document.createElement("input");
+  r.type = "range"; r.min = -60; r.max = 12; r.step = 0.5; r.value = value;
+  let last = 0, pending = null;
+  const push = () => { pending = null; last = Date.now(); send(parseFloat(r.value)); };
+  r.oninput = () => {
+    label.textContent = dbText(parseFloat(r.value));
+    if (Date.now() - last > 80) push(); else if (!pending) pending = setTimeout(push, 80);
+  };
+  r.onchange = () => { if (pending) clearTimeout(pending); push(); };
+  r.onpointerdown = () => { nowDragging++; };
+  const up = () => { nowDragging = Math.max(0, nowDragging - 1); };
+  r.onpointerup = up; r.onpointercancel = up;
+  return r;
+}
+function nowRow(cls, onNow, name, toggle, right) {
+  const row = document.createElement("div"); row.className = "nrow " + cls + (onNow ? "" : " off");
+  const t = document.createElement("button"); t.className = "tog" + (onNow ? " on" : ""); t.textContent = onNow ? "ON" : "OFF";
+  t.onclick = () => { const want = !t.classList.contains("on"); t.classList.toggle("on", want); t.textContent = want ? "ON" : "OFF"; row.classList.toggle("off", !want); toggle(want); };
+  const nm = document.createElement("div"); nm.className = "nm"; nm.textContent = name;
+  row.appendChild(t); row.appendChild(nm);
+  if (right) right.forEach(x => row.appendChild(x));
+  return row;
+}
+function renderNow(d) {
+  const root = document.getElementById("nowview");
+  root.innerHTML = "";
+
+  const top = document.createElement("div"); top.className = "nowtop";
+  const tr = document.createElement("div"); tr.className = "tr";
+  const lbl = document.createElement("span"); lbl.textContent = "TRANSPOSE";
+  const minus = document.createElement("button"); minus.textContent = "\u2212";
+  const val = document.createElement("b");
+  const plus = document.createElement("button"); plus.textContent = "+";
+  let st = d.transpose || 0;
+  const showSt = () => { val.textContent = st === 0 ? "0 st" : (st > 0 ? "+" : "\u2212") + Math.abs(st) + " st"; };
+  showSt();
+  minus.onclick = () => { st = Math.max(-24, st - 1); showSt(); nowPost("/api/transpose?st=" + st); };
+  plus.onclick  = () => { st = Math.min(24, st + 1);  showSt(); nowPost("/api/transpose?st=" + st); };
+  tr.appendChild(lbl); tr.appendChild(minus); tr.appendChild(val); tr.appendChild(plus);
+  top.appendChild(tr);
+  const save = document.createElement("button"); save.className = "save";
+  save.textContent = d.song >= 0 ? "Save to \u201c" + d.songName + "\u201d" : "No song in play";
+  save.disabled = !(d.song >= 0);
+  save.onclick = async () => { await nowPost("/api/savesong"); save.textContent = "Saved"; setTimeout(() => { nowKey = ""; pollNow(); }, 800); };
+  top.appendChild(save);
+  root.appendChild(top);
+
+  d.inputs.forEach(inp => {
+    const wrap = document.createElement("div"); wrap.className = "input";
+    const now = document.createElement("div"); now.className = "now";
+    now.innerHTML = '<div class="name"></div><div class="prog"><span class="num"></span><span class="title"></span></div>';
+    now.querySelector(".name").textContent = inp.name.toUpperCase();
+    now.querySelector(".num").textContent = String(inp.program).padStart(3, "0");
+    now.querySelector(".title").textContent = inp.programName || (inp.audio ? "straight through" : "(empty)");
+    wrap.appendChild(now);
+    inp.instruments.forEach(ins => {
+      const db = document.createElement("span"); db.className = "db"; db.textContent = dbText(ins.gainDb);
+      const f = fader(ins.gainDb, db, v => nowPost("/api/slotgain?input=" + inp.index + "&slot=" + ins.slot + "&db=" + v));
+      wrap.appendChild(nowRow("ins", ins.enabled, ins.name,
+        on => nowPost("/api/slotenable?input=" + inp.index + "&slot=" + ins.slot + "&on=" + (on ? 1 : 0)), [f, db]));
+    });
+    if (inp.effects.length) {
+      const h = document.createElement("div"); h.className = "nsec"; h.textContent = "EFFECTS"; wrap.appendChild(h);
+      inp.effects.forEach(fx => wrap.appendChild(nowRow("fx", !fx.bypassed, fx.name,
+        on => nowPost("/api/bypass?input=" + inp.index + "&slot=" + fx.slot + "&effect=" + fx.effect + "&on=" + (on ? 1 : 0)))));
+    }
+    root.appendChild(wrap);
+  });
+
+  if (d.outputs.length) {
+    const wrap = document.createElement("div"); wrap.className = "input";
+    const h = document.createElement("div"); h.className = "nsec"; h.textContent = "OUTPUTS"; wrap.appendChild(h);
+    d.outputs.forEach(o => {
+      const db = document.createElement("span"); db.className = "db"; db.textContent = dbText(o.gainDb);
+      const f = fader(o.gainDb, db, v => nowPost("/api/outgain?output=" + o.index + "&db=" + v));
+      const row = document.createElement("div"); row.className = "nrow out";
+      const nm = document.createElement("div"); nm.className = "nm"; nm.textContent = o.name;
+      row.appendChild(nm); row.appendChild(f); row.appendChild(db);
+      wrap.appendChild(row);
+      o.effects.forEach(fx => wrap.appendChild(nowRow("fx", !fx.bypassed, o.name + " > " + fx.name,
+        on => nowPost("/api/bypass?output=" + o.index + "&effect=" + fx.effect + "&on=" + (on ? 1 : 0)))));
+    });
+    root.appendChild(wrap);
+  }
+}
 
 // Registering this is what makes a browser offer "install" / "Add to Home
 // Screen" as a prompt rather than something buried in a menu.
@@ -1794,6 +1932,84 @@ String RemoteServer::healthJson() const
 
     Grouped by slot because that is how the setup is built and how the desktop
     labels things: "1: Kontakt 8" is the same slot in both views. */
+String RemoteServer::nowJson() const
+{
+    const auto& setup = engine.getSetup();
+    DynamicObject::Ptr root (new DynamicObject());
+    root->setProperty ("revision", revision.load());
+    root->setProperty ("transpose", engine.getTranspose());
+    const int song = engine.currentSongIndex();
+    root->setProperty ("song", song);
+    root->setProperty ("songName", song >= 0 ? setup.songs[(size_t) song].name : String());
+
+    auto fxObject = [] (int slot, int effect, const String& name, bool bypassed)
+    {
+        DynamicObject::Ptr so (new DynamicObject());
+        so->setProperty ("slot", slot);
+        so->setProperty ("effect", effect);
+        so->setProperty ("name", name);
+        so->setProperty ("bypassed", bypassed);
+        return var (so.get());
+    };
+
+    Array<var> inputs;
+    for (int i = 0; i < (int) setup.inputs.size(); ++i)
+    {
+        const auto& in = setup.inputs[(size_t) i];
+        if (in.isTrack()) continue;                 // its parts have their own sheet
+        const int prog = in.currentProgram;
+        const auto& def = in.programs[(size_t) prog];
+        DynamicObject::Ptr o (new DynamicObject());
+        o->setProperty ("index", i);
+        o->setProperty ("name", in.name);
+        o->setProperty ("audio", in.isAudio());
+        o->setProperty ("program", prog);
+        o->setProperty ("programName", def.name);
+        Array<var> instruments, effects;
+        for (int s = 0; s < (int) def.slots.size(); ++s)
+        {
+            const auto& sd = def.slots[(size_t) s];
+            DynamicObject::Ptr so (new DynamicObject());
+            so->setProperty ("slot", s);
+            so->setProperty ("name", sd.displayName());
+            so->setProperty ("enabled", sd.enabled);
+            so->setProperty ("gainDb", sd.gainDb);
+            instruments.add (var (so.get()));
+            // Its MIDI chain and its effects, in signal order, named after it.
+            for (int e = 0; e < (int) sd.midiEffects.size(); ++e)
+            {
+                const auto& md = sd.midiEffects[(size_t) e];
+                effects.add (fxObject (ProgramDef::midiChainOf (s), e, sd.displayName() + " > " + (md.isSend() ? md.portName + " (MIDI)" : md.plugin.name), md.bypassed));
+            }
+            for (int e = 0; e < (int) sd.effects.size(); ++e)
+                effects.add (fxObject (s, e, sd.displayName() + " > " + sd.effects[(size_t) e].plugin.name, sd.effects[(size_t) e].bypassed));
+        }
+        for (int e = 0; e < (int) def.effects.size(); ++e)
+            effects.add (fxObject (-1, e, (in.isAudio() ? String() : String ("Program > ")) + def.effects[(size_t) e].plugin.name, def.effects[(size_t) e].bypassed));
+        o->setProperty ("instruments", instruments);
+        o->setProperty ("effects", effects);
+        inputs.add (var (o.get()));
+    }
+    root->setProperty ("inputs", inputs);
+
+    Array<var> outputs;
+    for (int k = 0; k < (int) setup.outputs.size(); ++k)
+    {
+        const auto& od = setup.outputs[(size_t) k];
+        DynamicObject::Ptr o (new DynamicObject());
+        o->setProperty ("index", k);
+        o->setProperty ("name", od.name);
+        o->setProperty ("gainDb", od.gainDb);
+        Array<var> effects;
+        for (int e = 0; e < (int) od.chain.effects.size(); ++e)
+            effects.add (fxObject (-1, e, od.chain.effects[(size_t) e].plugin.name, od.chain.effects[(size_t) e].bypassed));
+        o->setProperty ("effects", effects);
+        outputs.add (var (o.get()));
+    }
+    root->setProperty ("outputs", outputs);
+    return JSON::toString (var (root.get()), true);
+}
+
 String RemoteServer::slotsJson (int inputIndex) const
 {
     DynamicObject::Ptr root (new DynamicObject());
@@ -2175,6 +2391,49 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         ++revision;
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;
+    }
+    if (path.startsWith ("/api/now"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        String body;
+        if (produceOnMessageThread ([this] { return nowJson(); }, body, 2000))
+            sendResponse (sock, "200 OK", "application/json", body);
+        else
+            sendBusy (sock, sendResponse);
+        return;
+    }
+    {
+        /* The Now page's changes -- an instrument on or off or louder, an
+           effect bypassed, an output's volume, the transpose, the song
+           captured -- each one engine call on the message thread, acknowledged
+           at once; the page reads the result back on its next poll. */
+        auto number = [&path] (const char* key, double fallback = 0.0)
+        {
+            for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
+                if (kv.startsWith (String (key) + "=")) return kv.fromFirstOccurrenceOf ("=", false, false).getDoubleValue();
+            return fallback;
+        };
+        auto has = [&path] (const char* key) { return path.contains ("?" + String (key) + "=") || path.contains ("&" + String (key) + "="); };
+        auto post = [&] (const char* route, std::function<void()> change)
+        {
+            if (! path.startsWith (route)) return false;
+            if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return true; }
+            MessageManager::callAsync (std::move (change));
+            ++revision;
+            sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+            return true;
+        };
+        auto programOf = [this] (int in) { const auto& inputs = engine.getSetup().inputs; return in >= 0 && in < (int) inputs.size() ? inputs[(size_t) in].currentProgram : -1; };
+        const int in = (int) number ("input", -1), slot = (int) number ("slot", -1), effect = (int) number ("effect", -1), output = (int) number ("output", -1);
+        const bool on = number ("on") != 0.0;
+        const float db = (float) number ("db");
+        if (post ("/api/slotenable", [this, programOf, in, slot, on] { engine.setSlotEnabled (in, programOf (in), slot, on); })) return;
+        if (post ("/api/slotgain",   [this, programOf, in, slot, db] { engine.setSlotGainDb (in, programOf (in), slot, db); })) return;
+        if (has ("output") && post ("/api/bypass", [this, output, effect, on] { engine.setEffectBypassed (Engine::outputAddress (output), 0, -1, effect, ! on); })) return;
+        if (post ("/api/bypass",     [this, programOf, in, slot, effect, on] { engine.setEffectBypassed (in, programOf (in), slot, effect, ! on); })) return;
+        if (post ("/api/outgain",    [this, output, db] { engine.setOutputGainDb (output, db); })) return;
+        if (post ("/api/transpose",  [this, st = (int) number ("st")] { engine.setTranspose (st); })) return;
+        if (post ("/api/savesong",   [this] { if (const int s = engine.currentSongIndex(); s >= 0) engine.captureSong (s); })) return;
     }
     if (path.startsWith ("/api/slots"))
     {

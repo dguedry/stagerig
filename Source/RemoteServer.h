@@ -26,6 +26,10 @@ class RemoteServer : private juce::Thread,
                      private Engine::Listener
 {
 public:
+    /** The Now page: every input's current program with its instruments
+        (on/off, gain) and effects (bypass), the outputs' volumes and master
+        chains, the transpose and the song in play. */
+    juce::String nowJson() const;
     RemoteServer (Engine&, juce::PropertiesFile&);
     ~RemoteServer() override;
 

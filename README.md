@@ -250,6 +250,11 @@ on), and **Parts** -- the MIDI files' parts, each with what plays it, a
 **Mute** for the one you will play yourself tonight, and **GUI** when a
 plugin in the song's own program plays it.
 
+The **Now** tab is the song's sound from the stand: each instrument on or
+off and its level, every effect's bypass, the outputs' volumes, a transpose
+for the singer, and **Save to song** so the fix sticks. What belongs in
+rehearsal -- adding plugins, mappings, splits -- stays on the laptop.
+
 If the tablet cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which
 makes it look like the tablet is at fault. Open the port for private networks

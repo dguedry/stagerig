@@ -1055,6 +1055,49 @@ int main()
         CHECK (render (engine, 3) < 1e-4f);     // silent until played
     }
 
+    // --- a CLAP synth that takes CLAP note events: PANIC silences it (Surge XT, when installed) ---
+    {
+        File surgeFile;
+        for (const char* p : { "/usr/lib/clap/Surge XT.clap", "/usr/local/lib/clap/Surge XT.clap" })
+            if (File (p).exists()) { surgeFile = File (p); break; }
+        if (surgeFile == File()) surgeFile = File::getSpecialLocation (File::userHomeDirectory).getChildFile (".clap/Surge XT.clap");
+        if (! surgeFile.exists())
+            std::printf ("     skip Surge XT PANIC check (not installed)\n");
+        else
+        {
+            perf::ClapPluginFormat clapFmt;
+            OwnedArray<PluginDescription> found;
+            clapFmt.findAllTypesForFile (found, surgeFile.getFullPathName());
+            const PluginDescription* surge = nullptr;
+            for (auto* d : found) if (d->isInstrument && d->name == "Surge XT") surge = d;
+            CHECK (surge != nullptr);
+            if (surge != nullptr)
+            {
+                engine.clearProgram (0, 61);
+                engine.selectProgram (0, 61); settle();
+                String sErr;
+                CHECK (engine.addSlot (0, 61, *surge, sErr));
+                settle();
+                CHECK (engine.isPluginAlive (0, 61, 0));
+                render (engine, 10);
+                engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+                engine.injectMidi (0, MidiMessage::noteOn (1, 64, (uint8) 100));
+                const float sounding = render (engine, 20);
+                std::printf ("     Surge XT playing two notes: %.4f\n", sounding);
+                CHECK (sounding > 1e-3f);
+                engine.panic();                                          // the keys are still held
+                render (engine, 10);
+                const float afterPanic = render (engine, 10);
+                std::printf ("     after PANIC with the keys held: %.6f\n", afterPanic);
+                CHECK (afterPanic < 1e-4f);
+                engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+                engine.injectMidi (0, MidiMessage::noteOff (1, 64));
+                render (engine, 5);
+                engine.clearProgram (0, 61);
+            }
+        }
+    }
+
     // --- plugin icons: generated badges always, embedded Windows icons when present ------
     {
         PluginDescription d; d.name = "Kontakt 8"; d.manufacturerName = "Native Instruments"; d.pluginFormatName = "VST3";
@@ -2215,6 +2258,20 @@ int main()
                 // PANIC gets past the processor to the sound.
                 engine.panic();
                 CHECK (has (renderAndWait(), [] (const MidiMessage& m) { return m.getChannel() == 1 && (m.isAllNotesOff() || (m.isController() && m.getControllerNumber() == 123)); }));
+
+                /* The transpose shifts the keys on the way in -- the send hears
+                   62, the sound 74 through the octave -- and a note held across
+                   a change is let go at the key it started on. */
+                engine.setTranspose (2);
+                engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));
+                got = renderAndWait();
+                CHECK (has (got, noteOn (62, 5)) && has (got, noteOn (74, 1)) && ! has (got, noteOn (60, 5)));
+                engine.setTranspose (0);
+                engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+                got = renderAndWait();
+                CHECK (has (got, [] (const MidiMessage& m) { return m.isNoteOff() && m.getNoteNumber() == 62 && m.getChannel() == 5; }));
+                CHECK (has (got, [] (const MidiMessage& m) { return m.isNoteOff() && m.getNoteNumber() == 74 && m.getChannel() == 1; }));
+                CHECK (engine.getTranspose() == 0);
 
                 TemporaryFile cf (".stagerig.json");
                 CHECK (engine.captureSetup().saveToFile (cf.getFile()).wasOk());

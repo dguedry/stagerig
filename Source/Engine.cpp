@@ -217,6 +217,9 @@ struct Engine::InputRuntime
     MidiBuffer sentMidi;           // what other inputs' "its sounds" slots sent here, for the next block
     MidiBuffer received;           // the same, as this block plays it (never forwarded again)
     MidiBuffer holdBlock;          // this block's MIDI less the note-ons, for programs left sounding
+    MidiBuffer shifted;            // this block's MIDI with the transpose applied
+    int8_t noteShift[16][128] = {};   // what each sounding key was shifted by at its note-on
+    int shiftedHeld = 0;              // how many of those are shifted at all
     std::map<int, std::unique_ptr<ProgramRuntime>> loaded;
     ProgramRuntime* active = nullptr;
     std::vector<ProgramRuntime*> releasing;
@@ -553,6 +556,7 @@ void Engine::rebuildRuntimes()
         auto rt = std::make_unique<InputRuntime>();
         rt->collector.reset (sampleRate);
         rt->trackMidi.ensureSize (4096);
+        rt->shifted.ensureSize (4096);
         applyInputDef (*rt, setup.inputs[(size_t) i]);
         runtimes.push_back (std::move (rt));
     }
@@ -1191,7 +1195,32 @@ void Engine::captureSong (int songIndex)
     for (size_t i = 0; i < setup.inputs.size(); ++i)
         s.programs[i] = setup.inputs[i].currentProgram;
     s.tempoBpm = setup.tempoBpm;
+    s.transpose = liveTranspose.load();
     listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setTranspose (int semitones)
+{
+    const int st = jlimit (-24, 24, semitones);
+    if (liveTranspose.exchange (st) == st) return;
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSongTranspose (int songIndex, int semitones)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.songs[(size_t) songIndex].transpose = jlimit (-24, 24, semitones);
+    if (songIndex == currentSongIndex()) setTranspose (semitones);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+int Engine::currentSongIndex() const
+{
+    if (setup.currentSet < 0 || setup.currentSet >= (int) setup.sets.size()) return -1;
+    const auto& songs = setup.sets[(size_t) setup.currentSet].songs;
+    if (setup.currentSongInSet < 0 || setup.currentSongInSet >= (int) songs.size()) return -1;
+    const int s = songs[(size_t) setup.currentSongInSet];
+    return s >= 0 && s < (int) setup.songs.size() ? s : -1;
 }
 
 void Engine::selectSong (int songIndex)
@@ -1211,6 +1240,7 @@ void Engine::selectSong (int songIndex)
         setTempoBpm (s.tempoBpm);
         resetTapTempo();
     }
+    setTranspose (s.transpose);
     // Its backing track is made ready, not started: starting is always on purpose.
     armTrack (songIndex);
     listeners.call ([] (Listener& l) { l.setupChanged(); });
@@ -3373,6 +3403,41 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
         in.block.addEvents (in.trackMidi, 0, -1, 0);
         in.trackMidi.clear();
     }
+    /* The transpose: the keys shifted on the way in -- never the backing
+       track, whose parts are its own, and never an audio input. A note held
+       across a change is let go at the key it started on. */
+    if (! in.track.load (std::memory_order_relaxed) && ! in.audio.load (std::memory_order_relaxed))
+    {
+        if (panicNow) { std::memset (in.noteShift, 0, sizeof (in.noteShift)); in.shiftedHeld = 0; }
+        const int t = liveTranspose.load (std::memory_order_relaxed);
+        if (t != 0 || in.shiftedHeld > 0)
+        {
+            in.shifted.clear();
+            for (const auto meta : in.block)
+            {
+                auto m = meta.getMessage();
+                const int c = m.getChannel() - 1;
+                if (c >= 0 && c < 16 && m.isNoteOn())
+                {
+                    const int k = m.getNoteNumber(), nk = k + t;
+                    if (nk < 0 || nk > 127) continue;
+                    if (in.noteShift[c][k] != 0) --in.shiftedHeld;     // retriggered while held: the old shift is forgotten
+                    in.noteShift[c][k] = (int8_t) t;
+                    if (t != 0) ++in.shiftedHeld;
+                    m.setNoteNumber (nk);
+                }
+                else if (c >= 0 && c < 16 && m.isNoteOff())
+                {
+                    const int k = m.getNoteNumber(), s = in.noteShift[c][k];
+                    if (s != 0) { --in.shiftedHeld; in.noteShift[c][k] = 0; }
+                    m.setNoteNumber (jlimit (0, 127, k + s));
+                }
+                in.shifted.addEvent (m, meta.samplePosition);
+            }
+            in.block.swapWith (in.shifted);
+        }
+    }
+
     /* Another input's "its sounds" slot sent these, on this input's own
        channel so they play as its keys would. Kept apart from the keys'
        own MIDI: played, never passed on to a third input. What was sent
