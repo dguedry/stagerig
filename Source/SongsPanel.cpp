@@ -3,6 +3,7 @@
 #include "GmSynth.h"
 #include "GmMixer.h"
 #include "MidiEditor.h"
+#include "PatchDialog.h"
 #include <cmath>
 #include <map>
 
@@ -334,7 +335,7 @@ void SongsPanel::ListProxy::paintListBoxItem (int row, Graphics& g, int w, int h
     for (int i = 0; i < (int) inputs.size(); ++i)
     {
         const int prog = sg.programFor (i);
-        if (prog < 0) continue;              // this song leaves that keyboard alone
+        if (prog < 0 || inputs[(size_t) i].isTrack()) continue;     // this song leaves that keyboard alone; the track's program is the song itself
         const auto& pd = inputs[(size_t) i].programs[(size_t) prog];
         parts.add (String (prog).paddedLeft ('0', 3)
                      + (pd.name.isNotEmpty() ? " " + pd.name : ""));
@@ -392,6 +393,7 @@ String SongsPanel::describeCurrent() const
     StringArray parts;
     for (const auto& in : inputs)
     {
+        if (in.isTrack()) continue;
         const auto& prog = in.programs[(size_t) in.currentProgram];
         parts.add (in.name + "  " + String (in.currentProgram).paddedLeft ('0', 3)
                      + "  " + (prog.name.isNotEmpty() ? prog.name : "(empty)"));
@@ -488,6 +490,7 @@ void SongsPanel::editSelectedSong()
     {
         const int prog = sg.programFor (i);
         const auto& in = inputs[(size_t) i];
+        if (in.isTrack()) continue;
         if (prog < 0 || prog >= (int) in.programs.size())
         {
             loads.add (in.name + ": left alone");
@@ -827,6 +830,8 @@ void SongsPanel::addTrackFile (const File& f, int songIndex)
     StemDef d;
     d.file = dest.getFileName();
     engine.addSongStem (songIndex, d);
+    // The song you are building is the one Play should play.
+    if (engine.getTrackSong() != songIndex) engine.selectSong (songIndex);
     refresh();
 }
 
@@ -876,10 +881,9 @@ public:
         hint.setColour (Label::textColourId, textDim);
         hint.setFont (FontOptions (12.0f));
         hint.setJustificationType (Justification::topLeft);
-        hint.setText ("Audio files play on an output. A MIDI file plays parts, like another player in the band: "
-                      "each part plays on what you choose -- a General MIDI instrument, a keyboard's sounds, a plugin, "
-                      "a MIDI device. Everything starts together with Play in the songs panel, the tablet, or the "
-                      "start/stop footswitch. Put a click or cue file on your in-ear output. The count-in clicks at the song's tempo.\n"
+        hint.setText ("Audio files play on an output; put a click or cue file on your in-ear output. "
+                      "A MIDI file plays parts: click a part's sound to choose what plays it. "
+                      "Play (songs panel, tablet or footswitch) starts everything together, after the count-in.\n"
                       "Sections start at their time and run to the next. A vamp section repeats until released "
                       "(Next, the tablet, or the section footswitch); asking for a section takes you there when "
                       "the current one ends.", dontSendNotification);
@@ -967,6 +971,12 @@ private:
                     empty.setColour (Label::textColourId, err.isNotEmpty() ? Colours::orange : textDim);
                     empty.setText (err.isNotEmpty() ? err : String ("No notes in this file"), dontSendNotification);
                 }
+                else if (const auto why = GmSynth::unavailableReason (owner.engine.getGmSoundfont()); why.isNotEmpty())
+                {
+                    addAndMakeVisible (empty);
+                    empty.setColour (Label::textColourId, Colours::orange);
+                    empty.setText ("No General MIDI sounds: " + why + ". Give each part one of your own instruments.", dontSendNotification);
+                }
                 refreshParts();
             }
             else
@@ -988,7 +998,7 @@ private:
             remove.onClick = [this] { owner.engine.removeSongStem (owner.songIndex, index); MessageManager::callAsync ([o = &owner] { o->rebuild(); }); };
         }
 
-        int preferredHeight() const { return 30 + (int) parts.size() * 28 + (parts.empty() && def.isMidi() ? 24 : 0); }
+        int preferredHeight() const { return 30 + (int) parts.size() * 28 + (def.isMidi() && empty.isVisible() ? 24 : 0); }
 
         void resized() override
         {
@@ -1005,17 +1015,18 @@ private:
             }
             r.removeFromRight (6);
             name.setBounds (r);
-            if (parts.empty()) empty.setBounds (all.removeFromTop (24).withTrimmedLeft (24));
+            if (parts.empty() && empty.isVisible()) empty.setBounds (all.removeFromTop (24).withTrimmedLeft (24));
             for (auto& p : parts)
             {
                 auto line = all.removeFromTop (28).reduced (0, 3);
                 line.removeFromLeft (24);
-                line.removeFromRight (34);                 // under the X
                 p->mute.setBounds (line.removeFromRight (28));  line.removeFromRight (6);
                 p->level.setBounds (line.removeFromRight (100)); line.removeFromRight (6);
+                p->open.setBounds (line.removeFromRight (64));  line.removeFromRight (6);
                 p->plays.setBounds (line.removeFromRight (jmin (300, line.getWidth() / 2))); line.removeFromRight (6);
                 p->label.setBounds (line);
             }
+            if (! parts.empty() && empty.isVisible()) empty.setBounds (all.removeFromTop (24).withTrimmedLeft (24));
         }
 
         void paint (Graphics& g) override
@@ -1030,7 +1041,7 @@ private:
         {
             int channel = 1;
             Label label;
-            TextButton plays, mute { "M" };
+            TextButton plays, mute { "M" }, open;     // open: the plugin's window, or a MIDI device's patch
             Slider level;
         };
 
@@ -1052,8 +1063,10 @@ private:
             p->mute.setColour (TextButton::buttonOnColourId, Colours::orangered);
             p->mute.setTooltip ("Mute this part");
             p->mute.onClick = [this, ch] { setMuted (ch, partFor (ch)->mute.getToggleState()); };
+            p->open.onClick = [this, ch] { openPart (ch); };
             for (auto* c : std::initializer_list<Component*> { &p->label, &p->plays, &p->level, &p->mute })
                 addAndMakeVisible (c);
+            addChildComponent (p->open);
             parts.push_back (std::move (p));
         }
 
@@ -1092,6 +1105,10 @@ private:
                 p->plays.setColour (TextButton::textColourOffId, sd == nullptr || loading ? textDim : Colours::white);
                 p->level.setEnabled (sd != nullptr);
                 p->mute.setEnabled (sd != nullptr);
+                // A plugin has a window to open; a MIDI device has a patch to send.
+                p->open.setVisible (sd != nullptr && (sd->isPlugin() || sd->isExternal()));
+                if (sd != nullptr && sd->isPlugin()) { p->open.setButtonText (loading ? "Loading" : "Edit GUI"); p->open.setEnabled (! loading); }
+                if (sd != nullptr && sd->isExternal()) { p->open.setButtonText ("Patch..."); p->open.setEnabled (true); }
                 if (sd == nullptr) { p->mute.setToggleState (false, dontSendNotification); continue; }
                 if (sd->isGm())
                 {
@@ -1137,6 +1154,30 @@ private:
             }
             else
                 owner.engine.setSlotEnabled (track(), program(), sl, ! muted);
+        }
+
+        void openPart (int ch)
+        {
+            int sl = -1;
+            const auto* sd = instrumentFor (ch, &sl);
+            if (sd == nullptr) return;
+            auto& engine = owner.engine;
+            if (sd->isPlugin())
+            {
+                auto* plugin = engine.getPlugin (track(), program(), sl);
+                if (plugin == nullptr || ! plugin->isAlive()) return;
+                const auto& songs = engine.getSongs();
+                plugin->showEditor ((owner.songIndex < (int) songs.size() ? songs[(size_t) owner.songIndex].name + " / " : String()) + sd->displayName());
+            }
+            else if (sd->isExternal())
+            {
+                const int t = track(), p = program();
+                showPatchRecallDialog (sd->midiOutName, sd->bankMsb, sd->bankLsb, sd->patch, [this, t, p, sl] (int msb, int lsb, int patch)
+                {
+                    owner.engine.setSlotPatch (t, p, sl, msb, lsb, patch);
+                    refreshParts();
+                });
+            }
         }
 
         /** What plays this part: a General MIDI instrument, a keyboard's sounds,

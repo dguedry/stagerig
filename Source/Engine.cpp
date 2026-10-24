@@ -1043,6 +1043,15 @@ int Engine::addSong (const String& name)
 void Engine::removeSong (int songIndex)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    // Its program on the backing track was its own: it goes too, unless another song shares it.
+    if (const int track = setup.trackInput(); track >= 0)
+        if (const int p = setup.songs[(size_t) songIndex].programFor (track); p >= 0)
+        {
+            bool shared = false;
+            for (int i = 0; i < (int) setup.songs.size(); ++i)
+                if (i != songIndex && setup.songs[(size_t) i].programFor (track) == p) shared = true;
+            if (! shared) clearProgram (track, p);
+        }
     setup.songs.erase (setup.songs.begin() + songIndex);
 
     /* Sets hold indices, so everything after the hole shifts down and any set

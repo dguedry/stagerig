@@ -562,6 +562,7 @@ function render(s) {
   const root = document.getElementById("inputs");
   root.innerHTML = "";
   s.inputs.forEach((inp, i) => {
+    if (inp.track) return;
     const wrap = document.createElement("div"); wrap.className = "input";
     const now = document.createElement("div"); now.className = "now";
     now.innerHTML = '<div class="name"></div><div class="prog"><span class="num"></span><span class="title"></span></div>';
@@ -1495,6 +1496,7 @@ String RemoteServer::stateJson() const
             loading = engine.isPluginLoading (i, in.currentProgram, -1, e);
         o->setProperty ("loading", loading);
         if (in.isAudio()) o->setProperty ("audio", true);
+        if (in.isTrack()) o->setProperty ("track", true);     // its program follows the song: nothing to pick
         Array<var> progs;
         for (int p = 0; p < InputDef::numPrograms; ++p)
         {

@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "GmSynth.h"
+#include "PatchDialog.h"
 #include "LevelMeter.h"
 #include "PluginView.h"
 #include "QrCode.h"
@@ -622,30 +623,6 @@ static void addPortItems (PopupMenu& m, const Array<MidiDeviceInfo>& ports, int 
     }
 }
 
-/** Patch recall for something on a MIDI port: bank select and program
-    change, sent when the program is selected. -1 = not sent. */
-static void showPatchRecallDialog (const String& portName, int msb, int lsb, int patch, std::function<void (int, int, int)> done)
-{
-    auto* w = new AlertWindow ("Patch recall",
-                               "Sent to " + portName + " when this program is selected, on the channel it "
-                               "plays on. Leave a box empty to send nothing. Program numbers as the synth shows them, 1-128.",
-                               MessageBoxIconType::NoIcon);
-    auto txt = [] (int v, int add) { return v >= 0 ? String (v + add) : String(); };
-    w->addTextEditor ("msb", txt (msb, 0), "Bank select MSB (CC 0), 0-127");
-    w->addTextEditor ("lsb", txt (lsb, 0), "Bank select LSB (CC 32), 0-127");
-    w->addTextEditor ("prog", txt (patch, 1), "Program, 1-128");
-    w->addButton ("OK", 1, KeyPress (KeyPress::returnKey));
-    w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
-    w->enterModalState (true, ModalCallbackFunction::create ([w, done] (int r)
-    {
-        if (r != 1) return;
-        auto num = [w] (const char* id, int lo, int hi, int sub) {
-            const auto t = w->getTextEditorContents (id).trim();
-            return t.isEmpty() ? -1 : jlimit (lo, hi, t.getIntValue()) - sub; };
-        done (num ("msb", 0, 127, 0), num ("lsb", 0, 127, 0), num ("prog", 1, 128, 1));
-    }), true);
-}
-
 /** A chain of blocks, in order: the insert effects after a slot's sound, a
     program's or an output's chain -- or a slot's MIDI chain, the MIDI
     processors and sends its notes go through before the sound.
@@ -665,7 +642,7 @@ public:
         addBtn.setVisible (! isMidi());
         addBtn.onClick = [this] { showAddMenu(); };
         if (slot >= 0) addBtn.setButtonText ("+ Add...");
-        addBtn.setTooltip (slot < 0 ? "Add an effect after the mix of all slots"
+        addBtn.setTooltip (slot < 0 ? "Add an effect on everything in this program, after the instruments"
                                     : "Add to this slot: an effect on its sound, or a MIDI processor or MIDI send for its notes before the sound");
     }
 
@@ -1207,6 +1184,7 @@ public:
         void update (const SlotDef& def, bool loaded, bool loading, const String& error, int inputIndex, int program)
         {
             alive = loaded;
+            guiBtn.setVisible (true);
             enabled.setToggleState (def.enabled, dontSendNotification);
             external = def.isExternal();
             gm = def.isGm();
@@ -1219,9 +1197,9 @@ public:
             icon.setAlpha (def.enabled ? 1.0f : 0.45f);
             if (external)
             {
-                String what = def.midiOutName + "  [MIDI out";
+                String what = def.midiOutName + "  [MIDI device";
                 if (def.patch >= 0) what << ", patch " << (def.patch + 1);
-                what << (def.returnLeft >= 0 ? ", audio back on in " + String (def.returnLeft + 1) + (def.returnRight >= 0 ? "+" + String (def.returnRight + 1) : String()) : String()) << "]";
+                what << (def.returnLeft >= 0 ? ", audio in " + String (def.returnLeft + 1) + (def.returnRight >= 0 ? "+" + String (def.returnRight + 1) : String()) : String()) << "]";
                 name.setText (what, dontSendNotification);
                 name.setColour (Label::textColourId, loaded ? Colours::white : Colours::orangered);
                 name.setTooltip (loaded ? "An external instrument, played through this MIDI port" : error);
@@ -1265,16 +1243,14 @@ public:
             }
             else if (gm)
             {
-                guiBtn.setButtonText (loading ? "Loading" : loaded ? "" : "Retry");
+                // Nothing to open while it is running: a blank button would look broken.
+                guiBtn.setButtonText (loading ? "Loading" : "Retry");
                 guiBtn.setEnabled (! loading && ! loaded);
+                guiBtn.setVisible (loading || ! loaded);
                 guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
             }
             else if (inputSlot)
-            {
-                guiBtn.setButtonText ("");
-                guiBtn.setEnabled (false);
-                guiBtn.setColour (TextButton::buttonColourId, getLookAndFeel().findColour (TextButton::buttonColourId));
-            }
+                guiBtn.setVisible (false);
             else
             {
                 guiBtn.setButtonText (loading ? "Loading" : loaded ? "Edit GUI" : "Reload");
@@ -1464,7 +1440,7 @@ public:
             header.setBounds (r.removeFromTop (22));
             chain.setBounds (r.withTrimmedLeft (24));
         }
-        Label header { {}, "PROGRAM EFFECTS  (after the mix of all slots)" };
+        Label header { {}, "PROGRAM EFFECTS  (on everything in this program)" };
         EffectChainComponent chain;
     };
 

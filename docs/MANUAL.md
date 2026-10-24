@@ -357,8 +357,10 @@ with the name the file gives it -- and for each: what it **plays on**, its
 instrument (the file's own, or any of the 128 and the drum kits), a
 keyboard's sounds (***Upper*'s sounds**: whatever that keyboard is playing),
 a plugin instrument, a MIDI device, anything already in the song, or nothing.
-One instrument per part. **Notes...** opens a piano roll for the file's
-notes. That is the whole job; the mechanics underneath are ordinary: the
+One instrument per part. A plugin part gets an **Edit GUI** button for its
+window; a MIDI device part gets **Patch...** for its patch recall.
+**Notes...** opens a piano roll for the file's notes. Adding a file also
+selects the song, so **Play** plays it straight away. That is the whole job; the mechanics underneath are ordinary: the
 song's program on the **Backing track** input holds those instruments, and
 INSTRUMENTS shows them when that input is selected -- with their effects,
 MIDI chains and everything else an instrument has.

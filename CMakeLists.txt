@@ -65,6 +65,7 @@ target_sources(StageRig PRIVATE
     Source/GmSynth.cpp
     Source/MidiEditor.cpp
     Source/GmMixer.cpp
+    Source/PatchDialog.cpp
     Source/MidiOuts.cpp
     Source/MainComponent.cpp)
 
