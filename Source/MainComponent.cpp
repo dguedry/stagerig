@@ -1049,7 +1049,8 @@ public:
 
 private:
     // Engine::Listener
-    void outputsChanged() override { refresh(); }
+    // Deferred, as MainComponent defers: a chain row's button may be the one asking.
+    void outputsChanged() override { MessageManager::callAsync ([self = SafePointer<OutputsComponent> (this)] { if (self != nullptr) self->refresh(); }); }
     void setupChanged() override { refresh(); }
     void outputVolumeLearned (int output, int cc) override
     {
@@ -2704,12 +2705,20 @@ void MainComponent::programContentChanged (int inputIndex, int program)
 {
     markDirty();
     if (inputIndex != selectedInput) return;
-    programsPanel->repaint();
-    if (program == getEditedProgram())
+    /* Deferred: this arrives from inside the engine call that a row's button
+       made (remove this effect, move it), and the refresh rebuilds the rows
+       -- deleting that button under its own click handler. The handler
+       finishes first; the rows follow a moment later. */
+    MessageManager::callAsync ([self = SafePointer<MainComponent> (this), inputIndex, program]
     {
-        slotsPanel->refresh();
-        mappingsPanel->refresh();
-    }
+        if (self == nullptr || inputIndex != self->selectedInput) return;
+        self->programsPanel->repaint();
+        if (program == self->getEditedProgram())
+        {
+            self->slotsPanel->refresh();
+            self->mappingsPanel->refresh();
+        }
+    });
 }
 
 void MainComponent::learnReceived (int, MappingDef::Source source, int number)
@@ -2873,7 +2882,7 @@ void MainComponent::showOutputs()
 void MainComponent::outputsChanged()
 {
     markDirty();
-    inputsPanel->refresh();
+    MessageManager::callAsync ([self = SafePointer<MainComponent> (this)] { if (self != nullptr) self->inputsPanel->refresh(); });
 }
 
 //==============================================================================
