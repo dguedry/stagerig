@@ -1169,10 +1169,12 @@ private:
         }
 
         /** What plays this part: a General MIDI instrument, one of your
-            programs (by keyboard, then by name), something already in the
-            song's program, or nothing. Your programs are where your sounds
-            are -- plugins, hardware, splits and layers, all set up -- so the
-            menu offers those rather than a plugin from scratch. */
+            programs (by keyboard, then by name), a MIDI device straight from
+            its port, something already in the song's program, or nothing.
+            Your programs are where your sounds are -- plugins, hardware,
+            splits and layers, all set up -- so the menu offers those rather
+            than a plugin from scratch; a device is offered for the things
+            that are not a program, lights above all. */
         void choosePlays (int ch)
         {
             auto& engine = owner.engine;
@@ -1221,6 +1223,15 @@ private:
                 programs.addItem (2000 + i, "Whatever " + in.name + " is playing", true, keysNow && cur->targetInput == i && cur->targetProgram < 0);
                 m.addSubMenu (in.name + "'s programs", programs, true, nullptr, keysNow && cur->targetInput == i);
             }
+            // A MIDI device straight from the port: a hardware synth or module, a lighting controller.
+            Array<MidiDeviceInfo> ports;
+            for (const auto& d : MidiOutput::getAvailableDevices()) if (! d.name.containsIgnoreCase ("Midi Through")) ports.add (d);
+            {
+                PopupMenu devices;
+                for (int k = 0; k < ports.size(); ++k) devices.addItem (4000 + k, ports[k].name);
+                if (ports.isEmpty()) devices.addItem (3999, "No MIDI interface connected", false);
+                m.addSubMenu ("A MIDI device (hardware synth, lights)", devices);
+            }
             bool header = false;
             for (int sl = 0; sl < (int) prog.slots.size(); ++sl)
             {
@@ -1233,7 +1244,7 @@ private:
             m.addItem (1, "Nothing", true, cur == nullptr);
 
             Component::SafePointer<Row> self (this);
-            m.showMenuAsync (PopupMenu::Options().withTargetComponent (partFor (ch)->plays), [self, ch, t, p] (int r)
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (partFor (ch)->plays), [self, ch, t, p, ports] (int r)
             {
                 if (self == nullptr || r < 1) return;
                 auto* thisRow = self.getComponent();
@@ -1267,6 +1278,10 @@ private:
                         if (slots[(size_t) k].isInput() && slots[(size_t) k].targetInput == target && slots[(size_t) k].targetProgram == targetProgram) sl = k;
                     if (sl < 0 && e.addInputSlot (t, p, target, targetProgram)) sl = slotsNow() - 1;
                     if (sl >= 0) e.assignPart (t, p, ch, sl);
+                }
+                else if (r >= 4000 && r < 4000 + ports.size())
+                {
+                    if (e.addExternalSlot (t, p, ports[r - 4000])) e.assignPart (t, p, ch, slotsNow() - 1);
                 }
                 thisRow->refreshParts();
             });

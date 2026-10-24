@@ -376,7 +376,9 @@ demo.mid                                                   [Notes...] [X]
    instrument the file asks for; any other General MIDI instrument or drum
    kit; **your programs**, keyboard by keyboard -- ***Upper*'s programs ▸
    003 Big Strings** -- and, at the end of each keyboard's list, **whatever
-   that keyboard is playing**; anything already in the song; or **Nothing**.
+   that keyboard is playing**; **a MIDI device** straight from its port (a
+   hardware synth, a lighting controller); anything already in the song; or
+   **Nothing**.
    One instrument per part. Your programs are where your sounds already are
    -- the plugin with its patch, the hardware synth with its bank and
    program, the split and the layer -- so a part goes straight to one of them
@@ -387,7 +389,8 @@ demo.mid                                                   [Notes...] [X]
    keyboard itself is on: the strings part can play *Upper: Big Strings*
    while you play the piano on Upper. The program is kept loaded for as long
    as a part names it. Change the sound by changing the program, where you
-   always do.
+   always do. A part on a MIDI device gets **Patch...** for the bank and
+   program to send it.
 5. **Notes...** opens a piano roll for the file's notes: move, resize, add
    (double-click), delete, change velocities, undo, save. The first version
    of the file is kept beside it as *.orig.mid*.
