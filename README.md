@@ -134,6 +134,18 @@ sudo dnf install ./stagerig-*.x86_64.rpm
 Without the GitHub CLI, open the releases page above and download the file
 directly; both packages are attached to every release.
 
+StageRig ships no plugins but the General MIDI player; the packages suggest a
+set of free ones good enough to gig with -- Surge XT, setBfree, ZynAddSubFX,
+AVL Drumkits, Dragonfly Reverb, LSP, x42, Calf, Guitarix, ZamAudio:
+
+```sh
+sudo apt install surge-xt setbfree zynaddsubfx-lv2 avldrums.lv2 dragonfly-reverb \
+                 lsp-plugins-lv2 x42-plugins calf-plugins guitarix-lv2 zam-plugins
+```
+
+The manual's *Good free plugins to start with* says what each is for, gives
+the Fedora line, and lists the ones worth fetching from their own sites.
+
 Every push also builds both packages as workflow artifacts under
 [Actions](https://github.com/dguedry/stagerig/actions), if you want a
 build from `main` rather than the last release.
