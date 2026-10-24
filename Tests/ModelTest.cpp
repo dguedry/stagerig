@@ -48,7 +48,10 @@ int main()
         SongDef sg; sg.name = "With a track";
         sg.stems.push_back ({ "mix.wav", "Mix", 0, -3.0f });
         sg.stems.push_back ({ "click.wav", {}, 1, 0.0f });
-        StemDef midiStem; midiStem.file = "bass.mid"; midiStem.input = 1; midiStem.midiChannel = 2;
+        StemDef midiStem; midiStem.file = "bass.mid";
+        midiStem.route (2) = MidiRoute { MidiRoute::Kind::keys, 1 };
+        midiStem.route (5) = MidiRoute { MidiRoute::Kind::slot, 0, 12, 3 };
+        midiStem.route (9) = MidiRoute { MidiRoute::Kind::mute };
         sg.stems.push_back (midiStem);
         sg.countInBeats = 4; sg.countInOutput = 1;
         sg.markers = { { "Intro", 0.0, true }, { "Verse", 8.5, false } };
@@ -130,7 +133,18 @@ int main()
         CHECK (ProgramDef::slotOfChain (ProgramDef::midiChainOf (3)) == 3 && ! ProgramDef::isMidiChain (3));
     }
     CHECK (loaded.songs.size() == 1 && loaded.songs[0].stems.size() == 3);
-    CHECK (loaded.songs[0].stems[2].isMidi() && loaded.songs[0].stems[2].input == 1 && loaded.songs[0].stems[2].midiChannel == 2);
+    {
+        const auto& ms = loaded.songs[0].stems[2];
+        CHECK (ms.isMidi() && ms.route (2) == (MidiRoute { MidiRoute::Kind::keys, 1 }) && ms.route (5) == (MidiRoute { MidiRoute::Kind::slot, 0, 12, 3 })
+               && ms.route (9).kind == MidiRoute::Kind::mute && ms.route (1).kind == MidiRoute::Kind::gm && ms.usesGm());
+
+        // A MIDI stem saved before the GM player: all of it (or its one channel) through a keyboard, as it played then.
+        auto old = StemDef::fromVar (juce::JSON::parse (R"({"file":"a.mid","output":0,"input":1,"midiChannel":3})"));
+        CHECK (old.route (3) == (MidiRoute { MidiRoute::Kind::keys, 1 }) && old.route (1).kind == MidiRoute::Kind::mute && ! old.usesGm());
+        auto oldSlot = StemDef::fromVar (juce::JSON::parse (R"({"file":"a.mid","output":0,"input":0,"slot":2,"program":7})"));
+        CHECK (oldSlot.route (16) == (MidiRoute { MidiRoute::Kind::slot, 0, 7, 2 }));
+        CHECK (StemDef::fromVar (juce::JSON::parse (R"({"file":"new.mid","output":0})")).usesGm());
+    }
     CHECK (! loaded.songs[0].stems[0].isMidi());
     CHECK (loaded.songs[0].stems[0].file == "mix.wav" && loaded.songs[0].stems[0].name == "Mix"
            && std::abs (loaded.songs[0].stems[0].gainDb + 3.0f) < 1e-6f && loaded.songs[0].stems[1].output == 1);

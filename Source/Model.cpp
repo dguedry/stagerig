@@ -377,13 +377,24 @@ var StemDef::toVar() const
     if (gainDb != 0.0f) o->setProperty ("gainDb", gainDb);
     if (isMidi())
     {
-        o->setProperty ("input", input);
-        if (midiChannel > 0) o->setProperty ("midiChannel", midiChannel);
-        if (slot >= 0)
+        // Only the channels that do not go to the GM player.
+        Array<var> routes;
+        for (int ch = 1; ch <= 16; ++ch)
         {
-            o->setProperty ("slot", slot);
-            if (program >= 0) o->setProperty ("program", program);
+            const auto& r = route (ch);
+            if (r.kind == MidiRoute::Kind::gm) continue;
+            auto* ro = new DynamicObject();
+            ro->setProperty ("ch", ch);
+            ro->setProperty ("kind", r.kind == MidiRoute::Kind::keys ? "keys" : r.kind == MidiRoute::Kind::slot ? "slot" : "mute");
+            if (r.kind != MidiRoute::Kind::mute) ro->setProperty ("input", r.input);
+            if (r.kind == MidiRoute::Kind::slot)
+            {
+                ro->setProperty ("slot", r.slot);
+                if (r.program >= 0) ro->setProperty ("program", r.program);
+            }
+            routes.add (var (ro));
         }
+        o->setProperty ("channels", routes);
     }
     return var (o);
 }
@@ -395,10 +406,41 @@ StemDef StemDef::fromVar (const var& v)
     d.name   = propStr (v, "name");
     d.output = jmax (0, prop<int> (v, "output", 0));
     d.gainDb = (float) prop<double> (v, "gainDb", 0.0);
-    d.input  = jmax (0, prop<int> (v, "input", 0));
-    d.midiChannel = jlimit (0, 16, prop<int> (v, "midiChannel", 0));
-    d.slot    = jlimit (-1, 255, prop<int> (v, "slot", -1));
-    d.program = jlimit (-1, InputDef::numPrograms - 1, prop<int> (v, "program", -1));
+    if (! d.isMidi()) return d;
+
+    if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("channels").getArray() : nullptr)
+    {
+        for (auto& rv : *arr)
+        {
+            const int ch = prop<int> (rv, "ch", 0);
+            if (ch < 1 || ch > 16) continue;
+            auto& r = d.route (ch);
+            const auto kind = propStr (rv, "kind");
+            r.kind = kind == "keys" ? MidiRoute::Kind::keys : kind == "slot" ? MidiRoute::Kind::slot
+                   : kind == "mute" ? MidiRoute::Kind::mute : MidiRoute::Kind::gm;
+            r.input   = jmax (0, prop<int> (rv, "input", 0));
+            r.slot    = jlimit (-1, 255, prop<int> (rv, "slot", -1));
+            r.program = jlimit (-1, InputDef::numPrograms - 1, prop<int> (rv, "program", -1));
+            if (r.kind == MidiRoute::Kind::slot && r.slot < 0) r.kind = MidiRoute::Kind::keys;
+        }
+    }
+    else if (obj (v) != nullptr && obj (v)->hasProperty ("input"))
+    {
+        /* Written before the GM player: the whole file (or its one chosen
+           channel) through a keyboard, or straight into one of its plugins. */
+        const int input = jmax (0, prop<int> (v, "input", 0));
+        const int only = jlimit (0, 16, prop<int> (v, "midiChannel", 0));
+        const int slot = jlimit (-1, 255, prop<int> (v, "slot", -1));
+        const int program = jlimit (-1, InputDef::numPrograms - 1, prop<int> (v, "program", -1));
+        for (int ch = 1; ch <= 16; ++ch)
+        {
+            auto& r = d.route (ch);
+            r.input = input;
+            if (only > 0 && ch != only)   r.kind = MidiRoute::Kind::mute;
+            else if (slot >= 0)           { r.kind = MidiRoute::Kind::slot; r.slot = slot; r.program = program; }
+            else                          r.kind = MidiRoute::Kind::keys;
+        }
+    }
     return d;
 }
 

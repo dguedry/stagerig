@@ -45,6 +45,8 @@ Recommends:
  novnc,
  xdotool,
  poppler-utils,
+ libfluidsynth3,
+ fluid-soundfont-gm,
 Suggests:
  calf-plugins,
  lsp-plugins-lv2,

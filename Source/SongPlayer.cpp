@@ -9,8 +9,8 @@ using namespace juce;
 namespace perf
 {
 
-SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef& song, double sr, int bs)
-    : formats (f), sampleRate (sr > 0.0 ? sr : 48000.0), blockSize (jmax (16, bs))
+SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef& song, double sr, int bs, const File& sf)
+    : formats (f), soundfont (sf), sampleRate (sr > 0.0 ? sr : 48000.0), blockSize (jmax (16, bs))
 {
     for (int i = 0; i < (int) song.stems.size(); ++i)
     {
@@ -21,8 +21,16 @@ SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef
         stem->output.store (jmax (0, def.output));
         stem->gain.store (Decibels::decibelsToGain (def.gainDb, -60.0f));
         stem->midi = def.isMidi();
-        stem->midiChannel = def.midiChannel;
-        stem->input.store (jmax (0, def.input));
+        if (stem->midi)
+        {
+            stem->wantsGm = def.usesGm();
+            stem->gmEvents.ensureSize (8192);
+            for (int c = 0; c < 16; ++c)
+            {
+                stem->routeKind[c].store ((int) def.channels[(size_t) c].kind);
+                stem->routeInput[c].store (jmax (0, def.channels[(size_t) c].input));
+            }
+        }
         stems.push_back (std::move (stem));
     }
     numStemDefs = (int) stems.size();
@@ -160,11 +168,13 @@ bool SongPlayer::loadMidiStem (Stem& s)
             for (const auto* e : *track)
             {
                 const auto& m = e->message;
-                /* What a keyboard sends, nothing else: no program changes (a
-                   backing file must not swap the sounds), no sysex, no meta. */
-                if (! (m.isNoteOnOrOff() || m.isController() || m.isPitchWheel() || m.isAftertouch() || m.isChannelPressure()))
+                /* Channel messages only: no sysex, no meta. Program changes
+                   are kept for the GM player -- they are how the file says
+                   which instrument plays -- and dropped on the way to your
+                   own sounds (see dispatch). */
+                if (! (m.isNoteOnOrOff() || m.isController() || m.isPitchWheel() || m.isAftertouch()
+                       || m.isChannelPressure() || m.isProgramChange()))
                     continue;
-                if (s.midiChannel > 0 && m.getChannel() != s.midiChannel) continue;
                 Stem::Event ev {};
                 ev.at = (int64) (m.getTimeStamp() * sampleRate);
                 ev.size = (uint8_t) jmin (3, m.getRawDataSize());
@@ -174,27 +184,97 @@ bool SongPlayer::loadMidiStem (Stem& s)
     std::stable_sort (events.begin(), events.end(), [] (const Stem::Event& a, const Stem::Event& b) { return a.at < b.at; });
     s.midiLength = events.empty() ? 0 : events.back().at + 1;
     s.events = std::move (events);
+
+    if (s.wantsGm)
+    {
+        String error;
+        const auto sf = GmSynth::findSoundfont (soundfont);
+        if (sf == File())
+            problems.add (s.file.getFileName() + ": " + GmSynth::unavailableReason (soundfont));
+        else if ((s.gm = GmSynth::create (sampleRate, sf, error)) == nullptr)
+            problems.add (s.file.getFileName() + ": " + error);
+    }
     return true;
 }
 
-void SongPlayer::midiForRun (Stem& s, MidiBuffer& out, int64 from, int count, int at)
+void SongPlayer::dispatch (Stem& s, const MidiMessage& m, int at, const MidiDest& d)
+{
+    const int ch = m.getChannel();
+    if (ch < 1 || ch > 16) return;
+    const auto kind = (MidiRoute::Kind) s.routeKind[ch - 1].load (std::memory_order_relaxed);
+    if (kind == MidiRoute::Kind::gm)
+    {
+        if (s.gm != nullptr) s.gmEvents.addEvent (m, at);
+        return;
+    }
+    if (kind == MidiRoute::Kind::mute) return;
+    // Your own sounds keep their own patches: the file's instrument choices are for the GM player.
+    if (m.isProgramChange() || (m.isController() && (m.getControllerNumber() == 0 || m.getControllerNumber() == 32))) return;
+    if (kind == MidiRoute::Kind::keys)
+    {
+        const int in = s.routeInput[ch - 1].load (std::memory_order_relaxed);
+        if (in >= 0 && in < d.numInputs && d.inputMidi[in] != nullptr) d.inputMidi[in]->addEvent (m, at);
+        return;
+    }
+    const int idx = s.defIndex * 16 + ch - 1;
+    if (d.slotMidi != nullptr && idx < d.numSlotMidi && d.slotMidi[idx] != nullptr)
+        d.slotMidi[idx]->addEvent (m, at);
+}
+
+void SongPlayer::midiForRun (Stem& s, int64 from, int count, int at, const MidiDest& d)
 {
     // The first event at or after `from`; the list is in order.
     auto it = std::lower_bound (s.events.begin(), s.events.end(), from,
                                 [] (const Stem::Event& e, int64 t) { return e.at < t; });
     for (; it != s.events.end() && it->at < from + count; ++it)
     {
-        out.addEvent (it->data, it->size, at + (int) (it->at - from));
+        dispatch (s, MidiMessage (it->data, it->size), at + (int) (it->at - from), d);
         s.notesSounding = true;
     }
 }
 
-void SongPlayer::allNotesOff (MidiBuffer& out, int at)
+void SongPlayer::allNotesOff (Stem& s, int at, const MidiDest& d)
 {
     for (int ch = 1; ch <= 16; ++ch)
     {
-        out.addEvent (MidiMessage::allNotesOff (ch), at);
-        out.addEvent (MidiMessage::controllerEvent (ch, 64, 0), at);     // a sustain held in the file must not ring on
+        dispatch (s, MidiMessage::allNotesOff (ch), at, d);
+        dispatch (s, MidiMessage::controllerEvent (ch, 64, 0), at, d);     // a sustain held in the file must not ring on
+    }
+}
+
+void SongPlayer::chase (Stem& s, int64 from, int at)
+{
+    if (s.gm == nullptr) return;
+    /* Defaults first, then whatever the file set before `from`, latest wins:
+       playing from a section in the middle must sound as it does when the
+       song gets there from the top. */
+    constexpr int ccs[] = { 0, 32, 1, 7, 10, 11, 91, 93 };
+    int program[16], bend[16], cc[16][8];
+    for (int c = 0; c < 16; ++c)
+    {
+        program[c] = 0; bend[c] = 8192;
+        const int defaults[8] = { -1, -1, 0, 100, 64, 127, 40, 0 };
+        for (int k = 0; k < 8; ++k) cc[c][k] = defaults[k];
+    }
+    for (const auto& e : s.events)
+    {
+        if (e.at >= from) break;
+        const int status = e.data[0] & 0xf0, c = e.data[0] & 0x0f;
+        if (status == 0xc0) program[c] = e.data[1];
+        else if (status == 0xe0) bend[c] = e.data[1] | (e.data[2] << 7);
+        else if (status == 0xb0)
+            for (int k = 0; k < 8; ++k)
+                if (ccs[k] == e.data[1]) cc[c][k] = e.data[2];
+    }
+    for (int c = 0; c < 16; ++c)
+    {
+        if ((MidiRoute::Kind) s.routeKind[c].load (std::memory_order_relaxed) != MidiRoute::Kind::gm) continue;
+        for (int k = 0; k < 2; ++k)
+            if (cc[c][k] >= 0) s.gmEvents.addEvent (MidiMessage::controllerEvent (c + 1, ccs[k], cc[c][k]), at);
+        s.gmEvents.addEvent (MidiMessage::programChange (c + 1, program[c]), at);
+        for (int k = 2; k < 8; ++k)
+            s.gmEvents.addEvent (MidiMessage::controllerEvent (c + 1, ccs[k], cc[c][k]), at);
+        s.gmEvents.addEvent (MidiMessage::pitchWheel (c + 1, bend[c]), at);
     }
 }
 
@@ -319,15 +399,33 @@ void SongPlayer::advance()
     if (next < numSections) queueSection (next);
 }
 
-void SongPlayer::setStemMix (int stemIndex, int output, float gainDb, int input)
+void SongPlayer::setStemMix (int stemIndex, int output, float gainDb)
 {
     for (auto& s : stems)
         if (s->defIndex == stemIndex)
         {
-            s->input.store (jmax (0, input));
             s->output.store (jmax (0, output));
             s->gain.store (Decibels::decibelsToGain (gainDb, -60.0f));
         }
+}
+
+void SongPlayer::setStemRoutes (int stemIndex, const std::array<MidiRoute, 16>& routes)
+{
+    for (auto& s : stems)
+        if (s->defIndex == stemIndex && s->midi)
+            for (int c = 0; c < 16; ++c)
+            {
+                s->routeKind[c].store ((int) routes[(size_t) c].kind);
+                s->routeInput[c].store (jmax (0, routes[(size_t) c].input));
+            }
+}
+
+bool SongPlayer::stemHasGm (int stemIndex) const
+{
+    if (! ready.load()) return false;
+    for (auto& s : stems)
+        if (s->defIndex == stemIndex) return s->gm != nullptr;
+    return false;
 }
 
 //==============================================================================
@@ -351,11 +449,29 @@ void SongPlayer::addClicks (float* l, float* r, int n)
 }
 
 SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, MidiBuffer* const* inputMidi, int numInputs, int n,
-                                         MidiBuffer* const* stemMidi, int numStemMidi)
+                                         MidiBuffer* const* slotMidi, int numSlotMidi)
 {
     auto st = getState();
-    if (st == State::idle || stems.empty()) return Happened::nothing;
+    if (stems.empty()) return Happened::nothing;
     if (n > scratch.getNumSamples()) return Happened::nothing;    // larger than prepared: never allocate here
+    if (st == State::idle)
+    {
+        // After the end: the GM player's last notes ring out rather than stop dead.
+        if (gmTail > 0 && ready.load())
+        {
+            static const MidiBuffer none;
+            for (auto& s : stems)
+                if (s->gm != nullptr)
+                    if (const int o = s->output.load (std::memory_order_relaxed); o >= 0 && o < numOutputs && outputs[o][0] != nullptr && outputs[o][1] != nullptr)
+                    {
+                        const float g = s->gain.load (std::memory_order_relaxed);
+                        s->gm->renderAdding (none, outputs[o][0], outputs[o][1], n, g, g);
+                    }
+            gmTail -= n;
+        }
+        return Happened::nothing;
+    }
+    const MidiDest dest { inputMidi, numInputs, slotMidi, numSlotMidi };
 
     Happened happened = Happened::nothing;
 
@@ -367,6 +483,10 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
         countInRemaining = (int64) countInTotalBeats * beatSamples;
         countInDone = 0;
         lastRunEnd = -1;
+        gmTail = 0;
+        // A fresh start: nothing left sounding from last time, and every GM channel set as it is at the start point.
+        for (auto& stem : stems)
+            if (stem->midi) { stem->needsChase = true; if (stem->gm != nullptr) stem->gm->silence(); }
         if (countInRemaining > 0) { state.store ((int) State::countIn); st = State::countIn; }
         else                      { state.store ((int) State::playing); st = State::playing; happened = Happened::stemsStarted; }
     }
@@ -447,25 +567,27 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
     {
         if (s->midi)
         {
-            MidiBuffer* dest = stemMidi != nullptr && s->defIndex < numStemMidi ? stemMidi[s->defIndex] : nullptr;
-            if (dest == nullptr)
-            {
-                const int in = s->input.load (std::memory_order_relaxed);
-                if (in < 0 || in >= numInputs || inputMidi[in] == nullptr) continue;
-                dest = inputMidi[in];
-            }
-            auto& out = *dest;
+            s->gmEvents.clear();
             for (int r = 0; r < numRuns; ++r)
             {
                 /* A run that does not follow on from the one before -- a vamp
                    going round, a jump -- starts with every note let go, or a
-                   note held across the seam would hang. */
+                   note held across the seam would hang; the GM player then
+                   catches up on what the file had set by the new place. */
                 const bool seam = r > 0 || (lastRunEnd >= 0 && runs[0].from != lastRunEnd);
-                if (seam && s->notesSounding) { allNotesOff (out, runs[r].at); s->notesSounding = false; }
+                if (seam && s->notesSounding) { allNotesOff (*s, runs[r].at, dest); s->notesSounding = false; }
+                if (seam || s->needsChase) { chase (*s, runs[r].from, runs[r].at); s->needsChase = false; }
                 if (st != State::stopping)
-                    midiForRun (*s, out, runs[r].from, runs[r].count, runs[r].at);
+                    midiForRun (*s, runs[r].from, runs[r].count, runs[r].at, dest);
             }
-            if ((st == State::stopping || ended) && s->notesSounding) { allNotesOff (out, n - 1); s->notesSounding = false; }
+            if ((st == State::stopping || ended) && s->notesSounding) { allNotesOff (*s, n - 1, dest); s->notesSounding = false; }
+
+            if (s->gm != nullptr)
+                if (const int o = s->output.load (std::memory_order_relaxed); o >= 0 && o < numOutputs && outputs[o][0] != nullptr && outputs[o][1] != nullptr)
+                {
+                    const float g = s->gain.load (std::memory_order_relaxed);
+                    s->gm->renderAdding (s->gmEvents, outputs[o][0], outputs[o][1], n, g * startGain, g * endGain);
+                }
             continue;
         }
 
@@ -510,6 +632,7 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
     }
     if (ended)
     {
+        gmTail = (int64) (3.0 * sampleRate);
         state.store ((int) State::idle);
         position.store (0);
         cuedPosition.store (0);

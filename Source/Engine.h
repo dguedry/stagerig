@@ -304,6 +304,11 @@ public:
     /** Loads (or reloads) the track for this song, stopping whatever was playing. */
     void armTrack (int songIndex);
 
+    /** The General MIDI soundfont MIDI stems play through; empty = the system's
+        (FluidR3_GM). Kept in the settings, as it belongs to the machine. */
+    juce::File getGmSoundfont() const;
+    void setGmSoundfont (const juce::File&);
+
     int  getTransportCC() const                     { return setup.transportCC; }
     void setTransportCC (int cc);
     void armTransportLearn()                        { transportLearnArmed.store (true); }
@@ -594,10 +599,10 @@ private:
     void runMidiChains (ProgramRuntime&, int numSamples, bool notesOffNow, bool panicNow);
     std::unique_ptr<SongPlayer> player;           // swapped under `lock`
 
-    /* MIDI stems aimed at one plugin (StemDef::isDirect). The player writes
-       such a stem into its own buffer; the audio thread then hands it to the
-       slot. All under `lock`. */
-    static constexpr int kMaxDirectStems = 64;
+    /* MIDI stem channels aimed at one plugin (MidiRoute::Kind::slot), at
+       stem * 16 + channel - 1. The player writes such a channel into its own
+       buffer; the audio thread then hands it to the slot. All under `lock`. */
+    static constexpr int kMaxDirectStems = 8 * 16;
     struct StemRoute { int input = -1, program = -1, slot = -1; };
     StemRoute stemRoutes[kMaxDirectStems];
     juce::MidiBuffer stemMidi[kMaxDirectStems];

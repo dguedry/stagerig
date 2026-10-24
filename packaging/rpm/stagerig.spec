@@ -69,6 +69,8 @@ Recommends:     python3-websockify
 Recommends:     novnc
 Recommends:     xdotool
 Recommends:     poppler-utils
+Recommends:     fluidsynth-libs
+Recommends:     fluid-soundfont-gm
 Suggests:       lv2-calf-plugins
 
 %description

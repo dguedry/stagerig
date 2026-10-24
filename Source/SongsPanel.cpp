@@ -1,5 +1,7 @@
 #include "SongsPanel.h"
 #include "Charts.h"
+#include "GmSynth.h"
+#include <map>
 
 namespace perf
 {
@@ -825,6 +827,179 @@ void SongsPanel::addTrackFile (const File& f, int songIndex)
     refresh();
 }
 
+/** Where each channel of a backing-track MIDI file plays: the General MIDI
+    player, with the instrument the file asks for, or one of your own sounds
+    -- a keyboard's program, or one plugin in it -- or nothing. Only the
+    channels the file uses are listed, each with what the file plays on it. */
+class ChannelRoutesComponent : public Component
+{
+public:
+    ChannelRoutesComponent (Engine& e, int song, int stem, std::function<void()> onChange)
+        : engine (e), songIndex (song), stemIndex (stem), changed (std::move (onChange))
+    {
+        const auto& sd = engine.getSongs()[(size_t) songIndex].stems[(size_t) stemIndex];
+        readFile (engine.getChartsFolder().getChildFile (sd.file));
+
+        addAndMakeVisible (intro);
+        intro.setJustificationType (Justification::topLeft);
+        intro.setColour (Label::textColourId, textDim);
+        String text = "Every channel plays on the General MIDI player with the file's own instrument, unless you send it to one "
+                      "of your sounds. A keyboard's program sorts it by each plugin's LISTENS TO, as your playing is; one plugin "
+                      "gets it on the channel that plugin listens on, and keeps it even when you change that keyboard's program.";
+        if (const auto why = GmSynth::unavailableReason (engine.getGmSoundfont()); why.isNotEmpty())
+        {
+            text = "No General MIDI player: " + why + ". Send the channels to your own sounds meanwhile.\n\n" + text;
+            intro.setColour (Label::textColourId, Colours::orange);
+        }
+        intro.setText (text, dontSendNotification);
+
+        for (int ch = 1; ch <= 16; ++ch)
+        {
+            if (fileRead && ! used[ch - 1]) continue;
+            auto row = std::make_unique<Row>();
+            row->channel = ch;
+            row->label.setText ("Ch " + String (ch), dontSendNotification);
+            row->label.setFont (FontOptions (13.0f, Font::bold));
+            String what = ch == 10 ? String ("Drums") : String (GmSynth::programName (program[ch - 1]));
+            if (trackName[ch - 1].isNotEmpty()) what = trackName[ch - 1] + "  (" + what + ")";
+            row->what.setText (what, dontSendNotification);
+            row->what.setColour (Label::textColourId, textDim);
+            fillPlays (*row, sd.route (ch));
+            row->plays.onChange = [this, r = row.get()] { choose (*r); };
+            addAndMakeVisible (row->label);
+            addAndMakeVisible (row->what);
+            addAndMakeVisible (row->plays);
+            rows.push_back (std::move (row));
+        }
+        if (rows.empty())
+        {
+            addAndMakeVisible (empty);
+            empty.setText ("This file plays no notes.", dontSendNotification);
+        }
+        setSize (720, 110 + jmax (1, (int) rows.size()) * 30);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (12);
+        intro.setBounds (r.removeFromTop (78));
+        r.removeFromTop (6);
+        empty.setBounds (r.removeFromTop (26));
+        for (auto& row : rows)
+        {
+            auto line = r.removeFromTop (30).reduced (0, 2);
+            row->label.setBounds (line.removeFromLeft (48));
+            row->plays.setBounds (line.removeFromRight (360));
+            line.removeFromRight (8);
+            row->what.setBounds (line);
+        }
+    }
+
+private:
+    struct Row
+    {
+        int channel = 1;
+        Label label, what;
+        ComboBox plays;
+        std::map<int, MidiRoute> routes;      // item id -> what it means
+    };
+
+    void readFile (const File& f)
+    {
+        for (int c = 0; c < 16; ++c) { used[c] = false; program[c] = 0; }
+        MidiFile mf;
+        FileInputStream in (f);
+        if (! in.openedOk() || ! mf.readFrom (in)) return;
+        fileRead = true;
+        for (int t = 0; t < mf.getNumTracks(); ++t)
+        {
+            String name;
+            bool programSeen[16] {};
+            for (const auto* e : *mf.getTrack (t))
+            {
+                const auto& m = e->message;
+                if (m.isTrackNameEvent()) name = m.getTextFromTextMetaEvent().trim();
+                const int c = m.getChannel() - 1;
+                if (c < 0 || c > 15) continue;
+                if (m.isProgramChange() && ! programSeen[c]) { program[c] = m.getProgramChangeNumber(); programSeen[c] = true; }
+                if (m.isNoteOn())
+                {
+                    if (! used[c] && name.isNotEmpty()) trackName[c] = name;
+                    used[c] = true;
+                }
+            }
+        }
+    }
+
+    void fillPlays (Row& row, const MidiRoute& current)
+    {
+        auto& box = row.plays;
+        int id = 1, selected = 0;
+        auto add = [&] (const String& text, const MidiRoute& r)
+        {
+            box.addItem (text, id);
+            row.routes[id] = r;
+            if (r == current) selected = id;
+            ++id;
+        };
+        add (row.channel == 10 ? "General MIDI drums" : "General MIDI: " + String (GmSynth::programName (program[row.channel - 1])), MidiRoute {});
+        add ("Mute", MidiRoute { MidiRoute::Kind::mute });
+
+        const auto& setup = engine.getSetup();
+        const auto& song = engine.getSongs()[(size_t) songIndex];
+        for (int i = 0; i < (int) setup.inputs.size(); ++i)
+        {
+            const auto& in = setup.inputs[(size_t) i];
+            if (in.isAudio()) continue;
+            box.addSectionHeading (in.name);
+            add (in.name + ": its sounds (by LISTENS TO)", MidiRoute { MidiRoute::Kind::keys, i });
+            // The program the song puts this keyboard on, else the one it is on now.
+            int prog = in.currentProgram;
+            if (i < (int) song.programs.size() && song.programs[(size_t) i] >= 0) prog = song.programs[(size_t) i];
+            const auto& pd = in.programs[(size_t) prog];
+            const auto progName = String (prog).paddedLeft ('0', 3) + (pd.name.isNotEmpty() ? " " + pd.name : String());
+            for (int sl = 0; sl < (int) pd.slots.size(); ++sl)
+                add ("Only " + pd.slots[(size_t) sl].displayName() + "  (" + in.name + " " + progName + ")",
+                     MidiRoute { MidiRoute::Kind::slot, i, prog, sl });
+        }
+        if (selected == 0 && current.kind == MidiRoute::Kind::slot)
+        {
+            // Set before, on a program this song does not use.
+            String text = "Slot " + String (current.slot + 1);
+            if (current.input < (int) setup.inputs.size())
+            {
+                const auto& in = setup.inputs[(size_t) current.input];
+                const int prog = current.program >= 0 ? current.program : in.currentProgram;
+                const auto& pd = in.programs[(size_t) prog];
+                if (current.slot < (int) pd.slots.size()) text = "Only " + pd.slots[(size_t) current.slot].displayName();
+                text << "  (" << in.name << " " << String (prog).paddedLeft ('0', 3) << ")";
+            }
+            add (text, current);
+        }
+        box.setSelectedId (selected > 0 ? selected : 1, dontSendNotification);
+    }
+
+    void choose (Row& row)
+    {
+        const auto it = row.routes.find (row.plays.getSelectedId());
+        if (it == row.routes.end()) return;
+        auto sd = engine.getSongs()[(size_t) songIndex].stems[(size_t) stemIndex];
+        sd.route (row.channel) = it->second;
+        engine.setSongStem (songIndex, stemIndex, sd);
+        if (changed) changed();
+    }
+
+    Engine& engine;
+    const int songIndex, stemIndex;
+    std::function<void()> changed;
+    bool fileRead = false;
+    bool used[16] {};
+    int program[16] {};
+    String trackName[16];
+    Label intro, empty;
+    std::vector<std::unique_ptr<Row>> rows;
+};
+
 /** A song's backing track: its stems, each with an output and a level, and
     the count-in. A window of its own, because it is set up once per song. */
 class TracksComponent : public Component,
@@ -947,34 +1122,23 @@ private:
             addAndMakeVisible (output);
             if (d.isMidi())
             {
-                /* A MIDI file plays through an input -- its current program,
-                   like the keys -- and can keep just one of the file's channels. */
-                owner.fillInputs (output, d.input);
-                output.setTooltip ("The keyboard this MIDI file plays through: its current program, as if played");
-                output.onChange = [this] { def.input = output.getSelectedId() - 1; def.slot = -1; def.program = -1;
-                                           owner.engine.setSongStem (owner.songIndex, index, def); fillPlays(); };
-                addAndMakeVisible (channel);
-                channel.addItem ("All channels", 1);
-                for (int c = 1; c <= 16; ++c) channel.addItem ("Channel " + String (c), c + 1);
-                channel.setSelectedId (d.midiChannel + 1, dontSendNotification);
-                channel.setTooltip ("Only this channel of the file -- add the file twice to send one part to each keyboard");
-                channel.onChange = [this] { def.midiChannel = channel.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
-
-                /* Which sound: the keyboard's, sorted by each slot's LISTENS
-                   TO like your playing -- or one plugin by name, whatever
-                   channel it listens on. */
-                addAndMakeVisible (plays);
-                plays.setTooltip ("Play through the keyboard's program like your hands do, or straight into one of its plugins: "
-                                  "the part arrives on the channel that plugin listens on, and keeps playing it even when you "
-                                  "switch the keyboard to another program");
-                plays.onChange = [this]
-                {
-                    const int id = plays.getSelectedId();
-                    if (id == 1) { def.slot = -1; def.program = -1; }
-                    else if (id >= 1000 && playsProgram >= 0) { def.slot = id - 1000; def.program = playsProgram; }
-                    owner.engine.setSongStem (owner.songIndex, index, def);
-                };
-                fillPlays();
+                /* A MIDI file: the GM player's output and level, and where
+                   each channel goes. */
+                owner.fillOutputs (output, d.output);
+                output.setTooltip ("Where the General MIDI player is heard -- the channels you send to your own sounds go where those sounds go");
+                output.onChange = [this] { def.output = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
+                addAndMakeVisible (gain);
+                gain.setRange (-60.0, 12.0, 0.5);
+                gain.setSliderStyle (Slider::LinearBar);
+                gain.setTextValueSuffix (" dB");
+                gain.setDoubleClickReturnValue (true, 0.0);
+                gain.setValue (d.gainDb, dontSendNotification);
+                gain.setTooltip ("Level of the General MIDI player");
+                gain.onValueChange = [this] { def.gainDb = (float) gain.getValue(); owner.engine.setSongStem (owner.songIndex, index, def); };
+                addAndMakeVisible (channels);
+                channels.setButtonText (channelsSummary());
+                channels.setTooltip ("Every channel plays on the General MIDI player with the file's own instruments, unless you send it to one of your sounds here");
+                channels.onClick = [this] { owner.showChannelRoutes (index); };
             }
             else
             {
@@ -997,52 +1161,33 @@ private:
         {
             auto r = getLocalBounds().reduced (0, 2);
             remove.setBounds (r.removeFromRight (28));     r.removeFromRight (6);
-            if (def.isMidi())
-            {
-                plays.setBounds (r.removeFromRight (220));  r.removeFromRight (6);
-                channel.setBounds (r.removeFromRight (110));
-            }
-            else gain.setBounds (r.removeFromRight (110));
+            gain.setBounds (r.removeFromRight (110));
             r.removeFromRight (6);
-            output.setBounds (r.removeFromRight (def.isMidi() ? 130 : 180));    r.removeFromRight (6);
+            if (def.isMidi()) { channels.setBounds (r.removeFromRight (190)); r.removeFromRight (6); }
+            output.setBounds (r.removeFromRight (def.isMidi() ? 150 : 180));    r.removeFromRight (6);
             name.setBounds (r);
         }
 
-        /** The program whose slots are offered: the one the song puts this
-            keyboard on, else the one it is on now; the stem's own if it
-            already names one. */
-        void fillPlays()
+        String channelsSummary() const
         {
-            plays.clear (dontSendNotification);
-            plays.addItem ("Its sounds (by LISTENS TO)", 1);
-            const auto& setup = owner.engine.getSetup();
-            playsProgram = -1;
-            if (def.input >= 0 && def.input < (int) setup.inputs.size() && ! setup.inputs[(size_t) def.input].isAudio())
+            int own = 0, muted = 0;
+            for (auto& rt : def.channels)
             {
-                const auto& in = setup.inputs[(size_t) def.input];
-                const auto& songs = owner.engine.getSongs();
-                int prog = in.currentProgram;
-                if (owner.songIndex >= 0 && owner.songIndex < (int) songs.size())
-                    if (const auto& sp = songs[(size_t) owner.songIndex].programs; def.input < (int) sp.size() && sp[(size_t) def.input] >= 0)
-                        prog = sp[(size_t) def.input];
-                if (def.slot >= 0 && def.program >= 0) prog = def.program;
-                playsProgram = jlimit (0, InputDef::numPrograms - 1, prog);
-                const auto& pd = in.programs[(size_t) playsProgram];
-                const String progName = String (playsProgram).paddedLeft ('0', 3) + (pd.name.isNotEmpty() ? " " + pd.name : String());
-                plays.addSectionHeading ("Straight into a plugin of " + progName);
-                for (int sl = 0; sl < (int) pd.slots.size(); ++sl)
-                    plays.addItem ("Only " + pd.slots[(size_t) sl].displayName(), 1000 + sl);
-                if (def.slot >= (int) pd.slots.size())
-                    plays.addItem ("Slot " + String (def.slot + 1) + " (no longer there)", 1000 + def.slot);
+                if (rt.kind == MidiRoute::Kind::keys || rt.kind == MidiRoute::Kind::slot) ++own;
+                if (rt.kind == MidiRoute::Kind::mute) ++muted;
             }
-            plays.setSelectedId (def.slot >= 0 ? 1000 + def.slot : 1, dontSendNotification);
+            if (own == 0 && muted == 0) return "Channels: all General MIDI";
+            String t = "Channels: " + String (own) + " to your sounds";
+            if (muted > 0) t << ", " << muted << " muted";
+            return t;
         }
+
         TracksComponent& owner;
         int index;
         StemDef def;
         Label name;
-        ComboBox output, channel, plays;
-        int playsProgram = -1;
+        ComboBox output;
+        TextButton channels;
         Slider gain;
         TextButton remove { "X" };
     };
@@ -1157,6 +1302,22 @@ private:
         for (int s = 0; s < engine.getTrackSectionCount(); ++s)
             if (std::abs (engine.getTrackSectionStart (s) - m[(size_t) index].seconds) < 0.001)
                 { engine.queueTrackSection (s); return; }
+    }
+
+    void showChannelRoutes (int stemIndex)
+    {
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size() || stemIndex >= (int) songs[(size_t) songIndex].stems.size()) return;
+        SafePointer<TracksComponent> self (this);
+        auto* content = new ChannelRoutesComponent (engine, songIndex, stemIndex, [self] { if (self != nullptr) self->rebuild(); });
+        DialogWindow::LaunchOptions o;
+        o.content.setOwned (content);
+        o.dialogTitle = "Channels: " + songs[(size_t) songIndex].stems[(size_t) stemIndex].displayName();
+        o.dialogBackgroundColour = bgPanel;
+        o.escapeKeyTriggersCloseButton = true;
+        o.useNativeTitleBar = true;
+        o.resizable = true;
+        o.launchAsync();
     }
 
     void fillInputs (ComboBox& box, int selected)

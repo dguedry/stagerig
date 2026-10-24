@@ -335,27 +335,40 @@ setup and its tracks travel together. For each stem:
 - **Level** -- in dB, and it can be changed while the track plays.
 - **X** takes the stem off the song; the file stays in the folder.
 
-**MIDI files** can be stems too (*.mid*). A MIDI stem has an **input** where
-an audio stem has an output: it plays through that keyboard's current
-program, exactly as if played on the keys -- splits, layers, effects and all.
-Its notes keep their channels when the input is on *Omni*, so slots that
-listen to one channel each (see *Routing by channel*) give every part of the
-file its own sound from one program. Or use **Channel** on the stem to keep
-just one channel of the file, and add the file once per part, each to its own
-input. The file's program changes are ignored (it must not swap
-your sounds), its notes follow sections, vamps and jumps like the audio does,
-and every note is let go when the track stops or jumps. Set the song's
-programs (Capture) to what the MIDI parts should play.
+**MIDI files** can be stems too (*.mid*). By default the whole file plays
+on StageRig's **General MIDI player** -- FluidSynth with the FluidR3_GM
+soundfont -- with the instruments the file asks for: drums on channel 10,
+bass, strings, whatever each channel's program change says. Its **output**
+and **level** are the stem's, like an audio stem's. Choose a different
+soundfont (GeneralUser GS, a commercial GM bank) under
+**Options ▸ General MIDI soundfont...**.
 
-**Plays** on a MIDI stem picks the sound by name instead. *Its sounds* is
-the way above, through the keyboard's program. Or choose one plugin of the
-program the song puts that keyboard on: the part goes straight to it,
-past its key range and **LISTENS TO**, and arrives on the channel that
-plugin listens on (what the slot **PLAYS ON**, else what it **LISTENS TO**,
-else the keyboard's channel). So the file's channel 5 strings can play a
-Kontakt that only hears channel 1. A part aimed at a plugin keeps playing it
-even while you switch that keyboard to another program -- that program
-stays loaded for the song.
+**Channels...** on the stem lists the channels the file uses, each with the
+instrument the file plays on it, and where it plays:
+
+- **General MIDI** -- the default, the file's own instrument.
+- ***Upper*: its sounds** -- through that keyboard's program, exactly as if
+  played on the keys: splits, layers, effects and all, each slot taking what
+  its **LISTENS TO** lets in (the notes arrive on the keyboard's channel
+  unless it is on *Omni*).
+- **Only *Kontakt 8*** -- straight into one plugin of the program the song
+  puts that keyboard on, past its key range and **LISTENS TO**, on the
+  channel that plugin listens on (what the slot **PLAYS ON**, else what it
+  **LISTENS TO**, else the keyboard's channel). So the file's channel 5
+  strings can play a Kontakt that only hears channel 1. It keeps playing
+  even while you switch that keyboard to another program -- that program
+  stays loaded for the song.
+- **Mute** -- not at all (the part you play yourself).
+
+Your own sounds keep their own patches: the file's program changes and bank
+selects only reach the General MIDI player. Notes follow sections, vamps and
+jumps like the audio does, every note is let go when the track stops or
+jumps, and starting from a section in the middle sets the GM instruments,
+volumes and pans as the file has them by then.
+
+Without FluidSynth (*libfluidsynth3*, Fedora's *fluidsynth-libs*) or a GM
+soundfont (*fluid-soundfont-gm*) the Channels window says so, and the
+channels can still go to your own sounds.
 
 **Count-in** clicks a number of beats at the song's tempo before the stems
 start, on the output you choose -- usually the in-ears.

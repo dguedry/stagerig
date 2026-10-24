@@ -4,6 +4,7 @@
 #include "PluginIcons.h"
 #include "MappingSuggestions.h"
 #include "ClapPluginFormat.h"
+#include "GmSynth.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
 #include <cmath>
@@ -1869,7 +1870,8 @@ int main()
             CHECK (os.openedOk() && mf.writeTo (os));
         }
         const int midiSong = engine.addSong ("MIDI part");
-        StemDef part; part.file = "part.mid"; part.input = 0;
+        StemDef part; part.file = "part.mid";
+        for (auto& r : part.channels) r = MidiRoute { MidiRoute::Kind::keys, 0 };   // all through Upper's sounds
         engine.addSongStem (midiSong, part);
         const int programBefore = engine.getSetup().inputs[0].currentProgram;
         engine.selectSong (midiSong);
@@ -1888,15 +1890,49 @@ int main()
         std::printf ("     after stopping with a note held: %.5f\n", afterStop);
         CHECK (afterStop < 1e-3f);
 
-        // Only channel 2 of a file that plays on channel 1: nothing.
-        part.midiChannel = 2;
+        // Channel 1 muted, in a file that plays on channel 1: nothing.
+        part.route (1) = MidiRoute { MidiRoute::Kind::mute };
         engine.setSongStem (midiSong, 0, part);
         CHECK (waitReady());
         engine.startTrack();
         const float otherChannel = levels (24)[0];
-        std::printf ("     channel 2 only: %.5f\n", otherChannel);
+        std::printf ("     channel 1 muted: %.5f\n", otherChannel);
         CHECK (otherChannel < 1e-3f);
         engine.stopTrack(); levels (4); pump (50);
+
+        // By default every channel plays on the General MIDI player, on the stem's output.
+        if (const auto why = GmSynth::unavailableReason(); why.isNotEmpty())
+            std::printf ("     skip General MIDI check (%s)\n", why.toRawUTF8());
+        else
+        {
+            const int gmSong = engine.addSong ("General MIDI");
+            StemDef gm; gm.file = "part.mid";
+            engine.addSongStem (gmSong, gm);
+            engine.selectSong (gmSong);
+            CHECK (waitReady() && engine.hasTrack());
+            const auto t0 = Time::getMillisecondCounterHiRes();
+            engine.startTrack();
+            const float gmLevel = levels (24)[0];
+            std::printf ("     General MIDI player (%s): %.3f, started in %.0f ms\n",
+                         GmSynth::findSoundfont().getFileName().toRawUTF8(), gmLevel, Time::getMillisecondCounterHiRes() - t0);
+            CHECK (gmLevel > 0.01f);
+            engine.stopTrack();
+            levels (4); pump (50);
+            levels (60);
+            const float gmAfter = levels (8)[0];
+            std::printf ("     after stopping the GM player: %.5f\n", gmAfter);
+            CHECK (gmAfter < 1e-3f);
+
+            // Channel 1 to Upper's sounds instead: the GM player falls silent, the synth plays it.
+            gm.route (1) = MidiRoute { MidiRoute::Kind::keys, 0 };
+            engine.setSongStem (gmSong, 0, gm);
+            engine.startTrack();
+            const float viaKeys = levels (24)[0];
+            std::printf ("     channel 1 to Upper instead: %.3f\n", viaKeys);
+            CHECK (viaKeys > 0.01f);
+            engine.stopTrack(); levels (4); pump (50); levels (60);
+            engine.removeSong (gmSong);
+        }
 
         // A song with no stems arms nothing.
         const int bare = engine.addSong ("No track");
@@ -2091,7 +2127,9 @@ int main()
                 renderAndWait();
 
                 const int song = engine.addSong ("Strings by name");
-                StemDef st; st.file = "strings.mid"; st.input = 0; st.program = 93; st.slot = 0;
+                StemDef st; st.file = "strings.mid";
+                for (auto& r : st.channels) r = MidiRoute { MidiRoute::Kind::mute };
+                st.route (5) = MidiRoute { MidiRoute::Kind::slot, 0, 93, 0 };
                 engine.addSongStem (song, st);
                 engine.selectSong (song);
                 for (int i = 0; i < 400 && ! engine.isTrackReady(); ++i) pump (10);
@@ -2110,7 +2148,7 @@ int main()
                 Setup back4;
                 CHECK (Setup::loadFromFile (sf.getFile(), back4).wasOk());
                 const auto& stBack = back4.songs[(size_t) song].stems[0];
-                CHECK (stBack.isDirect() && stBack.program == 93 && stBack.slot == 0);
+                CHECK (stBack.route (5) == (MidiRoute { MidiRoute::Kind::slot, 0, 93, 0 }) && stBack.route (1).kind == MidiRoute::Kind::mute);
 
                 engine.removeSong (song);
                 engine.clearProgram (0, 93);

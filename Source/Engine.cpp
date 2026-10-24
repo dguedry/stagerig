@@ -1148,15 +1148,18 @@ void Engine::setSongStem (int songIndex, int stemIndex, const StemDef& d)
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
     auto& stems = setup.songs[(size_t) songIndex].stems;
     if (stemIndex < 0 || stemIndex >= (int) stems.size()) return;
-    // A different file, or a different channel of a MIDI file, needs reading again.
-    const bool fileChanged = stems[(size_t) stemIndex].file != d.file || stems[(size_t) stemIndex].midiChannel != d.midiChannel;
+    // A different file needs reading again, and so does a GM player that is now wanted and was not made.
+    const bool fileChanged = stems[(size_t) stemIndex].file != d.file
+                          || (d.isMidi() && d.usesGm() && player != nullptr && player->isReady() && ! player->stemHasGm (stemIndex)
+                              && GmSynth::unavailableReason (getGmSoundfont()).isEmpty());
     stems[(size_t) stemIndex] = d;
     if (songIndex != trackSong) return;
     /* A new output, level or destination takes effect at once, even
        mid-song; only a different file needs the track loaded again. */
     if (! fileChanged && player != nullptr)
     {
-        player->setStemMix (stemIndex, d.output, d.gainDb, d.input);
+        player->setStemMix (stemIndex, d.output, d.gainDb);
+        player->setStemRoutes (stemIndex, d.channels);
         updateStemRoutes();
     }
     else
@@ -1225,7 +1228,7 @@ void Engine::armTrack (int songIndex)
     if (songIndex >= 0 && songIndex < (int) setup.songs.size() && ! setup.songs[(size_t) songIndex].stems.empty())
     {
         fresh = std::make_unique<SongPlayer> (trackFormats, getChartsFolder(),
-                                              setup.songs[(size_t) songIndex], sampleRate, blockSize);
+                                              setup.songs[(size_t) songIndex], sampleRate, blockSize, getGmSoundfont());
         trackProblemsReported = false;
     }
 
@@ -1240,6 +1243,19 @@ void Engine::armTrack (int songIndex)
     listeners.call ([] (Listener& l) { l.transportChanged(); });
 }
 
+File Engine::getGmSoundfont() const
+{
+    const auto path = settings.getValue ("gmSoundfont");
+    return path.isNotEmpty() && File::isAbsolutePath (path) ? File (path) : File();
+}
+
+void Engine::setGmSoundfont (const File& f)
+{
+    settings.setValue ("gmSoundfont", f.getFullPathName());
+    settings.saveIfNeeded();
+    if (trackSong >= 0) armTrack (trackSong);
+}
+
 void Engine::updateStemRoutes()
 {
     StemRoute routes[kMaxDirectStems];
@@ -1248,14 +1264,20 @@ void Engine::updateStemRoutes()
     if (player != nullptr && trackSong >= 0 && trackSong < (int) setup.songs.size())
     {
         const auto& stems = setup.songs[(size_t) trackSong].stems;
-        for (int i = 0; i < jmin ((int) stems.size(), kMaxDirectStems); ++i)
+        for (int st = 0; st < jmin ((int) stems.size(), kMaxDirectStems / 16); ++st)
         {
-            const auto& d = stems[(size_t) i];
-            if (! d.isDirect() || ! validInput (d.input) || setup.inputs[(size_t) d.input].isAudio()) continue;
-            routes[i] = { d.input, d.program, d.slot };
-            direct[i] = true;
-            if (validProgram (d.program))
-                pins.push_back ({ d.input, ensureProgramLoaded (d.input, d.program) });
+            const auto& d = stems[(size_t) st];
+            if (! d.isMidi()) continue;
+            for (int c = 0; c < 16; ++c)
+            {
+                const auto& r = d.channels[(size_t) c];
+                if (r.kind != MidiRoute::Kind::slot || r.slot < 0 || ! validInput (r.input) || setup.inputs[(size_t) r.input].isAudio()) continue;
+                const int i = st * 16 + c;
+                routes[i] = { r.input, r.program, r.slot };
+                direct[i] = true;
+                if (validProgram (r.program))
+                    pins.push_back ({ r.input, ensureProgramLoaded (r.input, r.program) });
+            }
         }
     }
 

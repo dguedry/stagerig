@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "GmSynth.h"
 #include "LevelMeter.h"
 #include "PluginView.h"
 #include "QrCode.h"
@@ -2125,6 +2126,10 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         m.addItem (5, "Outputs & master effects...");
         m.addItem (3, "Rescan MIDI devices");
         m.addItem (4, "Print program map...");
+        {
+            const auto sf = GmSynth::findSoundfont (engine.getGmSoundfont());
+            m.addItem (7, "General MIDI soundfont..." + (sf != File() ? "  (" + sf.getFileName() + ")" : String ("  (none found)")));
+        }
         m.showMenuAsync (PopupMenu::Options().withTargetComponent (optionsBtn), [this] (int r)
         {
             const auto& s = engine.getSetup();
@@ -2136,6 +2141,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
                 case 4: printProgramMap(); break;
                 case 5: showOutputs(); break;
                 case 6: setSongsPanelShown (songsPanel == nullptr || ! songsPanel->isVisible()); break;
+                case 7: chooseGmSoundfont(); break;
                 default: break;
             }
         });
@@ -3098,6 +3104,23 @@ void MainComponent::showRemote()
        than leaving someone to discover it at a gig. */
     if (const auto warn = Hotspot::firewallWarning (remote->getPort()); warn.isNotEmpty())
         AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Tablet control", warn, "OK");
+}
+
+/** The soundfont backing-track MIDI files play through. FluidR3_GM is found
+    by itself where distributions put it; this is for a better one. */
+void MainComponent::chooseGmSoundfont()
+{
+    const auto current = GmSynth::findSoundfont (engine.getGmSoundfont());
+    gmChooser = std::make_unique<FileChooser> ("General MIDI soundfont for backing-track MIDI files",
+                                               current != File() ? current : File ("/usr/share/sounds/sf2"), "*.sf2;*.sf3");
+    gmChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this] (const FileChooser& fc)
+    {
+        const auto f = fc.getResult();
+        if (f == File()) return;
+        engine.setGmSoundfont (f);
+        showStatus ("MIDI files now play through " + f.getFileName()
+                    + (GmSynth::isAvailable() ? String() : String (" -- once FluidSynth is installed (libfluidsynth3)")));
+    });
 }
 
 void MainComponent::printProgramMap()

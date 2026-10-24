@@ -2,6 +2,7 @@
 
 #include <juce_core/juce_core.h>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <array>
 #include <vector>
 
 namespace perf
@@ -247,6 +248,25 @@ struct ChartRef
     charts in MySetup.stagerig.charts/, beside it. */
 juce::File chartsFolderFor (const juce::File& setupFile);
 
+/** Where one channel of a backing-track MIDI file plays. */
+struct MidiRoute
+{
+    enum class Kind
+    {
+        gm,       // the built-in General MIDI player, with the file's own instruments
+        keys,     // through a keyboard's current program, as if played on it
+        slot,     // straight into one plugin of a keyboard's program
+        mute
+    };
+    Kind kind = Kind::gm;
+    int input = 0;                // keys, slot: which keyboard
+    int program = -1;             // slot: which of its programs; -1 = whatever it is on
+    int slot = -1;                // slot: which plugin in it
+
+    bool operator== (const MidiRoute& o) const { return kind == o.kind && input == o.input && program == o.program && slot == o.slot; }
+    bool operator!= (const MidiRoute& o) const { return ! (*this == o); }
+};
+
 /** One audio file of a song's backing track: a stem (drums, bass, pads), a
     full mix, or a click and cue track for the in-ears. Kept in the folder
     beside the setup, like charts, so the two travel together. */
@@ -256,19 +276,16 @@ struct StemDef
     juce::String name;            // shown in the list; the file name when empty
     int output = 0;               // which of the setup's outputs it plays on
     float gainDb = 0.0f;
-    /** A MIDI file (.mid) plays through an input instead: into that input's
-        current program, like the keys do. `midiChannel` keeps only one
-        channel of the file (0 = all), so one file can feed Upper and Lower. */
-    int input = 0;
-    int midiChannel = 0;
-    /** Or straight to one plugin: slot `slot` (>= 0) of that input's program
-        `program` -- or of whatever program the input is on, for -1. The
-        notes skip the slot's key range and LISTENS TO, and arrive on the
-        channel the plugin listens on, so the file's channel 5 can play a
-        sound that only hears channel 1. A named program keeps playing the
-        file even while the keys play another. */
-    int program = -1, slot = -1;
-    bool isDirect() const { return isMidi() && slot >= 0; }
+    /** A MIDI file (.mid): each of its channels plays somewhere. By default
+        the General MIDI player, with the instruments the file asks for, on
+        `output` at `gainDb`; any channel can instead play through a
+        keyboard's program, straight into one of its plugins (past its key
+        range and LISTENS TO, on the channel that plugin listens on; a named
+        program keeps playing even while the keys play another), or not at all. */
+    std::array<MidiRoute, 16> channels {};
+    const MidiRoute& route (int channel) const    { return channels[(size_t) juce::jlimit (1, 16, channel) - 1]; }
+    MidiRoute& route (int channel)                { return channels[(size_t) juce::jlimit (1, 16, channel) - 1]; }
+    bool usesGm() const                           { for (auto& r : channels) if (r.kind == MidiRoute::Kind::gm) return true; return false; }
 
     bool isMidi() const { return juce::File (file).hasFileExtension ("mid;midi;smf"); }
     juce::String displayName() const { return name.isNotEmpty() ? name : juce::File (file).getFileNameWithoutExtension(); }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Model.h"
+#include "GmSynth.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <atomic>
@@ -33,8 +34,9 @@ namespace perf
 class SongPlayer
 {
 public:
+    /** `soundfont`: the General MIDI soundfont MIDI stems play through, or none to look for the system's. */
     SongPlayer (juce::AudioFormatManager& formats, const juce::File& folder,
-                const SongDef& song, double sampleRate, int blockSize);
+                const SongDef& song, double sampleRate, int blockSize, const juce::File& soundfont = {});
     ~SongPlayer();
 
     bool hasStems() const                         { return numStemDefs > 0; }
@@ -78,16 +80,21 @@ public:
     /** The one-pedal control: releases a vamp, or else queues the next section. */
     void advance();
 
-    void setStemMix (int stemIndex, int output, float gainDb, int input);
+    void setStemMix (int stemIndex, int output, float gainDb);
+    /** Where each channel of a MIDI stem goes, from now on. */
+    void setStemRoutes (int stemIndex, const std::array<MidiRoute, 16>&);
+    /** Does this MIDI stem have a GM player? (False for audio, or when none could be made.) */
+    bool stemHasGm (int stemIndex) const;
 
     enum class Happened { nothing, stemsStarted, ended, stopped };
     /** Audio thread: adds this block of the track to the outputs' mixes, and
-        its MIDI to the inputs'. `outputs[i]` holds output i's left and right
-        mix buffers; `inputMidi[i]` is input i's MIDI for this block. A MIDI
-        stem whose `stemMidi[stem index]` is not null goes there instead (a
-        stem aimed at one plugin, which the engine delivers). */
+        its MIDI to where each channel goes. `outputs[i]` holds output i's
+        left and right mix buffers; `inputMidi[i]` is input i's MIDI for this
+        block (channels played through the keys); `slotMidi[stem * 16 +
+        channel - 1]` takes a channel aimed at one plugin, which the engine
+        delivers. A channel on the GM player is heard on the stem's output. */
     Happened render (float* (*outputs)[2], int numOutputs, juce::MidiBuffer* const* inputMidi, int numInputs, int numSamples,
-                     juce::MidiBuffer* const* stemMidi = nullptr, int numStemMidi = 0);
+                     juce::MidiBuffer* const* slotMidi = nullptr, int numSlotMidi = 0);
 
 private:
     struct Stem
@@ -100,16 +107,27 @@ private:
 
         // A MIDI stem: its events at device-rate sample positions, in order.
         bool midi = false;
-        int midiChannel = 0;
-        std::atomic<int> input { 0 };
+        bool wantsGm = false;                     // some channel played on the GM player when it was loaded
+        std::atomic<int> routeKind[16], routeInput[16];
         struct Event { juce::int64 at; uint8_t data[3]; uint8_t size; };
         std::vector<Event> events;
         juce::int64 midiLength = 0;
         bool notesSounding = false;               // audio thread: notes may be held, so a jump sends notes-off
+        bool needsChase = true;                   // audio thread: the GM player must catch up on programs and controllers first
+        std::unique_ptr<GmSynth> gm;              // filled by the loader
+        juce::MidiBuffer gmEvents;                // this block's events for it
     };
     bool loadMidiStem (Stem&);
-    void midiForRun (Stem&, juce::MidiBuffer&, juce::int64 from, int count, int at);
-    void allNotesOff (juce::MidiBuffer&, int at);
+
+    /** Where this block's MIDI goes, for dispatch(). */
+    struct MidiDest { juce::MidiBuffer* const* inputMidi; int numInputs; juce::MidiBuffer* const* slotMidi; int numSlotMidi; };
+    void dispatch (Stem&, const juce::MidiMessage&, int at, const MidiDest&);
+    void midiForRun (Stem&, juce::int64 from, int count, int at, const MidiDest&);
+    void allNotesOff (Stem&, int at, const MidiDest&);
+    /** The GM player's channels as they would be at `from`: programs, banks, volume, pan... */
+    void chase (Stem&, juce::int64 from, int at);
+    juce::File soundfont;
+    juce::int64 gmTail = 0;                       // audio thread: after the end, the GM player's last notes ring out
 
     void startLoading();
     void stopLoading();
