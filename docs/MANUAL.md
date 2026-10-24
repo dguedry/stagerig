@@ -52,7 +52,7 @@ Each input holds **128 programs**. On a keyboard, a program is one sound of
 your set: one or more **instruments**, each with its own key range, velocity
 range, transpose, gain, pan and effects. An instrument is a plugin, a MIDI
 device (a hardware synth, a lighting controller), the built-in General MIDI
-player, or another keyboard's sounds. On an audio input, a program is an
+player, or another keyboard's program. On an audio input, a program is an
 **effect chain** with an input trim -- the clean vocal, the vocal with the
 long reverb, the vocoder.
 
@@ -363,7 +363,7 @@ each part plays on. Under the file, the window lists them:
 demo.mid                                                   [Notes...] [X]
    Ch 1   Piano     [Acoustic Grand Piano · General MIDI]    0.0 dB  [M]
    Ch 2   Bass      [Fingered Bass · General MIDI]           0.0 dB  [M]
-   Ch 5   Strings   [Kontakt 8]              [Edit GUI]      0.0 dB  [M]
+   Ch 5   Strings   [Upper: Big Strings]                     0.0 dB  [M]
    Ch 10  Drums     [Standard kit · General MIDI]            0.0 dB  [M]
 ```
 
@@ -374,14 +374,20 @@ demo.mid                                                   [Notes...] [X]
    bank) under **Options ▸ General MIDI soundfont...**.
 2. **Click a part's sound to change it.** The menu offers: the General MIDI
    instrument the file asks for; any other General MIDI instrument or drum
-   kit; ***Upper*'s sounds** (whatever that keyboard is playing right now);
-   **a plugin instrument**; **a MIDI device** (a hardware synth, lights);
-   anything already in the song; or **Nothing**. One instrument per part.
+   kit; **your programs**, keyboard by keyboard -- ***Upper*'s programs ▸
+   003 Big Strings** -- and, at the end of each keyboard's list, **whatever
+   that keyboard is playing**; anything already in the song; or **Nothing**.
+   One instrument per part. Your programs are where your sounds already are
+   -- the plugin with its patch, the hardware synth with its bank and
+   program, the split and the layer -- so a part goes straight to one of them
+   rather than to a plugin set up from scratch here.
 3. **Level** is the part's level: 0 dB is as the file has it, double-click
    goes back there. **M** mutes the part -- the one you will play yourself.
-4. A part on a plugin gets **Edit GUI**, to open that plugin's window and
-   pick its patch; a part on a MIDI device gets **Patch...** for the bank
-   and program to send it.
+4. A part on one of your programs plays that program as it is, whatever the
+   keyboard itself is on: the strings part can play *Upper: Big Strings*
+   while you play the piano on Upper. The program is kept loaded for as long
+   as a part names it. Change the sound by changing the program, where you
+   always do.
 5. **Notes...** opens a piano roll for the file's notes: move, resize, add
    (double-click), delete, change velocities, undo, save. The first version
    of the file is kept beside it as *.orig.mid*.
@@ -487,7 +493,8 @@ the slot's notes -> [ MIDI chain ] -> the sound -> [ effects ] -> gain, pan
 - **The sound** is a plugin instrument; a MIDI device -- a hardware synth or
   module, a lighting controller -- played through a MIDI port (see *MIDI
   devices*); the built-in **General MIDI player**; or **another keyboard's
-  sounds**, which hands the notes to whatever that input is playing.
+  program**, which hands the notes to one of that input's programs by name,
+  or to whatever it is playing.
 - **The MIDI chain** works on the notes before the sound hears them: MIDI
   effects (an arpeggiator, a chord generator), and MIDI devices that should
   play along. See *A slot's MIDI chain* below.
@@ -520,9 +527,10 @@ curve and channels decide which notes enter the chain at all. Left to right:
   plug one in and use **Options ▸ Rescan MIDI devices**.
 - **General MIDI player** -- the built-in FluidSynth player, a multitimbral
   instrument with the standard 128 sounds and drum kits (see *Backing tracks*).
-- **Another keyboard's sounds** -- the notes go to that input's current
-  program: a layer from one keyboard on the other, or a MIDI file part played
-  by whatever that keyboard is on.
+- **Another keyboard's program** -- the notes go to one of that input's
+  programs by name (*Upper: Big Strings*), kept loaded and playing beside
+  whatever Upper itself is on; or to **whatever that keyboard is playing**.
+  A layer from one keyboard on the other, or a MIDI file part.
 
 **+ Add...** under a slot adds to its chain:
 
@@ -829,10 +837,10 @@ precisely and to miss sometimes.
 With a song armed, the set list page has a **Play / Stop** bar with the
 song's sections under it: tap a section to go there when the current one
 ends, **Go on** to let a vamp through. **Parts** lists the MIDI files'
-parts -- *Piano: Acoustic Grand Piano · General MIDI*, *Strings: Kontakt 8*
--- each with **Mute** (for the part you will play yourself tonight) and,
-when a plugin plays it, **GUI** to open that plugin's window on the
-tablet like any other. What plays each part is chosen on the laptop, in
+parts -- *Piano: Acoustic Grand Piano · General MIDI*, *Strings: Upper:
+Big Strings* -- each with **Mute** (for the part you will play yourself
+tonight) and, when a plugin in the song's own program plays it, **GUI** to
+open that plugin's window on the tablet like any other. What plays each part is chosen on the laptop, in
 the song's Backing track window; the tablet reads it.
 
 ### If the tablet cannot connect

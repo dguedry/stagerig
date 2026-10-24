@@ -1168,8 +1168,11 @@ private:
             }
         }
 
-        /** What plays this part: a General MIDI instrument, a keyboard's sounds,
-            a plugin, a MIDI device, something already in the song's program, or nothing. */
+        /** What plays this part: a General MIDI instrument, one of your
+            programs (by keyboard, then by name), something already in the
+            song's program, or nothing. Your programs are where your sounds
+            are -- plugins, hardware, splits and layers, all set up -- so the
+            menu offers those rather than a plugin from scratch. */
         void choosePlays (int ch)
         {
             auto& engine = owner.engine;
@@ -1193,36 +1196,30 @@ private:
                 m.addSubMenu (ch == 10 ? "Another General MIDI kit or instrument" : "Another General MIDI instrument", gm, GmSynth::isAvailable(), nullptr, gmChoice >= 0);
             }
             m.addSeparator();
+            /* Each keyboard's programs, as its program pages have them
+               (grouped when they are), then whatever it happens to be playing. */
             const auto& inputs = engine.getSetup().inputs;
+            const bool keysNow = cur != nullptr && cur->isInput();
             for (int i = 0; i < (int) inputs.size(); ++i)
-                if (! inputs[(size_t) i].isAudio() && ! inputs[(size_t) i].isTrack())
-                    m.addItem (2000 + i, inputs[(size_t) i].name + "'s sounds  (whatever it is playing)", true,
-                               cur != nullptr && cur->isInput() && cur->targetInput == i);
-            Array<PluginDescription> types;
-            for (auto& d : engine.getPluginHost().getKnownPlugins().getTypes()) if (d.isInstrument) types.add (d);
             {
-                PopupMenu plugins;
-                StringArray makers;
-                for (auto& d : types) makers.addIfNotAlreadyThere (d.manufacturerName.isNotEmpty() ? d.manufacturerName : "Other");
-                makers.sortNatural();
-                for (auto& maker : makers)
+                const auto& in = inputs[(size_t) i];
+                if (in.isAudio() || in.isTrack()) continue;
+                PopupMenu programs;
+                String group;
+                bool any = false;
+                for (int k = 0; k < (int) in.programs.size(); ++k)
                 {
-                    PopupMenu sub;
-                    for (int k = 0; k < types.size(); ++k)
-                        if ((types[k].manufacturerName.isNotEmpty() ? types[k].manufacturerName : "Other") == maker)
-                            sub.addItem (3000 + k, types[k].name + "  [" + types[k].pluginFormatName + "]");
-                    if (makers.size() == 1) plugins = sub; else plugins.addSubMenu (maker, sub);
+                    const auto& pd = in.programs[(size_t) k];
+                    if (pd.isEmpty() && pd.name.isEmpty()) continue;
+                    if (pd.group.isNotEmpty() && pd.group != group) { programs.addSectionHeader (pd.group); group = pd.group; }
+                    programs.addItem (10000 + i * 128 + k, String (k + 1).paddedLeft ('0', 3) + "  " + (pd.name.isNotEmpty() ? pd.name : String ("(unnamed)")),
+                                      true, keysNow && cur->targetInput == i && cur->targetProgram == k);
+                    any = true;
                 }
-                if (types.isEmpty()) plugins.addItem (2999, "No instrument plugins known yet: scan under Plugins...", false);
-                m.addSubMenu ("A plugin instrument", plugins);
-            }
-            Array<MidiDeviceInfo> ports;
-            for (const auto& d : MidiOutput::getAvailableDevices()) if (! d.name.containsIgnoreCase ("Midi Through")) ports.add (d);
-            {
-                PopupMenu devices;
-                for (int k = 0; k < ports.size(); ++k) devices.addItem (4000 + k, ports[k].name);
-                if (ports.isEmpty()) devices.addItem (3999, "No MIDI interface connected", false);
-                m.addSubMenu ("A MIDI device (hardware synth, lights)", devices);
+                if (! any) programs.addItem (9999, "No programs yet: make some on its program pages", false);
+                programs.addSeparator();
+                programs.addItem (2000 + i, "Whatever " + in.name + " is playing", true, keysNow && cur->targetInput == i && cur->targetProgram < 0);
+                m.addSubMenu (in.name + "'s programs", programs, true, nullptr, keysNow && cur->targetInput == i);
             }
             bool header = false;
             for (int sl = 0; sl < (int) prog.slots.size(); ++sl)
@@ -1236,7 +1233,7 @@ private:
             m.addItem (1, "Nothing", true, cur == nullptr);
 
             Component::SafePointer<Row> self (this);
-            m.showMenuAsync (PopupMenu::Options().withTargetComponent (partFor (ch)->plays), [self, ch, t, p, types, ports] (int r)
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (partFor (ch)->plays), [self, ch, t, p] (int r)
             {
                 if (self == nullptr || r < 1) return;
                 auto* thisRow = self.getComponent();
@@ -1259,23 +1256,17 @@ private:
                     e.setGmChannel (t, p, g, ch, gc);
                 }
                 else if (r >= 100 && r < 1000) e.assignPart (t, p, ch, r - 100);
-                else if (r >= 2000 && r < 3000)
+                else if ((r >= 2000 && r < 3000) || r >= 10000)
                 {
-                    const int target = r - 2000;
+                    // A keyboard's program, or whatever it is playing: one slot per choice, shared by the parts that make it.
+                    const int target = r >= 10000 ? (r - 10000) / 128 : r - 2000;
+                    const int targetProgram = r >= 10000 ? (r - 10000) % 128 : -1;
                     const auto& slots = e.getSetup().inputs[(size_t) t].programs[(size_t) p].slots;
                     int sl = -1;
-                    for (int k = 0; k < (int) slots.size(); ++k) if (slots[(size_t) k].isInput() && slots[(size_t) k].targetInput == target) sl = k;
-                    if (sl < 0 && e.addInputSlot (t, p, target)) sl = slotsNow() - 1;
+                    for (int k = 0; k < (int) slots.size(); ++k)
+                        if (slots[(size_t) k].isInput() && slots[(size_t) k].targetInput == target && slots[(size_t) k].targetProgram == targetProgram) sl = k;
+                    if (sl < 0 && e.addInputSlot (t, p, target, targetProgram)) sl = slotsNow() - 1;
                     if (sl >= 0) e.assignPart (t, p, ch, sl);
-                }
-                else if (r >= 3000 && r < 3000 + types.size())
-                {
-                    String err;
-                    if (e.addSlot (t, p, types[r - 3000], err)) e.assignPart (t, p, ch, slotsNow() - 1);
-                }
-                else if (r >= 4000 && r < 4000 + ports.size())
-                {
-                    if (e.addExternalSlot (t, p, ports[r - 4000])) e.assignPart (t, p, ch, slotsNow() - 1);
                 }
                 thisRow->refreshParts();
             });

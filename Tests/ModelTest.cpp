@@ -66,8 +66,9 @@ int main()
     SlotDef gm; gm.kind = SlotDef::Kind::gm; gm.listensTo = SlotDef::kAllChannels & ~(1 << 1);
     gm.gmChannels[9].program = 8; gm.gmChannels[9].volume = 90; gm.gmChannels[0].muted = true;
     SlotDef keys; keys.kind = SlotDef::Kind::input; keys.targetInput = 1; keys.targetInputName = "Lower"; keys.listensTo = 1 << 1;
+    SlotDef pad; pad.kind = SlotDef::Kind::input; pad.targetInput = 0; pad.targetInputName = "Upper"; pad.targetProgram = 4; pad.targetProgramName = "Big pad"; pad.listensTo = 1 << 4;
     track.programs[0].name = "With a track";
-    track.programs[0].slots = { gm, keys };
+    track.programs[0].slots = { gm, keys, pad };
     s.inputs.push_back (track);
 
     auto& prog = upper.programs[5];
@@ -145,7 +146,9 @@ int main()
         CHECK (loaded.trackInput() == 3 && loaded.inputs[3].isTrack() && loaded.inputs[3].channel == 0 && ! loaded.inputs[3].respondToProgramChange);
         CHECK (loaded.songs[0].programFor (3) == 0 && loaded.songs[0].programFor (1) == -1);
         const auto& tp = loaded.inputs[3].programs[0];
-        CHECK (tp.name == "With a track" && tp.slots.size() == 2);
+        CHECK (tp.name == "With a track" && tp.slots.size() == 3);
+        CHECK (tp.slots[2].isInput() && tp.slots[2].targetInput == 0 && tp.slots[2].targetProgram == 4 && tp.slots[2].targetProgramName == "Big pad"
+               && tp.slots[2].displayName() == "Upper: Big pad" && tp.slots[2].listensToText() == "Channel 5" && tp.slots[1].targetProgram == -1);
         CHECK (tp.slots[0].isGm() && ! tp.slots[0].hears (2) && tp.slots[0].hears (1) && tp.slots[0].hears (16)
                && tp.slots[0].gmChannels[9].program == 8 && tp.slots[0].gmChannels[9].volume == 90 && tp.slots[0].gmChannels[9].pan == -1
                && tp.slots[0].gmChannels[0].muted && tp.slots[0].gmChannels[1].isDefault() && tp.slots[0].displayName() == "General MIDI player");

@@ -9,6 +9,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
+#include <set>
 #include <pthread.h>
 #include <condition_variable>
 #include <deque>
@@ -376,7 +377,9 @@ public:
     /** The GM player's mixer for one channel: instrument, volume, pan, mute over the file's. */
     void setGmChannel (int inputIndex, int program, int slot, int channel, const SlotDef::GmChannel&);
     /** Another input's sounds: the slot's notes go to that input's current program. */
-    bool addInputSlot (int inputIndex, int program, int targetInput);
+    /** An instrument that is another input's sounds: its program number
+        `targetProgram`, or whatever that input is playing (-1). */
+    bool addInputSlot (int inputIndex, int program, int targetInput, int targetProgram = -1);
 
     // External instruments: a slot played through a MIDI output port ------------
     bool addExternalSlot (int inputIndex, int program, const juce::MidiDeviceInfo&);
@@ -534,6 +537,11 @@ private:
         whole teardown. */
     void teardownRuntimes (bool captureFirst = true, int budgetMs = -1);
     ProgramRuntime* ensureProgramLoaded (int inputIndex, int program);
+    /** The programs named by "another input's sounds" slots in the programs
+        that are current, as (input, program): kept loaded and rendered
+        beside the inputs' own. */
+    std::set<std::pair<int, int>> lentPrograms() const;
+    void ensureLentLoaded();
     std::unique_ptr<ProgramRuntime> buildProgram (int inputIndex, int program);
     std::unique_ptr<SlotRuntime> buildSlot (int inputIndex, int program, int slotIndex, const SlotDef&);
     std::unique_ptr<EffectRuntime> buildEffect (int inputIndex, int program, int slotIndex, int effectIndex, const EffectDef&);

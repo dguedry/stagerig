@@ -1212,9 +1212,11 @@ public:
             }
             else if (inputSlot)
             {
-                name.setText (def.targetInputName + "'s sounds  [whatever that keyboard is playing]", dontSendNotification);
+                name.setText (def.targetProgram >= 0 ? def.targetInputName + ": " + def.targetProgramName + "  [that keyboard's program " + String (def.targetProgram + 1).paddedLeft ('0', 3) + "]"
+                                                     : def.targetInputName + "'s sounds  [whatever that keyboard is playing]", dontSendNotification);
                 name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : Colours::white);
-                name.setTooltip (error.isNotEmpty() ? error : "The notes this gets are played by whatever that keyboard is playing right now: a layer from another keyboard, or a MIDI file part.");
+                name.setTooltip (error.isNotEmpty() ? error : def.targetProgram >= 0 ? "The notes this gets are played by that program of that keyboard, whatever the keyboard itself is on: a layer from another keyboard, or a MIDI file part."
+                                                                                      : "The notes this gets are played by whatever that keyboard is playing right now: a layer from another keyboard, or a MIDI file part.");
             }
             else
             {
@@ -1587,15 +1589,30 @@ private:
         const int self = owner.getSelectedInput();
         PopupMenu others;
         for (int i = 0; i < (int) inputs.size(); ++i)
-            if (i != self && ! inputs[(size_t) i].isAudio() && ! inputs[(size_t) i].isTrack())
-                others.addItem (200000 + i, inputs[(size_t) i].name);
+        {
+            const auto& in = inputs[(size_t) i];
+            if (i == self || in.isAudio() || in.isTrack()) continue;
+            // Its programs by name, as its pages have them, then whatever it is playing.
+            PopupMenu programs;
+            String group;
+            for (int k = 0; k < (int) in.programs.size(); ++k)
+            {
+                const auto& pd = in.programs[(size_t) k];
+                if (pd.isEmpty() && pd.name.isEmpty()) continue;
+                if (pd.group.isNotEmpty() && pd.group != group) { programs.addSectionHeader (pd.group); group = pd.group; }
+                programs.addItem (210000 + i * 128 + k, String (k + 1).paddedLeft ('0', 3) + "  " + (pd.name.isNotEmpty() ? pd.name : String ("(unnamed)")));
+            }
+            if (programs.getNumItems() > 0) programs.addSeparator();
+            programs.addItem (200000 + i, "Whatever " + in.name + " is playing");
+            others.addSubMenu (in.name, programs);
+        }
         if (others.getNumItems() == 0) others.addItem (199999, "No other keyboard", false);
 
         PopupMenu menu;
         menu.addSubMenu ("Plugin instrument", plugins);
         menu.addSubMenu ("MIDI device (hardware synth, module, lights)", external);
         menu.addItem (300000, "General MIDI player (built in)", GmSynth::isAvailable());
-        menu.addSubMenu ("Another keyboard's sounds", others);
+        menu.addSubMenu ("Another keyboard's program", others);
 
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types, ports] (int result)
         {
@@ -1618,6 +1635,15 @@ private:
             {
                 engine.addInputSlot (in, prog, result - 200000);
                 owner.showStatus ("Added " + engine.getSetup().inputs[(size_t) (result - 200000)].name + "'s sounds: what this gets is played by whatever that keyboard is on");
+                owner.markDirty();
+                return;
+            }
+            if (result >= 210000 && result < 210000 + 128 * (int) engine.getSetup().inputs.size())
+            {
+                const int target = (result - 210000) / 128, program = (result - 210000) % 128;
+                if (engine.addInputSlot (in, prog, target, program))
+                    owner.showStatus ("Added " + engine.getSetup().inputs[(size_t) target].name + ": " + engine.getSetup().inputs[(size_t) target].programs[(size_t) program].name
+                                      + " -- that program plays what this gets, whatever the keyboard itself is on");
                 owner.markDirty();
                 return;
             }

@@ -77,6 +77,13 @@ struct SlotDef
     // Another input's sounds ------------------------------------------------------
     int targetInput = -1;                          // Kind::input: index into Setup::inputs
     juce::String targetInputName;                  // for display, kept up to date on rename
+    /** Which of that input's programs plays the notes: one of them by
+        number, or -1 for whatever the input is playing at the time. A
+        program named here is kept loaded and sounding alongside the
+        keyboard's own, so a MIDI file's part can play "Upper: Strings"
+        while Upper itself is on the piano. */
+    int targetProgram = -1;
+    juce::String targetProgramName;                // for display, kept up to date on rename
 
     // The General MIDI player ------------------------------------------------------
     /** Per channel, what the player's own mixer sets over what the file
@@ -112,7 +119,7 @@ struct SlotDef
         {
             case Kind::external: return midiOutName + " (MIDI)";
             case Kind::gm:       return "General MIDI player";
-            case Kind::input:    return targetInputName + "'s sounds";
+            case Kind::input:    return targetProgram >= 0 ? targetInputName + ": " + targetProgramName : targetInputName + "'s sounds";
             case Kind::plugin:   break;
         }
         return plugin.name;

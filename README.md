@@ -68,8 +68,8 @@ other plugin.
 - **Backing tracks.** A song can carry audio stems -- a full mix, or drums,
   bass and pads apart, plus a click and cues for the in-ears -- each on its own
   output, and MIDI files whose parts each play on what you choose -- the
-  built-in General MIDI player (FluidSynth), one of your plugins, a hardware
-  synth, or whatever a keyboard is playing. With a count-in, started and
+  built-in General MIDI player (FluidSynth) or one of your own programs, by
+  keyboard and by name, whatever that keyboard is playing itself. With a count-in, started and
   stopped from a footswitch, the laptop or the tablet, where parts can be
   muted and their plugins opened from the stand. Mark its sections and jump between them in time, and vamp
   an intro until a pedal lets it go on. Tempo-synced effects lock to the track.

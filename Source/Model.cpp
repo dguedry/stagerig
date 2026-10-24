@@ -134,6 +134,11 @@ var SlotDef::toVar() const
         o->setProperty ("kind", "input");
         o->setProperty ("targetInput", targetInput);
         o->setProperty ("targetInputName", targetInputName);
+        if (targetProgram >= 0)
+        {
+            o->setProperty ("targetProgram", targetProgram);
+            o->setProperty ("targetProgramName", targetProgramName);
+        }
     }
     else if (isExternal())
     {
@@ -201,6 +206,8 @@ SlotDef SlotDef::fromVar (const var& v)
         s.kind = Kind::input;
         s.targetInput = prop<int> (v, "targetInput", -1);
         s.targetInputName = propStr (v, "targetInputName");
+        s.targetProgram = prop<int> (v, "targetProgram", -1);
+        s.targetProgramName = propStr (v, "targetProgramName");
     }
     else if (kind == "external")
     {

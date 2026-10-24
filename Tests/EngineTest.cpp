@@ -1935,6 +1935,43 @@ int main()
         std::printf ("     after stopping with a note held: %.5f\n", afterStop);
         CHECK (afterStop < 1e-3f);
 
+        /* The part on one of Upper's programs by name -- program 6, "Pad",
+           which Upper itself is not on. It is loaded for the part and plays
+           beside Upper's own program; Upper's keys still play that one. */
+        {
+            engine.clearProgram (0, 6);
+            engine.setProgramName (0, 6, "Pad");
+            CHECK (engine.addSlot (0, 6, synth, err));
+            CHECK (! engine.isProgramLoaded (0, 6));
+            CHECK (engine.addInputSlot (track, trackProg, 0, 6));
+            const int padSlot = (int) trackProgram().slots.size() - 1;
+            CHECK (trackProgram().slots[(size_t) padSlot].targetProgram == 6 && trackProgram().slots[(size_t) padSlot].displayName() == "Upper: Pad");
+            engine.assignPart (track, trackProg, 1, padSlot);
+            CHECK (engine.isProgramLoaded (0, 6));                      // named by a current program: kept loaded
+            settle();
+            CHECK (engine.isPluginAlive (0, 6, 0));
+            CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);
+            engine.startTrack();
+            const float viaPad = levels (24)[0];
+            std::printf ("     channel 1 to Upper: Pad (Upper on another program): %.3f\n", viaPad);
+            CHECK (viaPad > 0.01f);
+            CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);
+            engine.stopTrack();
+            levels (4); pump (50); levels (120);
+            const float padQuiet = levels (8)[0];
+            std::printf ("     after stopping: %.5f\n", padQuiet);
+            CHECK (padQuiet < 1e-3f);
+            // Renamed, the part follows; housekeeping leaves the program loaded while a part plays it.
+            engine.setProgramName (0, 6, "Big pad");
+            CHECK (trackProgram().slots[(size_t) padSlot].displayName() == "Upper: Big pad");
+            pump (900);
+            CHECK (engine.isProgramLoaded (0, 6));
+            // Nothing names it any more: it is let go like any idle program.
+            engine.removeSlot (track, trackProg, padSlot);
+            pump (900);
+            CHECK (! engine.isProgramLoaded (0, 6));
+        }
+
         // Nothing plays the part: silence.
         engine.assignPart (track, trackProg, 1, -1);
         CHECK (engine.partInstrument (track, trackProg, 1) < 0);
