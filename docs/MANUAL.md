@@ -69,7 +69,7 @@ Keyboard  ──> Input "Upper" (ch 1)  ──> Program 007 "Solo"    ──> Le
 Keyboard  ──> Input "Lower" (ch 2)  ──> Program 002 "Bass"    ──> Electric bass C0-B3
 Mic       ──> Input "Vocal" (in 1)  ──> Program 004 "Ballad"  ──> EQ ──> Plate reverb
 MIDI file ──> Input "Backing track" ──> Program "Oye Como Va" ──> General MIDI player (drums, bass)
-                                                              └─> Kontakt 8 (the strings part, channel 5)
+                                                              └─> Upper: Big Strings (the strings part, channel 5)
 ```
 
 Every input lands on an **output** -- a pair of the interface's output
@@ -266,6 +266,8 @@ keyboard you are not using in that number.
   zero. Use it for a song where the tempo is whatever you last tapped.
 - **^ v** beside the songs list reorder it. Sets keep playing the same order:
   they follow the song, not its position.
+- **Files...** attaches a chart for the stand (see *Charts on the stand*) or
+  opens the song's **Backing track** window (see *Backing tracks*).
 
 ### Making a set
 
@@ -414,13 +416,13 @@ window is the short way to the same thing. Without FluidSynth
 (*fluid-soundfont-gm*) the parts window says so, and the parts can play on
 your own instruments meanwhile.
 
-**Count-in** clicks a number of beats at the song's tempo before the stems
+**Count-in** clicks a number of beats at the song's tempo before the files
 start, on the output you choose -- usually the in-ears.
 
-The stems are read into memory when the song is selected, so they can jump
+The files are read into memory when the song is selected, so they can jump
 and loop without a gap; the songs panel says *loading* until they are ready,
 and a Play pressed before then starts the moment they are. Only the song in
-play is held -- about 46 MB for four minutes of a stereo stem.
+play is held -- about 46 MB for four minutes of a stereo audio file.
 
 ### Sections and vamps
 
@@ -455,7 +457,7 @@ footswitch can do the same: **Footswitches... ▸ Backing track: next section /
 release vamp**. The panel shows the section you are in and the one queued
 (*Verse 1:12 / 3:40 > Chorus*).
 
-Moving to another song stops the track that is playing. When the stems start,
+Moving to another song stops the track that is playing. When the files start,
 every plugin's musical position goes back to bar one, beat one, so a
 tempo-synced delay or arpeggiator lands on the track's beat -- set the song's
 tempo to the track's.
@@ -549,7 +551,7 @@ A program's slots hear everything their input lets through, unless a slot
 takes notes **from** some channels only. Set the input's channel to *Omni* and give
 each slot its channel, and one program sorts the parts by itself:
 
-| Slot | Listens to | Plays |
+| Slot | From channel | Plays |
 |---|---|---|
 | Electric bass | Channel 2 | the left-hand part of a keyboard that splits by channel, or a MIDI file's bass |
 | Pad | Channel 1 | the right hand, or the file's chords |
@@ -1148,6 +1150,7 @@ blacklisting the plugin; scan again once the install has finished.
 | `~/.config/StageRig/icons/` | Cached plugin icons. |
 | `~/.config/StageRig/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |
 | your `*.stagerig.json` | Your set. Keep it wherever you like. |
+| `<your set>.charts/` beside it | The songs' charts and backing-track files, copied in when you add them, so the set and its files travel together. An edited MIDI file keeps its first version here as `<name>.orig.mid`. |
 
 Advanced options can be set in `StageRig.settings`: `parallelLoads` (how many
 plugins load at once, default 4), `parallelBridgedLoads`, `bridgedColdStartSolo`,
@@ -1162,4 +1165,6 @@ plugins load at once, default 4), `parallelBridgedLoads`, `bridgedColdStartSolo`
 | Type in the parameter picker | Filters thousands of parameters; arrows and Page keys move, Return picks, Escape cancels. |
 | `A S D F G H J K` / `W E T Y U` | White and black keys on the on-screen keyboard. |
 | `Z` / `X` | Shift the on-screen keyboard down or up an octave. |
+| Double-click a part's level in the Backing track window | Back to 0 dB: the part as the file has it. |
+| Notes window's piano roll | Double-click adds a note; drag its ends to resize; Delete removes the selection; arrows move it a step (Shift: an octave); Space plays; **Undo** / **Redo** on the bar. |
 | Escape | Closes a dialog. |
