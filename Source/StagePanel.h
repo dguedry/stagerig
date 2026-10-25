@@ -64,7 +64,7 @@ public:
             if (def.isAudio())
                 perf::LevelMeterPainter::paint (g, cell.removeFromBottom (12).withTrimmedTop (2), engine.getInputLevel ((int) i));
 
-            juce::String name = empty ? (def.isAudio() ? "straight through" : "(empty)") : (prog.name.isNotEmpty() ? prog.name : "(unnamed)");
+            juce::String name = prog.name.isNotEmpty() ? prog.name : empty ? (def.isAudio() ? "straight through" : "empty program") : "(unnamed)";
             if (loading) name += "  ...loading";
             g.setFont (juce::FontOptions ((float) juce::jmin (34, cell.getHeight() - 4), juce::Font::bold));
             g.setColour (empty ? juce::Colour (0xff6b7079) : (loading ? juce::Colour (0xffd8a657) : juce::Colours::white));

@@ -70,7 +70,7 @@ struct ProgramMap
             h << "<h2>" << escape (in.name);
             if (in.midiDeviceName.isNotEmpty())
                 h << " <span style=\"font-weight:400;font-size:9pt;color:#555\">"
-                  << escape (in.midiDeviceName) << (in.channel > 0 ? ", channel " + juce::String (in.channel) : juce::String (", omni")) << "</span>";
+                  << escape (in.midiDeviceName) << (in.channel > 0 ? ", channel " + juce::String (in.channel) : juce::String (", all channels")) << "</span>";
             h << "</h2>\n";
 
             /* Grouped, but never reordered: the numbers must stay in order because

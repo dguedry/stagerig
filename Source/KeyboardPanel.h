@@ -388,7 +388,7 @@ public:
         controls.removeFromTop (6);
 
         row = controls.removeFromTop (24);
-        ccLabel.setBounds (row.removeFromLeft (52)); row.removeFromLeft (4);
+        ccLabel.setBounds (row.removeFromLeft (70)); row.removeFromLeft (4);
         ccNumber.setBounds (row.removeFromLeft (104)); row.removeFromLeft (8);
         ccValue.setBounds (row);
     }
@@ -480,7 +480,7 @@ private:
     juce::MidiKeyboardState state;
     juce::MidiKeyboardComponent keyboard;
     juce::Label targetLabel, hint;
-    juce::Label velocityLabel { {}, "Velocity" }, modLabel { {}, "Mod" }, bendLabel { {}, "Bend" }, ccLabel { {}, "CC" };
+    juce::Label velocityLabel { {}, "Velocity" }, modLabel { {}, "Mod" }, bendLabel { {}, "Bend" }, ccLabel { {}, "Controller" };
     juce::Slider velocity, modWheel, pitchBend, ccNumber, ccValue;
 
     WheelLookAndFeel bendLook { true }, modLook { false };

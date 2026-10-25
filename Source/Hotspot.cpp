@@ -164,7 +164,7 @@ String Hotspot::start (const Config& c)
                             "ifname", c.interfaceName, "con-name", kProfileName,
                             "autoconnect", "no", "ssid", c.networkName }, 20000, &code);
     if (code != 0)
-        return "Could not create the hotspot: " + add.trim();
+        return "Could not create the wifi network: " + add.trim();
 
     // band bg = 2.4GHz: shorter range than 5GHz in theory, but it goes through
     // people and walls, every tablet has it, and no country locks channel 6
@@ -180,7 +180,7 @@ String Hotspot::start (const Config& c)
                             "wifi-sec.group", "ccmp",
                             "wifi-sec.psk", c.password }, 20000, &code);
     if (code != 0)
-        return "Could not configure the hotspot: " + mod.trim();
+        return "Could not configure the wifi network: " + mod.trim();
 
     const auto up = run ({ "nmcli", "connection", "up", kProfileName }, 45000, &code);
     if (code != 0)
@@ -189,7 +189,7 @@ String Hotspot::start (const Config& c)
         auto why = up.trim();
         if (why.containsIgnoreCase ("not authorized") || why.containsIgnoreCase ("not permitted"))
             why = "this system requires an administrator to create a network.";
-        return "The hotspot did not start: " + why;
+        return "The wifi network did not start: " + why;
     }
     return {};
 }
@@ -200,7 +200,7 @@ String Hotspot::stop()
     int code = 0;
     const auto out = run ({ "nmcli", "connection", "down", kProfileName }, 30000, &code);
     if (code != 0 && ! out.containsIgnoreCase ("not an active"))
-        return "Could not stop the hotspot: " + out.trim();
+        return "Could not stop the wifi network: " + out.trim();
     return {};
 }
 

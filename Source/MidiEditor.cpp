@@ -37,7 +37,7 @@ bool MidiDoc::load (const File& f, String& error)
     const int tf = mf.getTimeFormat();
     if (tf <= 0)
     {
-        error = "this file counts time in SMPTE frames, which the editor cannot edit";
+        error = "this file counts time in SMPTE frames, which this editor cannot handle. Re-export it with a tempo-based (ticks) time format.";
         return false;
     }
     ticksPerQuarter = tf;
@@ -328,6 +328,8 @@ public:
         addAndMakeVisible (lanesView);
         addAndMakeVisible (roll);
         status.setColour (Label::textColourId, textDim);
+        status.setText ("Double-click: add a note (on a note: delete it). Drag a note's right edge to stretch. Drag in the velocity lane to change loudness. "
+                        "Arrows move; Shift+arrows by an octave; Ctrl+wheel zooms; Space plays.", dontSendNotification);
         lanesView.setViewedComponent (&lanes, false);
         lanesView.setScrollBarsShown (true, false);
 
@@ -339,8 +341,8 @@ public:
         zoomOut.onClick = [this] { roll.zoomBy (1.0f / 1.5f); };
         addPart.onClick = [this] { showAddPart(); };
         addPart.setTooltip ("Start a new part on a channel the file does not use yet");
-        playBtn.setTooltip ("Play the song's track from the cue (click the ruler to move it). What plays is the saved file: Save to hear your edits.");
-        saveBtn.setTooltip ("Write the notes back to the file. The first version is kept beside it as .orig.mid");
+        playBtn.setTooltip ("Play the song's backing track from the green marker (click the ruler to move it). You hear the saved file: press Save to hear your edits.");
+        saveBtn.setTooltip ("Write the notes back to the file in the setup's folder. The original is kept beside it as .orig.mid");
 
         const int q = doc.ticksPerQuarter;
         snapBox.addItem ("Snap: bar", 1);
@@ -356,6 +358,7 @@ public:
             roll.setSnap (v[jlimit (0, 6, snapBox.getSelectedId() - 1)]);
         };
         snapBox.setSelectedId (4);
+        snapBox.setTooltip ("Notes you add or drag land on this grid. Hold Alt to drag freely.");
 
         for (int ch = 1; ch <= 16; ++ch)
             if (doc.channelUsed (ch)) addLane (ch);
@@ -494,7 +497,7 @@ private:
             addLane (ch);
             resized();
             selectChannel (ch);
-            status.setText ("Double-click in the roll to add notes to channel " + String (ch) + "; give the part an instrument in the song's Backing track window", dontSendNotification);
+            status.setText ("Double-click in the grid to add notes to channel " + String (ch) + ". Then pick what plays this part in the song's Backing track window.", dontSendNotification);
         });
     }
 

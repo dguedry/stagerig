@@ -148,6 +148,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .sections button.on { background:var(--accent); color:#06121f; }
   .sections button.queued { border-color:var(--accent); }
   .sections button.go { background:#8a5a12; }
+  .transport .tt small { display:block; font-size:10px; letter-spacing:.08em; font-weight:700; color:var(--dim); opacity:.8; }
   .transport .tt { flex:1; min-width:0; font-size:15px; color:var(--dim); font-variant-numeric:tabular-nums;
                    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .setpick { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
@@ -212,17 +213,17 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 <header>
   <h1>STAGERIG</h1>
   <div class="hdr">
-    <span class="bpm" id="bpm">--<i>bpm</i></span>
-    <button id="tap">TAP</button>
+    <span class="bpm" id="bpm">…<i>bpm</i></span>
+    <button id="tap">TAP TEMPO</button>
     <button id="panic">PANIC</button>
   </div>
 </header>
 <div id="err"></div>
 <div id="gate">
   <form id="codeform">
-    <p>Enter the code shown in StageRig</p>
-    <input id="code" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="6" placeholder="ABC123">
-    <button type="submit">Connect</button>
+    <p>Enter the 6-character code from the <b>Tablet control</b> window on the computer</p>
+    <input id="code" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="6" placeholder="6 characters">
+    <button type="submit">Connect to StageRig</button>
     <p class="hint" id="gatemsg"></p>
   </form>
 </div>
@@ -262,7 +263,9 @@ let rev = -1;
 function askForCode(message) {
   document.getElementById("gate").style.display = "flex";
   document.getElementById("gatemsg").textContent = message || "";
-  document.getElementById("inputs").style.display = "none";
+  for (const id of ["inputs", "setview", "nowview"]) document.getElementById(id).style.display = "none";
+  document.querySelector(".tabs").style.display = "none";
+  document.querySelector(".hdr").style.display = "none";
   const f = document.getElementById("codeform");
   f.onsubmit = (e) => {
     e.preventDefault();
@@ -270,19 +273,34 @@ function askForCode(message) {
     if (!v) return;
     token = v; localStorage.setItem("t", v);
     document.getElementById("gate").style.display = "none";
-    document.getElementById("inputs").style.display = "";
+    document.querySelector(".tabs").style.display = "";
+    document.querySelector(".hdr").style.display = "";
+    syncTabs();
     refresh(true);
   };
   document.getElementById("code").focus();
 }
 
 async function api(path, opts) {
-  const r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token), opts);
+  let r;
+  try { r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token), opts); }
+  catch (e) { throw new Error("Can't reach StageRig on the computer. Is this tablet on the same wifi?"); }
   if (r.status === 403) { localStorage.removeItem("t"); const e = new Error("gate"); e.gate = true; throw e; }
-  if (!r.ok) throw new Error("HTTP " + r.status);
+  if (!r.ok) {
+    let text = "";
+    try { const j = await r.json(); text = j && j.error ? j.error : ""; } catch (e) {}
+    throw new Error(text || ("StageRig answered with an error (" + r.status + "). Try again."));
+  }
   return r.json();
 }
-function show(msg) { const e = document.getElementById("err"); e.textContent = msg; e.style.display = msg ? "block" : "none"; }
+/* A message stays long enough to be read -- an error six seconds, a
+   confirmation two -- rather than being wiped by the next poll. */
+let showTimer = null;
+function show(msg, ms) {
+  const e = document.getElementById("err"); e.textContent = msg; e.style.display = msg ? "block" : "none";
+  if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+  if (msg) showTimer = setTimeout(() => { e.style.display = "none"; showTimer = null; }, ms || 6000);
+}
 
 let lastState = null;
 const filters = {};          // input index -> chosen group, "" for all
@@ -297,10 +315,7 @@ let tab = localStorage.getItem("tab") || "songs";
 let songFilter = "";          // what is typed in the song search, if anything
 
 function syncTabs() {
-  const hasSongs = !!(lastState && lastState.sets && lastState.sets.length);
-  /* Nothing to show and no way to make one from here: a setup with no songs
-     goes straight to the programs rather than an empty list. */
-  const t = (tab === "songs" && !hasSongs) ? "programs" : tab;
+  const t = tab;
   document.getElementById("tabSongs").className = t === "songs" ? "on" : "";
   document.getElementById("tabNow").className   = t === "now" ? "on" : "";
   document.getElementById("tabProgs").className = t === "programs" ? "on" : "";
@@ -323,11 +338,14 @@ function showTransport(t) {
   transportUi.button.textContent = t.running ? "Stop" : "Play";
   transportUi.button.classList.toggle("running", !!t.running);
   const sec = (t.sections || [])[t.section];
-  transportUi.text.textContent = !t.ready ? (t.name + "   loading " + Math.round((t.loading || 0) * 100) + "%")
-    : t.countIn ? (t.name + "   counting in…")
-    : ((t.sections || []).length > 1 && sec ? sec.name + (t.vamping ? " (vamp)" : "") : t.name) + "   "
+  const status = !t.ready ? ("Loading " + Math.round((t.loading || 0) * 100) + "%")
+    : t.countIn ? "Counting in…"
+    : ((t.sections || []).length > 1 && sec ? sec.name + (t.vamping ? " — repeating (vamp)" : "") : t.name) + " · "
       + mmss(t.pos) + " / " + mmss(t.len)
-      + (t.queued >= 0 && t.sections[t.queued] ? "   › " + t.sections[t.queued].name : "");
+      + (t.queued >= 0 && t.sections[t.queued] ? " · next: " + t.sections[t.queued].name : "");
+  transportUi.text.innerHTML = '<small></small><span></span>';
+  transportUi.text.querySelector("small").textContent = "BACKING TRACK";
+  transportUi.text.querySelector("span").textContent = status;
 
   /* Section buttons, redrawn only when something about them changes: a tap
      queues that section; during a vamp, "Go on" lets it play through. */
@@ -341,15 +359,16 @@ function showTransport(t) {
   transportUi.key = key;
   const host = transportUi.sections;
   host.innerHTML = "";
+  if (transportUi.caption) transportUi.caption.style.display = list.length < 2 ? "none" : "";
   if (list.length < 2) return;
   if (t.vamping) {
-    const go = document.createElement("button"); go.className = "go"; go.textContent = "Go on";
+    const go = document.createElement("button"); go.className = "go"; go.textContent = "End vamp ▸";
     go.onclick = async () => { try { showTransport(await api("/api/transport?do=next", { method: "POST" })); } catch (e) { if (!e.gate) show(e.message); } };
     host.appendChild(go);
   }
   list.forEach((x, i) => {
     const b = document.createElement("button");
-    b.textContent = x.name + (x.vamp ? " ↻" : "");
+    b.textContent = x.name + (x.vamp ? " ↻ vamp" : "") + (i === t.queued && i !== t.section ? " · next" : "");
     if (i === t.section) b.className = "on";
     else if (i === t.queued) b.className = "queued";
     b.onclick = async () => {
@@ -366,7 +385,7 @@ function showParts() {
   if (!transportUi || !transportUi.parts.length) return;
   const back = document.createElement("div"); back.className = "sheet";
   const card = document.createElement("div"); card.className = "card";
-  const t = document.createElement("div"); t.className = "sheet-title"; t.textContent = "Parts of the backing track";
+  const t = document.createElement("div"); t.className = "sheet-title"; t.textContent = "Backing track parts — mute one to play it yourself";
   card.appendChild(t);
   const rows = document.createElement("div"); rows.style.display = "flex"; rows.style.flexDirection = "column"; rows.style.gap = "8px";
   card.appendChild(rows);
@@ -384,14 +403,14 @@ function showParts() {
       const who = document.createElement("div"); who.className = "who";
       who.innerHTML = "<b></b><span></span>";
       who.querySelector("b").textContent = p.name;
-      who.querySelector("span").textContent = p.plays;
+      who.querySelector("span").textContent = "Plays on: " + (p.plays && p.plays !== "Nothing" ? p.plays : "nothing yet (choose it in the song's Backing track window on the computer)");
       row.appendChild(who);
       if (p.slot >= 0) {
         const g = document.createElement("button"); g.textContent = "GUI";
         g.onclick = () => openPluginWindow(p.input, p.slot, -1, p.name, g, "GUI", -1);
         row.appendChild(g);
       }
-      const m = document.createElement("button"); m.textContent = p.muted ? "Muted" : "Mute"; if (p.muted) m.className = "on";
+      const m = document.createElement("button"); m.textContent = p.muted ? "Unmute" : "Mute"; if (p.muted) m.className = "on";
       m.onclick = async () => {
         try { showTransport(await api("/api/part?ch=" + p.ch + "&muted=" + (p.muted ? 0 : 1), { method: "POST" })); }
         catch (e) { if (!e.gate) show(e.message); }
@@ -422,7 +441,7 @@ function renderSets(s) {
   const sets = s.sets || [], songs = s.songs || [];
   if (!sets.length) {
     const e = document.createElement("div"); e.className = "empty";
-    e.textContent = "No sets yet. Build one in StageRig: group your programs into songs, then order the songs into a set.";
+    e.textContent = "No set list yet. On the computer: capture each song (its programs and tempo) with the + button under SONGS, then put the songs in order in a set list. They appear here.";
     host.appendChild(e);
     return;
   }
@@ -433,18 +452,21 @@ function renderSets(s) {
     const bar = document.createElement("div"); bar.className = "transport";
     const b = document.createElement("button"); b.textContent = "Play";
     const t = document.createElement("div"); t.className = "tt"; t.textContent = "Backing track";
+    const cap = document.createElement("div"); cap.className = "empty"; cap.style.padding = "0 4px 6px"; cap.style.fontSize = "12px";
+    cap.textContent = "Tap a section to go there when this one ends. ↻ repeats until you end the vamp.";
     b.onclick = async () => {
       try { showTransport(await api("/api/transport?do=toggle", { method: "POST" })); }
       catch (e) { if (!e.gate) show(e.message); }
     };
-    const parts = document.createElement("button"); parts.className = "parts"; parts.textContent = "Parts";
+    const parts = document.createElement("button"); parts.className = "parts"; parts.textContent = "Parts of the track";
     parts.style.display = "none";
     parts.onclick = showParts;
     bar.appendChild(b); bar.appendChild(t); bar.appendChild(parts);
     wrap.appendChild(bar);
     const secs = document.createElement("div"); secs.className = "sections";
     wrap.appendChild(secs);
-    transportUi = { button: b, text: t, sections: secs, partsBtn: parts, parts: [], key: "" };
+    wrap.appendChild(cap);
+    transportUi = { button: b, text: t, sections: secs, partsBtn: parts, parts: [], key: "", caption: cap };
   } else {
     transportUi = null;
   }
@@ -477,16 +499,16 @@ function renderSets(s) {
       || (x.input || "").toLowerCase().includes(q));
   };
 
-  // Which set, when there is more than one. One set needs no chooser.
-  if (sets.length > 1) {
+  // Which set list, when there is more than one -- or when none is chosen yet.
+  if (sets.length > 1 || !sets[s.currentSet]) {
     const pick = document.createElement("div"); pick.className = "setpick";
     sets.forEach((st, i) => {
       const b = document.createElement("button");
-      b.textContent = st.name || ("Set " + (i + 1));
+      b.textContent = st.name || ("Set list " + (i + 1));
       if (i === s.currentSet) b.className = "on";
       b.onclick = async () => {
         try { await api("/api/setlist?index=" + i, { method: "POST" }); await refresh(true); }
-        catch (e) { show(e.message); }
+        catch (e) { if (!e.gate) show(e.message); }
       };
       pick.appendChild(b);
     });
@@ -508,15 +530,15 @@ function renderSets(s) {
 
     const body = document.createElement("div"); body.className = "songbody";
     const t = document.createElement("div"); t.className = "t";
-    t.textContent = sg.name || "(unnamed)";
+    t.textContent = sg.name || "Untitled";
     body.appendChild(t);
 
     /* What each keyboard plays: on the song being played, and on any song not
        in the set -- there the programs are the only way to tell two songs with
        the same name apart, which a list of captures tends to produce. */
-    if ((playing || pos < 0) && sg.parts && sg.parts.length) {
+    if (sg.parts && sg.parts.length) {
       const pl = document.createElement("div"); pl.className = "parts";
-      pl.textContent = sg.parts.map(x => x.input + " " + String(x.program).padStart(3, "0")
+      pl.textContent = sg.parts.map(x => x.input + ": " + String(x.program).padStart(3, "0")
                                       + (x.name ? " " + x.name : "")).join("  \u00b7  ");
       body.appendChild(pl);
     }
@@ -550,7 +572,7 @@ function renderSets(s) {
          it, just load the song. */
       const path = pos >= 0 ? "/api/setsong?pos=" + pos : "/api/song?index=" + songIndex;
       try { await api(path, { method: "POST" }); await refresh(true); }
-      catch (e) { show(e.message); }
+      catch (e) { if (!e.gate) show(e.message); }
     };
     return b;
   };
@@ -558,7 +580,7 @@ function renderSets(s) {
   const cur = sets[s.currentSet];
   if (!cur) {
     const e = document.createElement("div"); e.className = "empty";
-    e.textContent = "Pick a set to play.";
+    e.textContent = "Choose a set list above.";
     wrap.appendChild(e); host.appendChild(wrap); return;
   }
 
@@ -572,7 +594,7 @@ function renderSets(s) {
   });
   if (!shownInSet && songFilter.trim()) {
     const e = document.createElement("div"); e.className = "empty";
-    e.textContent = "Nothing in this set matches.";
+    e.textContent = "No song in this set list matches “" + songFilter.trim() + "”.";
     wrap.appendChild(e);
   }
 
@@ -583,13 +605,13 @@ function renderSets(s) {
     b.textContent = label; b.disabled = disabled;
     b.onclick = async () => {
       try { await api("/api/step?dir=" + dir, { method: "POST" }); await refresh(true); }
-      catch (e) { show(e.message); }
+      catch (e) { if (!e.gate) show(e.message); }
     };
     return b;
   };
   const last = cur.songs.length - 1;
-  step.appendChild(mk("← PREV", -1, s.currentSong <= 0));
-  step.appendChild(mk("NEXT →", 1, s.currentSong >= last));
+  step.appendChild(mk("← PREV SONG", -1, s.currentSong <= 0));
+  step.appendChild(mk("NEXT SONG →", 1, s.currentSong >= last));
   wrap.appendChild(step);
 
   /* Everything not in this set, underneath. A song you have captured but not
@@ -600,7 +622,7 @@ function renderSets(s) {
                       .filter(([sg, i]) => !inSet.has(i) && matches(sg));
   if (others.length) {
     const h = document.createElement("div"); h.className = "otherhead";
-    h.textContent = "NOT IN THIS SET";
+    h.textContent = "SONGS NOT IN THIS SET LIST";
     wrap.appendChild(h);
     others.forEach(([sg, i]) => wrap.appendChild(songRow(sg, i, -1)));
   }
@@ -608,8 +630,8 @@ function renderSets(s) {
   const where = document.createElement("div"); where.className = "empty";
   where.style.padding = "12px 4px 0";
   where.textContent = s.currentSong >= 0
-      ? (s.currentSong + 1) + " of " + cur.songs.length
-      : cur.songs.length + " songs -- tap one to start";
+      ? "Song " + (s.currentSong + 1) + " of " + cur.songs.length
+      : cur.songs.length + (cur.songs.length === 1 ? " song" : " songs") + " in this set list — tap one to start";
   wrap.appendChild(where);
 
   host.appendChild(wrap);
@@ -652,6 +674,16 @@ function render(s) {
   if (s.tempo) showTempo(s.tempo);
   const root = document.getElementById("inputs");
   root.innerHTML = "";
+  {
+    const cap = document.createElement("div"); cap.className = "empty"; cap.style.padding = "10px 16px 0"; cap.style.fontSize = "13px";
+    cap.textContent = "Each keyboard's current program is highlighted. Tap another to switch to it now; the number is its program change. GUI opens the plugin's own window on this tablet.";
+    root.appendChild(cap);
+  }
+  if (!s.inputs.some(inp => !inp.track)) {
+    const e = document.createElement("div"); e.className = "empty";
+    e.textContent = "No keyboards or audio inputs are set up on the computer yet.";
+    root.appendChild(e);
+  }
   s.inputs.forEach((inp, i) => {
     if (inp.track) return;
     const wrap = document.createElement("div"); wrap.className = "input";
@@ -660,7 +692,7 @@ function render(s) {
     now.querySelector(".name").textContent = inp.name.toUpperCase();
     now.querySelector(".num").textContent = String(inp.current).padStart(3, "0");
     /* An audio input with nothing in the program is not empty: the signal goes straight through. */
-    now.querySelector(".title").textContent = inp.currentName || (inp.audio ? "straight through" : "(empty)");
+    now.querySelector(".title").textContent = inp.currentName || (inp.audio ? "Audio passes straight through (no effects)" : "Empty program — nothing loaded");
 
     /* Straight to the plugin's interface from the input's own header. This is
        the thing you reach for mid-set -- the slot rows below are further down
@@ -683,7 +715,7 @@ function render(s) {
     guiButtons[i] = gui;
     syncGuiButton(i);
 
-    if (inp.loading) { const l = document.createElement("div"); l.className = "loading"; l.textContent = "loading…"; now.appendChild(l); }
+    if (inp.loading) { const l = document.createElement("div"); l.className = "loading"; l.textContent = "Loading plugins…"; now.appendChild(l); }
     if (inp.audio) {
       const m = document.createElement("div"); m.className = "meter";
       m.innerHTML = '<div class="bars"><i><span></span></i><i><span></span></i></div><b></b>';
@@ -707,7 +739,7 @@ function render(s) {
       };
       mk("All", "");
       groups.forEach(gname => mk(gname, gname));
-      if (inp.programs.some(p => !p.group)) mk("Other", "\u0000other");
+      if (inp.programs.some(p => !p.group)) mk("Ungrouped", "\u0000other");
       wrap.appendChild(bar);
     }
 
@@ -720,7 +752,7 @@ function render(s) {
       b.className = "p" + (p.index === inp.current ? " on" : "");
       b.innerHTML = '<span class="n"></span><span class="t"></span>';
       b.querySelector(".n").textContent = String(p.index).padStart(3, "0");
-      b.querySelector(".t").textContent = p.name || "(unnamed)";
+      b.querySelector(".t").textContent = p.name || "Untitled";
       b.onclick = async () => {
         try { await api("/api/select?input=" + i + "&program=" + p.index, { method: "POST" }); await refresh(true); show(""); }
         catch (e) { show(e.message); }
@@ -760,7 +792,7 @@ function pickSlot(i, list, btn) {
   const back = document.createElement("div"); back.className = "sheet";
   const card = document.createElement("div"); card.className = "card";
   const t = document.createElement("div"); t.className = "sheet-title";
-  t.textContent = list.every(sl => sl.effect >= 0) ? "Which effect?" : "Which plugin?";
+  t.textContent = "Open which plugin's window?";
   card.appendChild(t);
 
   list.forEach(sl => {
@@ -848,15 +880,14 @@ async function refresh(force) {
     syncLevelPolling();
     syncTransportPolling();
     if (transportUi) pollTransport();
-    show("");
   } catch (e) {
-    if (e.gate) askForCode("That code was not accepted — check StageRig and try again.");
+    if (e.gate) askForCode("That code did not match the one in the Tablet control window on the computer. Try again.");
     else show(e.message);
   }
 }
 document.getElementById("panic").onclick = async () => {
-  try { await api("/api/panic", { method: "POST" }); show("All notes off sent"); setTimeout(() => show(""), 1500); }
-  catch (e) { show(e.message); }
+  try { await api("/api/panic", { method: "POST" }); show("PANIC sent: every note stopped.", 2000); }
+  catch (e) { if (!e.gate) show(e.message); }
 };
 if (token) refresh(true); else askForCode("");
 setInterval(() => { if (token) refresh(false); }, 1000);
@@ -914,23 +945,33 @@ function renderNow(d) {
 
   const top = document.createElement("div"); top.className = "nowtop";
   const tr = document.createElement("div"); tr.className = "tr";
-  const lbl = document.createElement("span"); lbl.textContent = "TRANSPOSE";
+  const lbl = document.createElement("span"); lbl.textContent = "TRANSPOSE (keyboards only)";
   const minus = document.createElement("button"); minus.textContent = "\u2212";
   const val = document.createElement("b");
   const plus = document.createElement("button"); plus.textContent = "+";
   let st = d.transpose || 0;
-  const showSt = () => { val.textContent = st === 0 ? "0 st" : (st > 0 ? "+" : "\u2212") + Math.abs(st) + " st"; };
+  const showSt = () => { val.textContent = st === 0 ? "0" : (st > 0 ? "+" : "\u2212") + Math.abs(st) + (Math.abs(st) === 1 ? " semitone" : " semitones"); };
   showSt();
   minus.onclick = () => { st = Math.max(-24, st - 1); showSt(); nowPost("/api/transpose?st=" + st); };
   plus.onclick  = () => { st = Math.min(24, st + 1);  showSt(); nowPost("/api/transpose?st=" + st); };
   tr.appendChild(lbl); tr.appendChild(minus); tr.appendChild(val); tr.appendChild(plus);
   top.appendChild(tr);
   const save = document.createElement("button"); save.className = "save";
-  save.textContent = d.song >= 0 ? "Save to \u201c" + d.songName + "\u201d" : "No song in play";
+  save.textContent = d.song >= 0 ? "Save this sound to \u201c" + d.songName + "\u201d" : "Save to song — start a song first";
   save.disabled = !(d.song >= 0);
-  save.onclick = async () => { await nowPost("/api/savesong"); save.textContent = "Saved"; setTimeout(() => { nowKey = ""; pollNow(); }, 800); };
+  save.onclick = async () => { await nowPost("/api/savesong"); save.textContent = "Saved to \u201c" + d.songName + "\u201d"; setTimeout(() => { nowKey = ""; pollNow(); }, 2000); };
   top.appendChild(save);
   root.appendChild(top);
+  {
+    const cap = document.createElement("div"); cap.className = "empty"; cap.style.padding = "8px 16px 0"; cap.style.fontSize = "13px";
+    cap.textContent = "ON/OFF and a level for each instrument; ON/OFF on an effect bypasses it. Changes are live and saved, as on the computer.";
+    root.appendChild(cap);
+  }
+  if (!d.inputs.length) {
+    const e = document.createElement("div"); e.className = "empty";
+    e.textContent = "No keyboards or audio inputs are set up on the computer yet.";
+    root.appendChild(e);
+  }
 
   d.inputs.forEach(inp => {
     const wrap = document.createElement("div"); wrap.className = "input";
@@ -938,8 +979,12 @@ function renderNow(d) {
     now.innerHTML = '<div class="name"></div><div class="prog"><span class="num"></span><span class="title"></span></div>';
     now.querySelector(".name").textContent = inp.name.toUpperCase();
     now.querySelector(".num").textContent = String(inp.program).padStart(3, "0");
-    now.querySelector(".title").textContent = inp.programName || (inp.audio ? "straight through" : "(empty)");
+    now.querySelector(".title").textContent = inp.programName || (inp.audio ? "Audio passes straight through (no effects)" : "Empty program — nothing loaded");
     wrap.appendChild(now);
+    if (!inp.instruments.length && !inp.effects.length) {
+      const e = document.createElement("div"); e.className = "empty"; e.style.padding = "6px 4px"; e.textContent = "Nothing to adjust in this program."; wrap.appendChild(e);
+    }
+    if (inp.instruments.length) { const h = document.createElement("div"); h.className = "nsec"; h.textContent = "INSTRUMENTS"; wrap.appendChild(h); }
     inp.instruments.forEach(ins => {
       const db = document.createElement("span"); db.className = "db"; db.textContent = dbText(ins.gainDb);
       const f = fader(ins.gainDb, db, v => nowPost("/api/slotgain?input=" + inp.index + "&slot=" + ins.slot + "&db=" + v));
@@ -964,7 +1009,7 @@ function renderNow(d) {
       const nm = document.createElement("div"); nm.className = "nm"; nm.textContent = o.name;
       row.appendChild(nm); row.appendChild(f); row.appendChild(db);
       wrap.appendChild(row);
-      o.effects.forEach(fx => wrap.appendChild(nowRow("fx", !fx.bypassed, o.name + " > " + fx.name,
+      o.effects.forEach(fx => wrap.appendChild(nowRow("fx", !fx.bypassed, fx.name,
         on => nowPost("/api/bypass?output=" + o.index + "&effect=" + fx.effect + "&on=" + (on ? 1 : 0)))));
     });
     root.appendChild(wrap);
@@ -1058,7 +1103,7 @@ static const char* kChartHtml = R"HTML(<!DOCTYPE html>
 </style></head>
 <body>
 <div id="bar">
-  <a id="back" href="/">&#8592; Set list</a>
+  <a id="back" href="/">&#8592; StageRig</a>
   <div id="title"></div>
   <button id="follow" class="on" title="Move to each song's chart as the set moves">Follow</button>
 </div>
@@ -1071,7 +1116,7 @@ if (token) localStorage.setItem("t", token);
 document.getElementById("back").href = "/?t=" + encodeURIComponent(token);
 async function api(path) {
   const r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token));
-  if (!r.ok) throw new Error("StageRig answered " + r.status);
+  if (!r.ok) throw new Error("Can't reach StageRig on the computer");
   return r.json();
 }
 const withToken = (u) => u + "?t=" + encodeURIComponent(token);
@@ -1129,10 +1174,10 @@ async function showChart() {
   const s = state; if (!s) return;
   const sg = (s.songs || [])[song];
   const page = document.getElementById("page"), tabs = document.getElementById("tabs"), nav = document.getElementById("nav");
-  document.getElementById("title").textContent = sg ? (sg.name || "(unnamed)") : "";
+  document.getElementById("title").textContent = sg ? (sg.name || "Untitled") : "";
   if (!sg || !sg.charts || !sg.charts.length) {
     tabs.innerHTML = ""; nav.style.display = "none";
-    page.innerHTML = '<div id="empty">' + (sg ? "No chart for this song" : "No song") + "</div>";
+    page.innerHTML = '<div id="empty">' + (sg ? "No chart for this song" : "No song is playing") + "</div>";
     shownKey = ""; return;
   }
   if (chart < 0 || chart >= sg.charts.length) chart = 0;
@@ -1266,7 +1311,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   #bar button.on { background:#5aa9ff; color:#06121f; border-color:#5aa9ff; }
 </style>
 </head><body>
-<div id="msg">Connecting...</div>
+<div id="msg">Connecting to the plugin window on the computer…</div>
 <script>
   /* Before anything else: is this window still being mirrored? The module
      below imports noVNC from under the mirror, and on a window that has
@@ -1275,11 +1320,11 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
      has (the window was closed on the computer, or its program swapped out). */
   fetch(location.pathname.replace(/plugin\.html$/, 'vnc.html'), { cache: 'no-store' })
     .then(r => { if (r.status === 404) { const m = document.getElementById('msg'); m.style.display = 'block';
-                 m.textContent = 'The plugin window was closed. Press GUI on the main page to open it again.'; } })
+                 m.textContent = 'The plugin window was closed. Go back to the StageRig tab and press GUI again.'; } })
     .catch(() => {});
 </script>
 <div id="screen"></div>
-<div id="bar"><button id="move">Move</button><button id="zoomout">-</button><button id="zoomin">+</button><button id="full">Full</button><button id="fit">Fit</button></div>
+<div id="bar"><button id="move">Move view</button><button id="zoomout">-</button><button id="zoomin">+</button><button id="full">Full screen</button><button id="fit">Fit to screen</button></div>
 <script type="module">
   import RFB from './core/rfb.js';
 
@@ -1307,7 +1352,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 
   function syncFit() {
     fit.className = fitting ? 'on' : '';
-    fit.textContent = fitting ? 'Actual size' : 'Fit';
+    fit.textContent = fitting ? 'Actual size' : 'Fit to screen';
   }
 
   const canvasOf = () => screen.querySelector('canvas');
@@ -1359,7 +1404,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   function syncMode() {
     document.body.classList.toggle('playing', playing);
     move.className = playing ? '' : 'on';
-    move.textContent = playing ? 'Move' : 'Moving';
+    move.textContent = playing ? 'Move view' : 'Done moving';
     move.title = playing ? 'Drag to pan the plugin instead of operating it'
                          : 'Back to operating the plugin';
     try { rfb.dragViewport = !playing; } catch (e) {}
@@ -1380,7 +1425,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
     document.addEventListener('fullscreenchange', () => {
       const on = !!document.fullscreenElement;
       full.className = on ? 'on' : '';
-      full.textContent = on ? 'Exit' : 'Full';
+      full.textContent = on ? 'Exit full screen' : 'Full screen';
     });
   } else {
     full.style.display = 'none';
@@ -1412,7 +1457,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
       const probe = await fetch(location.pathname.replace(/plugin\.html$/, 'vnc.html'), { cache: 'no-store' });
       if (probe.status === 404) {
         msg.style.display = 'block';
-        msg.textContent = 'The plugin window was closed. Press GUI on the main page to open it again.';
+        msg.textContent = 'The plugin window was closed. Go back to the StageRig tab and press GUI again.';
         return;
       }
     } catch (e) { /* no answer at all: let the reconnect below find out */ }
@@ -1438,12 +1483,12 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
       msg.style.display = 'block';
       if (retries < 30) {
         retries++;
-        msg.textContent = 'Reconnecting to the plugin...';
+        msg.textContent = 'Connection dropped, reconnecting…';
         setTimeout(connect, Math.min(5000, 1000 * retries));
       } else {
         msg.textContent = (e.detail && e.detail.clean)
-          ? 'The plugin window was closed. Press GUI on the main page to open it again.'
-          : 'Lost the connection to the plugin. Press GUI on the main page to try again.';
+          ? 'The plugin window was closed. Go back to the StageRig tab and press GUI again.'
+          : 'Lost the connection to the plugin window. Go back to the StageRig tab and press GUI again.';
       }
     });
   }
@@ -1979,13 +2024,13 @@ String RemoteServer::nowJson() const
             for (int e = 0; e < (int) sd.midiEffects.size(); ++e)
             {
                 const auto& md = sd.midiEffects[(size_t) e];
-                effects.add (fxObject (ProgramDef::midiChainOf (s), e, sd.displayName() + " > " + (md.isSend() ? md.portName + " (MIDI)" : md.plugin.name), md.bypassed));
+                effects.add (fxObject (ProgramDef::midiChainOf (s), e, (md.isSend() ? "Send to " + md.portName : md.plugin.name) + " \xe2\x80\x94 MIDI chain of " + sd.displayName(), md.bypassed));
             }
             for (int e = 0; e < (int) sd.effects.size(); ++e)
-                effects.add (fxObject (s, e, sd.displayName() + " > " + sd.effects[(size_t) e].plugin.name, sd.effects[(size_t) e].bypassed));
+                effects.add (fxObject (s, e, sd.effects[(size_t) e].plugin.name + " \xe2\x80\x94 effect on " + sd.displayName(), sd.effects[(size_t) e].bypassed));
         }
         for (int e = 0; e < (int) def.effects.size(); ++e)
-            effects.add (fxObject (-1, e, (in.isAudio() ? String() : String ("Program > ")) + def.effects[(size_t) e].plugin.name, def.effects[(size_t) e].bypassed));
+            effects.add (fxObject (-1, e, def.effects[(size_t) e].plugin.name + (in.isAudio() ? " \xe2\x80\x94 effect on this input" : " \xe2\x80\x94 effect on the whole program"), def.effects[(size_t) e].bypassed));
         o->setProperty ("instruments", instruments);
         o->setProperty ("effects", effects);
         inputs.add (var (o.get()));
@@ -2002,7 +2047,7 @@ String RemoteServer::nowJson() const
         o->setProperty ("gainDb", od.gainDb);
         Array<var> effects;
         for (int e = 0; e < (int) od.chain.effects.size(); ++e)
-            effects.add (fxObject (-1, e, od.chain.effects[(size_t) e].plugin.name, od.chain.effects[(size_t) e].bypassed));
+            effects.add (fxObject (-1, e, od.chain.effects[(size_t) e].plugin.name + " \xe2\x80\x94 effect on output " + od.name, od.chain.effects[(size_t) e].bypassed));
         o->setProperty ("effects", effects);
         outputs.add (var (o.get()));
     }
@@ -2032,7 +2077,7 @@ String RemoteServer::slotsJson (int inputIndex) const
                 DynamicObject::Ptr so (new DynamicObject());
                 so->setProperty ("slot", -1);
                 so->setProperty ("effect", e);
-                so->setProperty ("name", "FX" + String (e + 1) + ": " + fx.plugin.name);
+                so->setProperty ("name", fx.plugin.name + " \xe2\x80\x94 effect on this input");
                 so->setProperty ("enabled", ! fx.bypassed);
                 out.add (var (so.get()));
             }
@@ -2057,18 +2102,18 @@ String RemoteServer::slotsJson (int inputIndex) const
                 // In the slot's signal order: its MIDI processors (a send has no window), the sound, its effects.
                 for (int e = 0; e < (int) slot.midiEffects.size(); ++e)
                     if (const auto& md = slot.midiEffects[(size_t) e]; ! md.isSend() && md.plugin.name.isNotEmpty())
-                        add (ProgramDef::midiChainOf (sIdx), e, String (sIdx + 1) + " > MIDI" + String (e + 1) + ": " + md.plugin.name, ! md.bypassed);
+                        add (ProgramDef::midiChainOf (sIdx), e, md.plugin.name + " \xe2\x80\x94 MIDI chain of " + slot.displayName(), ! md.bypassed);
                 // An external instrument has no window of its own; its effects still do.
                 if (slot.plugin.name.isNotEmpty() && slot.isPlugin())
-                    add (sIdx, -1, String (sIdx + 1) + ": " + slot.plugin.name, slot.enabled);
+                    add (sIdx, -1, slot.plugin.name + " (instrument " + String (sIdx + 1) + ")", slot.enabled);
                 for (int e = 0; e < (int) slot.effects.size(); ++e)
                     if (slot.effects[(size_t) e].plugin.name.isNotEmpty())
-                        add (sIdx, e, String (sIdx + 1) + " > FX" + String (e + 1) + ": " + slot.effects[(size_t) e].plugin.name,
+                        add (sIdx, e, slot.effects[(size_t) e].plugin.name + " \xe2\x80\x94 effect on " + slot.displayName(),
                              ! slot.effects[(size_t) e].bypassed);
             }
             for (int e = 0; e < (int) def.effects.size(); ++e)
                 if (def.effects[(size_t) e].plugin.name.isNotEmpty())
-                    add (-1, e, "Program FX" + String (e + 1) + ": " + def.effects[(size_t) e].plugin.name, ! def.effects[(size_t) e].bypassed);
+                    add (-1, e, def.effects[(size_t) e].plugin.name + " \xe2\x80\x94 effect on the whole program", ! def.effects[(size_t) e].bypassed);
         }
         // And the master chain of the output this input lands on.
         if (in.output >= 0 && in.output < (int) setup.outputs.size())
@@ -2081,7 +2126,7 @@ String RemoteServer::slotsJson (int inputIndex) const
                     so->setProperty ("slot", -1);
                     so->setProperty ("effect", e);
                     so->setProperty ("bus", in.output);
-                    so->setProperty ("name", od.name + " out FX" + String (e + 1) + ": " + od.chain.effects[(size_t) e].plugin.name);
+                    so->setProperty ("name", od.chain.effects[(size_t) e].plugin.name + " \xe2\x80\x94 effect on output " + od.name);
                     so->setProperty ("enabled", ! od.chain.effects[(size_t) e].bypassed);
                     out.add (var (so.get()));
                 }
@@ -2217,7 +2262,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     if (! authorised (path))
     {
         // The page itself is harmless without a token; the API is not.
-        if (path.startsWith ("/api/")) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (path.startsWith ("/api/")) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
     }
 
     /* A plugin window's stream, relayed so it uses this port rather than one of
@@ -2245,7 +2290,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
 
         if (! known)
         {
-            sendResponse (sock, "404 Not Found", "text/plain", "No plugin window is being shown.");
+            sendResponse (sock, "404 Not Found", "text/plain", "This plugin window is no longer being shown. Go back to the StageRig tab and press GUI again.");
             return;
         }
 
@@ -2271,7 +2316,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     
     if (path.startsWith ("/api/health"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         String body;
         if (produceOnMessageThread ([this] { return healthJson(); }, body, 2000))
             sendResponse (sock, "200 OK", "application/json", body);
@@ -2282,7 +2327,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
 
     if (path.startsWith ("/api/levels"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         String body;
         if (produceOnMessageThread ([this] { return levelsJson(); }, body, 500))
             sendResponse (sock, "200 OK", "application/json", body);
@@ -2293,7 +2338,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
 
     if (path.startsWith ("/api/state"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         String body;
         if (produceOnMessageThread ([this] { return stateJson(); }, body, 2000))
             sendResponse (sock, "200 OK", "application/json", body);
@@ -2303,7 +2348,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/select"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
         const int prog  = path.fromFirstOccurrenceOf ("program=", false, false).getIntValue();
         // the engine is not thread-safe for this: do it on the message thread
@@ -2315,7 +2360,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
        redraws on its next poll rather than showing a stale set list. */
     if (path.startsWith ("/api/song"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         const int song = path.fromFirstOccurrenceOf ("index=", false, false).getIntValue();
         MessageManager::callAsync ([this, song] { engine.selectSong (song); });
         ++revision;
@@ -2324,7 +2369,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/transport"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         // POST ...?do=toggle|start|stop changes it; any request answers with where it is.
         const auto what = path.fromFirstOccurrenceOf ("do=", false, false).upToFirstOccurrenceOf ("&", false, false);
         String body;
@@ -2347,7 +2392,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     if (path.startsWith ("/api/part"))
     {
         // POST ...?ch=N&muted=0|1 mutes a part of the armed song's MIDI files; answers with the transport.
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         const int ch = path.fromFirstOccurrenceOf ("ch=", false, false).getIntValue();
         const bool muted = path.fromFirstOccurrenceOf ("muted=", false, false).getIntValue() != 0;
         String body;
@@ -2367,7 +2412,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
 
     if (path.startsWith ("/api/setlist"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         const int set = path.fromFirstOccurrenceOf ("index=", false, false).getIntValue();
         MessageManager::callAsync ([this, set] { engine.selectSet (set); });
         ++revision;
@@ -2376,7 +2421,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/setsong"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         const int pos = path.fromFirstOccurrenceOf ("pos=", false, false).getIntValue();
         MessageManager::callAsync ([this, pos] { engine.selectSongInSet (pos); });
         ++revision;
@@ -2385,7 +2430,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/step"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         const bool back = path.contains ("dir=-1");
         MessageManager::callAsync ([this, back] { if (back) engine.previousSong(); else engine.nextSong(); });
         ++revision;
@@ -2394,7 +2439,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/now"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         String body;
         if (produceOnMessageThread ([this] { return nowJson(); }, body, 2000))
             sendResponse (sock, "200 OK", "application/json", body);
@@ -2417,7 +2462,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         auto post = [&] (const char* route, std::function<void()> change)
         {
             if (! path.startsWith (route)) return false;
-            if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return true; }
+            if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return true; }
             MessageManager::callAsync (std::move (change));
             ++revision;
             sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
@@ -2437,7 +2482,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/slots"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
         String body;
         if (produceOnMessageThread ([this, input] { return slotsJson (input); }, body, 2000))
@@ -2448,7 +2493,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/tap"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
 
         /* Tapped on the tablet. The tap has to be timed where it happens, and it
            happens here: the round trip from a music stand is a few milliseconds
@@ -2477,7 +2522,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/settempo"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         const double bpm = path.fromFirstOccurrenceOf ("bpm=", false, false).getDoubleValue();
         MessageManager::callAsync ([this, bpm] { engine.setTempoBpm (bpm); engine.resetTapTempo(); });
         ++revision;
@@ -2486,7 +2531,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/pluginview"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         const int input  = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
         const int slot   = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
         const int effect = path.contains ("effect=") ? path.fromFirstOccurrenceOf ("effect=", false, false).getIntValue() : -1;
@@ -2510,7 +2555,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                              ? engine.getPlugin (Engine::outputAddress (bus), 0, -1, effect) : nullptr;
                 const auto name = "Output " + od.name + " / FX" + String (effect + 1) + " / " + (plugin != nullptr ? plugin->getName() : String());
                 if (plugin == nullptr || ! plugin->isAlive())
-                    *error = "That plugin is not running.";
+                    *error = "That plugin is not loaded on the computer.";
                 else if (! plugin->isEditorOpen() && ! plugin->showEditor (name))
                     *error = "Could not open that plugin's window.";
                 else
@@ -2532,7 +2577,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                 {
                     auto* plugin = engine.getPlugin (input, prog, slot, effect);
                     if (plugin == nullptr || ! plugin->isAlive())
-                        *error = "That plugin is not running.";
+                        *error = "That plugin is not loaded on the computer.";
                     else if (! plugin->isEditorOpen() && ! plugin->showEditor (
                                  in.name + " / " + String (prog).paddedLeft ('0', 3)
                                  + "  " + def.name + " / " + plugin->getName()))
@@ -2559,7 +2604,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         }
         else if (error->isNotEmpty() || title->isEmpty())
         {
-            o->setProperty ("error", error->isNotEmpty() ? *error : String ("No plugin in that slot."));
+            o->setProperty ("error", error->isNotEmpty() ? *error : String ("That instrument has no plugin window."));
         }
         else
         {
@@ -2624,7 +2669,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     if (path.startsWith ("/api/panic"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         MessageManager::callAsync ([this] { engine.panic(); });
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;

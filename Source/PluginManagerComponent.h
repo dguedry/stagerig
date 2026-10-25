@@ -37,11 +37,11 @@ public:
         folderBtn.onClick = [this] { chooseFolder(); };
 
         addAndMakeVisible (removeBtn);
-        removeBtn.setTooltip ("Remove the selected plugin from the list, or un-blacklist a deactivated one");
+        removeBtn.setTooltip ("Remove the selected plugin from the list, or switch back on one that was switched off after it hung");
         removeBtn.onClick = [this] { removeSelected(); };
 
         addAndMakeVisible (clearBtn);
-        clearBtn.setTooltip ("Forget every plugin and every blacklist entry");
+        clearBtn.setTooltip ("Forget every plugin, including the ones switched off after hanging");
         clearBtn.onClick = [this] { host.getKnownPlugins().clear(); host.getKnownPlugins().clearBlacklistedFiles(); host.saveKnownPlugins(); status ("List cleared. Scan again to rebuild it."); };
 
         addAndMakeVisible (cancelBtn);
@@ -166,7 +166,7 @@ private:
                 if (! removed.isEmpty())
                     msg << "  Removed (files gone): " << removed.joinIntoString (", ") << ".";
                 if (! blacklisted.isEmpty())
-                    msg << "  Deactivated (hung while being tested): " << blacklisted.joinIntoString (", ");
+                    msg << "  Switched off (hung while being tested): " << blacklisted.joinIntoString (", ");
                 if (! failed.isEmpty())
                 {
                     juce::StringArray described;

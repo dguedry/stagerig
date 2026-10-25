@@ -31,9 +31,10 @@ public:
 
         addAndMakeVisible (takeover);
         takeover.setToggleState (settings.getBoolValue ("pipewireTakeover", true), juce::dontSendNotification);
-        takeover.setTooltip ("Pin PipeWire's whole graph to this quantum and 48 kHz while StageRig runs (restored on quit). Other audio apps follow; needed when something else has forced a large quantum.");
+        takeover.setTooltip ("Every audio app on this computer is held at this buffer size and 48 kHz while StageRig is open, and put back when it quits. Turn this on when another app has forced a big buffer and StageRig cannot get a small one.");
 
         addAndMakeVisible (applyBtn);
+        applyBtn.setTooltip ("Reopen the audio device at this buffer size");
         applyBtn.onClick = [this] { apply(); };
 
         addAndMakeVisible (status);
@@ -92,20 +93,20 @@ private:
             if (d->getTypeName() == "JACK")
                 txt << (LowLatency::pipeWireJackLoaded() ? "  (PipeWire graph)" : "  (JACK server)");
             else
-                txt << "  -- pick the JACK type for PipeWire's graph with no resampling";
+                txt << "  -- choose JACK as the audio device type below: that is PipeWire's direct path, with no resampling";
         }
         else txt << "no audio device open";
         for (const auto& w : engine.deviceWarnings()) txt << "\nWARNING: " << w;
         txt << "\n" << LowLatency::realtimeSchedulingHint();
         const auto clock = LowLatency::readClock();
         if (clock.forceQuantum.isNotEmpty() && clock.forceQuantum != "0")
-            txt << "\nPipeWire clock forced to " << clock.forceQuantum << " samples" << (clock.forceRate.isNotEmpty() && clock.forceRate != "0" ? " @ " + clock.forceRate + " Hz" : juce::String());
+            txt << "\nSystem buffer forced to " << clock.forceQuantum << " samples" << (clock.forceRate.isNotEmpty() && clock.forceRate != "0" ? " at " + clock.forceRate + " Hz" : juce::String());
         const int wanted = settings.getBoolValue ("pipewireTakeover", true) ? settings.getIntValue ("pipewireQuantum", 128) : 0;
         if (wanted > 0 && engine.getLastBlockSize() > wanted)
-            txt << "\nWARNING: the graph runs " << engine.getLastBlockSize() << "-sample blocks, not the requested " << wanted
-                << ". Another application (Bitwig forces its own block size) holds PipeWire's clock: close it, or set its block size to " << wanted << ".";
+            txt << "\nWARNING: the system is running a " << engine.getLastBlockSize() << "-sample buffer, not the " << wanted
+                << " you asked for. Another application (Bitwig, for example) has forced it: close it, or set its buffer to " << wanted << ".";
         else if (clock.quantum.isNotEmpty())
-            txt << "\nPipeWire graph quantum " << clock.quantum << " @ " << clock.rate << " Hz (not forced)";
+            txt << "\nSystem buffer " << clock.quantum << " samples at " << clock.rate << " Hz (not forced)";
         status.setText (txt, juce::dontSendNotification);
         status.setColour (juce::Label::textColourId, LowLatency::realtimeSchedulingAvailable() ? juce::Colour (0xff9aa0ab) : juce::Colours::orange);
     }
@@ -116,9 +117,9 @@ private:
     Engine& engine;
     juce::PropertiesFile& settings;
     std::function<void (const juce::String&)> onStatus;
-    juce::Label title { {}, "LIVE LATENCY" }, quantumLabel { {}, "PipeWire quantum" }, status;
+    juce::Label title { {}, "LATENCY" }, quantumLabel { {}, "Buffer size" }, status;
     juce::ComboBox quantumBox;
-    juce::ToggleButton takeover { "Take over the PipeWire clock while StageRig runs" };
+    juce::ToggleButton takeover { "Make the whole system use this buffer size while StageRig runs" };
     juce::TextButton applyBtn { "Apply" };
     juce::AudioDeviceSelectorComponent selector;
 };

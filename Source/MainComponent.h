@@ -100,6 +100,7 @@ private:
     juce::TextButton optionsBtn { "Options" };
     juce::TextButton keyboardBtn { "Keyboard" };
     juce::TextButton stageBtn { "Stage" };
+    juce::TextButton songsBtn { "Songs" };
     juce::TextButton remoteBtn { "Tablet" };
     juce::TextButton helpBtn { "Help" };
     std::unique_ptr<KeyboardPanel> keyboardPanel;

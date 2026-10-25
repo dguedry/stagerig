@@ -219,7 +219,7 @@ PluginView::Session PluginView::start (const String& title, String& error)
     const auto window = findWindow (title);
     if (window == 0)
     {
-        error = "That plugin's window is not open. Open it with \"Edit GUI\" first.";
+        error = "The plugin's window could not be opened on the computer. Try again, or open it on the computer first.";
         return {};
     }
     raiseWindow (window);
@@ -368,7 +368,7 @@ void PluginView::dropDeadSessions()
         /* The window must be on screen, not just exist: an editor closed on
            the computer is hidden, and a mirror of it shows the last picture
            while every tap lands on whatever is under it. Ending the session
-           lets the tablet page say the window was closed. GUI reopens it. */
+           lets the tablet page say the window was closed. Window reopens it. */
         if (findVisibleWindow (r->session.title) == r->session.windowId
             && r->vnc != nullptr && r->vnc->isRunning()
             && r->web != nullptr && r->web->isRunning())

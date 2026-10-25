@@ -85,12 +85,12 @@ private:
 
     Engine& engine;
 
-    juce::Label songsHeader { {}, "SONGS" }, setHeader { {}, "SET" };
+    juce::Label songsHeader { {}, "SONGS" }, setHeader { {}, "SET LIST" };
     juce::ListBox songsList, setList;
     ListProxy songsModel { *this, false }, setModel { *this, true };
 
     juce::TextButton addBtn { "+" }, removeBtn { "-" },
-                     captureBtn { "Capture" }, editBtn { "Edit" }, chartBtn { "Files..." };
+                     captureBtn { "Capture" }, editBtn { "Edit..." }, chartBtn { "Attach..." };
     juce::TextButton toSetBtn { "Add to set list >" }, fromSetBtn { "< Remove" },
                      upBtn { "^" }, downBtn { "v" };
     juce::TextButton songUpBtn { "^" }, songDownBtn { "v" };
