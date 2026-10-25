@@ -246,7 +246,7 @@ void SongsPanel::refreshTransport()
     playBtn.setButtonText (engine.isTrackRunning() ? "Stop" : "Play");
     const bool vamping = engine.isTrackVamping();
     nextBtn.setEnabled (has && (engine.getTrackSectionCount() > 1));
-    nextBtn.setButtonText (vamping ? "Go on" : "Next");
+    nextBtn.setButtonText (vamping ? "End vamp" : "Next");
     nextBtn.setColour (TextButton::buttonColourId, vamping ? Colour (0xff8a5a12) : getLookAndFeel().findColour (TextButton::buttonColourId));
     playBtn.setColour (TextButton::buttonColourId, engine.isTrackRunning() ? accentDim : getLookAndFeel().findColour (TextButton::buttonColourId));
 

@@ -3,7 +3,7 @@
 **A live-performance plugin host for Linux -- for keyboards and for audio.**
 Point your keyboards at it and it plays instruments; plug a microphone, a
 guitar or a hardware synth into your audio interface and it runs them through
-effects. Build a program for each sound in your set, and change sounds from
+effects. Build a program for each sound in your show, and change sounds from
 the keyboard or a footswitch while you play -- or from a tablet on a music
 stand, with no app to install.
 
@@ -26,12 +26,12 @@ other plugin.
   MIDI device and channel) or an audio source (one or two of the interface's
   input channels). Each has its own 128 programs, selected by MIDI Program
   Change while you play: Upper and Lower manuals change independently, and a
-  vocal mic or a guitar steps through its effect chains from a footswitch the
+  vocal mic or a guitar steps through its effects from a footswitch the
   same way. Group programs by kind -- organs, strings, brass -- to find things
   quickly.
-- **Keyboards play instruments**, with splits and layers: per-slot key range,
+- **Keyboards play instruments**, with splits and layers: per-instrument key range,
   velocity range, velocity curve, transpose, gain and pan, and the MIDI
-  channels each slot takes notes from, so one program can sort a
+  channels each instrument takes notes from, so one program can sort a
   multi-channel keyboard or a MIDI file into its parts.
 - **MIDI devices too.** An instrument can be a hardware synth or a lighting
   controller on a MIDI port -- with patch recall when the program is
@@ -40,7 +40,7 @@ other plugin.
 - **Every instrument is a chain.** MIDI effects (arpeggiators, chord
   generators) before it, audio effects after it, and any MIDI device that
   should play along.
-- **Audio runs through effects.** An audio input's programs are effect chains
+- **Audio runs through effects.** An audio input's programs are effects
   with an input trim -- reverb on the vocal for the ballad, drive on the guitar
   for the solo -- and a level meter on the laptop and on the tablet. Effects
   get MIDI too, so a vocoder or harmoniser plays from the keyboard.
@@ -57,7 +57,7 @@ other plugin.
   by default, parallel plugin loading, and a late-block counter you can watch.
 - **A global tempo with tap tempo**, so tempo-synced delays and arpeggiators
   have something to sync to. Tap it in the toolbar or from a footswitch.
-- **An on-screen keyboard** for building a set without a controller attached.
+- **An on-screen keyboard** for building a setup without a controller attached.
 - **Tablet control -- the whole plugin, not a remote control for it.** A
   built-in web app changes programs from a music stand, and opens any loaded
   plugin's own interface on the tablet, laptop or phone: the real editor,
@@ -77,7 +77,7 @@ other plugin.
   effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
   song -- PDF, image, text or ChordPro -- and the tablet shows it, turning
-  PDF pages a tap at a time and following the set from song to song. Files
+  PDF pages a tap at a time and following the set list from song to song. Files
   are kept in a folder beside the setup, so the two travel together.
 
 **[Read the user manual](https://github.com/dguedry/stagerig/blob/main/docs/MANUAL.md)** for everyday use, or press **Help**
@@ -92,14 +92,14 @@ Licensed under the [GPL-3.0](LICENSE).
 | Term | Meaning |
 |------|---------|
 | **Input** | A keyboard (a MIDI device plus an optional channel filter), an audio input (device channels, with a MIDI device for program changes and pedals), or the **Backing track** -- the songs' MIDI files, which play instruments as a keyboard would. Each input has its own current program. Two inputs may share one device (e.g. channel 1 = Upper, channel 2 = Lower). |
-| **Program** | One of 128 per input, selected by MIDI Program Change or by clicking. Holds instrument slots and MIDI mappings. |
-| **Slot** | One instrument inside a program -- a plugin, a MIDI device (hardware synth, lights) on a port, the built-in General MIDI player, or another keyboard's program -- with enable, gain, pan, transpose, key range, velocity range, velocity curve and the channels it takes notes from, plus its MIDI chain and insert-effect chain. Key and velocity ranges make splits and touch-switched layers; the curve matches a controller's feel to a library. |
-| **Effect chain** | Ordered effects with bypass. Each slot has one (MIDI chain → instrument → effects → gain), the MIDI chain holding MIDI effects and sends to MIDI devices; the program has one more applied to the sum of all slots. Effects receive the same MIDI as their slot. |
+| **Program** | One of 128 per input, selected by MIDI Program Change, a click, a song, a footswitch or the tablet. Holds instruments and MIDI mappings. |
+| **Instrument** | One instrument inside a program -- a plugin, a MIDI device (hardware synth, lights) on a port, the built-in General MIDI player, or another keyboard's program -- with enable, gain, pan, transpose, key range, velocity range, velocity curve and the channels it takes notes from, plus its MIDI chain and effects. Key and velocity ranges make splits and touch-switched layers; the curve matches a controller's feel to a library. |
+| **Effects** | Ordered effects with bypass. Each instrument has its own (MIDI chain → instrument → effects → gain), the MIDI chain holding MIDI effects and sends to MIDI devices; the program's **PROGRAM EFFECTS** work on the sum of all instruments. Effects receive the same MIDI as their instrument. |
 | **Mapping** | A CC / pitch-bend / aftertouch message → one parameter on any instrument or effect, scaled between min and max. Optionally also passed through to the plugin. |
 | **Output** | A pair of the interface's channels with a master effects chain and a volume. Every input lands on one; the default setup has one, "Main", on channels 1-2. |
 | **Song** | What to load for one number: a program per input, a tempo, stage notes, charts, and its backing track -- audio and MIDI files with sections and vamps. A MIDI file's **parts** (its channels) each play on an instrument of the song's program on the Backing track input. |
 | **Set list** | Songs in order, stepped from a footswitch or the tablet. (Called a set list everywhere, because in Ableton Live a *Set* is the file.) |
-| **Setup** | The whole document (inputs, outputs, programs, songs, sets, plugin states). Saved as `*.stagerig.json`, with the songs' charts and track files in a `.charts/` folder beside it. |
+| **Setup** | The whole document (inputs, outputs, programs, songs, set lists, plugin states). Saved as `*.stagerig.json`, with the songs' charts and track files in a `.charts/` folder beside it. |
 
 If you know Ableton Live: a Live *Set* is StageRig's setup file; a MIDI
 track with its device chain is an **input** with the **program** it is on;
@@ -110,7 +110,7 @@ has the full table (*If you know Ableton Live*).
 A program change leaves what you are holding to the previous program: keys
 down and the sustain pedal keep sounding there until you let go, and then a
 configurable release tail lets it ring out, so a pad held under the change or a
-pedal down over the bar line is never cut. With **Preload all programs** on,
+pedal down over the bar line is never cut. With **Preload all programs (instant changes; uses more memory)** on,
 every used program stays loaded and changes are instant (at the cost of RAM).
 
 ## Install
@@ -186,7 +186,7 @@ cmake --install build --prefix ~/.local                  # optional: binaries, l
 ## Using it
 
 See the **[user manual](https://github.com/dguedry/stagerig/blob/main/docs/MANUAL.md)**: inputs and keyboards, programs,
-slots, splits and layers, effects, MIDI mappings, the on-screen keyboard, audio
+instruments, splits and layers, effects, MIDI mappings, the on-screen keyboard, audio
 settings and latency, live checklist, troubleshooting and the files StageRig
 uses.
 
@@ -210,7 +210,7 @@ keyboard, grouped, with a GUI button per input:
 
 Scan the square code with the tablet's camera, or type the address and the
 six-character code. The code survives a restart, so a home-screen shortcut keeps
-working, and **Options ▸ Print program map** puts the same scannable code on the printed program
+working, and **Options ▸ Print the program list (for the stand)...** puts the same scannable code on the printed program
 sheet.
 
 ### The plugin itself, on the stand
@@ -239,8 +239,8 @@ Mirroring the real editor sidesteps that, and needs no setting up per plugin:
 whatever the plugin shows is what you get.
 
 A touch holds for as long as your finger does, so the plugin's own keyboard
-plays properly -- one finger at a time, since the mirror is a single pointer. **+**/**-** and **Fit** handle zoom, **Move**
-switches to panning and pinching, and **Full** hides the browser's address bar.
+plays properly -- one finger at a time, since the mirror is a single pointer. **+**/**-** and **Fit to screen** handle zoom, **Move view**
+switches to panning and pinching, and **Full screen** hides the browser's address bar.
 Taps arrive on the computer as real clicks, so the plugin window must not be
 covered by another window there -- StageRig keeps it above everything else for
 as long as a tablet is looking at it. Each plugin gets its own tab, named after the
@@ -250,15 +250,15 @@ windows, so they run through XWayland, which `x11vnc` reads and writes
 normally. A Wayland session with no XWayland is the one case that does not
 work, and StageRig says so rather than showing a black screen.
 
-With a song armed, the set list page carries **Play / Stop**, the track's
-sections (tap one to go there when the current one ends, or let a vamp go
-on), and **Parts** -- the MIDI files' parts, each with what plays it, a
+With a song selected, the Set list tab carries **Play** / **Stop**, the track's
+sections (tap one to go there when the current one ends, or **End vamp ▸** to let a vamp go
+on), and **Parts of the track** -- the MIDI files' parts, each with what plays it, a
 **Mute** for the one you will play yourself tonight, and **GUI** when a
 plugin in the song's own program plays it.
 
 The **Now** tab is the song's sound from the stand: each instrument on or
 off and its level, every effect's bypass, the outputs' volumes, a transpose
-for the singer, and **Save to song** so the fix sticks. What belongs in
+for the singer, and **Save this sound to "song"** so the fix sticks. What belongs in
 rehearsal -- adding plugins, mappings, splits -- stays on the laptop.
 
 If the tablet cannot connect, the usual cause is a firewall on the computer
@@ -311,7 +311,7 @@ each one over a shared-memory block (audio, MIDI and parameter changes, one
 block at a time, with two semaphores) plus a socket for everything that is not
 real-time: loading, state, parameter lists, editor windows and notifications.
 
-- A plugin that crashes takes only its own process down. The slot goes silent,
+- A plugin that crashes takes only its own process down. The instrument goes silent,
   the UI marks it red, and its **Reload** button starts a fresh process with
   the saved state.
 - A plugin that hangs (a stuck editor, a bridge waiting on Wine) can't freeze
@@ -367,9 +367,9 @@ StageRig is meant to be played live, so it goes for the smallest safe block:
   `pw-jack`, and it defaults to the **JACK** device type at 48 kHz. That makes
   StageRig a direct node in the PipeWire graph; the ALSA type goes through
   PipeWire's ALSA emulation with its own buffering and resampling.
-* **Audio...** has a *Live latency* section: the block size (quantum) to ask
+* **Audio...** has a **LATENCY** section: the buffer size to ask
   for (default 128 samples = 2.7 ms at 48 kHz; 64 if the machine is quiet) and
-  *Take over the PipeWire clock while StageRig runs*. With the takeover on,
+  **Make the whole system use this buffer size while StageRig runs**. With that on,
   StageRig forces the PipeWire graph to that quantum at start
   (`clock.force-quantum`) and restores the previous value when it quits, so
   the desktop's `min-quantum`/`default.clock.quantum` settings do not get in
@@ -385,9 +385,9 @@ StageRig is meant to be played live, so it goes for the smallest safe block:
   log out and back in) or otherwise grant `rtprio`/`memlock` in
   `/etc/security/limits.d/`. The Audio dialog reports whether realtime
   scheduling is available.
-* Plugins load in parallel (four at a time by default; `parallelLoads` in
+* Plugins load in parallel (half the machine's threads, 4 to 12, by default; `parallelLoads` in
   `~/.config/StageRig/StageRig.settings` changes it), so *Preload all
-  programs* fills a set quickly. Wine-bridged plugins load in parallel too
+  programs* fills a setup quickly. Wine-bridged plugins load in parallel too
   (`parallelBridgedLoads`, default the same); two Kontakts starting together on
   a cold prefix both come up in the time one takes. If a machine stalls on
   concurrent Wine start-ups, `bridgedColdStartSolo=1` starts the first bridged
