@@ -368,7 +368,7 @@ void PluginView::dropDeadSessions()
         /* The window must be on screen, not just exist: an editor closed on
            the computer is hidden, and a mirror of it shows the last picture
            while every tap lands on whatever is under it. Ending the session
-           lets the tablet page say the window was closed. GUI reopens it. */
+           lets the tablet page say the window was closed. Window reopens it. */
         if (findVisibleWindow (r->session.title) == r->session.windowId
             && r->vnc != nullptr && r->vnc->isRunning()
             && r->web != nullptr && r->web->isRunning())

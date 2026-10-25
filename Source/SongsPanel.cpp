@@ -1,4 +1,5 @@
 #include "SongsPanel.h"
+#include "Confirm.h"
 #include "Charts.h"
 #include "GmSynth.h"
 #include "GmMixer.h"
@@ -41,18 +42,17 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     }
 
     addAndMakeVisible (addBtn);
-    addBtn.setTooltip ("A new song, ready to capture what is loaded now");
+    addBtn.setTooltip ("A new song that stores what is loaded now");
     addBtn.onClick = [this] { addSong(); };
 
     addAndMakeVisible (removeBtn);
-    removeBtn.setTooltip ("Delete the selected song, and take it out of every set that used it");
+    removeBtn.setTooltip ("Delete the selected song, and take it out of every set list that used it");
     removeBtn.onClick = [this] { removeSong(); };
 
     addAndMakeVisible (captureBtn);
     captureBtn.setColour (TextButton::buttonColourId, accentDim);
-    captureBtn.setTooltip ("Save what every keyboard is playing right now, and the tempo, into the selected "
-                           "song -- this is how you change which sounds a song loads: select it, change the "
-                           "programs, then press this");
+    captureBtn.setTooltip ("Capture stores in this song what each keyboard is playing now, plus the tempo and transpose. "
+                           "This is how you change which sounds a song loads: select it, change the programs, then press this.");
     captureBtn.onClick = [this] { captureIntoSelectedSong(); };
 
     addAndMakeVisible (editBtn);
@@ -60,8 +60,8 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     editBtn.onClick = [this] { editSelectedSong(); };
 
     addAndMakeVisible (chartBtn);
-    chartBtn.setTooltip ("What this song brings with it: sheet music for the tablet (a PDF, an image, a text "
-                         "chart or a ChordPro file) and a backing track: audio files and MIDI files. Or drop files on the song.");
+    chartBtn.setTooltip ("A chart for the stand, or the song's backing track: sheet music for the tablet (a PDF, an image, a text "
+                         "chart or a ChordPro file) and audio or MIDI files. Or drop files on the song.");
     chartBtn.onClick = [this] { showChartMenu(); };
 
     addAndMakeVisible (playBtn);
@@ -77,31 +77,33 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     trackLabel.setColour (Label::textColourId, textDim);
 
     addAndMakeVisible (toSetBtn);
-    toSetBtn.setTooltip ("Put the selected song at the end of the set");
+    toSetBtn.setTooltip ("Put the selected song at the end of the set list");
     toSetBtn.onClick = [this] { addToSet(); };
 
     addAndMakeVisible (fromSetBtn);
-    fromSetBtn.setTooltip ("Take this song out of the set. The song itself is kept.");
+    fromSetBtn.setTooltip ("Take this song out of the set list. The song itself is kept.");
     fromSetBtn.onClick = [this] { removeFromSet(); };
 
     addAndMakeVisible (songUpBtn);
-    songUpBtn.setTooltip ("Move this song up the list. Sets keep playing the same order.");
+    songUpBtn.setTooltip ("Move this song up the list. Set lists keep their own order.");
     songUpBtn.onClick = [this] { moveSongInList (-1); };
     addAndMakeVisible (songDownBtn);
     songDownBtn.setTooltip ("Move this song down the list");
     songDownBtn.onClick = [this] { moveSongInList (1); };
 
     addAndMakeVisible (upBtn);
+    upBtn.setTooltip ("Move this song earlier in the set list");
     upBtn.onClick = [this] { moveInSet (-1); };
     addAndMakeVisible (downBtn);
+    downBtn.setTooltip ("Move this song later in the set list");
     downBtn.onClick = [this] { moveInSet (1); };
 
     addAndMakeVisible (setBtn);
-    setBtn.setTooltip ("Choose which set you are playing, or make a new one");
+    setBtn.setTooltip ("Choose which set list you are playing, or make a new one");
     setBtn.onClick = [this] { showSetMenu(); };
 
     addAndMakeVisible (footBtn);
-    footBtn.setTooltip ("Pedals that step to the next and previous song");
+    footBtn.setTooltip ("Pedals that step through the set list and start, stop or advance the backing track");
     footBtn.onClick = [this] { showFootswitchMenu(); };
 
     /* The set can move without anyone touching this panel -- a footswitch, the
@@ -182,7 +184,7 @@ void SongsPanel::refresh()
     const auto& sets  = engine.getSets();
     const int set = engine.getCurrentSet();
 
-    songsHeader.setText (songs.empty() ? "SONGS  (a program per keyboard, and a tempo)"
+    songsHeader.setText (songs.empty() ? "SONGS  (none yet: + stores what is loaded now as a song)"
                                       : "SONGS  (" + String ((int) songs.size()) + ")",
                          dontSendNotification);
 
@@ -194,7 +196,7 @@ void SongsPanel::refresh()
     }
     else
     {
-        setHeader.setText (sets.empty() ? "SET LIST  (none yet: the songs in order)" : "SET LIST  (none chosen)", dontSendNotification);
+        setHeader.setText (sets.empty() ? "SET LIST  (none yet: Set list... > New set list...)" : "SET LIST  (none chosen: pick one under Set list...)", dontSendNotification);
     }
 
     const bool haveSong = selectedSong >= 0 && selectedSong < (int) songs.size();
@@ -204,6 +206,7 @@ void SongsPanel::refresh()
     editBtn.setEnabled (haveSong);
     chartBtn.setEnabled (haveSong);
     toSetBtn.setEnabled (haveSong && haveSet);
+    toSetBtn.setTooltip (haveSet ? "Put the selected song at the end of the set list" : "Make or choose a set list first (Set list...)");
     fromSetBtn.setEnabled (haveSet && selectedInSet >= 0);
     songUpBtn.setEnabled (haveSong && selectedSong > 0);
     songDownBtn.setEnabled (haveSong && selectedSong < (int) songs.size() - 1);
@@ -249,7 +252,7 @@ void SongsPanel::refreshTransport()
 
     String text;
     if (! has)
-        text = "No backing track";
+        text = "No backing track (Attach... > Backing track...)";
     else if (! engine.isTrackReady())
         text = songs[(size_t) song].name + "  -- loading " + String (roundToInt (engine.getTrackLoadProgress() * 100.0f)) + "%";
     else if (engine.isTrackCountingIn())
@@ -344,7 +347,7 @@ void SongsPanel::ListProxy::paintListBoxItem (int row, Graphics& g, int w, int h
         parts.add (String (CharPointer_UTF8 ("\xe2\x99\xaa")) + (sg.charts.size() > 1 ? " charts" : " chart"));
     g.setColour (playing ? Colours::white.withAlpha (0.8f) : textDim);
     g.setFont (FontOptions (10.5f));
-    g.drawText (parts.isEmpty() ? "(nothing captured)" : parts.joinIntoString ("   "),
+    g.drawText (parts.isEmpty() ? "(no sounds stored yet: press Capture)" : parts.joinIntoString ("   "),
                 r, Justification::centredLeft, true);
 }
 
@@ -356,8 +359,15 @@ void SongsPanel::ListProxy::listBoxItemClicked (int row, const MouseEvent&)
 
        It also selects, so Capture, Rename and Add to set act on what you just
        clicked without a second step. */
-    if (isSet) owner.selectedInSet = row;
-    else       owner.selectedSong  = row;
+    if (isSet)
+    {
+        owner.selectedInSet = row;
+        const auto& sets = owner.engine.getSets();
+        const int set = owner.engine.getCurrentSet();
+        if (set >= 0 && set < (int) sets.size() && row >= 0 && row < (int) sets[(size_t) set].songs.size())
+            owner.selectedSong = sets[(size_t) set].songs[(size_t) row];
+    }
+    else owner.selectedSong = row;
     play (row);
 }
 
@@ -451,7 +461,7 @@ void SongsPanel::removeSong()
 
     const auto name = songs[(size_t) selectedSong].name;
     auto* w = new AlertWindow ("Delete song", "Delete \"" + name + "\"?\n\n"
-                              "It will also be taken out of every set that uses it.",
+                              "It will also be taken out of every set list that uses it.",
                               MessageBoxIconType::QuestionIcon);
     w->addButton ("Delete", 1, KeyPress (KeyPress::returnKey));
     w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
@@ -508,15 +518,18 @@ void SongsPanel::editSelectedSong()
     auto* w = new AlertWindow ("Edit song",
                                whatItLoads
                                  + "\n\nTo change those, close this, set each keyboard to the sound you "
-                                   "want and press Capture.\n\nThe name, and anything you want to "
-                                   "read on the stand:",
+                                   "want and press Capture.\n\nThe name, and stage notes: anything you want to "
+                                   "read on the stand.",
                                MessageBoxIconType::NoIcon);
-    w->addTextEditor ("name", sg.name);
-    w->addTextEditor ("notes", sg.notes);
-    w->addTextEditor ("tempo", sg.tempoBpm > 0.0 ? String (sg.tempoBpm, 1) : String());
-    w->getTextEditor ("notes")->setTextToShowWhenEmpty ("stage notes: key, count-in, a reminder", textDim);
-    w->getTextEditor ("tempo")->setTextToShowWhenEmpty ("tempo, or blank to keep the current one", textDim);
-    w->addButton ("OK", 1, KeyPress (KeyPress::returnKey));
+    w->addTextEditor ("name", sg.name, "Name");
+    w->addTextEditor ("notes", sg.notes, "Stage notes");
+    w->addTextEditor ("tempo", sg.tempoBpm > 0.0 ? String (sg.tempoBpm, 1) : String(), "Tempo (bpm; blank keeps whatever the tempo is)");
+    w->addTextEditor ("transpose", sg.transpose != 0 ? String (sg.transpose) : String(), "Transpose the keyboards (semitones; blank or 0 for none)");
+    w->getTextEditor ("name")->setTextToShowWhenEmpty ("song name", textDim);
+    w->getTextEditor ("notes")->setTextToShowWhenEmpty ("key, count-in, a reminder", textDim);
+    w->getTextEditor ("tempo")->setTextToShowWhenEmpty ("blank = leave the tempo alone", textDim);
+    w->getTextEditor ("transpose")->setTextToShowWhenEmpty ("0", textDim);
+    w->addButton ("Save", 1, KeyPress (KeyPress::returnKey));
     w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
     w->enterModalState (true, ModalCallbackFunction::create ([this, w, idx = selectedSong] (int r)
     {
@@ -528,6 +541,7 @@ void SongsPanel::editSelectedSong()
         // Blank means "leave the tempo alone", which is not the same as 0 bpm.
         const auto typed = w->getTextEditorContents ("tempo").trim();
         engine.setSongTempo (idx, typed.isEmpty() ? 0.0 : typed.getDoubleValue());
+        engine.setSongTranspose (idx, w->getTextEditorContents ("transpose").trim().getIntValue());
         refresh();
     }), false);
 }
@@ -591,8 +605,8 @@ void SongsPanel::moveInSet (int delta)
 //==============================================================================
 void SongsPanel::newSet()
 {
-    auto* w = new AlertWindow ("New set", "What is this set called?", MessageBoxIconType::NoIcon);
-    w->addTextEditor ("name", "Set " + String ((int) engine.getSets().size() + 1));
+    auto* w = new AlertWindow ("New set list", "Name for this set list:", MessageBoxIconType::NoIcon);
+    w->addTextEditor ("name", "Set list " + String ((int) engine.getSets().size() + 1));
     w->addButton ("Create", 1, KeyPress (KeyPress::returnKey));
     w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
     w->enterModalState (true, ModalCallbackFunction::create ([this, w] (int r)
@@ -614,18 +628,18 @@ void SongsPanel::showSetMenu()
 
     if (! sets.empty())
     {
-        m.addSectionHeader ("Play");
+        m.addSectionHeader ("Set lists");
         for (int i = 0; i < (int) sets.size(); ++i)
             m.addItem (100 + i, sets[(size_t) i].name, true, i == current);
         m.addSeparator();
     }
-    m.addItem (1, "New set...");
+    m.addItem (1, "New set list...");
     if (current >= 0)
     {
-        m.addItem (2, "Rename this set...");
+        m.addItem (2, "Rename this set list...");
         m.addItem (4, "Move up",   current > 0);
         m.addItem (5, "Move down", current < (int) sets.size() - 1);
-        m.addItem (3, "Delete this set");
+        m.addItem (3, "Delete this set list");
     }
 
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (setBtn), [this] (int choice)
@@ -645,7 +659,7 @@ void SongsPanel::showSetMenu()
 
         if (choice == 2)
         {
-            auto* w = new AlertWindow ("Set list", "Name", MessageBoxIconType::NoIcon);
+            auto* w = new AlertWindow ("Rename set list", "New name:", MessageBoxIconType::NoIcon);
             w->addTextEditor ("name", engine.getSets()[(size_t) set].name);
             w->addButton ("OK", 1, KeyPress (KeyPress::returnKey));
             w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
@@ -659,9 +673,14 @@ void SongsPanel::showSetMenu()
         }
         else if (choice == 3)
         {
-            engine.removeSet (set);
-            selectedInSet = -1;
-            refresh();
+            const auto& sets = engine.getSets();
+            const String name = set >= 0 && set < (int) sets.size() ? sets[(size_t) set].name : String();
+            confirm ("Delete set list", "Delete the set list \"" + name + "\"?\n\nThe songs themselves are kept.", "Delete", [this, set]
+            {
+                engine.removeSet (set);
+                selectedInSet = -1;
+                refresh();
+            });
         }
         else if (choice == 4 || choice == 5)
         {
@@ -692,6 +711,10 @@ void SongsPanel::showFootswitchMenu()
     m.addItem (7, "Learn: press the pedal...");
     if (engine.getSectionCC() > 0) m.addItem (8, "Stop using CC " + String (engine.getSectionCC()));
 
+    m.addSectionHeader ("Tap tempo");
+    m.addItem (9, "Learn: press the pedal...");
+    if (engine.getTapTempoCC() > 0) m.addItem (10, "Stop using CC " + String (engine.getTapTempoCC()));
+
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (footBtn), [this] (int choice)
     {
         switch (choice)
@@ -704,6 +727,8 @@ void SongsPanel::showFootswitchMenu()
             case 6: engine.setTransportCC (0);   break;
             case 7: engine.armSectionLearn();    break;
             case 8: engine.setSectionCC (0);     break;
+            case 9: engine.armTapTempoLearn (true); break;
+            case 10: engine.setTapTempoCC (0);   break;
             default: break;
         }
         refresh();
@@ -844,6 +869,7 @@ public:
     TracksComponent (Engine& e, SongsPanel& p, int song) : engine (e), panel (p), songIndex (song)
     {
         addAndMakeVisible (addBtn);
+        addBtn.setTooltip ("Audio files (click, cue, stems) play on an output; a MIDI file plays parts on your instruments");
         addBtn.onClick = [this]
         {
             chooser = std::make_unique<FileChooser> ("Add audio or MIDI files to the backing track",
@@ -863,18 +889,20 @@ public:
         addAndMakeVisible (countInBox);
         countInBox.addItem ("No count-in", 1);
         for (int b = 1; b <= 8; ++b) countInBox.addItem (String (b) + (b == 1 ? " beat" : " beats"), b + 1);
+        countInBox.setTooltip ("Clicks before the track starts, at the song's tempo");
         countInBox.onChange = [this] { applyCountIn(); };
         addAndMakeVisible (countInOutLabel);
         countInOutLabel.setColour (Label::textColourId, textDim);
         addAndMakeVisible (countInOutBox);
+        countInOutBox.setTooltip ("Which output hears the count-in (your in-ears)");
         countInOutBox.onChange = [this] { applyCountIn(); };
 
         addAndMakeVisible (sectionsHeader);
         sectionsHeader.setColour (Label::textColourId, accent);
         sectionsHeader.setFont (FontOptions (13.0f, Font::bold));
         addAndMakeVisible (addSectionBtn);
-        addSectionBtn.setTooltip ("A new section where the track is now if it is playing, otherwise after the last one. "
-                                  "Type the time to move it: 1:23.5");
+        addSectionBtn.setTooltip ("A new section where the backing track is now if it is playing, otherwise after the last one. "
+                                  "Edit the time to move it: 1:23.5");
         addSectionBtn.onClick = [this] { addSection(); };
 
         addAndMakeVisible (hint);
@@ -948,6 +976,10 @@ private:
         Row (TracksComponent& o, int i, const StemDef& d) : owner (o), index (i), def (d)
         {
             addAndMakeVisible (name);
+            addChildComponent (partsCap);
+            partsCap.setText ("Each part of the file: what plays it, its level (0 dB = as the file has it), and M to mute it", dontSendNotification);
+            partsCap.setFont (FontOptions (11.0f));
+            partsCap.setColour (Label::textColourId, textDim);
             name.setText (d.displayName(), dontSendNotification);
             name.setEditable (true);
             name.setTooltip (d.file);
@@ -982,6 +1014,7 @@ private:
             else
             {
                 addAndMakeVisible (output);
+                output.setTooltip ("Which output this file plays on");
                 owner.fillOutputs (output, d.output);
                 output.onChange = [this] { def.output = output.getSelectedId() - 1; owner.engine.setSongStem (owner.songIndex, index, def); };
 
@@ -990,6 +1023,7 @@ private:
                 gain.setSliderStyle (Slider::LinearBar);
                 gain.setTextValueSuffix (" dB");
                 gain.setDoubleClickReturnValue (true, 0.0);
+                gain.setTooltip ("This file's level. Double-click for 0 dB");
                 gain.setValue (d.gainDb, dontSendNotification);
                 gain.onValueChange = [this] { def.gainDb = (float) gain.getValue(); owner.engine.setSongStem (owner.songIndex, index, def); };
             }
@@ -998,7 +1032,7 @@ private:
             remove.onClick = [this] { owner.engine.removeSongStem (owner.songIndex, index); MessageManager::callAsync ([o = &owner] { o->rebuild(); }); };
         }
 
-        int preferredHeight() const { return 30 + (int) parts.size() * 28 + (def.isMidi() && empty.isVisible() ? 24 : 0); }
+        int preferredHeight() const { return 30 + (parts.empty() ? 0 : 18) + (int) parts.size() * 28 + (def.isMidi() && empty.isVisible() ? 24 : 0); }
 
         void resized() override
         {
@@ -1016,6 +1050,8 @@ private:
             r.removeFromRight (6);
             name.setBounds (r);
             if (parts.empty() && empty.isVisible()) empty.setBounds (all.removeFromTop (24).withTrimmedLeft (24));
+            partsCap.setVisible (! parts.empty());
+            if (! parts.empty()) partsCap.setBounds (all.removeFromTop (18).withTrimmedLeft (24));
             for (auto& p : parts)
             {
                 auto line = all.removeFromTop (28).reduced (0, 3);
@@ -1107,8 +1143,8 @@ private:
                 p->mute.setEnabled (sd != nullptr);
                 // A plugin has a window to open; a MIDI device has a patch to send.
                 p->open.setVisible (sd != nullptr && (sd->isPlugin() || sd->isExternal()));
-                if (sd != nullptr && sd->isPlugin()) { p->open.setButtonText (loading ? "Loading" : "Edit GUI"); p->open.setEnabled (! loading); }
-                if (sd != nullptr && sd->isExternal()) { p->open.setButtonText ("Patch..."); p->open.setEnabled (true); }
+                if (sd != nullptr && sd->isPlugin()) { p->open.setButtonText (loading ? "Loading" : "Window"); p->open.setEnabled (! loading); }
+                if (sd != nullptr && sd->isExternal()) { p->open.setButtonText ("Patch recall..."); p->open.setEnabled (true); }
                 if (sd == nullptr) { p->mute.setToggleState (false, dontSendNotification); continue; }
                 if (sd->isGm())
                 {
@@ -1214,11 +1250,11 @@ private:
                     const auto& pd = in.programs[(size_t) k];
                     if (pd.isEmpty() && pd.name.isEmpty()) continue;
                     if (pd.group.isNotEmpty() && pd.group != group) { programs.addSectionHeader (pd.group); group = pd.group; }
-                    programs.addItem (10000 + i * 128 + k, String (k + 1).paddedLeft ('0', 3) + "  " + (pd.name.isNotEmpty() ? pd.name : String ("(unnamed)")),
+                    programs.addItem (10000 + i * 128 + k, String (k).paddedLeft ('0', 3) + "  " + (pd.name.isNotEmpty() ? pd.name : String ("(unnamed)")),
                                       true, keysNow && cur->targetInput == i && cur->targetProgram == k);
                     any = true;
                 }
-                if (! any) programs.addItem (9999, "No programs yet: make some on its program pages", false);
+                if (! any) programs.addItem (9999, "No programs yet: select that keyboard under INPUTS and name a program in the Programs list", false);
                 programs.addSeparator();
                 programs.addItem (2000 + i, "Whatever " + in.name + " is playing", true, keysNow && cur->targetInput == i && cur->targetProgram < 0);
                 m.addSubMenu (in.name + "'s programs", programs, true, nullptr, keysNow && cur->targetInput == i);
@@ -1291,9 +1327,9 @@ private:
         int index;
         StemDef def;
         MidiDoc doc;
-        Label name, empty;
+        Label name, empty, partsCap;
         ComboBox output;
-        TextButton notes { "Notes..." };
+        TextButton notes { "Edit notes..." };
         Slider gain;
         TextButton remove { "X" };
         std::vector<std::unique_ptr<Part>> parts;
@@ -1326,10 +1362,11 @@ private:
             vamp.onClick = [this] { const bool v = vamp.getToggleState(); owner.updateMarker (index, [v] (MarkerDef& d) { d.vamp = v; }); };
 
             addAndMakeVisible (go);
-            go.setTooltip ("Go here: at the end of the current section if the track is playing, otherwise where Play starts");
+            go.setTooltip ("Go here: at the end of the current section if the backing track is playing, otherwise where Play starts");
             go.onClick = [this] { owner.goToMarker (index); };
 
             addAndMakeVisible (remove);
+            remove.setTooltip ("Remove this section marker (the music is untouched)");
             remove.onClick = [this] { owner.removeMarker (index); };
         }
         static String formatTime (double s)

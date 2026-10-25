@@ -196,7 +196,7 @@ std::vector<MappingSuggestion> suggestMappingsFromNames (const ParamInfoList& pl
         s.mapping.number = rule.cc;
         s.mapping.paramId = best->param->id;
         s.mapping.paramName = best->name;
-        s.reason = String ("GM2 ") + rule.label + ": name matches";
+        s.reason = "name looks like " + String (rule.label) + " (standard controller " + String (rule.cc) + ")";
         out.push_back (std::move (s));
     }
     return out;
@@ -216,7 +216,7 @@ std::vector<MappingSuggestion> suggestMappingsFromTemplate (const ParamInfoList&
         MappingSuggestion s;
         s.mapping = m;
         s.mapping.paramName = p->name;
-        s.reason = "from saved template";
+        s.reason = "From the saved template";
         out.push_back (std::move (s));
     }
     return out;

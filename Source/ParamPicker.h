@@ -222,7 +222,7 @@ private:
             {
                 addAndMakeVisible (showAll);
                 showAll.setButtonText ("Show repeated parameters (" + juce::String (numSecondary) + " copies of " + juce::String (countRuns()) + " names)");
-                showAll.setTooltip ("Runs of identically named parameters are usually per-channel MIDI controller proxies. This plugin did not say which channel is which.");
+                showAll.setTooltip ("Plugins usually list each MIDI controller once per channel. This plugin did not say which copy is which channel, so the repeats are folded away here.");
                 showAll.setToggleState (showRepeated, juce::dontSendNotification);
                 showAll.onClick = [this] { showRepeated = showAll.getToggleState(); filter(); };
             }

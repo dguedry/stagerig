@@ -1520,7 +1520,7 @@ void Engine::resetPluginPositions()
 int Engine::addSet (const String& name)
 {
     SetDef s;
-    s.name = name.isNotEmpty() ? name : "Set " + String ((int) setup.sets.size() + 1);
+    s.name = name.isNotEmpty() ? name : "Set list " + String ((int) setup.sets.size() + 1);
     setup.sets.push_back (std::move (s));
     listeners.call ([] (Listener& l) { l.setupChanged(); });
     return (int) setup.sets.size() - 1;
@@ -2700,7 +2700,7 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
     else if (auto* fx = static_cast<EffectRuntime*> (node); fx->send)
         return midiOuts.isOpen (fx->outPort.load()) ? String() : "MIDI port not connected: " + midiOuts.getName (fx->outPort.load());
     if (node->plugin != nullptr && ! node->plugin->isAlive())
-        return "Plugin process stopped: " + node->plugin->getLastError();
+        return "Plugin stopped: " + node->plugin->getLastError();
     return node->loadError;
 }
 
@@ -2907,13 +2907,13 @@ void Engine::handleAsyncUpdate()
                 else                  setPrevSongCC (e.a);
                 const String what = songLearnForNext ? "Next song" : "Previous song";
                 listeners.call ([what, cc = e.a] (Listener& l)
-                    { l.statusMessage (what + ": CC " + String (cc)); });
+                    { l.statusMessage (what + " pedal learned: controller " + String (cc)); });
                 break;
             }
 
             case Event::transportLearn:
                 setTransportCC (e.a);
-                listeners.call ([cc = e.a] (Listener& l) { l.statusMessage ("Backing track start/stop: CC " + String (cc)); });
+                listeners.call ([cc = e.a] (Listener& l) { l.statusMessage ("Backing track start/stop pedal learned: controller " + String (cc)); });
                 break;
 
             case Event::transport:
@@ -2925,7 +2925,7 @@ void Engine::handleAsyncUpdate()
 
             case Event::sectionLearn:
                 setSectionCC (e.a);
-                listeners.call ([cc = e.a] (Listener& l) { l.statusMessage ("Next section / release vamp: CC " + String (cc)); });
+                listeners.call ([cc = e.a] (Listener& l) { l.statusMessage ("Next section pedal learned: controller " + String (cc)); });
                 break;
 
             case Event::sectionPedal:
@@ -2948,7 +2948,7 @@ void Engine::handleAsyncUpdate()
                 if (setup.currentSet < 0)
                 {
                     listeners.call ([] (Listener& l)
-                        { l.statusMessage ("No set chosen -- pick one first."); });
+                        { l.statusMessage ("No set list chosen: choose one under Set list..."); });
                     break;
                 }
                 if (e.a > 0) nextSong(); else previousSong();
@@ -2965,7 +2965,7 @@ void Engine::handleAsyncUpdate()
                 }
                 else if (e.a > 0)
                 {
-                    listeners.call ([] (Listener& l) { l.statusMessage ("End of the set."); });
+                    listeners.call ([] (Listener& l) { l.statusMessage ("End of the set list."); });
                 }
                 break;
             }
