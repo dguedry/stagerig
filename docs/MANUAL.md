@@ -339,16 +339,16 @@ keyboard you are not using in that number.
 - **Files...** attaches a chart for the stand (see *Charts on the stand*) or
   opens the song's **Backing track** window (see *Backing tracks*).
 
-### Making a set
+### Making a set list
 
 **Set list...** makes one, renames it, moves it or deletes it. With a song selected,
 **Add to set list >** puts it at the end; **^ v** beside the set list order it, and
-**< Remove** takes it out of the set without deleting the song.
+**< Remove** takes it out of the set list without deleting the song.
 
-A song can appear in more than one set, and more than once in the same set --
+A song can appear in more than one set list, and more than once in the same one --
 encores happen. Deleting a song takes it out of every set that used it.
 
-### Playing a set
+### Playing a set list
 
 Click a song to load it: every input it names, and its tempo, at once.
 
