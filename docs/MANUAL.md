@@ -608,7 +608,8 @@ each slot its channel, and one program sorts the parts by itself:
 
 That is how a keyboard which sends its zones on different channels, or a
 multi-part MIDI file on a backing track, plays several sounds from one
-program -- no extra inputs needed.
+program -- no extra inputs needed. To hear one of them from the on-screen
+keyboard, click its row: the keys move to its channel.
 
 ### MIDI devices
 
@@ -1068,6 +1069,13 @@ velocity, sustain, mod wheel, pitch bend and a free CC number and value. It
 plays into the selected input on that input's channel, through exactly the same
 path as a real keyboard, so it works for auditioning sounds, checking splits and
 doing MIDI learn without a controller connected.
+
+On an input that takes every channel -- the backing track, or a keyboard on
+*Omni* whose program gives each channel its own instrument -- the keys play
+one channel, and it is chosen for you: **click an instrument** in the program
+and the keys play that one. A button beside *Playing into* names the channel
+and the instrument (*ch 5 · Upper: Big Strings*) and lists the others. An
+input with a channel of its own plays on it and shows no choice.
 
 Click the keys with the mouse, or focus the keyboard and use the computer
 keyboard: `A S D F G H J K` for white keys, `W E T Y U` for sharps, `Z` and `X`

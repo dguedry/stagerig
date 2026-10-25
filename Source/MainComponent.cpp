@@ -1086,6 +1086,9 @@ public:
             addAndMakeVisible (enabled);
             addAndMakeVisible (icon);
             addAndMakeVisible (name);
+            // A click on the row itself (its name, its icon, the space between) plays this instrument on the on-screen keyboard.
+            name.setInterceptsMouseClicks (false, false);
+            icon.setInterceptsMouseClicks (false, false);
             addAndMakeVisible (gain);
             addAndMakeVisible (transpose);
             addAndMakeVisible (keyRange);
@@ -1266,6 +1269,8 @@ public:
             midiChain.rebuild (def.midiEffects, inputIndex, program);
             chain.rebuild (def.effects, inputIndex, program);
         }
+
+        void mouseDown (const MouseEvent&) override { panel.owner.playInstrumentFromKeyboard (index); }
 
         int midiChainHeight() const { const int h = midiChain.preferredHeight(); return h > 0 ? h + 2 : 0; }
         int preferredHeight() const { return slotHeaderHeight + midiChainHeight() + chain.preferredHeight() + 4; }
@@ -2938,6 +2943,11 @@ void MainComponent::showOutputs()
     o.useNativeTitleBar = true;
     o.resizable = true;
     o.launchAsync();
+}
+
+void MainComponent::playInstrumentFromKeyboard (int slot)
+{
+    if (keyboardPanel != nullptr && keyboardPanel->isVisible()) keyboardPanel->playInstrument (slot);
 }
 
 void MainComponent::outputsChanged()

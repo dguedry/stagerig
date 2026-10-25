@@ -152,6 +152,13 @@ private:
     without a MIDI controller. Everything it sends goes through Engine::injectMidi
     into one input, on that input's channel, so program changes, key zones,
     mappings and learn all behave exactly as they would with real hardware.
+
+    On an input that takes every channel (Omni -- the backing track, or a
+    keyboard whose program sorts its parts by channel) the notes need a
+    channel of their own, and that is chosen for you: clicking an instrument
+    in the program plays it, and a small button names the channel and the
+    instrument in case you want another. An input with a channel of its own
+    plays on it and shows no choice.
 */
 class KeyboardPanel : public juce::Component,
                       private juce::MidiKeyboardState::Listener
@@ -173,6 +180,10 @@ public:
         addAndMakeVisible (targetLabel);
         targetLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         targetLabel.setColour (juce::Label::textColourId, juce::Colour (0xff4f9dff));
+
+        addChildComponent (chBtn);
+        chBtn.setTooltip ("Which of the input's channels these keys play on, and so which instrument. Clicking an instrument above chooses it too.");
+        chBtn.onClick = [this] { showChannelMenu(); };
 
         addAndMakeVisible (hint);
         hint.setFont (juce::FontOptions (11.0f));
@@ -289,16 +300,41 @@ public:
         if (inputIndex == target) { refreshLabel(); return; }
         releaseAll();
         target = inputIndex;
+        omniChannel = firstHeardChannel();
+        refreshLabel();
+    }
+
+    /** Play this instrument of the current program: on an Omni input, the
+        keys move to a channel it hears. Clicking an instrument row calls this. */
+    void playInstrument (int slot)
+    {
+        const auto* def = currentProgram();
+        if (def == nullptr || slot < 0 || slot >= (int) def->slots.size() || ! isOmni()) return;
+        const auto& sd = def->slots[(size_t) slot];
+        if (sd.hears (channel())) { refreshLabel(); return; }
+        for (int c = 1; c <= 16; ++c)
+            if (sd.hears (c)) { releaseAll(); omniChannel = c; break; }
         refreshLabel();
     }
 
     void refreshLabel()
     {
         const auto& inputs = engine.getSetup().inputs;
-        if (target >= 0 && target < (int) inputs.size())
-            targetLabel.setText ("Playing into: " + inputs[(size_t) target].name + "  (ch " + juce::String (channel()) + ")", juce::dontSendNotification);
-        else
+        const bool have = target >= 0 && target < (int) inputs.size();
+        const bool choose = have && isOmni() && channelsMatter();
+        if (! have)
             targetLabel.setText ("No input selected", juce::dontSendNotification);
+        else if (choose)
+            targetLabel.setText ("Playing into: " + inputs[(size_t) target].name, juce::dontSendNotification);
+        else
+            targetLabel.setText ("Playing into: " + inputs[(size_t) target].name + "  (ch " + juce::String (channel()) + ")", juce::dontSendNotification);
+        chBtn.setVisible (choose);
+        if (choose)
+        {
+            const auto who = instrumentOn (channel());
+            chBtn.setButtonText ("ch " + juce::String (channel()) + (who.isNotEmpty() ? "  \xc2\xb7  " + who : juce::String ("  \xc2\xb7  nothing")));
+        }
+        resized();
     }
 
     /** All notes off + reset controllers on the target. */
@@ -315,7 +351,8 @@ public:
     {
         auto r = getLocalBounds().reduced (8, 4);
         auto top = r.removeFromTop (22);
-        targetLabel.setBounds (top.removeFromLeft (260));
+        targetLabel.setBounds (top.removeFromLeft (chBtn.isVisible() ? 200 : 260));
+        if (chBtn.isVisible()) { chBtn.setBounds (top.removeFromLeft (230).reduced (0, 1)); top.removeFromLeft (10); }
         hint.setBounds (top);
         r.removeFromTop (4);
 
@@ -367,7 +404,58 @@ private:
         const auto& inputs = engine.getSetup().inputs;
         if (target >= 0 && target < (int) inputs.size() && inputs[(size_t) target].channel > 0)
             return inputs[(size_t) target].channel;
+        return omniChannel;
+    }
+    bool isOmni() const
+    {
+        const auto& inputs = engine.getSetup().inputs;
+        return target >= 0 && target < (int) inputs.size() && inputs[(size_t) target].channel <= 0 && ! inputs[(size_t) target].isAudio();
+    }
+    const ProgramDef* currentProgram() const
+    {
+        const auto& inputs = engine.getSetup().inputs;
+        if (target < 0 || target >= (int) inputs.size()) return nullptr;
+        const auto& in = inputs[(size_t) target];
+        return in.currentProgram >= 0 && in.currentProgram < (int) in.programs.size() ? &in.programs[(size_t) in.currentProgram] : nullptr;
+    }
+    /** Does any instrument of the current program take some channels only? Then the choice is real. */
+    bool channelsMatter() const
+    {
+        if (const auto* def = currentProgram())
+            for (const auto& sd : def->slots) if (! sd.hearsAll()) return true;
+        return false;
+    }
+    /** The lowest channel any instrument hears -- or 1. */
+    int firstHeardChannel() const
+    {
+        if (const auto* def = currentProgram())
+            for (int c = 1; c <= 16; ++c)
+                for (const auto& sd : def->slots) if (sd.hears (c)) return c;
         return 1;
+    }
+    /** The instrument that plays channel c, by name; empty for none. */
+    juce::String instrumentOn (int c) const
+    {
+        if (const auto* def = currentProgram())
+            for (const auto& sd : def->slots) if (sd.hears (c)) return sd.displayName();
+        return {};
+    }
+    void showChannelMenu()
+    {
+        juce::PopupMenu m;
+        for (int c = 1; c <= 16; ++c)
+        {
+            const auto who = instrumentOn (c);
+            if (who.isEmpty()) continue;
+            m.addItem (c, "Ch " + juce::String (c) + "   \xc2\xb7   " + who, true, c == channel());
+        }
+        juce::Component::SafePointer<KeyboardPanel> self (this);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&chBtn), [self] (int r)
+        {
+            if (self == nullptr || r < 1) return;
+            if (r != self->channel()) { self->releaseAll(); self->omniChannel = r; }
+            self->refreshLabel();
+        });
     }
 
     void send (const juce::MidiMessage& m)
@@ -387,6 +475,8 @@ private:
 
     Engine& engine;
     int target = -1;
+    int omniChannel = 1;           // the channel the keys play on when the input takes every channel
+    juce::TextButton chBtn;
     juce::MidiKeyboardState state;
     juce::MidiKeyboardComponent keyboard;
     juce::Label targetLabel, hint;
