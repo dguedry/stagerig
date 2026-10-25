@@ -91,10 +91,10 @@ private:
 
     juce::TextButton addBtn { "+" }, removeBtn { "-" },
                      captureBtn { "Capture" }, editBtn { "Edit" }, chartBtn { "Files..." };
-    juce::TextButton toSetBtn { "Add to set >" }, fromSetBtn { "< Remove" },
+    juce::TextButton toSetBtn { "Add to set list >" }, fromSetBtn { "< Remove" },
                      upBtn { "^" }, downBtn { "v" };
     juce::TextButton songUpBtn { "^" }, songDownBtn { "v" };
-    juce::TextButton setBtn { "Set..." }, footBtn { "Footswitches..." };
+    juce::TextButton setBtn { "Set list..." }, footBtn { "Footswitches..." };
 
     // The backing track of the song in play: start/stop, and where it is.
     juce::TextButton playBtn { "Play" }, nextBtn { "Next" };

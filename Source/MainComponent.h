@@ -44,6 +44,8 @@ public:
     static bool looksLikeAraPlugin (const juce::PluginDescription&);
     void selectInput (int);
     void loadSetupFile (const juce::File&);
+    /** An instrument row was clicked: the on-screen keyboard plays that instrument. */
+    void playInstrumentFromKeyboard (int slot);
 
 private:
     // Engine::Listener

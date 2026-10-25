@@ -189,12 +189,12 @@ void SongsPanel::refresh()
     if (set >= 0 && set < (int) sets.size())
     {
         const auto& st = sets[(size_t) set];
-        setHeader.setText ("SET: " + st.name.toUpperCase() + "  ("
+        setHeader.setText ("SET LIST: " + st.name.toUpperCase() + "  ("
                              + String ((int) st.songs.size()) + ")", dontSendNotification);
     }
     else
     {
-        setHeader.setText (sets.empty() ? "SET  (none yet)" : "SET  (none chosen)", dontSendNotification);
+        setHeader.setText (sets.empty() ? "SET LIST  (none yet: the songs in order)" : "SET LIST  (none chosen)", dontSendNotification);
     }
 
     const bool haveSong = selectedSong >= 0 && selectedSong < (int) songs.size();
@@ -645,7 +645,7 @@ void SongsPanel::showSetMenu()
 
         if (choice == 2)
         {
-            auto* w = new AlertWindow ("Set", "Name", MessageBoxIconType::NoIcon);
+            auto* w = new AlertWindow ("Set list", "Name", MessageBoxIconType::NoIcon);
             w->addTextEditor ("name", engine.getSets()[(size_t) set].name);
             w->addButton ("OK", 1, KeyPress (KeyPress::returnKey));
             w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));

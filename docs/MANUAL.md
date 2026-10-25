@@ -76,6 +76,30 @@ Every input lands on an **output** -- a pair of the interface's output
 channels -- with its own master effects and volume, so the keyboards and the
 vocal can go to the desk on separate channels.
 
+### If you know Ableton Live
+
+The pieces map, but the centre of gravity is different. Live is built
+around tracks; StageRig is built around the keyboard in front of you and
+the sound it is on, the way a stage piano's patches are.
+
+| In Live | In StageRig | The difference |
+|---|---|---|
+| A **Set** (the file) | the **setup** file, `*.stagerig.json` | the whole rig: inputs, programs, songs, set lists, plugin states |
+| A MIDI **track** with *MIDI From* a device and channel | an **input**: a keyboard, or one channel of it | an input is not a sound; it is where the notes come from, and it holds 128 programs |
+| The track's **device chain** (Instrument Rack with chains, key and velocity zones, effects) | a **program**: instruments with key and velocity ranges, each with its own MIDI chain and effects, and the program's effects after them | a program is one sound of your set; a Program Change from the keyboard switches to another, and only that keyboard's sound changes |
+| Switching sounds: arm another track, or a Rack's chain selector | select another program (keys, pedal, click, tablet) | nothing to arm; each keyboard changes independently |
+| An audio track with effects | an **audio input** whose programs are effect chains | the vocal's reverb steps with a footswitch like any program |
+| *Audio To* | the input's **output**, a pair of interface channels with a master chain and a volume | |
+| A **scene** per song, or a Set per song | a **song**: a program per input, a tempo, notes, charts, a backing track | one place that says what every keyboard is on for this number |
+| Locators in the arrangement; a looped clip | **sections** on the backing track; a **vamp** | jumps land at the end of the current section, in time |
+| The arrangement's audio and MIDI clips | the song's **audio files** and **MIDI files**, each MIDI part playing on an instrument you pick | the MIDI files' instruments live in a program on the *Backing track* input, which the song selects |
+| MIDI Map mode | **MIDI mappings**, with Learn, in the program | per program, so a pedal does different things in different sounds |
+| A **set list** in Live needs a plugin or a template | a **set list**: the songs in order, stepped from a pedal or the tablet | built in |
+
+If one sentence has to do: *a program is the sound a keyboard is on; a
+song is which program every keyboard is on; a set list is the songs in
+order.*
+
 ## First run
 
 1. Start StageRig. It opens with two empty inputs, **Upper** and **Lower**.
@@ -315,16 +339,16 @@ keyboard you are not using in that number.
 - **Files...** attaches a chart for the stand (see *Charts on the stand*) or
   opens the song's **Backing track** window (see *Backing tracks*).
 
-### Making a set
+### Making a set list
 
-**Set...** makes one, renames it, moves it or deletes it. With a song selected,
-**Add to set >** puts it at the end; **^ v** beside the set order it, and
-**< Remove** takes it out of the set without deleting the song.
+**Set list...** makes one, renames it, moves it or deletes it. With a song selected,
+**Add to set list >** puts it at the end; **^ v** beside the set list order it, and
+**< Remove** takes it out of the set list without deleting the song.
 
-A song can appear in more than one set, and more than once in the same set --
+A song can appear in more than one set list, and more than once in the same one --
 encores happen. Deleting a song takes it out of every set that used it.
 
-### Playing a set
+### Playing a set list
 
 Click a song to load it: every input it names, and its tempo, at once.
 
@@ -608,7 +632,8 @@ each slot its channel, and one program sorts the parts by itself:
 
 That is how a keyboard which sends its zones on different channels, or a
 multi-part MIDI file on a backing track, plays several sounds from one
-program -- no extra inputs needed.
+program -- no extra inputs needed. To hear one of them from the on-screen
+keyboard, click its row: the keys move to its channel.
 
 ### MIDI devices
 
@@ -1068,6 +1093,13 @@ velocity, sustain, mod wheel, pitch bend and a free CC number and value. It
 plays into the selected input on that input's channel, through exactly the same
 path as a real keyboard, so it works for auditioning sounds, checking splits and
 doing MIDI learn without a controller connected.
+
+On an input that takes every channel -- the backing track, or a keyboard on
+*Omni* whose program gives each channel its own instrument -- the keys play
+one channel, and it is chosen for you: **click an instrument** in the program
+and the keys play that one. A button beside *Playing into* names the channel
+and the instrument (*ch 5 · Upper: Big Strings*) and lists the others. An
+input with a channel of its own plays on it and shows no choice.
 
 Click the keys with the mouse, or focus the keyboard and use the computer
 keyboard: `A S D F G H J K` for white keys, `W E T Y U` for sharps, `Z` and `X`
