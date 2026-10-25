@@ -76,6 +76,30 @@ Every input lands on an **output** -- a pair of the interface's output
 channels -- with its own master effects and volume, so the keyboards and the
 vocal can go to the desk on separate channels.
 
+### If you know Ableton Live
+
+The pieces map, but the centre of gravity is different. Live is built
+around tracks; StageRig is built around the keyboard in front of you and
+the sound it is on, the way a stage piano's patches are.
+
+| In Live | In StageRig | The difference |
+|---|---|---|
+| A **Set** (the file) | the **setup** file, `*.stagerig.json` | the whole rig: inputs, programs, songs, set lists, plugin states |
+| A MIDI **track** with *MIDI From* a device and channel | an **input**: a keyboard, or one channel of it | an input is not a sound; it is where the notes come from, and it holds 128 programs |
+| The track's **device chain** (Instrument Rack with chains, key and velocity zones, effects) | a **program**: instruments with key and velocity ranges, each with its own MIDI chain and effects, and the program's effects after them | a program is one sound of your set; a Program Change from the keyboard switches to another, and only that keyboard's sound changes |
+| Switching sounds: arm another track, or a Rack's chain selector | select another program (keys, pedal, click, tablet) | nothing to arm; each keyboard changes independently |
+| An audio track with effects | an **audio input** whose programs are effect chains | the vocal's reverb steps with a footswitch like any program |
+| *Audio To* | the input's **output**, a pair of interface channels with a master chain and a volume | |
+| A **scene** per song, or a Set per song | a **song**: a program per input, a tempo, notes, charts, a backing track | one place that says what every keyboard is on for this number |
+| Locators in the arrangement; a looped clip | **sections** on the backing track; a **vamp** | jumps land at the end of the current section, in time |
+| The arrangement's audio and MIDI clips | the song's **audio files** and **MIDI files**, each MIDI part playing on an instrument you pick | the MIDI files' instruments live in a program on the *Backing track* input, which the song selects |
+| MIDI Map mode | **MIDI mappings**, with Learn, in the program | per program, so a pedal does different things in different sounds |
+| A **set list** in Live needs a plugin or a template | a **set list**: the songs in order, stepped from a pedal or the tablet | built in |
+
+If one sentence has to do: *a program is the sound a keyboard is on; a
+song is which program every keyboard is on; a set list is the songs in
+order.*
+
 ## First run
 
 1. Start StageRig. It opens with two empty inputs, **Upper** and **Lower**.
@@ -317,8 +341,8 @@ keyboard you are not using in that number.
 
 ### Making a set
 
-**Set...** makes one, renames it, moves it or deletes it. With a song selected,
-**Add to set >** puts it at the end; **^ v** beside the set order it, and
+**Set list...** makes one, renames it, moves it or deletes it. With a song selected,
+**Add to set list >** puts it at the end; **^ v** beside the set list order it, and
 **< Remove** takes it out of the set without deleting the song.
 
 A song can appear in more than one set, and more than once in the same set --

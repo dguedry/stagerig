@@ -98,8 +98,14 @@ Licensed under the [GPL-3.0](LICENSE).
 | **Mapping** | A CC / pitch-bend / aftertouch message → one parameter on any instrument or effect, scaled between min and max. Optionally also passed through to the plugin. |
 | **Output** | A pair of the interface's channels with a master effects chain and a volume. Every input lands on one; the default setup has one, "Main", on channels 1-2. |
 | **Song** | What to load for one number: a program per input, a tempo, stage notes, charts, and its backing track -- audio and MIDI files with sections and vamps. A MIDI file's **parts** (its channels) each play on an instrument of the song's program on the Backing track input. |
-| **Set** | Songs in order, stepped from a footswitch or the tablet. |
+| **Set list** | Songs in order, stepped from a footswitch or the tablet. (Called a set list everywhere, because in Ableton Live a *Set* is the file.) |
 | **Setup** | The whole document (inputs, outputs, programs, songs, sets, plugin states). Saved as `*.stagerig.json`, with the songs' charts and track files in a `.charts/` folder beside it. |
+
+If you know Ableton Live: a Live *Set* is StageRig's setup file; a MIDI
+track with its device chain is an **input** with the **program** it is on;
+a Rack's zones are a program's instruments with their key and velocity
+ranges; a scene per song is a **song**; locators are **sections**. The manual
+has the full table (*If you know Ableton Live*).
 
 A program change leaves what you are holding to the previous program: keys
 down and the sustain pedal keep sounding there until you let go, and then a

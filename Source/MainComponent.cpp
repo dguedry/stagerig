@@ -471,6 +471,7 @@ public:
         const bool valid = in >= 0 && in < (int) inputs.size();
         list.setEnabled (valid);
         nameEditor.setEnabled (valid);
+        header.setText (valid && inputs[(size_t) in].isTrack() ? "PROGRAMS  (one per song, made for it; the song picks it)" : "PROGRAMS", dontSendNotification);
         if (valid)
         {
             const int p = inputs[(size_t) in].currentProgram;
@@ -1578,8 +1579,12 @@ public:
             meter.setInput (in);
         }
         /* An audio input has no instruments to add: the signal is the
-           instrument. Its chain's own "+ Add effect" is the way in. */
-        header.setText (audioInput ? "EFFECTS" : "INSTRUMENTS", dontSendNotification);
+           instrument. Its chain's own "+ Add effect" is the way in. The
+           backing track's instruments are the song's parts' -- say where
+           they are chosen, so nobody builds them here by hand. */
+        const bool trackInput = in >= 0 && in < (int) inputs.size() && inputs[(size_t) in].isTrack();
+        header.setText (audioInput ? "EFFECTS" : trackInput ? "INSTRUMENTS  (what this song's MIDI file parts play on -- chosen in the song's Backing track window)"
+                                                            : "INSTRUMENTS", dontSendNotification);
         addBtn.setVisible (! audioInput);
         meter.setVisible (audioInput);
         trimCap.setVisible (audioInput);
