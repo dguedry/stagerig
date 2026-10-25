@@ -2590,6 +2590,18 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     updateTempoLabel();
     startTimerHz (4);
     setSize (1280, 800);
+
+    /* The first time, with nothing plugged in and nothing scanned, the window
+       says where to start. Once, when it has settled; never again after that. */
+    Timer::callAfterDelay (1500, [self = SafePointer<MainComponent> (this)]
+    {
+        if (self == nullptr) return;
+        const auto& inputs = self->engine.getSetup().inputs;
+        bool anyDevice = false;
+        for (const auto& in : inputs) if (in.midiDeviceIdentifier.isNotEmpty() || in.isAudio()) anyDevice = true;
+        if (! anyDevice && self->engine.getPluginHost().getKnownPlugins().getTypes().isEmpty())
+            self->showStatus ("Start here: Audio... picks your interface, Plugins... scans for sounds, then choose each keyboard's MIDI device under INPUTS.");
+    });
 }
 
 MainComponent::~MainComponent()
