@@ -219,7 +219,7 @@ PluginView::Session PluginView::start (const String& title, String& error)
     const auto window = findWindow (title);
     if (window == 0)
     {
-        error = "That plugin's window is not open. Open it with \"Edit GUI\" first.";
+        error = "The plugin's window could not be opened on the computer. Try again, or open it on the computer first.";
         return {};
     }
     raiseWindow (window);

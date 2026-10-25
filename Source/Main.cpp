@@ -26,7 +26,10 @@ class StageRigApplication : public juce::JUCEApplication,
 public:
     const juce::String getApplicationName() override       { return "StageRig"; }
     const juce::String getApplicationVersion() override    { return JUCE_APPLICATION_VERSION_STRING; }
-    bool moreThanOneInstanceAllowed() override             { return false; }
+    /* One copy at a time: two would fight over the MIDI devices and the
+       setup. A copy with its own settings folder (STAGERIG_SETTINGS_DIR) is
+       a separate rig -- a demo, a review copy -- and may run beside it. */
+    bool moreThanOneInstanceAllowed() override             { return std::getenv ("STAGERIG_SETTINGS_DIR") != nullptr; }
 
     void initialise (const juce::String& commandLine) override
     {
@@ -47,6 +50,8 @@ public:
         opts.folderName = "StageRig";
        #endif
         opts.osxLibrarySubFolder = "Application Support";
+        if (const char* dir = std::getenv ("STAGERIG_SETTINGS_DIR"); dir != nullptr && *dir != 0)
+            opts.folderName = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (dir)).getFullPathName();
         opts.storageFormat = juce::PropertiesFile::storeAsXML;
         settings = std::make_unique<juce::PropertiesFile> (opts);
 
