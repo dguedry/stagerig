@@ -38,7 +38,6 @@ works inside, see the [README](../README.md).
 - [Reading the stage display](#reading-the-stage-display)
 - [The tablet](#the-tablet)
   - [Set list](#set-list)
-  - [Now](#now)
   - [Programs](#programs)
   - [Showing a plugin's own window](#showing-a-plugins-own-window)
   - [If the tablet cannot connect](#if-the-tablet-cannot-connect)
@@ -522,7 +521,7 @@ can be more:
   pedal** unlearns it.
 
 The tablet's **GUI** chooser lists an output's master effects under every input
-that lands on it, and the Now tab has every output's volume.
+that lands on it.
 
 ## Songs and set lists
 
@@ -565,8 +564,7 @@ keyboard you are not using in that number.
   zero. Use it for a song where the tempo is whatever you last tapped.
 - **Transpose** shifts every keyboard by that many semitones while the song is
   in play -- down a step for the singer. The backing track's parts are not
-  shifted. Set it here, or from the tablet's Now tab and press **Save this
-  sound to "song"** there; selecting the song applies it.
+  shifted. Selecting the song applies it.
 - **-** deletes the selected song, and takes it out of every set list that
   used it.
 - **^ v** beside the songs list reorder it. Set lists keep playing their own
@@ -863,10 +861,10 @@ name.
 
 **Tablet** in the toolbar starts a small web app on your network. Nothing is
 installed on the tablet: it is a web page, and a laptop or phone on the same
-network does the same job. It has three tabs: **Set list** (the running order
-and the backing track), **Now** (the song's sound, adjustable) and
-**Programs** (every program on every keyboard). **TAP TEMPO** and **PANIC**
-are in the header.
+network does the same job. It has two tabs: **Set list** (the running order
+and the backing track) and **Programs** (every program on every keyboard, with
+what each keyboard is on now at the top). **TAP TEMPO** and **PANIC** are in
+the header.
 
 ![The tablet set list: the song you are on in large type, the running order, and a search](images/tablet-setlist.png)
 
@@ -893,8 +891,8 @@ Anyone on your network who has the code can change your sounds, which is the
 right level of care for a stage tool and no more: do not expect it to be safe on
 an untrusted network.
 
-`?tab=songs`, `?tab=now` or `?tab=programs` on the address opens the page on
-that tab, for a home-screen shortcut straight to it.
+`?tab=songs` or `?tab=programs` on the address opens the page on that tab,
+for a home-screen shortcut straight to it.
 
 ### Set list
 
@@ -923,30 +921,6 @@ when the current one ends; a vamping section reads *↻ vamp*, and **End vamp
 plugin in the song's own program plays it, **GUI** to open that plugin's
 window on the tablet like any other. What plays each part is chosen on the
 laptop, in the song's Backing track window; the tablet reads it.
-
-### Now
-
-The **Now** tab is the song's sound, adjustable from the stand -- the things
-that come up at a gig, and nothing that belongs in rehearsal:
-
-- **TRANSPOSE (keyboards only)**: **−** and **+** shift the keyboards' notes
-  in semitones, down a step for the singer. The backing track's parts are not
-  shifted. A note you are holding when you press it is let go properly.
-- **Save this sound to "song"** makes the song in play remember the programs
-  on every input, the tempo and the transpose as they are now, so a fix made
-  at the sound check is still there at the second set.
-- **INSTRUMENTS**: each keyboard's program with its instruments, **ON** /
-  **OFF** for a layer, and a fader for its level.
-- **EFFECTS**: the instruments' own, the program's, and the MIDI chain's --
-  each with **ON** / **OFF**, which is the effect's bypass: lose the reverb
-  when the room is wet.
-- **OUTPUTS**: each one's volume into the desk.
-
-Every change is live and saved with the setup, exactly as the same change on
-the laptop would be: turning a layer down on the tablet turns it down in the
-program. Adding or removing instruments and effects, mappings, splits and
-layers stay on the laptop, on purpose: they are slow on a touch screen and
-easy to get wrong two songs before you need the sound.
 
 ### Programs
 
