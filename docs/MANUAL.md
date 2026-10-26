@@ -817,6 +817,14 @@ Removing a section never touches the music.
 
 ### Playing it
 
+Play begins where the sound begins: silence at the head of a file is never
+played, so a track exported with an empty bar in front starts the moment you
+press Play. A lead-in that is not silent -- a quiet count-in recorded into
+the file, a breath -- is yours to cut: right-click the timeline where the
+song should begin and choose **Start the song here**, or type the time under
+**Starts at** (blank goes back to the first sound). Sections before that
+point are still there to go to, and the cue shows where Play will start.
+
 Selecting a song makes its track ready but never starts it: starting is always
 on purpose. Then any of these starts it, and the same again stops it with a
 short fade:

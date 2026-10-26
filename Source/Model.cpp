@@ -538,6 +538,7 @@ var SongDef::toVar() const
     if (click)              o->setProperty ("click", true);
     if (beatsPerBar != 4)   o->setProperty ("beatsPerBar", beatsPerBar);
     if (firstBeat != 0.0)   o->setProperty ("firstBeat", firstBeat);
+    if (startSeconds > 0.0) o->setProperty ("start", startSeconds);
     if (! markers.empty())
     {
         juce::Array<juce::var> arr;
@@ -575,6 +576,7 @@ SongDef SongDef::fromVar (const var& v)
         s.click         = (bool) o->getProperty ("click");
         s.beatsPerBar   = o->hasProperty ("beatsPerBar") ? jlimit (1, 16, (int) o->getProperty ("beatsPerBar")) : 4;
         s.firstBeat     = jmax (0.0, (double) o->getProperty ("firstBeat"));
+        s.startSeconds  = jmax (0.0, (double) o->getProperty ("start"));
     }
     return s;
 }

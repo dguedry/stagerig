@@ -390,6 +390,11 @@ struct SongDef
     bool click = false;
     int beatsPerBar = 4;
     double firstBeat = 0.0;
+    /** Where Play from the top begins (seconds into the files), for a file
+        with a lead-in you do not want to hear -- a quiet count-in, a breath.
+        0 means at the first sound: silence at the head of a file is skipped
+        anyway. Sections before it can still be gone to. */
+    double startSeconds = 0.0;
     /** Sections of the backing track, by where each starts. */
     std::vector<MarkerDef> markers;
 

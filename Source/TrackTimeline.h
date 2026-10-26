@@ -96,6 +96,7 @@ private:
     int markerAt (juce::Point<int>) const;             // a flag or its line, or -1
     int sectionBlockAt (juce::Point<int>) const;       // a block in the sections band, or -1
     void showMarkerMenu (int index, juce::Point<int> at);
+    void showTimelineMenu (double atSeconds, juce::Point<int> where);
     void renameMarker (int index);
     void removeMarker (int index);
     void goToMarker (int index);

@@ -1396,6 +1396,15 @@ void Engine::setSongFirstBeat (int songIndex, double seconds)
     listeners.call ([] (Listener& l) { l.transportChanged(); });
 }
 
+void Engine::setSongStart (int songIndex, double seconds)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& s = setup.songs[(size_t) songIndex];
+    s.startSeconds = jmax (0.0, seconds);
+    if (songIndex == trackSong && player != nullptr) player->setStart (s.startSeconds);
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
 void Engine::setSongMarkers (int songIndex, const std::vector<MarkerDef>& markers)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;

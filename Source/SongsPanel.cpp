@@ -975,6 +975,18 @@ public:
         for (int b = 2; b <= 7; ++b) barBox.addItem (String (b) + " beats per bar", b);
         barBox.setTooltip ("The click is accented on beat 1 of every bar");
         barBox.onChange = [this] { applyCountIn(); };
+        addAndMakeVisible (startLabel);
+        startLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (startText);
+        startText.setEditable (true);
+        startText.setJustificationType (Justification::centredRight);
+        startText.setTooltip ("Where Play from the top begins (minutes:seconds). Blank: at the first sound, skipping silence at the head of the files. "
+                              "Set it past a lead-in you do not want to hear, such as a count-in recorded in the file; or right-click the timeline there.");
+        startText.onTextChange = [this]
+        {
+            engine.setSongStart (songIndex, startText.getText().trim().isEmpty() ? 0.0 : SectionRow::parseTime (startText.getText()));
+            refreshTempoRow();
+        };
         addAndMakeVisible (countInOutLabel);
         countInOutLabel.setColour (Label::textColourId, textDim);
         addAndMakeVisible (countInOutBox);
@@ -1118,6 +1130,9 @@ public:
         c = r.removeFromTop (24);
         countInOutLabel.setBounds (c.removeFromLeft (70));
         countInOutBox.setBounds (c.removeFromLeft (240));
+        c.removeFromLeft (16);
+        startLabel.setBounds (c.removeFromLeft (66));
+        startText.setBounds (c.removeFromLeft (90));
         r.removeFromTop (10);
         hint.setBounds (r.removeFromTop (60));
     }
@@ -1636,6 +1651,17 @@ private:
         tempoText.setColour (Label::textColourId, sg.tempoBpm > 0.0 ? Colours::white : textDim);
         const int m = (int) (sg.firstBeat / 60.0);
         firstBeatText.setText (String (m) + ":" + String (sg.firstBeat - m * 60.0, 2).paddedLeft ('0', 5), dontSendNotification);
+        if (sg.startSeconds > 0.0)
+        {
+            const int sm = (int) (sg.startSeconds / 60.0);
+            startText.setText (String (sm) + ":" + String (sg.startSeconds - sm * 60.0, 2).paddedLeft ('0', 5), dontSendNotification);
+            startText.setColour (Label::textColourId, Colours::white);
+        }
+        else
+        {
+            startText.setText ("first sound", dontSendNotification);
+            startText.setColour (Label::textColourId, textDim);
+        }
         if (timeline != nullptr) timeline->repaint();
     }
 
@@ -1742,7 +1768,7 @@ private:
     TextButton addBtn { "+ Add audio or MIDI..." };
     Label countInLabel { {}, "Count-in" }, clickLabel { {}, "Click" }, countInOutLabel { {}, "Heard on" }, hint;
     ComboBox countInBox, clickBox, barBox, countInOutBox;
-    Label tempoLabel { {}, "Tempo" }, tempoText, firstBeatLabel { {}, "First beat" }, firstBeatText;
+    Label tempoLabel { {}, "Tempo" }, tempoText, firstBeatLabel { {}, "First beat" }, firstBeatText, startLabel { {}, "Starts at" }, startText;
     TextButton findTempoBtn { "Find the tempo in the audio..." }, halfBtn { "/2" }, doubleBtn { "x2" }, beatBackBtn { "< beat" }, beatFwdBtn { "beat >" };
     std::thread detectThread;
     std::shared_ptr<std::atomic<bool>> detectStop;

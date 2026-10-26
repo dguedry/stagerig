@@ -25,6 +25,9 @@ SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef
     }
     numStemDefs = (int) stems.size();
     setClick (song.click, song.beatsPerBar, song.firstBeat);
+    startSamples.store ((int64) (jmax (0.0, song.startSeconds) * sampleRate));
+    cuedPosition.store (startSamples.load());
+    position.store (startSamples.load());
     fadeLength = jmax (1, (int) (0.03 * sampleRate));
     scratch.setSize (2, blockSize, false, true, true);
     setMarkers (song.markers);
@@ -72,7 +75,33 @@ void SongPlayer::load()
     // A metronome with no files runs for an hour, or until it is stopped.
     lengthSamples = stems.empty() ? (int64) (3600.0 * sampleRate) : longest;
     if (stems.empty()) loadProgress.store (1.0f);
+
+    /* Where the song starts: the first sound in any of its files, a little
+       before it so no attack is clipped. Play from the top begins there
+       unless the song has a start point of its own or a cue was asked for. */
+    int64 first = -1;
+    for (auto& st : stems)
+        if (st->midi ? ! st->events.empty() : ! st->left.empty())
+            first = first < 0 ? st->firstSound : jmin (first, st->firstSound);
+    leadIn.store (jmax ((int64) 0, first - (int64) (0.01 * sampleRate)));
+    if (! cuedByUser.load() && startSamples.load() == 0)
+    {
+        cuedPosition.store (leadIn.load());
+        position.store (leadIn.load());
+        currentSection.store (sectionAt (leadIn.load()));
+    }
     ready.store (true);
+}
+
+void SongPlayer::setStart (double seconds)
+{
+    startSamples.store ((int64) (jmax (0.0, seconds) * sampleRate));
+    if (getState() == State::idle && ! cuedByUser.load())
+    {
+        cuedPosition.store (home());
+        position.store (home());
+        currentSection.store (sectionAt (home()));
+    }
 }
 
 void SongPlayer::setClick (bool on, int beatsPerBar, double firstBeatSeconds)
@@ -146,6 +175,11 @@ bool SongPlayer::loadStem (Stem& s)
     }
     s.left.resize ((size_t) written);
     s.right.resize ((size_t) written);
+
+    // The first sample above -45 dBFS on either side: the head of the file up to there is silence.
+    s.firstSound = (int64) s.left.size();
+    for (size_t i = 0; i < s.left.size(); ++i)
+        if (std::abs ((int) s.left[i]) >= 184 || std::abs ((int) s.right[i]) >= 184) { s.firstSound = (int64) i; break; }
     return ! loaderStop.load();
 }
 
@@ -183,6 +217,9 @@ bool SongPlayer::loadMidiStem (Stem& s)
             }
     std::stable_sort (events.begin(), events.end(), [] (const Stem::Event& a, const Stem::Event& b) { return a.at < b.at; });
     s.midiLength = events.empty() ? 0 : events.back().at + 1;
+    s.firstSound = s.midiLength;
+    for (const auto& ev : events)
+        if (ev.size == 3 && (ev.data[0] & 0xf0) == 0x90 && ev.data[2] > 0) { s.firstSound = ev.at; break; }
     s.events = std::move (events);
 
     return true;
@@ -330,7 +367,8 @@ void SongPlayer::stop()
             state.compare_exchange_strong (expected, (int) State::idle);
         }
     }
-    cuedPosition.store (0);
+    cuedPosition.store (home());
+    cuedByUser.store (false);
     queuedSection.store (-1);
     vamping.store (false);
 }
@@ -341,6 +379,7 @@ void SongPlayer::queueSection (int index)
     if (getState() == State::idle)
     {
         // Stopped: this is where Play will start.
+        cuedByUser.store (true);
         cuedPosition.store (sectionStart[index]);
         position.store (sectionStart[index]);
         currentSection.store (index);
@@ -356,6 +395,7 @@ void SongPlayer::cue (double seconds)
     // Before loading has finished the length is not known yet: the cue is taken as it is.
     const auto wanted = jmax ((int64) 0, (int64) (seconds * sampleRate));
     const auto p = ready.load() ? jmin (wanted, lengthSamples) : wanted;
+    cuedByUser.store (true);
     cuedPosition.store (p);
     position.store (p);
     currentSection.store (sectionAt (p));
@@ -593,15 +633,16 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
     if (st == State::stopping && fadeRemaining <= 0)
     {
         state.store ((int) State::idle);
-        position.store (0);
+        position.store (home());
         currentSection.store (0);
         return Happened::stopped;
     }
     if (ended)
     {
         state.store ((int) State::idle);
-        position.store (0);
-        cuedPosition.store (0);
+        position.store (home());
+        cuedPosition.store (home());
+        cuedByUser.store (false);
         currentSection.store (0);
         vamping.store (false);
         return Happened::ended;

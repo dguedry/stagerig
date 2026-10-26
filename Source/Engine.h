@@ -284,6 +284,10 @@ public:
     void setSongClick (int songIndex, bool on, int beatsPerBar);
     /** Where beat 1 of bar 1 falls in the song's files (seconds): the click and the count-in line up with it. */
     void setSongFirstBeat (int songIndex, double seconds);
+    /** Where Play from the top begins in the song's files (seconds); 0 = the first sound. */
+    void setSongStart (int songIndex, double seconds);
+    /** Where the armed track will start from while stopped (seconds). */
+    double getTrackCue() const                      { return player != nullptr ? player->getCueSeconds() : 0.0; }
 
     /** The song whose track is ready to play: the one selected last, or -1. */
     int  getTrackSong() const                       { return trackSong; }

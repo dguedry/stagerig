@@ -1953,6 +1953,50 @@ int main()
         engine.setSongClick (song, false, 4);
         engine.setSongCountIn (song, 2, click);                          // as the save below expects
 
+        /* A file with silence at its head starts at its first sound: half a
+           second of nothing, then the tone, and Play is loud at once. A start
+           point of the song's own wins over that. */
+        {
+            auto writeLeadIn = [&] (const File& f)
+            {
+                f.deleteFile();
+                WavAudioFormat wav;
+                std::unique_ptr<OutputStream> os (f.createOutputStream().release());
+                std::unique_ptr<AudioFormatWriter> w (wav.createWriterFor (os.get(), 48000.0, 1, 16, {}, 0));
+                if (w == nullptr) return false;
+                os.release();
+                AudioBuffer<float> b (1, 72000);
+                b.clear();
+                for (int i = 24000; i < 72000; ++i) b.setSample (0, i, 0.5f * (float) std::sin (MathConstants<double>::twoPi * 440.0 * i / 48000.0));
+                return w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+            };
+            CHECK (writeLeadIn (folder.getChildFile ("leadin.wav")));
+            const int lead = engine.addSong ("Lead-in");
+            engine.addSongStem (lead, { "leadin.wav", {}, 0, 0.0f });
+            engine.selectSong (lead);
+            CHECK (waitReady());
+            std::printf ("     lead-in: cue %.3f s\n", engine.getTrackCue());
+            CHECK (std::abs (engine.getTrackCue() - 0.49) < 0.02);
+            engine.startTrack();
+            const auto atOnce = levels (3);
+            std::printf ("     lead-in: at once %.3f, position %.3f\n", atOnce[0], engine.getTrackPosition());
+            CHECK (atOnce[0] > 0.4f && engine.getTrackPosition() > 0.5);
+            engine.stopTrack();
+            levels (4);
+            pump (50);
+            engine.setSongStart (lead, 1.0);
+            CHECK (std::abs (engine.getTrackCue() - 1.0) < 0.01);
+            engine.startTrack();
+            levels (1);
+            std::printf ("     start point 1.0: position %.3f\n", engine.getTrackPosition());
+            CHECK (engine.getTrackPosition() >= 1.0);
+            engine.stopTrack();
+            levels (4);
+            pump (50);
+            engine.selectSong (song);
+            CHECK (waitReady());
+        }
+
         // A song with no files but a click is a metronome: Play runs until stopped.
         {
             const int metro = engine.addSong ("Metronome");

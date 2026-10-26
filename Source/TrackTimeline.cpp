@@ -30,6 +30,7 @@ TrackTimeline::TrackTimeline (Engine& e, int song) : engine (e), songIndex (song
     scrollBar.setAutoHide (false);
     scrollBar.addListener (this);
     refresh();
+    if (engine.getTrackSong() == songIndex) cue = engine.getTrackCue();
     startTimerHz (30);
 }
 
@@ -601,6 +602,8 @@ void TrackTimeline::showMarkerMenu (int index, Point<int> at)
     menu.addItem (1, "Rename...");
     menu.addItem (2, "Vamp: repeat until released", true, m[(size_t) index].vamp);
     menu.addItem (3, isPlaying() ? "Go here when this section ends" : "Start Play here", true);
+    menu.addItem (5, "Start the song here  (Play from the top begins at this section)", true,
+                  song() != nullptr && std::abs (song()->startSeconds - m[(size_t) index].seconds) < 1e-6);
     menu.addSeparator();
     menu.addItem (4, "Remove section (the music is untouched)");
     SafePointer<TrackTimeline> self (this);
@@ -619,8 +622,48 @@ void TrackTimeline::showMarkerMenu (int index, Point<int> at)
             }
             case 3: self->goToMarker (index); break;
             case 4: self->removeMarker (index); break;
+            case 5:
+            {
+                const auto mm = self->markers();
+                if (index < (int) mm.size())
+                {
+                    self->engine.setSongStart (self->songIndex, mm[(size_t) index].seconds);
+                    self->hint ("Play from the top now begins at " + mm[(size_t) index].name);
+                    if (self->onMarkersChanged) self->onMarkersChanged();
+                }
+                break;
+            }
             default: break;
         }
+    });
+}
+
+void TrackTimeline::showTimelineMenu (double at, Point<int> where)
+{
+    auto* s = song();
+    if (s == nullptr) return;
+    PopupMenu menu;
+    menu.addItem (1, "Start the song here  (Play from the top begins at " + formatTime (at) + ")");
+    menu.addItem (2, "Start at the first sound  (the usual: silence at the head of the files is skipped)", s->startSeconds > 0.0, s->startSeconds <= 0.0);
+    menu.addSeparator();
+    menu.addItem (3, "Start a section here...");
+    SafePointer<TrackTimeline> self (this);
+    menu.showMenuAsync (PopupMenu::Options().withTargetScreenArea (Rectangle<int> (localPointToGlobal (where), localPointToGlobal (where)).expanded (1)),
+                        [self, at] (int choice)
+    {
+        if (self == nullptr || choice == 0) return;
+        if (choice == 1)      { self->engine.setSongStart (self->songIndex, at); self->hint ("Play from the top now begins at " + formatTime (at)); }
+        else if (choice == 2) { self->engine.setSongStart (self->songIndex, 0.0); self->hint ("Play from the top begins at the first sound"); }
+        else if (choice == 3)
+        {
+            auto m = self->markers();
+            m.push_back ({ "Section " + String ((int) m.size() + 1), at, false });
+            std::sort (m.begin(), m.end(), [] (const MarkerDef& a, const MarkerDef& b) { return a.seconds < b.seconds; });
+            for (int i = 0; i < (int) m.size(); ++i) if (std::abs (m[(size_t) i].seconds - at) < 1e-9) self->selected = i;
+            self->setMarkers (m, true);
+            self->renameMarker (self->selected);
+        }
+        if (self->onMarkersChanged) self->onMarkersChanged();
     });
 }
 
@@ -641,6 +684,7 @@ void TrackTimeline::mouseDown (const MouseEvent& e)
         int idx = markerAt (p);
         if (idx < 0) idx = sectionBlockAt (p);
         if (idx >= 0) showMarkerMenu (idx, p);
+        else showTimelineMenu (snapped (secondsAt ((float) p.x), e.mods.isAltDown()), p);
         return;
     }
 
@@ -735,7 +779,7 @@ void TrackTimeline::mouseMove (const MouseEvent& e)
         hint (ms[(size_t) b].name + (ms[(size_t) b].vamp ? " (vamp)" : "")
               + ".  Click to play from its start; double-click to rename; right-click for vamp, go and remove.");
     else
-        hint (formatTime (hoverSeconds) + ".  Click to play from here (Space or Play); double-click to start a section here."
+        hint (formatTime (hoverSeconds) + ".  Click to play from here (Space or Play); double-click to start a section here; right-click to start the song here."
               + (barsKnown() ? String ("  Snaps to bars; hold Alt for free.") : String()));
     repaint();
 }
@@ -803,6 +847,12 @@ void TrackTimeline::timerCallback()
     const bool playing = isPlaying();
     if (playing) { followPlayhead(); repaint(); }
     else if (wasPlaying) repaint();
+    else if (engine.getTrackSong() == songIndex && dragging < 0)
+    {
+        // Stopped: the cue follows the player's -- the song's start after a stop, a section asked for from the panel.
+        const double c = engine.getTrackCue();
+        if (std::abs (c - cue) > 1e-6) { cue = c; repaint(); }
+    }
     wasPlaying = playing;
 }
 
