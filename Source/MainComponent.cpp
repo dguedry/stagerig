@@ -1636,7 +1636,7 @@ public:
         trimCap.setVisible (audioInput);
         trim.setVisible (audioInput);
         emptyLabel.setText (audioInput ? "No effects in this program. The signal passes straight through; add an effect below."
-                            : trackInput ? "No parts yet. Add a MIDI file to the song (Attach... > Backing track...) and pick what plays each part there."
+                            : trackInput ? "No parts yet. Add a MIDI file to the song (Backing track... under the songs) and pick what plays each part there."
                                          : "No instruments in this program. Click \"Add instrument...\"", dontSendNotification);
         emptyLabel.setVisible (rows.empty() && (programChain == nullptr || def_hasNoEffects (in, prog)));
         resized();

@@ -90,7 +90,7 @@ private:
     ListProxy songsModel { *this, false }, setModel { *this, true };
 
     juce::TextButton addBtn { "+" }, removeBtn { "-" },
-                     captureBtn { "Capture" }, editBtn { "Edit..." }, chartBtn { "Attach..." };
+                     captureBtn { "Capture" }, editBtn { "Edit..." }, chartBtn { "Chart..." }, trackBtn { "Backing track..." };
     juce::TextButton toSetBtn { "Add to set list >" }, fromSetBtn { "< Remove" },
                      upBtn { "^" }, downBtn { "v" };
     juce::TextButton songUpBtn { "^" }, songDownBtn { "v" };

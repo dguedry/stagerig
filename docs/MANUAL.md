@@ -569,9 +569,9 @@ keyboard you are not using in that number.
   used it.
 - **^ v** beside the songs list reorder it. Set lists keep playing their own
   order: they follow the song, not its position.
-- **Attach...** offers **Attach a chart...** (see *Charts on the stand*),
-  **Backing track...** (see *Backing tracks*) and, under **Attached**,
-  **Remove** for each chart the song has.
+- **Chart...** is the song's sheet music: open one, **New chord chart...**,
+  **Attach a file...** and **Remove** (see *Charts on the stand*).
+  **Backing track...** opens the song's track (see *Backing tracks*).
 
 ### Making a set list
 
@@ -612,11 +612,11 @@ tablet*.
 ## Charts on the stand
 
 A song can carry its sheet music -- a lead sheet, a scan, a typed chord
-chart -- and the tablet shows it. Press **Attach... ▸ Attach a chart...** under
+chart -- and the tablet shows it. Press **Chart... ▸ Attach a file...** under
 the songs list, or drop a file onto a song. PDF, PNG, JPEG, GIF and WebP are
 accepted, plain text (`.txt`) is shown as it is in a monospace face, and a
 ChordPro file (`.cho`, `.crd`, `.chordpro`) has its chords set above the
-words. A song may have several; they appear as tabs. **Attach... ▸ Remove
+words. A song may have several; they appear as tabs. **Chart... ▸ Remove
 <name>** takes one off the song.
 
 The file is copied, not referred to: it goes into a folder beside the setup
@@ -632,7 +632,7 @@ next page, the left third or swipe right for the previous. This needs the
 
 ### Charts on the laptop
 
-**Attach... ▸ Open <name>...** opens the chart in a window of its own on the
+**Chart... ▸ Open <name>...** opens the chart in a window of its own on the
 laptop, to look it over before the gig: a PDF a page at a time (**< Page**,
 **Page >**, the arrow keys), an image, **-** / **+** / **Fit** for the size,
 and **Open in the system app...** for anything else. A song with several
@@ -641,7 +641,7 @@ charts shows them as tabs.
 A typed chart -- plain text or ChordPro -- opens with its text on the left
 and the page as the stand will show it on the right, so a chord can be fixed
 in the dressing room: edit, watch the page follow, press **Save** (Ctrl+S).
-The tablet shows the saved version from then on. **Attach... ▸ New chord
+The tablet shows the saved version from then on. **Chart... ▸ New chord
 chart...** starts one from a few lines that show the ChordPro way: chords in
 square brackets before the syllable they fall on, `{title: ...}`,
 `{subtitle: ...}` and `{comment: ...}` for the headings; a line without
@@ -662,7 +662,7 @@ mix, or drums, bass and pads on their own, plus a click and spoken cues for
 your in-ears -- and MIDI files, whose parts play on instruments of your
 choosing.
 
-**Attach... ▸ Backing track...** on a song opens its track. **+ Add audio or
+**Backing track...** under the songs list opens the song's track. **+ Add audio or
 MIDI...** adds WAV, AIFF, FLAC, Ogg or MP3 files, or MIDI files (or drop them
 on the song in the songs panel). Like charts, they are copied into the folder
 beside the setup, so the setup and its tracks travel together. Adding a file

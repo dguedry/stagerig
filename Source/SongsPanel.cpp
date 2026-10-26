@@ -64,9 +64,12 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     editBtn.onClick = [this] { editSelectedSong(); };
 
     addAndMakeVisible (chartBtn);
-    chartBtn.setTooltip ("A chart for the stand, or the song's backing track: sheet music for the tablet (a PDF, an image, a text "
-                         "chart or a ChordPro file) and audio or MIDI files. Or drop files on the song.");
+    chartBtn.setTooltip ("The song's sheet music, for the stand: open one, write a chord chart, or attach a PDF, an image, "
+                         "a text chart or a ChordPro file. Or drop a file on the song.");
     chartBtn.onClick = [this] { showChartMenu(); };
+    addAndMakeVisible (trackBtn);
+    trackBtn.setTooltip ("The song's backing track: its audio and MIDI files, sections, count-in, click and tempo. Or drop files on the song.");
+    trackBtn.onClick = [this] { if (selectedSong >= 0) showTracksDialog (selectedSong); };
 
     addAndMakeVisible (playBtn);
     playBtn.setTooltip ("Start or stop the backing track of the song in play, after its count-in. "
@@ -151,6 +154,8 @@ void SongsPanel::resized()
     r.removeFromTop (6);
 
     songsHeader.setBounds (songsArea.removeFromTop (14));
+    auto songFiles = songsArea.removeFromBottom (26);
+    songsArea.removeFromBottom (2);
     auto songButtons = songsArea.removeFromBottom (26);
     songsArea.removeFromBottom (4);
     auto songMoveCol = songsArea.removeFromRight (28);
@@ -162,10 +167,10 @@ void SongsPanel::resized()
 
     addBtn.setBounds (songButtons.removeFromLeft (28).reduced (1, 0));
     removeBtn.setBounds (songButtons.removeFromLeft (28).reduced (1, 0));
-    const int third = songButtons.getWidth() / 3;
-    captureBtn.setBounds (songButtons.removeFromLeft (third).reduced (1, 0));
-    editBtn.setBounds (songButtons.removeFromLeft (third).reduced (1, 0));
-    chartBtn.setBounds (songButtons.reduced (1, 0));
+    captureBtn.setBounds (songButtons.removeFromLeft (songButtons.getWidth() / 2).reduced (1, 0));
+    editBtn.setBounds (songButtons.reduced (1, 0));
+    chartBtn.setBounds (songFiles.removeFromLeft (songFiles.getWidth() * 2 / 5).reduced (1, 0));
+    trackBtn.setBounds (songFiles.reduced (1, 0));
 
     setHeader.setBounds (r.removeFromTop (14));
     auto setButtons = r.removeFromBottom (26);
@@ -209,6 +214,7 @@ void SongsPanel::refresh()
     captureBtn.setEnabled (haveSong);
     editBtn.setEnabled (haveSong);
     chartBtn.setEnabled (haveSong);
+    trackBtn.setEnabled (haveSong);
     toSetBtn.setEnabled (haveSong && haveSet);
     toSetBtn.setTooltip (haveSet ? "Put the selected song at the end of the set list" : "Make or choose a set list first (Set list...)");
     fromSetBtn.setEnabled (haveSet && selectedInSet >= 0);
@@ -256,7 +262,7 @@ void SongsPanel::refreshTransport()
 
     String text;
     if (! has)
-        text = "No backing track (Attach... > Backing track...)";
+        text = "No backing track (Backing track... under the songs)";
     else if (! engine.isTrackReady())
         text = songs[(size_t) song].name + "  -- loading " + String (roundToInt (engine.getTrackLoadProgress() * 100.0f)) + "%";
     else if (engine.isTrackCountingIn())
@@ -749,14 +755,14 @@ void SongsPanel::showChartMenu()
     const auto& sg = songs[(size_t) selectedSong];
 
     PopupMenu m;
-    m.addItem (1, "Attach a chart...");
+    for (int i = 0; i < (int) sg.charts.size(); ++i)
+        m.addItem (200 + i, "Open " + sg.charts[(size_t) i].displayName() + "...");
+    if (! sg.charts.empty()) m.addSeparator();
     m.addItem (3, "New chord chart...");
-    m.addItem (2, "Backing track..." + (sg.stems.empty() ? String() : "  (" + String ((int) sg.stems.size()) + (sg.stems.size() == 1 ? " file)" : " files)")));
+    m.addItem (1, "Attach a file...  (PDF, image, text, ChordPro)");
     if (! sg.charts.empty())
     {
-        m.addSectionHeader ("Charts");
-        for (int i = 0; i < (int) sg.charts.size(); ++i)
-            m.addItem (200 + i, "Open " + sg.charts[(size_t) i].displayName() + "...");
+        m.addSeparator();
         for (int i = 0; i < (int) sg.charts.size(); ++i)
             m.addItem (100 + i, "Remove " + sg.charts[(size_t) i].displayName());
     }
@@ -774,10 +780,6 @@ void SongsPanel::showChartMenu()
             {
                 for (const auto& f : fc.getResults()) attachChartFile (f, idx);
             });
-        }
-        else if (r == 2)
-        {
-            showTracksDialog (idx);
         }
         else if (r == 3)
         {
