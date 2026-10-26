@@ -224,12 +224,20 @@ bool TrackTimeline::barsKnown() const
     return s != nullptr && s->tempoBpm > 0.0;
 }
 
+int TrackTimeline::beatsPerBar() const
+{
+    for (auto& l : lanes)
+        if (l.doc != nullptr) return jmax (1, l.doc->timeSigNumerator);
+    auto* s = song();
+    return s != nullptr ? jmax (1, s->beatsPerBar) : 4;
+}
+
 double TrackTimeline::barAt (int bar) const
 {
     for (auto& l : lanes)
         if (l.doc != nullptr) return l.doc->tickToSeconds ((int64) bar * l.doc->ticksPerBar());
     auto* s = song();
-    return s != nullptr && s->tempoBpm > 0.0 ? bar * 240.0 / s->tempoBpm : 0.0;
+    return s != nullptr && s->tempoBpm > 0.0 ? s->firstBeat + bar * jmax (1, s->beatsPerBar) * 60.0 / s->tempoBpm : 0.0;
 }
 
 double TrackTimeline::barOf (double seconds) const
@@ -237,7 +245,7 @@ double TrackTimeline::barOf (double seconds) const
     for (auto& l : lanes)
         if (l.doc != nullptr) return (double) l.doc->secondsToTick (seconds) / (double) jmax ((int64) 1, l.doc->ticksPerBar());
     auto* s = song();
-    return s != nullptr && s->tempoBpm > 0.0 ? seconds * s->tempoBpm / 240.0 : 0.0;
+    return s != nullptr && s->tempoBpm > 0.0 ? (seconds - s->firstBeat) * s->tempoBpm / (60.0 * jmax (1, s->beatsPerBar)) : 0.0;
 }
 
 double TrackTimeline::snapped (double seconds, bool free) const
@@ -352,15 +360,32 @@ void TrackTimeline::paint (Graphics& g)
         {
             int labelEvery = 1;
             while (labelEvery * barPx < 44.0) labelEvery *= 2;
-            const int first = jmax (0, (int) std::floor (barOf (t0)));
+            const int first = (int) std::floor (barOf (t0));          // negative before the first beat: lines, no numbers
             const int last = (int) std::ceil (barOf (t1));
             for (int b = first; b <= last; ++b)
             {
                 const float x = xOf (barAt (b));
-                if (x < (float) area.getX() || x > (float) area.getRight()) continue;
-                const bool labelled = b % labelEvery == 0;
-                g.setColour (Colours::white.withAlpha (labelled ? 0.10f : 0.05f));
-                g.drawVerticalLine ((int) x, (float) lanesTop, (float) lanesBottom);
+                const bool onScreen = x >= (float) area.getX() && x <= (float) area.getRight();
+                const bool labelled = b >= 0 && b % labelEvery == 0;
+                if (onScreen)
+                {
+                    g.setColour (Colours::white.withAlpha (labelled ? 0.22f : 0.14f));
+                    g.drawVerticalLine ((int) x, (float) lanesTop, (float) lanesBottom);
+                }
+                // Close in, the beats between the bars too: to see the grid sit on the hits. (The bar's
+                // own line may be off the left edge while its beats are not, so these come first.)
+                if (const int bpb = beatsPerBar(); bpb > 1 && barPx / bpb >= 14.0)
+                {
+                    const double next = barAt (b + 1);
+                    for (int k = 1; k < bpb; ++k)
+                    {
+                        const float bx = xOf (barAt (b) + (next - barAt (b)) * k / bpb);
+                        if (bx < (float) area.getX() || bx > (float) area.getRight()) continue;
+                        g.setColour (Colours::white.withAlpha (0.07f));
+                        g.drawVerticalLine ((int) bx, (float) lanesTop, (float) lanesBottom);
+                    }
+                }
+                if (! onScreen) continue;
                 g.setColour (textDim.withAlpha (labelled ? 0.6f : 0.3f));
                 g.drawVerticalLine ((int) x, (float) area.getY() + 22.0f, (float) area.getY() + kRuler);
                 if (labelled)

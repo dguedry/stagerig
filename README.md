@@ -77,7 +77,8 @@ other plugin.
   intro until a pedal lets it go on. Tempo-synced
   effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
-  song -- PDF, image, text or ChordPro -- and the tablet shows it, turning
+  song -- PDF, image, text or ChordPro -- or type a chord chart in the app,
+  with the page beside the text -- and the tablet shows it, turning
   PDF pages a tap at a time and following the set list from song to song. Files
   are kept in a folder beside the setup, so the two travel together.
 

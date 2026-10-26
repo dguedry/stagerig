@@ -88,6 +88,7 @@ private:
     /** Bar lines, when the song's tempo is known: a MIDI file's own tempo map,
         else the song's tempo (or the current one) in 4/4. */
     bool barsKnown() const;
+    int beatsPerBar() const;
     double barAt (int bar) const;                      // seconds
     double barOf (double seconds) const;               // fractional bar number
     double snapped (double seconds, bool free) const;

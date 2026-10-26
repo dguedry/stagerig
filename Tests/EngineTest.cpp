@@ -1,6 +1,7 @@
 // Headless integration test: loads a real LV2 instrument, routes MIDI through the
 // engine and checks audio, program changes, mappings and learn.
 #include "Engine.h"
+#include "TempoDetect.h"
 #include "PluginIcons.h"
 #include "MappingSuggestions.h"
 #include "ClapPluginFormat.h"
@@ -1748,6 +1749,87 @@ int main()
 
         engine.injectMidi (0, MidiMessage::noteOff (1, 60));
         render (engine, 30);
+    }
+
+    // --- finding the tempo of a recording -------------------------------------------------
+    {
+        /* A drum pattern at an awkward tempo with a lead-in before the first
+           downbeat: kick on 1 and 3, snare on 2 and 4, hats on the eighths,
+           a little noise under it all. The detector should find the tempo
+           to within a fraction of a bpm and the first downbeat to within a
+           frame or two. */
+        auto drumWav = [&] (const File& f, double bpm, double leadIn, double seconds, double rate)
+        {
+            f.deleteFile();
+            WavAudioFormat wav;
+            std::unique_ptr<OutputStream> os (f.createOutputStream().release());
+            std::unique_ptr<AudioFormatWriter> w (wav.createWriterFor (os.get(), rate, 2, 16, {}, 0));
+            if (w == nullptr) return false;
+            os.release();
+            AudioBuffer<float> b (2, (int) (seconds * rate));
+            b.clear();
+            Random rng (7);
+            const double beat = 60.0 / bpm;
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                const float noise = 0.02f * (rng.nextFloat() * 2.0f - 1.0f);
+                b.addSample (0, i, noise); b.addSample (1, i, noise);
+            }
+            auto hit = [&] (double t, double freq, double len, float amp, bool noise)
+            {
+                const int s = (int) (t * rate), n = (int) (len * rate);
+                for (int i = 0; i < n && s + i < b.getNumSamples(); ++i)
+                {
+                    const float env = std::exp (-6.0f * (float) i / (float) n);
+                    const float v = amp * env * (noise ? (rng.nextFloat() * 2.0f - 1.0f) : (float) std::sin (MathConstants<double>::twoPi * freq * i / rate));
+                    b.addSample (0, s + i, v); b.addSample (1, s + i, v);
+                }
+            };
+            for (int k = 0; leadIn + k * beat < seconds; ++k)
+            {
+                const double t = leadIn + k * beat;
+                if (k % 4 == 0)      hit (t, 60.0, 0.15, 0.9f, false);       // a heavy kick on 1
+                else if (k % 2 == 0) hit (t, 60.0, 0.15, 0.6f, false);       // a lighter one on 3
+                else                 hit (t, 0.0, 0.10, 0.5f, true);         // snare on 2 and 4
+                hit (t, 0.0, 0.03, 0.2f, true);                              // hats
+                hit (t + beat / 2, 0.0, 0.03, 0.2f, true);
+            }
+            return w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+        };
+        AudioFormatManager fm;
+        fm.registerBasicFormats();
+        for (auto [bpm, leadIn, rate] : { std::tuple { 123.4, 0.37, 44100.0 }, std::tuple { 97.0, 1.21, 48000.0 }, std::tuple { 168.0, 0.0, 48000.0 } })
+        {
+            const auto f = scratchDir.getChildFile ("drums.wav");
+            CHECK (drumWav (f, bpm, leadIn, 40.0, rate));
+            std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (f));
+            CHECK (reader != nullptr);
+            const auto t0 = Time::getMillisecondCounterHiRes();
+            const auto est = detectTempo (*reader, 4);
+            std::printf ("     %.1f bpm, first beat %.3f s: found %.2f bpm, first beat %.3f s, confidence %.2f, in %.0f ms\n",
+                         bpm, leadIn, est.bpm, est.firstBeat, est.confidence, Time::getMillisecondCounterHiRes() - t0);
+            CHECK (est.ok);
+            /* Half or double the tempo is the one honest ambiguity -- a
+               backbeat at 168 is also a slow 84 -- so either octave passes,
+               and the downbeat must then fall on one of the heavy kicks. */
+            const double ratio = est.bpm / bpm;
+            const bool octave = std::abs (ratio - 1.0) < 0.003 || std::abs (ratio - 0.5) < 0.0015 || std::abs (ratio - 2.0) < 0.006;
+            CHECK (octave);
+            /* At the true tempo the downbeat must be a heavy kick, which
+               comes round every four beats; heard at half the tempo the grid
+               may sit on the snares instead, so any beat will do there. */
+            const double heavy = (std::abs (ratio - 1.0) < 0.003 ? 4.0 : 1.0) * 60.0 / bpm;
+            const double off = std::fmod (est.firstBeat - leadIn + 100.0 * heavy, heavy);
+            CHECK (jmin (off, heavy - off) < 0.025);
+            CHECK (est.confidence > 0.3);
+        }
+        // Too short to say anything about.
+        {
+            const auto f = scratchDir.getChildFile ("short.wav");
+            CHECK (drumWav (f, 120.0, 0.0, 2.0, 48000.0));
+            std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (f));
+            CHECK (reader != nullptr && ! detectTempo (*reader, 4).ok);
+        }
     }
 
     // --- backing tracks: stems from disk onto their outputs, a count-in, stop, end ----------

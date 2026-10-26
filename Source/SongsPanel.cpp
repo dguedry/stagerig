@@ -5,6 +5,9 @@
 #include "GmMixer.h"
 #include "MidiEditor.h"
 #include "TrackTimeline.h"
+#include "TempoDetect.h"
+#include "ChartViewer.h"
+#include <thread>
 #include "PatchDialog.h"
 #include <cmath>
 #include <map>
@@ -747,10 +750,13 @@ void SongsPanel::showChartMenu()
 
     PopupMenu m;
     m.addItem (1, "Attach a chart...");
+    m.addItem (3, "New chord chart...");
     m.addItem (2, "Backing track..." + (sg.stems.empty() ? String() : "  (" + String ((int) sg.stems.size()) + (sg.stems.size() == 1 ? " file)" : " files)")));
     if (! sg.charts.empty())
     {
-        m.addSectionHeader ("Attached");
+        m.addSectionHeader ("Charts");
+        for (int i = 0; i < (int) sg.charts.size(); ++i)
+            m.addItem (200 + i, "Open " + sg.charts[(size_t) i].displayName() + "...");
         for (int i = 0; i < (int) sg.charts.size(); ++i)
             m.addItem (100 + i, "Remove " + sg.charts[(size_t) i].displayName());
     }
@@ -773,6 +779,14 @@ void SongsPanel::showChartMenu()
         {
             showTracksDialog (idx);
         }
+        else if (r == 3)
+        {
+            newChordChart (idx);
+        }
+        else if (r >= 200)
+        {
+            showChartViewer (engine, idx, r - 200);
+        }
         else if (r >= 100)
         {
             /* The entry goes; the file stays in the folder. Another song may
@@ -781,6 +795,28 @@ void SongsPanel::showChartMenu()
             refresh();
         }
     });
+}
+
+void SongsPanel::newChordChart (int songIndex)
+{
+    /* A typed chart starts from a few lines that show the ChordPro way, in
+       the setup's own folder so it travels with the setup; the viewer opens
+       on it with the editor beside the page. */
+    const auto& songs = engine.getSongs();
+    if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+    const auto folder = engine.getChartsFolder();
+    if (folder == File()) return;
+    folder.createDirectory();
+    const auto& sg = songs[(size_t) songIndex];
+    const File dest = folder.getNonexistentChildFile (File::createLegalFileName (sg.name.isNotEmpty() ? sg.name : "Chart"), ".cho", false);
+    const String text = "{title: " + sg.name + "}\n{subtitle: key, tempo, who starts}\n\n"
+                        "{comment: Intro}\n[C]    [G]    [Am]    [F]\n\n"
+                        "{comment: Verse}\n[C]Chords go in square brackets [G]before the syllable they [Am]fall on, like [F]this.\n"
+                        "A line without brackets is just words.\n";
+    if (! dest.replaceWithText (text)) return;
+    engine.addSongChart (songIndex, { dest.getFileName(), {} });
+    refresh();
+    showChartViewer (engine, songIndex, (int) engine.getSongs()[(size_t) songIndex].charts.size() - 1);
 }
 
 void SongsPanel::attachChartFile (const File& f, int songIndex)
@@ -887,6 +923,39 @@ public:
             });
         };
 
+        addAndMakeVisible (tempoLabel);
+        tempoLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (tempoText);
+        tempoText.setTooltip ("The tempo the click, the count-in and the bar lines use. Edit... on the song sets it by hand.");
+        addAndMakeVisible (findTempoBtn);
+        findTempoBtn.setTooltip ("Listens to the song's longest audio file and finds its tempo and where its first beat falls. "
+                                 "For a recording with a steady beat; a track that speeds up or slows down gets the tempo it mostly keeps.");
+        findTempoBtn.onClick = [this] { findTempo(); };
+        addAndMakeVisible (halfBtn);
+        addAndMakeVisible (doubleBtn);
+        halfBtn.setTooltip ("Half the tempo: when the band counts it slower than the detector did");
+        doubleBtn.setTooltip ("Double the tempo: when the band counts it faster than the detector did");
+        halfBtn.onClick = [this] { scaleTempo (0.5); };
+        doubleBtn.onClick = [this] { scaleTempo (2.0); };
+        addAndMakeVisible (firstBeatLabel);
+        firstBeatLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (firstBeatText);
+        firstBeatText.setEditable (true);
+        firstBeatText.setJustificationType (Justification::centredRight);
+        firstBeatText.setTooltip ("Where beat 1 of a bar first falls in the files (minutes:seconds). 0:00.00 when the recording starts on the beat. "
+                                  "The click, the count-in and the bar lines line up with it.");
+        firstBeatText.onTextChange = [this]
+        {
+            engine.setSongFirstBeat (songIndex, SectionRow::parseTime (firstBeatText.getText()));
+            refreshTempoRow();
+        };
+        addAndMakeVisible (beatBackBtn);
+        addAndMakeVisible (beatFwdBtn);
+        beatBackBtn.setTooltip ("Move the first beat one beat earlier: when the accent falls on the wrong beat of the bar");
+        beatFwdBtn.setTooltip ("Move the first beat one beat later: when the accent falls on the wrong beat of the bar");
+        beatBackBtn.onClick = [this] { nudgeFirstBeat (-1); };
+        beatFwdBtn.onClick = [this] { nudgeFirstBeat (1); };
+
         addAndMakeVisible (countInLabel);
         countInLabel.setColour (Label::textColourId, textDim);
         addAndMakeVisible (countInBox);
@@ -959,6 +1028,12 @@ public:
         startTimerHz (5);
     }
 
+    ~TracksComponent() override
+    {
+        if (detectStop != nullptr) detectStop->store (true);
+        if (detectThread.joinable()) detectThread.join();
+    }
+
     void rebuild()
     {
         rows.clear();
@@ -982,6 +1057,7 @@ public:
             sectionRows.push_back (std::move (row));
         }
 
+        refreshTempoRow();
         fillOutputs (countInOutBox, sg.countInOutput);
         countInBox.setSelectedId (sg.countInBeats + 1, dontSendNotification);
         clickBox.setSelectedId (sg.click ? 2 : 1, dontSendNotification);
@@ -1002,7 +1078,7 @@ public:
         if (timeline != nullptr)
         {
             // The timeline takes whatever height the rest leaves: a bigger window shows more of the music.
-            const int below = 4 + 26 + 6 + 28 * (int) sectionRows.size() + 12 + 24 + 6 + 24 + 10 + 46;
+            const int below = 4 + 26 + 6 + 28 * (int) sectionRows.size() + 12 + 24 + 6 + 24 + 6 + 24 + 10 + 60;
             timeline->setBounds (r.removeFromTop (jmax (timeline->preferredHeight(), r.getHeight() - below)));
         }
         r.removeFromTop (4);
@@ -1019,6 +1095,18 @@ public:
         for (auto& row : sectionRows) row->setBounds (r.removeFromTop (28));
         r.removeFromTop (12);
         auto c = r.removeFromTop (24);
+        tempoLabel.setBounds (c.removeFromLeft (70));
+        tempoText.setBounds (c.removeFromLeft (200));
+        findTempoBtn.setBounds (c.removeFromLeft (190));   c.removeFromLeft (4);
+        halfBtn.setBounds (c.removeFromLeft (34));          c.removeFromLeft (4);
+        doubleBtn.setBounds (c.removeFromLeft (34));
+        c.removeFromLeft (12);
+        firstBeatLabel.setBounds (c.removeFromLeft (66));
+        firstBeatText.setBounds (c.removeFromLeft (70));   c.removeFromLeft (4);
+        beatBackBtn.setBounds (c.removeFromLeft (56));     c.removeFromLeft (4);
+        beatFwdBtn.setBounds (c.removeFromLeft (56));
+        r.removeFromTop (6);
+        c = r.removeFromTop (24);
         countInLabel.setBounds (c.removeFromLeft (70));
         countInBox.setBounds (c.removeFromLeft (130));
         c.removeFromLeft (16);
@@ -1031,7 +1119,7 @@ public:
         countInOutLabel.setBounds (c.removeFromLeft (70));
         countInOutBox.setBounds (c.removeFromLeft (240));
         r.removeFromTop (10);
-        hint.setBounds (r.removeFromTop (46));
+        hint.setBounds (r.removeFromTop (60));
     }
 
 private:
@@ -1530,6 +1618,105 @@ private:
         countInOutBox.setEnabled (beats > 0 || click);
     }
 
+    double songBeatSeconds() const
+    {
+        const auto& songs = engine.getSongs();
+        const double bpm = songIndex < (int) songs.size() && songs[(size_t) songIndex].tempoBpm > 0.0 ? songs[(size_t) songIndex].tempoBpm
+                                                                                                     : engine.getTempoBpm();
+        return 60.0 / jmax (20.0, bpm);
+    }
+
+    void refreshTempoRow()
+    {
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+        const auto& sg = songs[(size_t) songIndex];
+        tempoText.setText (sg.tempoBpm > 0.0 ? String (sg.tempoBpm, 1) + " bpm, the song's own"
+                                             : String (engine.getTempoBpm(), 1) + " bpm now (the song sets none)", dontSendNotification);
+        tempoText.setColour (Label::textColourId, sg.tempoBpm > 0.0 ? Colours::white : textDim);
+        const int m = (int) (sg.firstBeat / 60.0);
+        firstBeatText.setText (String (m) + ":" + String (sg.firstBeat - m * 60.0, 2).paddedLeft ('0', 5), dontSendNotification);
+        if (timeline != nullptr) timeline->repaint();
+    }
+
+    void scaleTempo (double factor)
+    {
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+        const double bpm = songs[(size_t) songIndex].tempoBpm > 0.0 ? songs[(size_t) songIndex].tempoBpm : engine.getTempoBpm();
+        engine.setSongTempo (songIndex, std::round (bpm * factor * 10.0) / 10.0);
+        refreshTempoRow();
+    }
+
+    void nudgeFirstBeat (int beats)
+    {
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+        const auto& sg = songs[(size_t) songIndex];
+        const double beat = songBeatSeconds();
+        double fb = sg.firstBeat + beats * beat;
+        if (fb < 0.0) fb += jmax (1, sg.beatsPerBar) * beat;      // the same downbeat, a bar later
+        engine.setSongFirstBeat (songIndex, jmax (0.0, fb));
+        refreshTempoRow();
+    }
+
+    void findTempo()
+    {
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+        const auto& sg = songs[(size_t) songIndex];
+        File best;
+        for (const auto& st : sg.stems)
+            if (! st.isMidi())
+                if (const File f = engine.getChartsFolder().getChildFile (st.file); f.getSize() > best.getSize())
+                    best = f;
+        if (best == File())
+        {
+            tempoText.setText ("Add an audio file first; MIDI files bring their own tempo.", dontSendNotification);
+            return;
+        }
+        if (detectThread.joinable()) return;
+        findTempoBtn.setEnabled (false);
+        tempoText.setText ("Listening to " + best.getFileName() + "...", dontSendNotification);
+        detectStop = std::make_shared<std::atomic<bool>> (false);
+        SafePointer<TracksComponent> self (this);
+        detectThread = std::thread ([self, best, bpb = sg.beatsPerBar, stop = detectStop]
+        {
+            AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (best));
+            TempoEstimate est;
+            if (reader == nullptr) est.problem = best.getFileName() + " could not be read.";
+            else est = detectTempo (*reader, bpb, [stop] { return stop->load(); });
+            MessageManager::callAsync ([self, est, name = best.getFileName()] { if (self != nullptr) self->tempoFound (est, name); });
+        });
+    }
+
+    void tempoFound (const TempoEstimate& est, const String& fileName)
+    {
+        if (detectThread.joinable()) detectThread.join();
+        findTempoBtn.setEnabled (true);
+        if (! est.ok) { tempoText.setText (est.problem, dontSendNotification); return; }
+        const double bpm = std::round (est.bpm * 100.0) / 100.0;     // two decimals: a tenth of a bpm drifts a beat over a long song
+        const int m = (int) (est.firstBeat / 60.0);
+        const String at = String (m) + ":" + String (est.firstBeat - m * 60.0, 2).paddedLeft ('0', 5);
+        const String how = est.confidence > 0.6 ? "a clear, steady beat" : est.confidence > 0.3 ? "a fair guess: check it against the click" : "a faint beat: check it against the click";
+        refreshTempoRow();
+        SafePointer<TracksComponent> self (this);
+        perf::confirm ("Tempo found",
+                       fileName + " is at " + String (bpm, 1) + " bpm (" + how + "), with the first beat of a bar at " + at + ".\n\n"
+                       "Use it for this song? Its tempo, click, count-in and the bar lines on the timeline will follow it. "
+                       "If the band counts it twice or half as fast, press x2 or /2 afterwards; if the accent lands on the "
+                       "wrong beat, move the first beat a beat with the buttons beside it.",
+                       "Use it", [self, bpm, fb = est.firstBeat]
+        {
+            if (self == nullptr) return;
+            self->engine.setSongTempo (self->songIndex, bpm);
+            self->engine.setSongFirstBeat (self->songIndex, fb);
+            self->refreshTempoRow();
+        });
+    }
+
     void timerCallback() override
     {
         // Rows follow the song if it was changed elsewhere -- a stem dropped on it in the songs panel.
@@ -1555,6 +1742,10 @@ private:
     TextButton addBtn { "+ Add audio or MIDI..." };
     Label countInLabel { {}, "Count-in" }, clickLabel { {}, "Click" }, countInOutLabel { {}, "Heard on" }, hint;
     ComboBox countInBox, clickBox, barBox, countInOutBox;
+    Label tempoLabel { {}, "Tempo" }, tempoText, firstBeatLabel { {}, "First beat" }, firstBeatText;
+    TextButton findTempoBtn { "Find the tempo in the audio..." }, halfBtn { "/2" }, doubleBtn { "x2" }, beatBackBtn { "< beat" }, beatFwdBtn { "beat >" };
+    std::thread detectThread;
+    std::shared_ptr<std::atomic<bool>> detectStop;
     std::unique_ptr<FileChooser> chooser;
 };
 

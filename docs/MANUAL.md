@@ -632,6 +632,24 @@ it a page at a time: tap the right third of the page or swipe left for the
 next page, the left third or swipe right for the previous. This needs the
 `poppler-utils` package; without it the tablet scrolls the PDF instead.
 
+### Charts on the laptop
+
+**Attach... ▸ Open <name>...** opens the chart in a window of its own on the
+laptop, to look it over before the gig: a PDF a page at a time (**< Page**,
+**Page >**, the arrow keys), an image, **-** / **+** / **Fit** for the size,
+and **Open in the system app...** for anything else. A song with several
+charts shows them as tabs.
+
+A typed chart -- plain text or ChordPro -- opens with its text on the left
+and the page as the stand will show it on the right, so a chord can be fixed
+in the dressing room: edit, watch the page follow, press **Save** (Ctrl+S).
+The tablet shows the saved version from then on. **Attach... ▸ New chord
+chart...** starts one from a few lines that show the ChordPro way: chords in
+square brackets before the syllable they fall on, `{title: ...}`,
+`{subtitle: ...}` and `{comment: ...}` for the headings; a line without
+brackets is just words. Writing notation -- a score with staves -- is a job
+for MuseScore or the like; export its PDF and attach that.
+
 On the tablet, a song with a chart shows a **Chart** button on its row. It
 opens the chart in its own tab, which **follows the set list**: when the song
 changes -- from a footswitch or the tablet -- the tab moves to the new song's
@@ -740,6 +758,27 @@ When a recording does not start on the beat -- a breath, a lead-in -- set
 **First beat** (see *Finding the tempo* below) and the click, the count-in
 and the bar lines all line up with it: the count-in's last click lands one
 beat before the music's first.
+
+### Finding the tempo
+
+Under **Tempo** the window says what tempo the song uses: its own, or
+whatever the tempo is now when the song sets none (**Edit...** on the song
+sets it by hand). **Find the tempo in the audio...** listens to the song's
+longest audio file and comes back with its tempo and where the first beat of
+a bar falls -- *123.4 bpm, with the first beat of a bar at 0:00.42* -- and
+asks before using it. **Use it** sets the song's tempo and **First beat**,
+and the click, the count-in and the bar lines on the timeline follow.
+
+It works on recordings with a steady beat, which is nearly every backing
+track. A track that speeds up, slows down or breathes gets the tempo it
+mostly keeps, and the window says so (*a faint beat: check it against the
+click*). Half or double is the one thing no detector can settle -- a
+backbeat at 168 is also a slow 84 -- so if the band counts it twice or half
+as fast, **x2** and **/2** fix the tempo in one press. If the accent lands on
+the wrong beat of the bar -- the click says *one* where the band says
+*three* -- **< beat** and **beat >** move the first beat a beat at a time.
+**First beat** can also be typed. MIDI files bring their own tempo and need
+none of this.
 
 A song's files are read in when the song is selected, so they can jump and
 loop without a gap; the line beside **Play** says *loading* until they are
@@ -1299,6 +1338,7 @@ size) and `pipewireTakeover`.
 | `Z` / `X` | Shift the on-screen keyboard down or up an octave. |
 | Double-click a part's level in the Backing track window | Back to 0 dB: the part as the file has it. |
 | The piano roll (**Edit notes...**) | Double-click adds a note (on a note: deletes it); drag its right edge to resize; Delete removes the selection; arrows move it a step (Shift: an octave); Ctrl+wheel zooms; Space plays; `Ctrl+Z` / `Ctrl+Shift+Z` undo and redo. |
+| The chart window | Arrow keys or Page Up / Page Down turn a PDF's pages; Ctrl+wheel zooms; `Ctrl+S` saves a typed chart. |
 | The timeline in the Backing track window | Click sets the cue (Play starts there); double-click starts a section; drag a flag moves it (snaps to bars; Alt: free); double-click a section renames it; right-click: vamp, go, remove; Delete removes the selected one; arrows nudge it; Ctrl+wheel zooms; Space plays. |
 | Click a section's name or time in the list under the timeline | Edits it exactly. |
 | Escape | Closes a dialog. |

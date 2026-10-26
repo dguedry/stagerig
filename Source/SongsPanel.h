@@ -114,6 +114,7 @@ private:
     // Sheet music: a file copied into the setup's charts folder and listed on the song.
     void showChartMenu();
     void attachChartFile (const juce::File&, int songIndex);
+    void newChordChart (int songIndex);
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
