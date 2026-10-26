@@ -59,6 +59,22 @@ var EffectDef::toVar() const
         o->setProperty ("bypassed", bypassed);
         return var (o);
     }
+    if (isBuiltIn())
+    {
+        o->setProperty ("kind", kind == Kind::arpeggio ? "arpeggio" : kind == Kind::chord ? "chord" : "scale");
+        if (kind == Kind::arpeggio)
+        {
+            o->setProperty ("rate", arpRate);
+            o->setProperty ("mode", arpMode);
+            o->setProperty ("octaves", arpOctaves);
+            o->setProperty ("gate", arpGate);
+            if (arpLatch) o->setProperty ("latch", true);
+        }
+        else if (kind == Kind::chord) o->setProperty ("chord", chordType);
+        else { o->setProperty ("root", scaleRoot); o->setProperty ("scale", scaleMode); }
+        o->setProperty ("bypassed", bypassed);
+        return var (o);
+    }
     if (auto xml = plugin.createXml())
         o->setProperty ("plugin", xml->toString (XmlElement::TextFormat().singleLine()));
     o->setProperty ("state", state.toBase64Encoding());
@@ -79,6 +95,20 @@ EffectDef EffectDef::fromVar (const var& v)
         e.bankLsb = jlimit (-1, 127, prop<int> (v, "bankLsb", -1));
         e.patch   = jlimit (-1, 127, prop<int> (v, "patch", -1));
         e.bypassed = prop<bool> (v, "bypassed", false);
+        return e;
+    }
+    if (const auto kind = propStr (v, "kind"); kind == "arpeggio" || kind == "chord" || kind == "scale")
+    {
+        e.kind = kind == "arpeggio" ? Kind::arpeggio : kind == "chord" ? Kind::chord : Kind::scale;
+        e.arpRate    = jlimit (0, 4, prop<int> (v, "rate", 2));
+        e.arpMode    = jlimit (0, 4, prop<int> (v, "mode", 0));
+        e.arpOctaves = jlimit (1, 4, prop<int> (v, "octaves", 1));
+        e.arpGate    = jlimit (5, 100, prop<int> (v, "gate", 80));
+        e.arpLatch   = prop<bool> (v, "latch", false);
+        e.chordType  = jlimit (0, 9, prop<int> (v, "chord", 0));
+        e.scaleRoot  = jlimit (0, 11, prop<int> (v, "root", 0));
+        e.scaleMode  = jlimit (0, 10, prop<int> (v, "scale", 0));
+        e.bypassed   = prop<bool> (v, "bypassed", false);
         return e;
     }
     if (auto xml = parseXML (propStr (v, "plugin")))
@@ -600,6 +630,8 @@ var SongDef::toVar() const
     if (beatsPerBar != 4)   o->setProperty ("beatsPerBar", beatsPerBar);
     if (firstBeat != 0.0)   o->setProperty ("firstBeat", firstBeat);
     if (startSeconds > 0.0) o->setProperty ("start", startSeconds);
+    if (trackBpm > 0.0)     o->setProperty ("trackBpm", trackBpm);
+    if (transposeTrack)     o->setProperty ("transposeTrack", true);
     if (! markers.empty())
     {
         juce::Array<juce::var> arr;
@@ -638,6 +670,8 @@ SongDef SongDef::fromVar (const var& v)
         s.beatsPerBar   = o->hasProperty ("beatsPerBar") ? jlimit (1, 16, (int) o->getProperty ("beatsPerBar")) : 4;
         s.firstBeat     = jmax (0.0, (double) o->getProperty ("firstBeat"));
         s.startSeconds  = jmax (0.0, (double) o->getProperty ("start"));
+        s.trackBpm      = jmax (0.0, (double) o->getProperty ("trackBpm"));
+        s.transposeTrack = (bool) o->getProperty ("transposeTrack");
     }
     return s;
 }
@@ -721,6 +755,8 @@ var Setup::toVar() const
     if (prevSongCC > 0) o->setProperty ("prevSongCC", prevSongCC);
     if (transportCC > 0) o->setProperty ("transportCC", transportCC);
     if (sectionCC > 0)   o->setProperty ("sectionCC", sectionCC);
+    if (looperCC > 0)    o->setProperty ("looperCC", looperCC);
+    if (looperClearCC > 0) o->setProperty ("looperClearCC", looperClearCC);
     return var (o);
 }
 
@@ -752,6 +788,8 @@ Setup Setup::fromVar (const var& v)
     s.prevSongCC = prop<int> (v, "prevSongCC", 0);
     s.transportCC = jlimit (0, 127, prop<int> (v, "transportCC", 0));
     s.sectionCC   = jlimit (0, 127, prop<int> (v, "sectionCC", 0));
+    s.looperCC    = jlimit (0, 127, prop<int> (v, "looperCC", 0));
+    s.looperClearCC = jlimit (0, 127, prop<int> (v, "looperClearCC", 0));
     if (auto* o = obj (v))
     {
         if (auto* arr = o->getProperty ("songs").getArray())

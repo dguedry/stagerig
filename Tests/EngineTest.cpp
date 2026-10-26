@@ -2,6 +2,8 @@
 // engine and checks audio, program changes, mappings and learn.
 #include "Engine.h"
 #include "TempoDetect.h"
+#include "Stretch.h"
+#include "MidiFx.h"
 #include "PluginIcons.h"
 #include "MappingSuggestions.h"
 #include "ClapPluginFormat.h"
@@ -321,6 +323,92 @@ int main()
         render (engine, 2);
         CHECK (inst->fetchParameterValue (target->index, v));
         CHECK (std::abs (v - 0.25f) < 0.02f);
+    }
+
+    // --- a pedal on the instrument itself: on / off, toggled, and a level ------------------
+    {
+        MappingDef onOff;
+        onOff.source = MappingDef::Source::CC; onOff.number = 80; onOff.slot = 0; onOff.paramId = "#on"; onOff.paramName = "On / off";
+        engine.addMapping (0, 0, onOff);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 80, 0));
+        render (engine, 2);
+        pump (50);
+        std::printf ("     CC 80 = 0 -> instrument enabled %d\n", (int) engine.getSetup().inputs[0].programs[0].slots[0].enabled);
+        CHECK (! engine.getSetup().inputs[0].programs[0].slots[0].enabled);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 80, 127));
+        render (engine, 2);
+        pump (50);
+        CHECK (engine.getSetup().inputs[0].programs[0].slots[0].enabled);
+        engine.removeMapping (0, 0, (int) engine.getSetup().inputs[0].programs[0].mappings.size() - 1);
+
+        MappingDef tog = onOff; tog.number = 81; tog.paramId = "#toggle";
+        engine.addMapping (0, 0, tog);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 81, 127));           // press: off
+        render (engine, 2);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 81, 0));             // release: nothing
+        render (engine, 2);
+        pump (50);
+        CHECK (! engine.getSetup().inputs[0].programs[0].slots[0].enabled);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 81, 127));           // press again: on
+        render (engine, 2);
+        pump (50);
+        std::printf ("     CC 81 pressed twice -> instrument enabled %d\n", (int) engine.getSetup().inputs[0].programs[0].slots[0].enabled);
+        CHECK (engine.getSetup().inputs[0].programs[0].slots[0].enabled);
+        engine.removeMapping (0, 0, (int) engine.getSetup().inputs[0].programs[0].mappings.size() - 1);
+
+        MappingDef lev = onOff; lev.number = 82; lev.paramId = "#level";
+        engine.addMapping (0, 0, lev);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 82, 64));            // halfway up the fader: about -24 dB
+        render (engine, 2);
+        pump (50);
+        std::printf ("     CC 82 = 64 -> level %.1f dB\n", engine.getSetup().inputs[0].programs[0].slots[0].gainDb);
+        CHECK (std::abs (engine.getSetup().inputs[0].programs[0].slots[0].gainDb + 24.0f) < 1.5f);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 82, 106));           // 0 dB
+        render (engine, 2);
+        pump (50);
+        CHECK (std::abs (engine.getSetup().inputs[0].programs[0].slots[0].gainDb) < 1.0f);
+        engine.removeMapping (0, 0, (int) engine.getSetup().inputs[0].programs[0].mappings.size() - 1);
+        engine.setSlotGainDb (0, 0, 0, 0.0f);
+    }
+
+    // --- the looper: a bar of playing goes round on its own ---------------------------------
+    {
+        auto peakBlock = [&]
+        {
+            AudioBuffer<float> b (2, kBlock);
+            b.clear();
+            engine.renderBlockForTesting (b.getArrayOfWritePointers(), 2, kBlock);
+            return b.getMagnitude (0, kBlock);
+        };
+        engine.setTempoBpm (120.0);                                      // a bar is two seconds
+        const int blocksPerBar = (int) std::ceil (engine.getSampleRate() * 2.0 / kBlock);
+        CHECK (engine.getLoopState (0) == Engine::LoopState::empty);
+        engine.loopPedal (0);                                            // record
+        render (engine, 1);
+        CHECK (engine.getLoopState (0) == Engine::LoopState::recording);
+        engine.injectMidi (0, MidiMessage::noteOn (1, 64, (uint8) 100));
+        render (engine, 10);
+        engine.injectMidi (0, MidiMessage::noteOff (1, 64));
+        render (engine, blocksPerBar - 11);
+        engine.loopPedal (0);                                            // play: one bar, the nearest
+        render (engine, 1);
+        std::printf ("     loop: state %d, %d bar(s)\n", (int) engine.getLoopState (0), engine.getLoopBars (0));
+        CHECK (engine.getLoopState (0) == Engine::LoopState::playing && engine.getLoopBars (0) == 1);
+        // Round it goes: in the second pass the note sounds again with nothing played.
+        render (engine, blocksPerBar - 2);
+        float loud = 0.0f;
+        for (int b = 0; b < 12; ++b) loud = jmax (loud, peakBlock());
+        std::printf ("     the loop playing the note again: peak %.3f\n", loud);
+        CHECK (loud > 0.01f);
+        engine.loopStop (0);
+        render (engine, 30);
+        float quiet = 0.0f;
+        for (int b = 0; b < 4; ++b) quiet = jmax (quiet, peakBlock());
+        std::printf ("     stopped: peak %.4f\n", quiet);
+        CHECK (engine.getLoopState (0) == Engine::LoopState::stopped && quiet < 0.01f);
+        engine.loopClear (0);
+        render (engine, 1);
+        CHECK (engine.getLoopState (0) == Engine::LoopState::empty && engine.getLoopBars (0) == 0);
     }
 
     // --- learn ------------------------------------------------------------------------
@@ -1751,6 +1839,88 @@ int main()
         render (engine, 30);
     }
 
+    // --- the built-in MIDI effects ----------------------------------------------------------
+    {
+        auto notesOn = [] (const MidiBuffer& b) { StringArray out; for (const auto m : b) if (m.getMessage().isNoteOn()) out.add (String (m.getMessage().getNoteNumber())); return out.joinIntoString (" "); };
+        // Chord: a C becomes C E G, and letting go lets all three go.
+        {
+            EffectDef d; d.kind = EffectDef::Kind::chord; d.chordType = 0;
+            auto fx = MidiFx::create (d);
+            CHECK (fx != nullptr);
+            MidiBuffer in, out;
+            in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0);
+            fx->process (in, out, 512, 48000.0, 120.0);
+            std::printf ("     chord of C: %s\n", notesOn (out).toRawUTF8());
+            CHECK (notesOn (out) == "60 64 67");
+            in.clear(); out.clear();
+            in.addEvent (MidiMessage::noteOff (1, 60), 0);
+            fx->process (in, out, 512, 48000.0, 120.0);
+            int offs = 0; for (const auto m : out) if (m.getMessage().isNoteOff()) ++offs;
+            CHECK (offs == 3);
+        }
+        // Scale: C# in C major goes down to C; E stays.
+        {
+            EffectDef d; d.kind = EffectDef::Kind::scale; d.scaleRoot = 0; d.scaleMode = 0;
+            auto fx = MidiFx::create (d);
+            MidiBuffer in, out;
+            in.addEvent (MidiMessage::noteOn (1, 61, (uint8) 100), 0);
+            in.addEvent (MidiMessage::noteOn (1, 64, (uint8) 100), 10);
+            fx->process (in, out, 512, 48000.0, 120.0);
+            std::printf ("     C# and E in C major: %s\n", notesOn (out).toRawUTF8());
+            CHECK (notesOn (out) == "60 64");
+        }
+        // Arpeggiator: C and E held, eighths at 120 (a step every 0.25 s): four notes a second, alternating.
+        {
+            EffectDef d; d.kind = EffectDef::Kind::arpeggio; d.arpRate = 1; d.arpMode = 0; d.arpOctaves = 1; d.arpGate = 50;
+            auto fx = MidiFx::create (d);
+            MidiBuffer in, out;
+            in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0);
+            in.addEvent (MidiMessage::noteOn (1, 64, (uint8) 100), 0);
+            StringArray played;
+            int offs = 0;
+            for (int b = 0; b < 48000 / 512; ++b)
+            {
+                out.clear();
+                fx->process (in, out, 512, 48000.0, 120.0);
+                in.clear();
+                for (const auto m : out) { if (m.getMessage().isNoteOn()) played.add (String (m.getMessage().getNoteNumber())); if (m.getMessage().isNoteOff()) ++offs; }
+            }
+            std::printf ("     arpeggio over a second: %s (%d note-offs)\n", played.joinIntoString (" ").toRawUTF8(), offs);
+            CHECK (played.size() == 4 && played[0] == "60" && played[1] == "64" && played[2] == "60" && offs >= 3);
+        }
+    }
+
+    // --- stretching a recording: longer without changing its pitch, higher without its length --
+    {
+        auto tone = [] (double freq, double seconds, double rate)
+        {
+            std::vector<int16_t> v ((size_t) (seconds * rate));
+            for (size_t i = 0; i < v.size(); ++i) v[i] = (int16_t) (20000.0 * std::sin (MathConstants<double>::twoPi * freq * (double) i / rate));
+            return v;
+        };
+        auto hzOf = [] (const std::vector<int16_t>& v, double rate)
+        {
+            // Zero crossings over the middle half, where the stretch has settled.
+            int crossings = 0;
+            const size_t a = v.size() / 4, b = v.size() * 3 / 4;
+            for (size_t i = a + 1; i < b; ++i) if ((v[i - 1] < 0) != (v[i] < 0)) ++crossings;
+            return crossings * rate / (2.0 * (double) (b - a));
+        };
+        const double rate = 48000.0;
+        auto l = tone (440.0, 2.0, rate), r = l;
+        stretchAndShift (l, r, 1.5, 0.0, rate);
+        std::printf ("     stretched x1.5: %.3f s, %.1f Hz\n", l.size() / rate, hzOf (l, rate));
+        CHECK (std::abs (l.size() / rate - 3.0) < 0.01 && std::abs (hzOf (l, rate) - 440.0) < 5.0);
+        l = tone (440.0, 2.0, rate); r = l;
+        stretchAndShift (l, r, 1.0, 12.0, rate);
+        std::printf ("     up an octave: %.3f s, %.1f Hz\n", l.size() / rate, hzOf (l, rate));
+        CHECK (std::abs (l.size() / rate - 2.0) < 0.01 && std::abs (hzOf (l, rate) - 880.0) < 10.0);
+        l = tone (440.0, 2.0, rate); r = l;
+        stretchAndShift (l, r, 0.8, -2.0, rate);
+        std::printf ("     shorter and down two: %.3f s, %.1f Hz\n", l.size() / rate, hzOf (l, rate));
+        CHECK (std::abs (l.size() / rate - 1.6) < 0.01 && std::abs (hzOf (l, rate) - 392.0) < 6.0);
+    }
+
     // --- recording the gig: every output to WAV, the keyboards to MIDI ----------------------
     {
         engine.setSetupFile (scratchDir.getChildFile ("rec.stagerig.json"));
@@ -2064,6 +2234,30 @@ int main()
             levels (1);
             std::printf ("     start point 1.0: position %.3f\n", engine.getTrackPosition());
             CHECK (engine.getTrackPosition() >= 1.0);
+            engine.stopTrack();
+            levels (4);
+            pump (50);
+            engine.selectSong (song);
+            CHECK (waitReady());
+        }
+
+        /* Files that know their tempo follow the song's: the one-second
+           stem, made "at 120", plays for two seconds when the song is at 60,
+           and every time on the panel still reads in the file's seconds. */
+        {
+            const int slow = engine.addSong ("Half speed");
+            engine.addSongStem (slow, { "stem.wav", "Tone", 0, 0.0f });
+            engine.setSongTrackBpm (slow, 120.0);
+            engine.setSongTempo (slow, 60.0);
+            engine.selectSong (slow);
+            CHECK (waitReady());
+            std::printf ("     stretched song: time scale %.2f, length reads %.2f s\n", engine.getTrackTimeScale(), engine.getTrackLength());
+            CHECK (std::abs (engine.getTrackTimeScale() - 2.0) < 1e-6 && std::abs (engine.getTrackLength() - 1.0) < 0.02);
+            engine.startTrack();
+            levels (150);                                                 // 1.6 s: past where the file would have ended
+            CHECK (engine.isTrackRunning());
+            std::printf ("     still playing at 1.6 s: position reads %.2f s (file time)\n", engine.getTrackPosition());
+            CHECK (engine.getTrackPosition() > 0.7 && engine.getTrackPosition() < 1.0);
             engine.stopTrack();
             levels (4);
             pump (50);

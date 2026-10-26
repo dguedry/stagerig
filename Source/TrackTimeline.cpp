@@ -222,7 +222,13 @@ bool TrackTimeline::barsKnown() const
 {
     for (auto& l : lanes) if (l.doc != nullptr) return true;
     auto* s = song();
-    return s != nullptr && s->tempoBpm > 0.0;
+    return s != nullptr && (s->trackBpm > 0.0 || s->tempoBpm > 0.0);
+}
+
+/** The timeline is the files' own: their tempo when known, else the song's. */
+static double fileBpmOf (const SongDef& s)
+{
+    return s.trackBpm > 0.0 ? s.trackBpm : s.tempoBpm;
 }
 
 int TrackTimeline::beatsPerBar() const
@@ -238,7 +244,7 @@ double TrackTimeline::barAt (int bar) const
     for (auto& l : lanes)
         if (l.doc != nullptr) return l.doc->tickToSeconds ((int64) bar * l.doc->ticksPerBar());
     auto* s = song();
-    return s != nullptr && s->tempoBpm > 0.0 ? s->firstBeat + bar * jmax (1, s->beatsPerBar) * 60.0 / s->tempoBpm : 0.0;
+    return s != nullptr && fileBpmOf (*s) > 0.0 ? s->firstBeat + bar * jmax (1, s->beatsPerBar) * 60.0 / fileBpmOf (*s) : 0.0;
 }
 
 double TrackTimeline::barOf (double seconds) const
@@ -246,7 +252,7 @@ double TrackTimeline::barOf (double seconds) const
     for (auto& l : lanes)
         if (l.doc != nullptr) return (double) l.doc->secondsToTick (seconds) / (double) jmax ((int64) 1, l.doc->ticksPerBar());
     auto* s = song();
-    return s != nullptr && s->tempoBpm > 0.0 ? (seconds - s->firstBeat) * s->tempoBpm / (60.0 * jmax (1, s->beatsPerBar)) : 0.0;
+    return s != nullptr && fileBpmOf (*s) > 0.0 ? (seconds - s->firstBeat) * fileBpmOf (*s) / (60.0 * jmax (1, s->beatsPerBar)) : 0.0;
 }
 
 double TrackTimeline::snapped (double seconds, bool free) const

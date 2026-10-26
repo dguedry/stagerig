@@ -72,6 +72,15 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     trackBtn.setTooltip ("The song's backing track: its audio and MIDI files, sections, count-in, click and tempo. Or drop files on the song.");
     trackBtn.onClick = [this] { if (selectedSong >= 0) showTracksDialog (selectedSong); };
 
+    addAndMakeVisible (loopBtn);
+    loopBtn.setTooltip ("Loop a passage on the selected keyboard: press to record, press again to play it round (whole bars at the rig's tempo), "
+                        "press to stop, press to play again. Right-click clears. A footswitch can do the same (Footswitches...).");
+    loopBtn.onClick = [this]
+    {
+        const int input = selectedInputProvider ? selectedInputProvider() : 0;
+        engine.loopPedal (input);
+        refreshLoopButton();
+    };
     addAndMakeVisible (playBtn);
     playBtn.setTooltip ("Start or stop the backing track of the song in play, after its count-in. "
                         "A footswitch can do the same (Footswitches...).");
@@ -140,8 +149,10 @@ void SongsPanel::resized()
     auto r = getLocalBounds().reduced (6);
 
     auto top = r.removeFromTop (24);
-    setBtn.setBounds (top.removeFromLeft (top.getWidth() / 2).reduced (1, 0));
-    footBtn.setBounds (top.reduced (1, 0));
+    const int third = top.getWidth() / 3;
+    setBtn.setBounds (top.removeFromLeft (third + 10).reduced (1, 0));
+    footBtn.setBounds (top.removeFromLeft (third + 24).reduced (1, 0));
+    loopBtn.setBounds (top.reduced (1, 0));
     r.removeFromTop (4);
     auto transport = r.removeFromTop (24);
     playBtn.setBounds (transport.removeFromLeft (52).reduced (1, 0));
@@ -231,8 +242,34 @@ void SongsPanel::refresh()
     setList.repaint();
 }
 
+void SongsPanel::refreshLoopButton()
+{
+    const int input = selectedInputProvider ? selectedInputProvider() : 0;
+    const auto st = engine.getLoopState (input);
+    const int bars = engine.getLoopBars (input);
+    loopBtn.setButtonText (st == Engine::LoopState::recording ? "Rec..." : st == Engine::LoopState::playing ? String (bars) + (bars == 1 ? " bar" : " bars")
+                         : st == Engine::LoopState::stopped ? "Loop >" : "Loop");
+    loopBtn.setColour (TextButton::buttonColourId, st == Engine::LoopState::recording ? Colour (0xffa3282d)
+                                                 : st == Engine::LoopState::playing ? accentDim : getLookAndFeel().findColour (TextButton::buttonColourId));
+}
+
+void SongsPanel::showLoopMenu()
+{
+    const int input = selectedInputProvider ? selectedInputProvider() : 0;
+    PopupMenu m;
+    m.addItem (1, "Stop the loop", engine.getLoopState (input) == Engine::LoopState::playing);
+    m.addItem (2, "Clear the loop", engine.getLoopState (input) != Engine::LoopState::empty);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (loopBtn), [this, input] (int r)
+    {
+        if (r == 1) engine.loopStop (input);
+        else if (r == 2) engine.loopClear (input);
+        refreshLoopButton();
+    });
+}
+
 void SongsPanel::timerCallback()
 {
+    refreshLoopButton();
     /* Follow the set moving under us. Only the highlight and the headers can
        change without a click here, so this is cheap. */
     static int lastSet = -2, lastPos = -2, lastSongs = -1, lastSets = -1;
@@ -728,6 +765,14 @@ void SongsPanel::showFootswitchMenu()
     m.addItem (9, "Learn: press the pedal...");
     if (engine.getTapTempoCC() > 0) m.addItem (10, "Stop using CC " + String (engine.getTapTempoCC()));
 
+    m.addSectionHeader ("Loop: record / play / stop  (on the keyboard the pedal is on)");
+    m.addItem (11, "Learn: press the pedal...");
+    if (engine.getLooperCC() > 0) m.addItem (12, "Stop using CC " + String (engine.getLooperCC()));
+
+    m.addSectionHeader ("Loop: clear");
+    m.addItem (13, "Learn: press the pedal...");
+    if (engine.getLooperClearCC() > 0) m.addItem (14, "Stop using CC " + String (engine.getLooperClearCC()));
+
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (footBtn), [this] (int choice)
     {
         switch (choice)
@@ -742,6 +787,10 @@ void SongsPanel::showFootswitchMenu()
             case 8: engine.setSectionCC (0);     break;
             case 9: engine.armTapTempoLearn (true); break;
             case 10: engine.setTapTempoCC (0);   break;
+            case 11: engine.armLooperLearn (false); break;
+            case 12: engine.setLooperCC (0);     break;
+            case 13: engine.armLooperLearn (true); break;
+            case 14: engine.setLooperClearCC (0); break;
             default: break;
         }
         refresh();
@@ -934,6 +983,22 @@ public:
         findTempoBtn.setTooltip ("Listens to the song's longest audio file and finds its tempo and where its first beat falls. "
                                  "For a recording with a steady beat; a track that speeds up or slows down gets the tempo it mostly keeps.");
         findTempoBtn.onClick = [this] { findTempo(); };
+        addAndMakeVisible (fileBpmLabel);
+        fileBpmLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (fileBpmText);
+        fileBpmText.setEditable (true);
+        fileBpmText.setJustificationType (Justification::centredRight);
+        fileBpmText.setTooltip ("The tempo the audio files were made at (Find the tempo fills it in). With the song's own tempo set to "
+                                "something else, the files are stretched to play at the song's tempo. Blank: unknown, so they play as they are.");
+        fileBpmText.onTextChange = [this]
+        {
+            engine.setSongTrackBpm (songIndex, fileBpmText.getText().trim().getDoubleValue());
+            refreshTempoRow();
+        };
+        addAndMakeVisible (transposeTrackBtn);
+        transposeTrackBtn.setTooltip ("The song's transpose (Edit... on the song) also moves the files' pitch, and the MIDI files' notes "
+                                      "(drums aside): one setting takes the whole band down a step. The files are re-read when it changes.");
+        transposeTrackBtn.onClick = [this] { engine.setSongTransposeTrack (songIndex, transposeTrackBtn.getToggleState()); refreshTempoRow(); };
         addAndMakeVisible (halfBtn);
         addAndMakeVisible (doubleBtn);
         halfBtn.setTooltip ("Half the tempo: when the band counts it slower than the detector did");
@@ -1111,16 +1176,17 @@ public:
         for (auto& row : sectionRows) row->setBounds (r.removeFromTop (28));
         r.removeFromTop (12);
         auto c = r.removeFromTop (24);
-        tempoLabel.setBounds (c.removeFromLeft (70));
-        tempoText.setBounds (c.removeFromLeft (200));
-        findTempoBtn.setBounds (c.removeFromLeft (190));   c.removeFromLeft (4);
-        halfBtn.setBounds (c.removeFromLeft (34));          c.removeFromLeft (4);
-        doubleBtn.setBounds (c.removeFromLeft (34));
-        c.removeFromLeft (12);
-        firstBeatLabel.setBounds (c.removeFromLeft (66));
-        firstBeatText.setBounds (c.removeFromLeft (70));   c.removeFromLeft (4);
-        beatBackBtn.setBounds (c.removeFromLeft (56));     c.removeFromLeft (4);
-        beatFwdBtn.setBounds (c.removeFromLeft (56));
+        tempoLabel.setBounds (c.removeFromLeft (50));
+        tempoText.setBounds (c.removeFromLeft (190));
+        findTempoBtn.setBounds (c.removeFromLeft (170));   c.removeFromLeft (4);
+        halfBtn.setBounds (c.removeFromLeft (30));          c.removeFromLeft (4);
+        doubleBtn.setBounds (c.removeFromLeft (30));        c.removeFromLeft (10);
+        fileBpmLabel.setBounds (c.removeFromLeft (50));
+        fileBpmText.setBounds (c.removeFromLeft (52));      c.removeFromLeft (10);
+        firstBeatLabel.setBounds (c.removeFromLeft (60));
+        firstBeatText.setBounds (c.removeFromLeft (64));   c.removeFromLeft (4);
+        beatBackBtn.setBounds (c.removeFromLeft (50));     c.removeFromLeft (4);
+        beatFwdBtn.setBounds (c.removeFromLeft (50));
         r.removeFromTop (6);
         c = r.removeFromTop (24);
         countInLabel.setBounds (c.removeFromLeft (70));
@@ -1137,6 +1203,8 @@ public:
         c.removeFromLeft (16);
         startLabel.setBounds (c.removeFromLeft (66));
         startText.setBounds (c.removeFromLeft (90));
+        c.removeFromLeft (16);
+        transposeTrackBtn.setBounds (c.removeFromLeft (250));
         r.removeFromTop (10);
         hint.setBounds (r.removeFromTop (60));
     }
@@ -1662,9 +1730,20 @@ private:
         const auto& songs = engine.getSongs();
         if (songIndex < 0 || songIndex >= (int) songs.size()) return;
         const auto& sg = songs[(size_t) songIndex];
+        const bool stretched = sg.trackBpm > 0.0 && sg.tempoBpm > 0.0 && std::abs (sg.trackBpm - sg.tempoBpm) > 0.005;
         tempoText.setText (sg.tempoBpm > 0.0 ? String (sg.tempoBpm, 1) + " bpm, the song's own"
+                                                 + (stretched ? "  (files stretched " + String (roundToInt ((sg.tempoBpm / sg.trackBpm - 1.0) * 100.0)) + "%)" : String())
                                              : String (engine.getTempoBpm(), 1) + " bpm now (the song sets none)", dontSendNotification);
         tempoText.setColour (Label::textColourId, sg.tempoBpm > 0.0 ? Colours::white : textDim);
+        tempoText.setTooltip (stretched ? "The files were made at " + String (sg.trackBpm, 1) + " bpm and are stretched to play at the song's "
+                                          + String (sg.tempoBpm, 1) + ". Edit... on the song sets its tempo; Files at sets theirs."
+                                        : "The tempo the click, the count-in and the bar lines use. Edit... on the song sets it by hand.");
+        fileBpmText.setText (sg.trackBpm > 0.0 ? String (sg.trackBpm, 1) : String ("?"), dontSendNotification);
+        fileBpmText.setColour (Label::textColourId, sg.trackBpm > 0.0 ? Colours::white : textDim);
+        transposeTrackBtn.setToggleState (sg.transposeTrack, dontSendNotification);
+        transposeTrackBtn.setButtonText (sg.transposeTrack && sg.transpose != 0
+                                           ? "Transpose the files with the song  (" + String (sg.transpose > 0 ? "+" : "") + String (sg.transpose) + " st now)"
+                                           : "Transpose the files with the song");
         const int m = (int) (sg.firstBeat / 60.0);
         firstBeatText.setText (String (m) + ":" + String (sg.firstBeat - m * 60.0, 2).paddedLeft ('0', 5), dontSendNotification);
         if (sg.startSeconds > 0.0)
@@ -1686,7 +1765,9 @@ private:
         const auto& songs = engine.getSongs();
         if (songIndex < 0 || songIndex >= (int) songs.size()) return;
         const double bpm = songs[(size_t) songIndex].tempoBpm > 0.0 ? songs[(size_t) songIndex].tempoBpm : engine.getTempoBpm();
-        engine.setSongTempo (songIndex, std::round (bpm * factor * 10.0) / 10.0);
+        // Both numbers: the detector heard the octave wrong, not the stretch.
+        if (songs[(size_t) songIndex].trackBpm > 0.0) engine.setSongTrackBpm (songIndex, std::round (songs[(size_t) songIndex].trackBpm * factor * 100.0) / 100.0);
+        engine.setSongTempo (songIndex, std::round (bpm * factor * 100.0) / 100.0);
         refreshTempoRow();
     }
 
@@ -1753,6 +1834,7 @@ private:
                        "Use it", [self, bpm, fb = est.firstBeat]
         {
             if (self == nullptr) return;
+            self->engine.setSongTrackBpm (self->songIndex, bpm);
             self->engine.setSongTempo (self->songIndex, bpm);
             self->engine.setSongFirstBeat (self->songIndex, fb);
             self->refreshTempoRow();
@@ -1784,7 +1866,9 @@ private:
     TextButton addBtn { "+ Add audio or MIDI..." };
     Label countInLabel { {}, "Count-in" }, clickLabel { {}, "Click" }, countInOutLabel { {}, "Heard on" }, hint;
     ComboBox countInBox, clickBox, barBox, countInOutBox;
-    Label tempoLabel { {}, "Tempo" }, tempoText, firstBeatLabel { {}, "First beat" }, firstBeatText, startLabel { {}, "Starts at" }, startText;
+    Label tempoLabel { {}, "Tempo" }, tempoText, fileBpmLabel { {}, "Files at" }, fileBpmText, firstBeatLabel { {}, "First beat" }, firstBeatText,
+          startLabel { {}, "Starts at" }, startText;
+    ToggleButton transposeTrackBtn { "Transpose the files with the song" };
     TextButton findTempoBtn { "Find the tempo in the audio..." }, halfBtn { "/2" }, doubleBtn { "x2" }, beatBackBtn { "< beat" }, beatFwdBtn { "beat >" };
     std::thread detectThread;
     std::shared_ptr<std::atomic<bool>> detectStop;

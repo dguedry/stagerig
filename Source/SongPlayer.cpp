@@ -1,4 +1,5 @@
 #include "SongPlayer.h"
+#include "Stretch.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -12,6 +13,12 @@ namespace perf
 SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef& song, double sr, int bs)
     : formats (f), sampleRate (sr > 0.0 ? sr : 48000.0), blockSize (jmax (16, bs))
 {
+    /* Played at the song's tempo when the files' own is known and differs;
+       moved with the song's transpose when asked. Both are baked into the
+       loaded track, so a change re-arms the song. */
+    if (song.trackBpm > 0.0 && song.tempoBpm > 0.0 && std::abs (song.trackBpm - song.tempoBpm) > 0.005)
+        timeScale = jlimit (0.25, 4.0, song.trackBpm / song.tempoBpm);
+    if (song.transposeTrack) pitchSemitones = jlimit (-24, 24, song.transpose);
     for (int i = 0; i < (int) song.stems.size(); ++i)
     {
         const auto& def = song.stems[(size_t) i];
@@ -25,7 +32,7 @@ SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef
     }
     numStemDefs = (int) stems.size();
     setClick (song.click, song.beatsPerBar, song.firstBeat);
-    startSamples.store ((int64) (jmax (0.0, song.startSeconds) * sampleRate));
+    startSamples.store ((int64) (jmax (0.0, song.startSeconds) * sampleRate * timeScale));
     cuedPosition.store (startSamples.load());
     position.store (startSamples.load());
     fadeLength = jmax (1, (int) (0.03 * sampleRate));
@@ -95,7 +102,7 @@ void SongPlayer::load()
 
 void SongPlayer::setStart (double seconds)
 {
-    startSamples.store ((int64) (jmax (0.0, seconds) * sampleRate));
+    startSamples.store ((int64) (jmax (0.0, seconds) * sampleRate * timeScale));
     if (getState() == State::idle && ! cuedByUser.load())
     {
         cuedPosition.store (home());
@@ -175,6 +182,8 @@ bool SongPlayer::loadStem (Stem& s)
     }
     s.left.resize ((size_t) written);
     s.right.resize ((size_t) written);
+    if (std::abs (timeScale - 1.0) > 1e-6 || pitchSemitones != 0)
+        stretchAndShift (s.left, s.right, timeScale, pitchSemitones, sampleRate, [this] { return loaderStop.load(); });
 
     // The first sample above -45 dBFS on either side: the head of the file up to there is silence.
     s.firstSound = (int64) s.left.size();
@@ -210,9 +219,15 @@ bool SongPlayer::loadMidiStem (Stem& s)
                        || m.isChannelPressure() || m.isProgramChange()))
                     continue;
                 Stem::Event ev {};
-                ev.at = (int64) (m.getTimeStamp() * sampleRate);
+                ev.at = (int64) (m.getTimeStamp() * sampleRate * timeScale);
                 ev.size = (uint8_t) jmin (3, m.getRawDataSize());
                 std::memcpy (ev.data, m.getRawData(), ev.size);
+                if (pitchSemitones != 0 && m.isNoteOnOrOff() && m.getChannel() != 10)      // the drums stay where they are
+                {
+                    const int note = m.getNoteNumber() + pitchSemitones;
+                    if (note < 0 || note > 127) continue;
+                    ev.data[1] = (uint8_t) note;
+                }
                 events.push_back (ev);
             }
     std::stable_sort (events.begin(), events.end(), [] (const Stem::Event& a, const Stem::Event& b) { return a.at < b.at; });
@@ -288,7 +303,7 @@ void SongPlayer::prepare (double sr, int bs)
     sampleRate = newRate;
     fadeLength = jmax (1, (int) (0.03 * sampleRate));
     for (int i = 0; i < numSections; ++i)
-        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate);
+        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate * timeScale);
     startLoading();
 }
 
@@ -320,7 +335,7 @@ void SongPlayer::setMarkers (const std::vector<MarkerDef>& markers)
         ++n;
     }
     for (int i = 0; i < n; ++i)
-        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate);
+        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate * timeScale);
     numSections = n;
     if (queuedSection.load() >= numSections) queuedSection.store (-1);
     if (currentSection.load() >= numSections) currentSection.store (0);
@@ -398,7 +413,7 @@ void SongPlayer::cue (double seconds)
 {
     if (getState() != State::idle) return;
     // Before loading has finished the length is not known yet: the cue is taken as it is.
-    const auto wanted = jmax ((int64) 0, (int64) (seconds * sampleRate));
+    const auto wanted = jmax ((int64) 0, (int64) (seconds * sampleRate * timeScale));
     const auto p = ready.load() ? jmin (wanted, lengthSamples) : wanted;
     cuedByUser.store (true);
     cuedPosition.store (p);
@@ -454,7 +469,7 @@ void SongPlayer::addClickRun (float* l, float* r, int at, int64 from, int count)
     /* The click through the song: a beat every `beatSamples` from the first
        beat, accented every bar. Follows the position, so a vamp or a jump
        keeps it on the music's own grid. */
-    const int64 fb = (int64) (firstBeat.load (std::memory_order_relaxed) * sampleRate);
+    const int64 fb = (int64) (firstBeat.load (std::memory_order_relaxed) * sampleRate * timeScale);
     const int bpb = jmax (1, clickBeatsPerBar.load (std::memory_order_relaxed));
     const int64 clickLen = (int64) (0.03 * sampleRate);
     for (int i = 0; i < count; ++i)
@@ -490,7 +505,7 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
         int64 phase = 0;
         if (countInTotalBeats > 0)
         {
-            const int64 fb = (int64) (firstBeat.load() * sampleRate);
+            const int64 fb = (int64) (firstBeat.load() * sampleRate * timeScale);
             const int64 rel = position.load() - fb;
             int64 k = rel / beatSamples;
             if (rel < 0 && k * beatSamples != rel) --k;

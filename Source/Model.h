@@ -17,7 +17,7 @@ struct EffectDef
     /** A plugin, or -- in a slot's MIDI chain only -- a send: the MIDI at
         that point also goes out of a port, to a hardware synth or another
         program, and carries on unchanged to the next block. */
-    enum class Kind { plugin, midiSend };
+    enum class Kind { plugin, midiSend, arpeggio, chord, scale };
     Kind kind = Kind::plugin;
 
     juce::PluginDescription plugin;
@@ -29,8 +29,30 @@ struct EffectDef
     int channel = 0;                  // 0 = as it arrives, 1..16 = rechannelled for the port
     int bankMsb = -1, bankLsb = -1, patch = -1;   // patch recall, as an external instrument's
 
+    // The built-in MIDI effects: an arpeggiator, a chord, a scale -------------
+    int arpRate = 2;                  // index into MidiFx::arpRates: 1/4, 1/8, 1/16, 1/8 triplet, 1/32
+    int arpMode = 0;                  // up, down, up and down, random, as played
+    int arpOctaves = 1;               // 1..4
+    int arpGate = 80;                 // percent of the step the note sounds for
+    bool arpLatch = false;            // held notes keep going after they are let go
+    int chordType = 0;                // index into MidiFx::chordTypes
+    int scaleRoot = 0;                // 0 = C .. 11 = B
+    int scaleMode = 0;                // index into MidiFx::scaleModes
+
     bool isSend() const               { return kind == Kind::midiSend; }
-    juce::String displayName() const  { return isSend() ? portName : plugin.name; }
+    bool isBuiltIn() const            { return kind == Kind::arpeggio || kind == Kind::chord || kind == Kind::scale; }
+    bool isPlugin() const             { return kind == Kind::plugin; }
+    juce::String displayName() const
+    {
+        switch (kind)
+        {
+            case Kind::midiSend: return portName;
+            case Kind::arpeggio: return "Arpeggiator";
+            case Kind::chord:    return "Chord";
+            case Kind::scale:    return "Scale";
+            default:             return plugin.name;
+        }
+    }
 
     juce::var toVar() const;
     static EffectDef fromVar (const juce::var&);
@@ -418,6 +440,14 @@ struct SongDef
         0 means at the first sound: silence at the head of a file is skipped
         anyway. Sections before it can still be gone to. */
     double startSeconds = 0.0;
+    /** The tempo the audio files were made at, when known (found by Find the
+        tempo, or typed). With the song's own tempo set to something else,
+        the files are stretched to play at the song's tempo; 0 = unknown, so
+        they play as they are. */
+    double trackBpm = 0.0;
+    /** The song's transpose also moves the files' pitch (and the MIDI files'
+        notes, drums aside), so one setting takes the whole band down a step. */
+    bool transposeTrack = false;
     /** Sections of the backing track, by where each starts. */
     std::vector<MarkerDef> markers;
 
@@ -479,6 +509,10 @@ struct Setup
     int transportCC = 0;
     /** Controller that releases a vamp, or else queues the next section. */
     int sectionCC = 0;
+    /** The looper's pedals: one that records, plays and stops a loop on the
+        keyboard it is pressed on, and one that clears it. 0 for none. */
+    int looperCC = 0;
+    int looperClearCC = 0;
 
     bool preloadAllPrograms = false;  // keep every used program's plugins resident
     double releaseTailSeconds = 4.0;  // how long the outgoing program keeps sounding

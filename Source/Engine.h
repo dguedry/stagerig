@@ -6,6 +6,7 @@
 #include "SongPlayer.h"
 #include "MidiOuts.h"
 #include "Recorder.h"
+#include "MidiFx.h"
 #include "GmSynth.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -308,6 +309,14 @@ public:
     void setSongFirstBeat (int songIndex, double seconds);
     /** Where Play from the top begins in the song's files (seconds); 0 = the first sound. */
     void setSongStart (int songIndex, double seconds);
+    /** The tempo the song's audio files were made at (0 = unknown). With the
+        song's tempo set to something else, the files play stretched to it. */
+    void setSongTrackBpm (int songIndex, double bpm);
+    /** Whether the song's transpose also moves its files' pitch. */
+    void setSongTransposeTrack (int songIndex, bool on);
+    /** How the armed track is playing against its files: 1 = as they are. */
+    double getTrackTimeScale() const                { return player != nullptr ? player->getTimeScale() : 1.0; }
+    int    getTrackPitchSemitones() const           { return player != nullptr ? player->getPitchSemitones() : 0; }
     /** Where the armed track will start from while stopped (seconds). */
     double getTrackCue() const                      { return player != nullptr ? player->getCueSeconds() : 0.0; }
 
@@ -351,6 +360,23 @@ public:
     int  getSectionCC() const                       { return setup.sectionCC; }
     void setSectionCC (int cc);
     void armSectionLearn()                          { sectionLearnArmed.store (true); }
+
+    /** Looping a passage on a keyboard: record what you play, and it goes
+        round in whole bars at the rig's tempo while you play over it. One
+        pedal does it all -- press to record, press to play, press to stop,
+        press to play again -- and a second clears. The pedal works on the
+        keyboard it is pressed on; the button on the panel on the selected one. */
+    enum class LoopState { empty, recording, playing, stopped };
+    LoopState getLoopState (int inputIndex) const;
+    int  getLoopBars (int inputIndex) const;
+    void loopPedal (int inputIndex);
+    void loopClear (int inputIndex);
+    void loopStop (int inputIndex);
+    int  getLooperCC() const                        { return setup.looperCC; }
+    int  getLooperClearCC() const                   { return setup.looperClearCC; }
+    void setLooperCC (int cc);
+    void setLooperClearCC (int cc);
+    void armLooperLearn (bool clearPedal)           { (clearPedal ? looperClearLearnArmed : looperLearnArmed).store (true); }
     /** The backing-track input: where the songs' MIDI files play. -1 while none. */
     int  getTrackInput() const                      { return setup.trackInput(); }
     /** Makes the backing-track input if there is none, and returns its index. */
@@ -449,6 +475,10 @@ public:
     void setMidiSendPort (int inputIndex, int program, int slot, int effect, const juce::MidiDeviceInfo&);
     /** 0 = as the MIDI arrives at the send, 1..16 = rechannelled for its port. */
     void setMidiSendChannel (int inputIndex, int program, int slot, int effect, int channel);
+    /** A built-in MIDI effect (arpeggiator, chord, scale) at the end of a slot's MIDI chain. */
+    bool addBuiltInMidiEffect (int inputIndex, int program, int slot, EffectDef::Kind kind);
+    /** Its settings, from `def`'s arp/chord/scale fields; takes effect at once. */
+    void setBuiltInMidiEffect (int inputIndex, int program, int slot, int effect, const EffectDef& def);
     /** Sent from the port when the program is selected, as an external instrument's patch; -1 = not sent. */
     void setMidiSendPatch (int inputIndex, int program, int slot, int effect, int bankMsb, int bankLsb, int patch);
 
@@ -532,7 +562,7 @@ private:
     {
         enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
                     songStep, songLearn, editorClosed, outputVolume, outputLearn,
-                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn, sectionEntered };
+                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn, sectionEntered, mappedSwitch, looperLearn };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -715,6 +745,9 @@ private:
     void resolveClockPorts();                     // message thread
     void sendClock (int numSamples, double chunkStartMs, bool trackStarted, bool trackStopped);   // audio thread
     std::atomic<bool> sectionLearnArmed { false };
+    std::atomic<int> looperCCAtomic { 0 }, looperClearCCAtomic { 0 };
+    std::atomic<bool> looperLearnArmed { false }, looperClearLearnArmed { false };
+    void loopProcess (InputRuntime& in, int numSamples, bool panicNow);   // audio thread
     int trackSong = -1;                           // message thread
     int lastTrackSection = -1;                    // audio thread: to notice the track entering a section
     std::atomic<int> transportCCAtomic { 0 };     // read on the MIDI thread

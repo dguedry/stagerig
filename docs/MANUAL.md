@@ -344,6 +344,13 @@ transpose, curve and channels decide which notes enter at all. Left to right:
 
 - **Effect on the sound** -- reverb, EQ, an amp: after the instrument.
 - **MIDI effect on the notes** -- an arpeggiator, a chord generator: before it.
+  Three are built in, under **Built in** at the top of that list, with
+  nothing to install and nothing to open: **Arpeggiator** plays the notes you
+  hold one at a time, in time with the rig's tempo (rate, pattern, octaves,
+  note length and latch under **Settings...**); **Chord** makes every note a
+  chord of the kind you pick; **Scale** moves any note off the scale down to
+  the nearest note on it, so a wrong note is never wrong. Each shows its
+  settings in words on its row.
 - **Send to a MIDI device too** -- the instrument's notes go out of a MIDI port
   as well, so a hardware synth doubles the plugin, or a lighting controller
   follows the keys.
@@ -475,6 +482,20 @@ effect**, **Parameter**, **Min**, **Max** and **Pass on**.
 
 **Use last moved** is often faster: open the plugin's own window, move the knob
 you care about, press the button, and StageRig selects that parameter.
+
+**A pedal for a layer or an effect.** The parameter list begins with the
+thing itself, before any plugin parameter: **On / off (pedal down = on)**,
+**On / off, toggled by each press** and, for an instrument, **Level**. Map a
+footswitch to the strings layer's *toggled* entry and each press brings the
+strings in or takes them out; map an expression pedal to its *Level* and the
+pedal is its fader. The same works for every effect, so a pedal can be the
+delay's bypass. No plugin is needed, so a hardware synth or the General MIDI
+player can be switched the same way.
+
+**One knob, several things.** A controller may appear in as many rows as you
+like, each with its own target and range: one knob that opens the filter on
+the pad while it closes the one on the bass (reverse Min and Max on the
+second row) is two rows with the same controller. That is a macro.
 
 To change a mapping, select it in the table, change the boxes and press
 **Update**; **Remove** deletes the selected one.
@@ -756,6 +777,23 @@ When a recording does not start on the beat -- a breath, a lead-in -- set
 **First beat** (see *Finding the tempo* below) and the click, the count-in
 and the bar lines all line up with it: the count-in's last click lands one
 beat before the music's first.
+
+### Playing the files at another tempo, or in another key
+
+Once a song knows the tempo its files were made at (**Files at**, which
+**Find the tempo** fills in), its files follow the song's own tempo: set the
+song to 110 where the files are 117.4 (**Edit...** on the song) and they play
+stretched to 110, drums, bass and all, with the click and the bar lines
+along. The window says so (*files stretched -6%*). **Transpose the files with
+the song** makes the song's transpose move the files' pitch too, and the MIDI
+files' notes (drums aside), so one setting takes the whole band down a step
+for the singer. Either change re-reads the files, which takes a few seconds,
+so make it at the sound check, not between the verse and the chorus.
+
+The stretching is StageRig's own and needs nothing installed. It is made for
+the changes a gig needs -- a few percent of tempo, a few semitones -- and a
+track pushed far from its own speed starts to smear, as every such method
+does. Blank **Files at** and the files play exactly as they are.
 
 ### Finding the tempo
 
@@ -1081,6 +1119,22 @@ Without a backing track playing, plugins are told the music is always running,
 from bar one at the current tempo. When a backing track starts, the position
 jumps to its bar one and follows it. If a plugin's delay still does not sync,
 it may simply never ask the host for the tempo; set it in the plugin.
+
+### Looping a passage
+
+**Loop** beside Footswitches... loops what you play on the selected keyboard: press it
+and play; press it again and the passage goes round on its own, trimmed to
+whole bars at the rig's tempo (the nearest; at least one), while you play
+over it. Press again to stop it, again to start it from the top; right-click
+for **Clear**. The button reads *Rec...*, then *2 bars*, then *Loop >*.
+
+A footswitch is the way to do it with your hands on the keys: **Footswitches
+▸ Loop: record / play / stop**, and a second pedal for **Loop: clear**. The
+pedal loops the keyboard it is pressed on. Press it on the *one*: the loop
+starts the moment you press, and ends on the nearest bar line to your second
+press, so a bar's passage played a little long or short still comes round
+in time. The loop plays into whatever program the keyboard is on, so a
+program change changes its sound.
 
 ### Recording the gig
 

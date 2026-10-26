@@ -47,8 +47,14 @@ public:
     float getLoadProgress() const                 { return loadProgress.load(); }
     juce::String getProblems() const;             // files that could not be read; once ready
 
-    double getLengthSeconds() const               { return ready.load() ? (double) lengthSamples / sampleRate : 0.0; }
-    double getPositionSeconds() const             { return (double) position.load() / sampleRate; }
+    /* Times given and taken here are the files' own seconds. Played at a
+       tempo other than the files', the track is longer or shorter inside,
+       by `timeScale`; the conversion happens at this edge, so sections,
+       cues and the clock on the panel all read as the files read. */
+    double getLengthSeconds() const               { return ready.load() ? (double) lengthSamples / (sampleRate * timeScale) : 0.0; }
+    double getPositionSeconds() const             { return (double) position.load() / (sampleRate * timeScale); }
+    double getTimeScale() const                   { return timeScale; }
+    int    getPitchSemitones() const              { return pitchSemitones; }
 
     enum class State { idle, waiting, countIn, playing, stopping };
     State getState() const                        { return (State) state.load(); }
@@ -83,7 +89,7 @@ public:
     /** While stopped: Play starts here (seconds). */
     void cue (double seconds);
     /** Where Play starts while stopped (seconds): the top of the song unless a section or a cue was asked for. */
-    double getCueSeconds() const                  { return (double) cuedPosition.load() / sampleRate; }
+    double getCueSeconds() const                  { return (double) cuedPosition.load() / (sampleRate * timeScale); }
     /** The song's own start point (seconds); 0 means the first sound in the files. */
     void setStart (double seconds);
     /** Lets a vamp play on at the end of the current repetition. */
@@ -148,6 +154,8 @@ private:
 
     double sampleRate = 48000.0;
     int blockSize = 512;
+    double timeScale = 1.0;                       // stretched length over the files' own: fixed at construction
+    int pitchSemitones = 0;                       // the files' pitch moved by this much: fixed at construction
     juce::int64 lengthSamples = 0;                // the longest stem; written by the loader before `ready`
 
     // Sections, in device samples. Fixed capacity: changed under the engine's lock, never allocated by the audio thread.

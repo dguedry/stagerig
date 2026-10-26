@@ -63,6 +63,8 @@ struct Engine::EffectRuntime : public PluginNode
     /** A MIDI send in a slot's MIDI chain: no plugin, a port. Fixed when built. */
     bool send = false;
     std::atomic<int> outPort { -1 }, sendChannel { 0 };
+    /** A built-in MIDI effect: no plugin, a little code. Fixed when built; configured live. */
+    std::unique_ptr<MidiFx> builtIn;
     MidiBuffer produced;           // a MIDI processor's output, swapped into the slot's MIDI
 };
 
@@ -133,6 +135,15 @@ struct Engine::MappingRuntime
     MappingDef def;
     RemotePlugin* plugin = nullptr;
     int paramIndex = -1;
+
+    /* A built-in target instead of a plugin parameter: the instrument or
+       effect itself -- on or off from a pedal, a level from a knob -- so a
+       layer or an effect can be worked without a plugin in the loop. */
+    enum BuiltIn { none, onOff, toggle, level };
+    BuiltIn builtIn = none;
+    SlotRuntime* slotNode = nullptr;
+    EffectRuntime* effectNode = nullptr;
+    bool wasHigh = false;          // audio thread: for the toggle's edge
 };
 
 struct Engine::ProgramRuntime
@@ -220,6 +231,20 @@ struct Engine::InputRuntime
     MidiBuffer shifted;            // this block's MIDI with the transpose applied
     int8_t noteShift[16][128] = {};   // what each sounding key was shifted by at its note-on
     int shiftedHeld = 0;              // how many of those are shifted at all
+
+    /* The looper: what was played, in samples from the loop's start, going
+       round in whole bars. Commands come from the pedal or the panel as an
+       atomic and are acted on at the top of a block, so a change is clean. */
+    struct Looper
+    {
+        struct Ev { int64 at; uint8 data[3]; uint8 size; };
+        std::vector<Ev> events;
+        std::atomic<int> state { 0 };     // Engine::LoopState
+        std::atomic<int> command { 0 };   // 1 = the pedal, 2 = clear, 3 = stop
+        std::atomic<int> bars { 0 };
+        int64 length = 0, pos = 0, recorded = 0;
+        uint8 held[16][128] = {};         // notes the loop is sounding, to let go on a stop
+    } loop;
     std::map<int, std::unique_ptr<ProgramRuntime>> loaded;
     ProgramRuntime* active = nullptr;
     std::vector<ProgramRuntime*> releasing;
@@ -415,6 +440,8 @@ void Engine::loadSetup (Setup newSetup)
     prevCC.store (jlimit (0, 127, setup.prevSongCC), std::memory_order_relaxed);
     transportCCAtomic.store (jlimit (0, 127, setup.transportCC), std::memory_order_relaxed);
     sectionCCAtomic.store (jlimit (0, 127, setup.sectionCC), std::memory_order_relaxed);
+    looperCCAtomic.store (jlimit (0, 127, setup.looperCC), std::memory_order_relaxed);
+    looperClearCCAtomic.store (jlimit (0, 127, setup.looperClearCC), std::memory_order_relaxed);
     tapTimes.clear();
     rebuildRuntimes();
     /* The song the set was on gets its track back once setSetupFile() says
@@ -557,6 +584,7 @@ void Engine::rebuildRuntimes()
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
     {
         auto rt = std::make_unique<InputRuntime>();
+        rt->loop.events.reserve (16384);          // a few minutes of playing; sized once, never on the audio thread
         rt->collector.reset (sampleRate);
         rt->trackMidi.ensureSize (4096);
         rt->shifted.ensureSize (4096);
@@ -1254,6 +1282,8 @@ void Engine::setSongTempo (int songIndex, double bpm)
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
     // 0 means "leave the tempo alone"; anything else is clamped like the global one.
     setup.songs[(size_t) songIndex].tempoBpm = bpm <= 0.0 ? 0.0 : jlimit (20.0, 300.0, bpm);
+    // Files that know their own tempo follow the song's: re-read them at the new stretch.
+    if (songIndex == trackSong && setup.songs[(size_t) songIndex].trackBpm > 0.0) armTrack (songIndex);
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
@@ -1293,6 +1323,7 @@ void Engine::setSongTranspose (int songIndex, int semitones)
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
     setup.songs[(size_t) songIndex].transpose = jlimit (-24, 24, semitones);
     if (songIndex == currentSongIndex()) setTranspose (semitones);
+    if (songIndex == trackSong && setup.songs[(size_t) songIndex].transposeTrack) armTrack (songIndex);   // the files move too
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
@@ -1574,6 +1605,22 @@ void Engine::sendMidiToDevice (const String& identifier, const String& name, con
     if (const int port = midiOuts.portFor (identifier, name); port >= 0) midiOuts.sendNow (port, m);
 }
 
+void Engine::setSongTrackBpm (int songIndex, double bpm)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.songs[(size_t) songIndex].trackBpm = bpm <= 0.0 ? 0.0 : jlimit (20.0, 300.0, bpm);
+    if (songIndex == trackSong) armTrack (songIndex);                  // the stretch is baked in: read the files again
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSongTransposeTrack (int songIndex, bool on)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.songs[(size_t) songIndex].transposeTrack = on;
+    if (songIndex == trackSong) armTrack (songIndex);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
 void Engine::setSongMarkers (int songIndex, const std::vector<MarkerDef>& markers)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
@@ -1605,6 +1652,154 @@ void Engine::advanceTrack()
     if (player == nullptr) return;
     player->advance();
     listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+Engine::LoopState Engine::getLoopState (int i) const
+{
+    return i >= 0 && i < (int) runtimes.size() ? (LoopState) runtimes[(size_t) i]->loop.state.load() : LoopState::empty;
+}
+
+int Engine::getLoopBars (int i) const
+{
+    return i >= 0 && i < (int) runtimes.size() ? runtimes[(size_t) i]->loop.bars.load() : 0;
+}
+
+void Engine::loopPedal (int i)
+{
+    if (i < 0 || i >= (int) runtimes.size()) return;
+    runtimes[(size_t) i]->loop.command.store (1);
+}
+
+void Engine::loopClear (int i)
+{
+    if (i < 0 || i >= (int) runtimes.size()) return;
+    runtimes[(size_t) i]->loop.command.store (2);
+}
+
+void Engine::loopStop (int i)
+{
+    if (i < 0 || i >= (int) runtimes.size()) return;
+    runtimes[(size_t) i]->loop.command.store (3);
+}
+
+void Engine::setLooperCC (int cc)
+{
+    setup.looperCC = jlimit (0, 127, cc);
+    looperCCAtomic.store (setup.looperCC, std::memory_order_relaxed);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setLooperClearCC (int cc)
+{
+    setup.looperClearCC = jlimit (0, 127, cc);
+    looperClearCCAtomic.store (setup.looperClearCC, std::memory_order_relaxed);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::loopProcess (InputRuntime& in, int numSamples, bool panicNow)
+{
+    auto& lp = in.loop;
+    if (lp.events.capacity() == 0) return;                 // never sized: an input made before the looper (not expected)
+    auto releaseHeld = [&]
+    {
+        for (int c = 0; c < 16; ++c)
+            for (int k = 0; k < 128; ++k)
+                if (lp.held[c][k]) { in.block.addEvent (MidiMessage::noteOff (c + 1, k), 0); lp.held[c][k] = 0; }
+    };
+    if (panicNow) std::memset (lp.held, 0, sizeof (lp.held));
+
+    const double bpm = jmax (20.0, tempoAtomic.load (std::memory_order_relaxed));
+    const int64 barSamples = jmax ((int64) 1, (int64) (sampleRate * 60.0 / bpm * 4.0));
+
+    const int cmd = lp.command.exchange (0);
+    auto st = (LoopState) lp.state.load();
+    if (cmd == 2)
+    {
+        releaseHeld();
+        lp.events.clear();
+        lp.length = lp.pos = lp.recorded = 0;
+        lp.bars.store (0);
+        st = LoopState::empty;
+    }
+    else if (cmd == 3)
+    {
+        if (st == LoopState::playing) { releaseHeld(); st = LoopState::stopped; }
+        else if (st == LoopState::recording) { lp.events.clear(); lp.recorded = 0; st = LoopState::empty; }
+    }
+    else if (cmd == 1)
+    {
+        switch (st)
+        {
+            case LoopState::empty:
+                lp.events.clear();
+                lp.recorded = 0;
+                st = LoopState::recording;
+                break;
+            case LoopState::recording:
+            {
+                // Whole bars, the nearest; at least one. What was played past the end is dropped.
+                const int64 bars = jmax ((int64) 1, (int64) std::llround ((double) lp.recorded / (double) barSamples));
+                lp.length = bars * barSamples;
+                lp.events.erase (std::remove_if (lp.events.begin(), lp.events.end(), [&] (const InputRuntime::Looper::Ev& e) { return e.at >= lp.length; }), lp.events.end());
+                lp.bars.store ((int) bars);
+                lp.pos = 0;
+                st = LoopState::playing;
+                break;
+            }
+            case LoopState::playing:
+                releaseHeld();
+                st = LoopState::stopped;
+                break;
+            case LoopState::stopped:
+                lp.pos = 0;
+                st = LoopState::playing;
+                break;
+        }
+    }
+    lp.state.store ((int) st);
+
+    if (st == LoopState::recording)
+    {
+        for (const auto meta : in.block)
+        {
+            const auto m = meta.getMessage();
+            if (m.getRawDataSize() > 3 || m.isProgramChange() || m.getChannel() == 0) continue;
+            if (lp.events.size() >= lp.events.capacity()) break;      // full: the loop keeps what it has, never allocates here
+            InputRuntime::Looper::Ev e;
+            e.at = lp.recorded + meta.samplePosition;
+            e.size = (uint8) m.getRawDataSize();
+            std::memcpy (e.data, m.getRawData(), e.size);
+            lp.events.push_back (e);
+        }
+        lp.recorded += numSamples;
+    }
+    else if (st == LoopState::playing && lp.length > 0)
+    {
+        auto play = [&] (int64 from, int64 to, int offset)
+        {
+            for (const auto& e : lp.events)
+                if (e.at >= from && e.at < to)
+                {
+                    const int at = (int) (e.at - from) + offset;
+                    in.block.addEvent (e.data, (int) e.size, at);
+                    const MidiMessage m (e.data, (int) e.size);
+                    if (m.getChannel() >= 1)
+                    {
+                        if (m.isNoteOn()) lp.held[m.getChannel() - 1][m.getNoteNumber()] = 1;
+                        else if (m.isNoteOff()) lp.held[m.getChannel() - 1][m.getNoteNumber()] = 0;
+                    }
+                }
+        };
+        const int64 end = lp.pos + numSamples;
+        if (end <= lp.length)
+            play (lp.pos, end, 0);
+        else
+        {
+            play (lp.pos, lp.length, 0);
+            play (0, end - lp.length, (int) (lp.length - lp.pos));
+        }
+        lp.pos = end % lp.length;
+    }
 }
 
 void Engine::setSectionCC (int cc)
@@ -1711,7 +1906,11 @@ void Engine::resetPluginPositions()
             {
                 if (s->plugin != nullptr) s->plugin->resetMusicalPosition();
                 if (s->gm != nullptr) { s->gm->reset(); s->gmDirty.store (true); }   // the GM player starts the song clean
-                for (auto* ch : { &s->midiEffects, &s->effects }) for (auto& e : *ch) if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
+                for (auto* ch : { &s->midiEffects, &s->effects }) for (auto& e : *ch)
+                {
+                    if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
+                    if (e->builtIn != nullptr) e->builtIn->reset();
+                }
             }
             for (auto& e : rt->effects) if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
         }
@@ -2030,6 +2229,11 @@ std::unique_ptr<Engine::EffectRuntime> Engine::buildEffect (int inputIndex, int 
         fx->send = true;
         fx->sendChannel.store (def.channel);
         fx->outPort.store (midiOuts.portFor (def.portIdentifier, def.portName));
+        return fx;
+    }
+    if (def.isBuiltIn())
+    {
+        fx->builtIn = MidiFx::create (def);
         return fx;
     }
     queueLoad (*fx, def.plugin, def.state);
@@ -2806,6 +3010,43 @@ bool Engine::addMidiSend (int inputIndex, int program, int slotIndex, const Midi
     return true;
 }
 
+bool Engine::addBuiltInMidiEffect (int inputIndex, int program, int slotIndex, EffectDef::Kind kind)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return false;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size()) return false;
+    EffectDef ed;
+    ed.kind = kind;
+    if (! ed.isBuiltIn()) return false;
+    auto& chainDef = def.slots[(size_t) slotIndex].midiEffects;
+    chainDef.push_back (ed);
+    const int chainAddress = ProgramDef::midiChainOf (slotIndex);
+    if (auto* rt = getLoaded (inputIndex, program))
+        if (auto* chain = runtimeChainFor (*rt, chainAddress))
+        {
+            auto fx = buildEffect (inputIndex, program, chainAddress, (int) chainDef.size() - 1, ed);
+            const ScopedLock sl (lock);
+            chain->push_back (std::move (fx));
+        }
+    notifyContent (inputIndex, program);
+    return true;
+}
+
+void Engine::setBuiltInMidiEffect (int inputIndex, int program, int slotIndex, int effect, const EffectDef& settings)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size()) return;
+    auto& chain = def.slots[(size_t) slotIndex].midiEffects;
+    if (effect < 0 || effect >= (int) chain.size() || ! chain[(size_t) effect].isBuiltIn()) return;
+    auto& ed = chain[(size_t) effect];
+    ed.arpRate = settings.arpRate; ed.arpMode = settings.arpMode; ed.arpOctaves = settings.arpOctaves; ed.arpGate = settings.arpGate; ed.arpLatch = settings.arpLatch;
+    ed.chordType = settings.chordType; ed.scaleRoot = settings.scaleRoot; ed.scaleMode = settings.scaleMode;
+    if (auto* fx = static_cast<EffectRuntime*> (getNode (inputIndex, program, ProgramDef::midiChainOf (slotIndex), effect)))
+        if (fx->builtIn != nullptr) fx->builtIn->configure (ed);
+    notifyContent (inputIndex, program);
+}
+
 EffectDef* Engine::sendDefFor (int inputIndex, int program, int slotIndex, int effect)
 {
     if (! validInput (inputIndex) || ! validProgram (program)) return nullptr;
@@ -2982,7 +3223,16 @@ void Engine::resolveMappings (ProgramRuntime& rt, const ProgramDef& def)
                 node = (*chain)[(size_t) m.effect].get();
         }
 
-        if (node != nullptr && node->plugin != nullptr)
+        if (m.paramId.startsWith ("#"))
+        {
+            mr.builtIn = m.paramId == "#on" ? MappingRuntime::onOff : m.paramId == "#toggle" ? MappingRuntime::toggle
+                       : m.paramId == "#level" ? MappingRuntime::level : MappingRuntime::none;
+            if (m.effect < 0 && m.slot >= 0 && m.slot < (int) rt.slots.size()) mr.slotNode = rt.slots[(size_t) m.slot].get();
+            else if (auto* chain = runtimeChainFor (rt, m.slot); chain != nullptr && m.effect >= 0 && m.effect < (int) chain->size())
+                mr.effectNode = (*chain)[(size_t) m.effect].get();
+            if (mr.builtIn == MappingRuntime::level && mr.slotNode == nullptr) mr.builtIn = MappingRuntime::none;   // a level is an instrument's
+        }
+        else if (node != nullptr && node->plugin != nullptr)
         {
             mr.plugin = node->plugin.get();
             mr.paramIndex = node->plugin->findParameterIndex (m.paramId);
@@ -3125,6 +3375,11 @@ void Engine::handleAsyncUpdate()
                     toggleTrack();
                 break;
 
+            case Event::looperLearn:
+                if (e.b == 0) setLooperCC (e.a); else setLooperClearCC (e.a);
+                listeners.call ([cc = e.a, clear = e.b != 0] (Listener& l) { l.statusMessage (String (clear ? "Loop clear" : "Loop") + " pedal learned: controller " + String (cc)); });
+                break;
+
             case Event::sectionLearn:
                 setSectionCC (e.a);
                 listeners.call ([cc = e.a] (Listener& l) { l.statusMessage ("Next section pedal learned: controller " + String (cc)); });
@@ -3144,6 +3399,24 @@ void Engine::handleAsyncUpdate()
             case Event::trackFinished:
                 listeners.call ([] (Listener& l) { l.transportChanged(); });
                 break;
+
+            case Event::mappedSwitch:
+            {
+                // a = program, b = slot (or chain address), c = effect (-1 = the instrument), d = on / off or a level in dB
+                if (! validInput (e.input) || ! validProgram (e.a)) break;
+                auto& def = setup.inputs[(size_t) e.input].programs[(size_t) e.a];
+                if (e.c < 0)
+                {
+                    if (e.b < 0 || e.b >= (int) def.slots.size()) break;
+                    auto& sd = def.slots[(size_t) e.b];
+                    if (e.d >= 900) sd.gainDb = (float) (e.d - 1000);      // a level, packed as 1000 + dB
+                    else            sd.enabled = e.d != 0;
+                }
+                else if (auto* chain = defChainFor (def, e.b); chain != nullptr && e.c < (int) chain->size())
+                    (*chain)[(size_t) e.c].bypassed = e.d == 0;
+                notifyContent (e.input, e.a);
+                break;
+            }
 
             case Event::sectionEntered:
                 if (trackSong >= 0 && trackSong < (int) setup.songs.size())
@@ -3368,6 +3641,18 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
         postEvent ({ Event::sectionLearn, i, m.getControllerNumber(), 0, 0, 0 });
         return;
     }
+    if (looperLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
+    {
+        looperLearnArmed.store (false);
+        postEvent ({ Event::looperLearn, i, m.getControllerNumber(), 0, 0, 0 });
+        return;
+    }
+    if (looperClearLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
+    {
+        looperClearLearnArmed.store (false);
+        postEvent ({ Event::looperLearn, i, m.getControllerNumber(), 1, 0, 0 });
+        return;
+    }
 
     /* Stepping through the set, outside the channel filter and whatever is
        loaded -- a footswitch has to work all night. Only the press counts. */
@@ -3382,6 +3667,11 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
         { postEvent ({ Event::transport, i, 0, 0, 0, 0 }); return; }
         if (const int sc = sectionCCAtomic.load (std::memory_order_relaxed); sc > 0 && cc == sc)
         { postEvent ({ Event::sectionPedal, i, 0, 0, 0, 0 }); return; }
+        // The looper's pedals act on the keyboard they are pressed on, straight away.
+        if (const int lc = looperCCAtomic.load (std::memory_order_relaxed); lc > 0 && cc == lc)
+        { in.loop.command.store (1); return; }
+        if (const int lc = looperClearCCAtomic.load (std::memory_order_relaxed); lc > 0 && cc == lc)
+        { in.loop.command.store (2); return; }
     }
 
     /* Tap tempo, outside the channel filter: the tempo belongs to the rig, so a
@@ -3675,6 +3965,10 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
         }
     }
 
+    // The looper: records what the keys just played, or plays it round. Not for the track or an audio input.
+    if (! in.track.load (std::memory_order_relaxed) && ! in.audio.load (std::memory_order_relaxed))
+        loopProcess (in, numSamples, panicNow);
+
     /* Another input's "its sounds" slot sent these, on this input's own
        channel so they play as its keys would. Kept apart from the keys'
        own MIDI: played, never passed on to a third input. What was sent
@@ -3835,6 +4129,15 @@ void Engine::runMidiChains (ProgramRuntime& prog, int numSamples, bool notesOffN
             auto& fx = *slot->midiEffects[k];
             if (fx.bypassed.load()) continue;
 
+            if (fx.builtIn != nullptr)
+            {
+                fx.produced.clear();
+                fx.builtIn->process (slot->midi, fx.produced, numSamples, sampleRate, tempoAtomic.load (std::memory_order_relaxed));
+                slot->midi.swapWith (fx.produced);
+                if (notesOffNow) { fx.builtIn->reset(); addNotesOff (slot->midi, panicNow); }
+                continue;
+            }
+
             if (fx.send)
             {
                 // A copy goes out of the port; the MIDI carries on unchanged.
@@ -3893,7 +4196,45 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const M
         bool consumed = false;
         for (auto& map : prog.mappings)
         {
-            if (map.plugin == nullptr || map.paramIndex < 0 || ! map.plugin->isAlive() || ! mappingMatches (map.def, m)) continue;
+            if (! mappingMatches (map.def, m)) continue;
+            if (map.builtIn != MappingRuntime::none)
+            {
+                /* The instrument or effect itself. Changed here, at once, and
+                   told to the message thread so the setup and the panel agree. */
+                if (map.slotNode == nullptr && map.effectNode == nullptr) continue;
+                const float norm = normalisedValueOf (m, map.def.source);
+                const float value = jlimit (0.0f, 1.0f, map.def.minValue + (map.def.maxValue - map.def.minValue) * norm);
+                const bool high = value >= 0.5f;
+                bool apply = false, on = false;
+                int levelDb = 0;
+                if (map.builtIn == MappingRuntime::onOff) { apply = true; on = high; }
+                else if (map.builtIn == MappingRuntime::toggle)
+                {
+                    if (high && ! map.wasHigh)
+                    {
+                        apply = true;
+                        on = map.slotNode != nullptr ? ! map.slotNode->enabled.load() : map.effectNode->bypassed.load();
+                    }
+                    map.wasHigh = high;
+                }
+                else if (map.builtIn == MappingRuntime::level)
+                {
+                    apply = true;
+                    levelDb = roundToInt (-60.0f + 72.0f * value);          // the fader's travel: -60 dB to +12
+                }
+                if (apply)
+                {
+                    if (map.builtIn == MappingRuntime::level) map.slotNode->gain.store (Decibels::decibelsToGain ((float) levelDb, -60.0f));
+                    else if (map.slotNode != nullptr) map.slotNode->enabled.store (on);
+                    else map.effectNode->bypassed.store (! on);
+                    const PluginNode* node = map.slotNode != nullptr ? static_cast<const PluginNode*> (map.slotNode) : map.effectNode;
+                    postEvent ({ Event::mappedSwitch, node->inputIndex.load (std::memory_order_relaxed), prog.program, map.def.slot, map.def.effect,
+                                 map.builtIn == MappingRuntime::level ? 1000 + levelDb : (on ? 1 : 0) });
+                }
+                if (! map.def.passThrough) consumed = true;
+                continue;
+            }
+            if (map.plugin == nullptr || map.paramIndex < 0 || ! map.plugin->isAlive()) continue;
             const float norm = normalisedValueOf (m, map.def.source);
             const float value = map.def.minValue + (map.def.maxValue - map.def.minValue) * norm;
             map.plugin->queueParameterChange (map.paramIndex, jlimit (0.0f, 1.0f, value));

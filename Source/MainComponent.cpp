@@ -743,6 +743,7 @@ private:
             on.onClick        = [this, &e, &o] { const auto a = chain.address(); e.setEffectBypassed (a.first, a.second, chain.slot, index, ! on.getToggleState()); o.markDirty(); };
             guiBtn.onClick    = [this, &e, &o] { const auto a = chain.address();
                                                  if (def.isSend()) chain.showSendMenu (index, def, guiBtn);
+                                                 else if (def.isBuiltIn()) chain.showBuiltInMenu (index, def, guiBtn);
                                                  else if (alive)   o.openPluginEditor (a.first, a.second, chain.slot, index);
                                                  else              e.reloadPlugin (a.first, a.second, chain.slot, index); };
             upBtn.onClick     = [this, &e, &o] { const auto a = chain.address(); e.moveEffect (a.first, a.second, chain.slot, index, index - 1); o.markDirty(); };
@@ -757,9 +758,21 @@ private:
             on.setToggleState (! def.bypassed, dontSendNotification);
             PluginDescription forIcon = def.plugin;
             if (def.isSend()) { forIcon = {}; forIcon.name = def.portName; forIcon.pluginFormatName = "MIDI"; }   // the port's initials
+            if (def.isBuiltIn()) { forIcon = {}; forIcon.name = def.displayName(); forIcon.pluginFormatName = "MIDI"; }
             icon.setImage (chain.engine.getPluginHost().getIcons().get (forIcon, 40), RectanglePlacement::centred);
             icon.setAlpha (def.bypassed ? 0.45f : 1.0f);
-            if (def.isSend())
+            if (def.isBuiltIn())
+            {
+                name.setText (def.displayName() + "  [" + MidiFx::describe (def) + "]", dontSendNotification);
+                name.setTooltip (def.kind == EffectDef::Kind::arpeggio ? "Plays the notes you hold one at a time, in time with the rig's tempo"
+                               : def.kind == EffectDef::Kind::chord    ? "Every note you play becomes this chord"
+                                                                        : "Notes off the scale are moved down to the nearest note on it");
+                guiBtn.setButtonText ("Settings...");
+                guiBtn.setTooltip ("Its settings");
+                guiBtn.setEnabled (true);
+                guiBtn.setColour (TextButton::buttonColourId, getLookAndFeel().findColour (TextButton::buttonColourId));
+            }
+            else if (def.isSend())
             {
                 String what = "Also plays " + def.portName + "  [" + (def.channel > 0 ? "channel " + String (def.channel) : String ("same channel"));
                 if (def.patch >= 0) what << ", patch " << (def.patch + 1);
@@ -843,6 +856,55 @@ private:
         });
     }
 
+    void showBuiltInMenu (int index, const EffectDef& def, Component& target)
+    {
+        /* Each setting a submenu with the choice ticked: few enough to read
+           at a glance, and nothing to type. */
+        PopupMenu m;
+        const auto a = address();
+        const int s = ProgramDef::slotOfChain (slot);
+        if (def.kind == EffectDef::Kind::arpeggio)
+        {
+            PopupMenu rate, mode, oct, gate;
+            for (int i = 0; i < MidiFx::numArpRates(); ++i) rate.addItem (100 + i, MidiFx::arpRates[i], true, def.arpRate == i);
+            for (int i = 0; i < MidiFx::numArpModes(); ++i) mode.addItem (200 + i, MidiFx::arpModes[i], true, def.arpMode == i);
+            for (int i = 1; i <= 4; ++i) oct.addItem (300 + i, String (i) + (i == 1 ? " octave" : " octaves"), true, def.arpOctaves == i);
+            for (int g : { 25, 50, 80, 100 }) gate.addItem (400 + g, String (g) + "%" + (g == 100 ? "  (legato)" : g == 25 ? "  (staccato)" : ""), true, def.arpGate == g);
+            m.addSubMenu ("Rate", rate);
+            m.addSubMenu ("Pattern", mode);
+            m.addSubMenu ("Octaves", oct);
+            m.addSubMenu ("Note length", gate);
+            m.addItem (500, "Latch  (keeps going after you let go)", true, def.arpLatch);
+        }
+        else if (def.kind == EffectDef::Kind::chord)
+        {
+            for (int i = 0; i < MidiFx::numChordTypes(); ++i) m.addItem (600 + i, MidiFx::chordTypes[i], true, def.chordType == i);
+        }
+        else
+        {
+            PopupMenu root, mode;
+            for (int i = 0; i < 12; ++i) root.addItem (700 + i, MidiFx::noteNames[i], true, def.scaleRoot == i);
+            for (int i = 0; i < MidiFx::numScaleModes(); ++i) mode.addItem (800 + i, MidiFx::scaleModes[i], true, def.scaleMode == i);
+            m.addSubMenu ("Key", root);
+            m.addSubMenu ("Scale", mode);
+        }
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (target), [this, a, s, index, def] (int r)
+        {
+            if (r == 0) return;
+            EffectDef d = def;
+            if (r >= 100 && r < 200)      d.arpRate = r - 100;
+            else if (r >= 200 && r < 300) d.arpMode = r - 200;
+            else if (r >= 300 && r < 400) d.arpOctaves = r - 300;
+            else if (r >= 400 && r < 500) d.arpGate = r - 400;
+            else if (r == 500)            d.arpLatch = ! d.arpLatch;
+            else if (r >= 600 && r < 700) d.chordType = r - 600;
+            else if (r >= 700 && r < 800) d.scaleRoot = r - 700;
+            else if (r >= 800 && r < 900) d.scaleMode = r - 800;
+            engine.setBuiltInMidiEffect (a.first, a.second, s, index, d);
+            owner.markDirty();
+        });
+    }
+
     void showAddMenu()
     {
         Array<PluginDescription> effects, all;
@@ -871,6 +933,11 @@ private:
             /* Any plugin can be a MIDI effect: arpeggiators and chord
                generators are filed as instruments as often as effects, and a
                plugin that plays no MIDI simply hands nothing on. */
+            procMenu.addSectionHeader ("Built in");
+            procMenu.addItem (300001, "Arpeggiator  (held notes played one at a time, in time)");
+            procMenu.addItem (300002, "Chord  (every note becomes a chord)");
+            procMenu.addItem (300003, "Scale  (wrong notes bent to a scale)");
+            procMenu.addSectionHeader ("Plugins");
             addPluginsToMenu (procMenu, all, engine.getPluginHost().getIcons(), midiBase);
             if (all.isEmpty()) procMenu.addItem (99998, "No plugins known yet: scan under Plugins...", false);
             addPortItems (sendMenu, ports, sendBase);
@@ -882,6 +949,14 @@ private:
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, effects, all, ports] (int result)
         {
             const auto a = address();
+            if (result >= 300001 && result <= 300003)
+            {
+                const auto kind = result == 300001 ? EffectDef::Kind::arpeggio : result == 300002 ? EffectDef::Kind::chord : EffectDef::Kind::scale;
+                engine.addBuiltInMidiEffect (a.first, a.second, slot, kind);
+                owner.showStatus ("Added. Settings... on its row sets it up; it works at the rig's tempo.");
+                owner.markDirty();
+                return;
+            }
             if (result >= sendBase && result < sendBase + ports.size())
             {
                 engine.addMidiSend (a.first, a.second, slot, ports[result - sendBase]);
@@ -2000,19 +2075,18 @@ public:
         targetBox.clear (dontSendNotification);
         if (const auto* def = currentProgram())
         {
+            // Every instrument and effect: a plugin's parameters, and the thing itself (on, off, its level) for any of them.
             for (int s = 0; s < (int) def->slots.size(); ++s)
             {
-                if (def->slots[(size_t) s].isPlugin())     // no parameters to map on a hardware synth or an input
-                    targets.push_back ({ s, -1, String (s + 1) + ": " + def->slots[(size_t) s].plugin.name });
+                targets.push_back ({ s, -1, String (s + 1) + ": " + def->slots[(size_t) s].displayName() });
                 const auto& midiChain = def->slots[(size_t) s].midiEffects;
                 for (int e = 0; e < (int) midiChain.size(); ++e)
-                    if (! midiChain[(size_t) e].isSend())
-                        targets.push_back ({ ProgramDef::midiChainOf (s), e, String (s + 1) + " > MIDI effect " + String (e + 1) + ": " + midiChain[(size_t) e].plugin.name });
+                    targets.push_back ({ ProgramDef::midiChainOf (s), e, String (s + 1) + " > MIDI effect " + String (e + 1) + ": " + midiChain[(size_t) e].displayName() });
                 for (int e = 0; e < (int) def->slots[(size_t) s].effects.size(); ++e)
-                    targets.push_back ({ s, e, String (s + 1) + " > effect " + String (e + 1) + ": " + def->slots[(size_t) s].effects[(size_t) e].plugin.name });
+                    targets.push_back ({ s, e, String (s + 1) + " > effect " + String (e + 1) + ": " + def->slots[(size_t) s].effects[(size_t) e].displayName() });
             }
             for (int e = 0; e < (int) def->effects.size(); ++e)
-                targets.push_back ({ -1, e, "Program effect " + String (e + 1) + ": " + def->effects[(size_t) e].plugin.name });
+                targets.push_back ({ -1, e, "Program effect " + String (e + 1) + ": " + def->effects[(size_t) e].displayName() });
         }
         for (int i = 0; i < (int) targets.size(); ++i)
             targetBox.addItem (targets[(size_t) i].label, i + 1);
@@ -2184,16 +2258,35 @@ private:
         paramIds.clear();
         auto* t = selectedTarget();
         auto* plugin = t != nullptr ? engine.getPlugin (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect) : nullptr;
+        paramIndices.clear();
+        int id = 1, reselect = 0;
+        if (t != nullptr)
+        {
+            /* The thing itself comes first: a pedal that switches a layer or
+               an effect, a knob that is its level. No plugin needed, so a
+               hardware synth or the GM player can be switched the same way. */
+            const bool instrument = t->effect < 0;
+            auto builtIn = [&] (const String& pid, const String& name)
+            {
+                paramBox.addItem (name, id);
+                paramIds.add (pid);
+                paramIndices.add (-1);
+                if (pid == prev) reselect = id;
+                ++id;
+            };
+            builtIn ("#on",     instrument ? "On / off  (pedal down = on)" : "On / off  (pedal down = on, up = bypassed)");
+            builtIn ("#toggle", "On / off, toggled by each press");
+            if (instrument) builtIn ("#level", "Level  (the fader: -60 dB to +12)");
+        }
         if (plugin == nullptr)
         {
             paramBox.setTextWhenNothingSelected (t != nullptr ? "(plugin not loaded)" : "(no plugin)");
+            if (reselect > 0) paramBox.setSelectedId (reselect, dontSendNotification);
             updateButtons();
             return;
         }
         paramBox.setTextWhenNothingSelected ("Choose parameter...");
         paramBox.setPreferredChannel (channelInto (*t));
-        int id = 1, reselect = 0;
-        paramIndices.clear();
         for (auto& p : plugin->getParameters())
         {
             paramBox.addItem (p, id);
@@ -2456,6 +2549,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
        panel you want while building a set and while playing one, and in the way
        the rest of the time. */
     songsPanel = std::make_unique<SongsPanel> (engine);
+    songsPanel->selectedInputProvider = [this] { return getSelectedInput(); };
 
     // Pane dividers: drag to give a pane more room; remembered across runs.
     songsWidth    = settings.getIntValue ("paneSongsWidth",    SongsPanel::preferredWidth);
