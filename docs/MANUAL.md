@@ -1147,6 +1147,24 @@ take is a folder named by date and time inside `MySetup.stagerig.recordings/`
 beside the setup, so it travels with it like the charts. Listen back to a
 rehearsal, or keep the night that went well.
 
+### Ableton Link
+
+**Options ▸ Ableton Link** shares the tempo and the beat over the network
+with anything else that has Link: Live or Bitwig on another laptop, a loop
+app on a phone, a DJ's software, a drum machine that speaks it. Nothing to
+connect: they find each other on the wifi (StageRig's own hotspot works
+too), and the tempo readout shows *Link · 2* for two others. From then on
+the rig's tempo and theirs are one number, from whichever side set it last:
+tap yours and they follow, let the drummer tap theirs and your click,
+arpeggiators, delays and MIDI clock follow. **Play** on the backing track
+waits for the next shared bar line, count-in included, so its bar one is
+the band's. **Link also starts and stops the others** makes Play and Stop
+go both ways; off, each side keeps its own transport. A venue network that
+keeps devices apart gives *Link* with no number, and nothing else changes.
+
+Link is Ableton's, open source, and is built in -- see *Licence* in the
+README.
+
 ### MIDI clock to hardware
 
 **Options ▸ Send MIDI clock to** lists the MIDI devices on the computer; tick

@@ -4,6 +4,7 @@
 #include "TempoDetect.h"
 #include "Stretch.h"
 #include "MidiFx.h"
+#include <ableton/Link.hpp>
 #include "PluginIcons.h"
 #include "MappingSuggestions.h"
 #include "ClapPluginFormat.h"
@@ -1962,6 +1963,40 @@ int main()
         std::printf ("     MIDI file: %d tracks, %d note-ons\n", mf.getNumTracks(), notes);
         CHECK (notes == 1);
         engine.setSetupFile (File());
+    }
+
+    // --- Ableton Link: the tempo shared with a peer ----------------------------------------
+    {
+        engine.setLinkEnabled (true);
+        CHECK (engine.isLinkEnabled());
+        engine.setTempoBpm (100.0);
+        std::printf ("     Link on: session tempo %.1f\n", engine.getLinkTempoForTesting());
+        CHECK (std::abs (engine.getLinkTempoForTesting() - 100.0) < 0.01);
+
+        /* A second Link in this process is another app on the network. It
+           needs multicast on the loopback, which not every machine allows;
+           without it there is nothing to test but no fault either. */
+        ableton::Link peer (120.0);
+        peer.enable (true);
+        for (int i = 0; i < 120 && engine.getLinkPeers() == 0; ++i) pump (50);
+        if (engine.getLinkPeers() > 0)
+        {
+            auto st = peer.captureAppSessionState();
+            st.setTempo (95.0, peer.clock().micros());
+            peer.commitAppSessionState (st);
+            for (int i = 0; i < 100 && std::abs (engine.getTempoBpm() - 95.0) > 0.01; ++i) pump (50);
+            std::printf ("     a peer set 95: the rig is at %.1f\n", engine.getTempoBpm());
+            CHECK (std::abs (engine.getTempoBpm() - 95.0) < 0.01);
+            engine.setTempoBpm (110.0);
+            for (int i = 0; i < 100 && std::abs (peer.captureAppSessionState().tempo() - 110.0) > 0.01; ++i) pump (50);
+            std::printf ("     the rig set 110: the peer is at %.1f\n", peer.captureAppSessionState().tempo());
+            CHECK (std::abs (peer.captureAppSessionState().tempo() - 110.0) < 0.01);
+        }
+        else
+            std::printf ("     (no Link peer found on this machine's loopback: skipping the two-way check)\n");
+        peer.enable (false);
+        engine.setLinkEnabled (false);
+        engine.setTempoBpm (120.0);
     }
 
     // --- MIDI clock out: 24 ticks a beat at the rig's tempo ---------------------------------

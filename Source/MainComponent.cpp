@@ -2478,6 +2478,13 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
             const int sending = (int) setup.clockOut.size();
             m.addSubMenu ("Send MIDI clock to" + (sending > 0 ? "  (" + String (sending) + (sending == 1 ? " device)" : " devices)") : String()), clock);
         }
+        {
+            const int peers = engine.getLinkPeers();
+            m.addItem (9, "Ableton Link: share the tempo and the beat over the network"
+                           + (engine.isLinkEnabled() ? (peers == 0 ? String ("  (no one else yet)") : "  (" + String (peers) + (peers == 1 ? " other)" : " others)")) : String()),
+                       true, engine.isLinkEnabled());
+            m.addItem (10, "Link also starts and stops the others", engine.isLinkEnabled(), engine.isLinkStartStopSync());
+        }
         m.addSeparator();
         m.addItem (8, engine.isRecording() ? "Stop recording the gig  (" + formatElapsed (engine.getRecordingSeconds()) + ")"
                                             : "Record the gig  (every output to WAV, the keyboards to MIDI)");
@@ -2485,6 +2492,15 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         {
             const auto& s = engine.getSetup();
             if (r == 8) { toggleRecording(); return; }
+            if (r == 9)
+            {
+                engine.setLinkEnabled (! engine.isLinkEnabled());
+                showStatus (engine.isLinkEnabled() ? "Link on: the tempo and the beat are shared with everything on the network that has Link. Play waits for the next shared bar."
+                                                   : "Link off");
+                updateTempoLabel();
+                return;
+            }
+            if (r == 10) { engine.setLinkStartStopSync (! engine.isLinkStartStopSync()); return; }
             if (r >= 100)
             {
                 const auto devices = engine.midiOutputDevices();
@@ -3356,7 +3372,8 @@ bool MainComponent::startRemote()
 void MainComponent::updateTempoLabel()
 {
     const int st = engine.getTranspose();
-    tempoLabel.setText (String (engine.getTempoBpm(), 1) + " bpm" + (st != 0 ? "   " + String (st > 0 ? "+" : "") + String (st) + " st" : String()), dontSendNotification);
+    const String linkText = engine.isLinkEnabled() ? "   Link" + (engine.getLinkPeers() > 0 ? " \u00b7 " + String (engine.getLinkPeers()) : String()) : String();
+    tempoLabel.setText (String (engine.getTempoBpm(), 1) + " bpm" + (st != 0 ? "   " + String (st > 0 ? "+" : "") + String (st) + " st" : String()) + linkText, dontSendNotification);
     tempoLabel.setTooltip (st != 0 ? "The tempo, and the song's transpose: the keyboards play " + String (std::abs (st)) + (std::abs (st) == 1 ? " semitone " : " semitones ") + (st > 0 ? "up" : "down")
                                    : "The tempo. Tap it, or set it on the song.");
 }

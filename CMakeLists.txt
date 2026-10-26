@@ -94,9 +94,13 @@ target_compile_definitions(StageRig PRIVATE
     JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
+# Ableton Link: tempo and beat shared over the network, header-only, GPLv2+ (see external/link/LICENSE.md).
+include(${CMAKE_CURRENT_SOURCE_DIR}/external/link/AbletonLinkConfig.cmake)
+
 target_link_libraries(StageRig PRIVATE
     ClapHeaders
     StageRigAssets
+    Ableton::Link
     ${CMAKE_DL_LIBS}
     juce::juce_audio_basics
     juce::juce_audio_devices
@@ -198,7 +202,7 @@ target_compile_definitions(RemoteTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_LV2=1 JUCE_PLUGINHOST_LADSPA=1 JUCE_PLUGINHOST_VST=0)
 target_link_libraries(RemoteTest PRIVATE
-    ClapHeaders
+    ClapHeaders Ableton::Link
     StageRigAssets
     juce::juce_audio_basics juce::juce_audio_devices juce::juce_audio_formats
     juce::juce_audio_processors juce::juce_audio_utils
@@ -214,7 +218,7 @@ target_compile_definitions(EngineTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_LV2=1 JUCE_PLUGINHOST_LADSPA=1 JUCE_PLUGINHOST_VST=0)
 target_link_libraries(EngineTest PRIVATE
-    ClapHeaders
+    ClapHeaders Ableton::Link
     juce::juce_audio_basics juce::juce_audio_devices juce::juce_audio_formats
     juce::juce_audio_processors juce::juce_audio_utils juce::juce_dsp
     juce::juce_core juce::juce_data_structures juce::juce_events

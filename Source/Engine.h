@@ -7,6 +7,7 @@
 #include "MidiOuts.h"
 #include "Recorder.h"
 #include "MidiFx.h"
+#include <ableton/Link.hpp>
 #include "GmSynth.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -129,6 +130,19 @@ public:
         belongs to the rig, not to one sound. 0 = nothing assigned. Channel 0
         means any channel, so a footswitch works wherever it is plugged in. */
     int getTapTempoCC() const                       { return setup.tapTempoCC; }
+
+    /** Ableton Link: the tempo and the beat shared over the network with
+        anything else that has Link -- Live or Bitwig on another laptop, a
+        phone's loop app, a DJ's software. On, the rig's tempo and Link's are
+        one number, from whichever side changed it last, and Play on the
+        backing track waits for the next shared bar line. With start/stop
+        sync, Play and Stop go both ways too. Message thread. */
+    void setLinkEnabled (bool on);
+    bool isLinkEnabled() const                      { return link != nullptr && link->isEnabled(); }
+    void setLinkStartStopSync (bool on);
+    bool isLinkStartStopSync() const                { return link != nullptr && link->isStartStopSyncEnabled(); }
+    int  getLinkPeers() const                       { return linkPeers.load(); }
+    double getLinkTempoForTesting() const           { return link != nullptr ? link->captureAppSessionState().tempo() : 0.0; }
 
     /** MIDI clock out: 24 ticks a beat at the rig's tempo to these devices,
         with Start when the backing track starts and Stop when it stops, so
@@ -562,7 +576,8 @@ private:
     {
         enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
                     songStep, songLearn, editorClosed, outputVolume, outputLearn,
-                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn, sectionEntered, mappedSwitch, looperLearn };
+                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn, sectionEntered, mappedSwitch, looperLearn,
+                    linkTempo, linkStartStop };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -720,6 +735,12 @@ private:
     // External instruments
     MidiOuts midiOuts;
     Recorder recorder;
+    std::unique_ptr<ableton::Link> link;
+    std::atomic<int> linkPeers { 0 };
+    std::atomic<double> linkTempoFromPeer { 0.0 };
+    std::atomic<bool> linkPlayingFromPeer { false };
+    /** Samples until the next shared bar line, less `countInBeats`, at the output; 0 when Link is off. */
+    juce::int64 linkStartDelay (int countInBeats, int beatsPerBar) const;
     double chunkStartMs = 0.0;                    // audio thread: when this chunk will be heard, on Time's hi-res clock
     double outputLatencyMs = 0.0;
     const float* const* chunkIn = nullptr;        // audio thread: this chunk's device inputs

@@ -360,9 +360,11 @@ int64 SongPlayer::sectionEnd (int s) const
 }
 
 //==============================================================================
-void SongPlayer::start (int beats, double beatSeconds, int output)
+void SongPlayer::start (int beats, double beatSeconds, int output, int64 delaySamples)
 {
     if (getState() != State::idle) return;
+    pendingDelay.store (jmax ((int64) 0, delaySamples));
+    startDelay = -1;
     pendingCountInBeats.store (jmax (0, beats));
     pendingBeatSeconds.store (jmax (0.05, beatSeconds));
     countInOutput.store (jmax (0, output));
@@ -496,6 +498,9 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
     if (st == State::waiting)
     {
         if (! ready.load()) return Happened::nothing;
+        // Asked to start on a shared bar line: wait for it, in whole blocks.
+        if (startDelay < 0) startDelay = pendingDelay.exchange (0);
+        if (startDelay > 0) { startDelay -= n; return Happened::nothing; }
         countInTotalBeats = pendingCountInBeats.load();
         beatSamples = jmax ((int64) 1, (int64) (pendingBeatSeconds.load() * sampleRate));
         /* The count-in leads into the music's own beat: its last click is one

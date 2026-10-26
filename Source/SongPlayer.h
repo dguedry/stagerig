@@ -66,7 +66,7 @@ public:
     /** Starts from the cued position (the top, unless a section was asked
         for while stopped): `countInBeats` clicks of `beatSeconds` each on
         `countInOutput` first. Before loading has finished it waits for it. */
-    void start (int countInBeats, double beatSeconds, int countInOutput);
+    void start (int countInBeats, double beatSeconds, int countInOutput, juce::int64 delaySamples = 0);
     /** Fades out over a few milliseconds and goes idle; the next start is from the top. */
     void stop();
 
@@ -185,6 +185,8 @@ private:
     std::atomic<double> pendingBeatSeconds { 0.5 };
     juce::int64 countInRemaining = 0, beatSamples = 1, countInDone = 0;
     int countInTotalBeats = 0;
+    std::atomic<juce::int64> pendingDelay { 0 };   // samples to wait before the count-in: the next bar on a shared beat
+    juce::int64 startDelay = -1;                  // audio thread: -1 = not yet taken from pendingDelay
 
     // the click through the song
     std::atomic<bool> clickOn { false };

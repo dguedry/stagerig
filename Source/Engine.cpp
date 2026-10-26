@@ -271,6 +271,15 @@ struct Engine::OutputRuntime
 //==============================================================================
 Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host (h), settings (s)
 {
+    /* Link is made now and switched on only if it was on last time. Its
+       callbacks arrive on its own thread, so they only post events. */
+    link = std::make_unique<ableton::Link> (setup.tempoBpm);
+    link->setNumPeersCallback ([this] (std::size_t n) { linkPeers.store ((int) n); });
+    link->setTempoCallback ([this] (double bpm) { linkTempoFromPeer.store (bpm); postEvent ({ Event::linkTempo, 0, 0, 0, 0, 0 }); });
+    link->setStartStopCallback ([this] (bool playing) { linkPlayingFromPeer.store (playing); postEvent ({ Event::linkStartStop, 0, playing ? 1 : 0, 0, 0, 0 }); });
+    link->enableStartStopSync (settings.getBoolValue ("linkStartStop", false));
+    link->enable (settings.getBoolValue ("linkEnabled", false));
+
     if (startAudioDevice)
     {
         std::unique_ptr<XmlElement> savedAudio (settings.getXmlValue ("audioDeviceState"));
@@ -508,6 +517,16 @@ void Engine::setTempoBpm (double bpm)
     if (std::abs (clamped - setup.tempoBpm) < 0.001) return;
     setup.tempoBpm = clamped;
     tempoAtomic.store (clamped);
+    if (link != nullptr && link->isEnabled())
+    {
+        // Told to the others, unless it came from them (then Link has it already).
+        auto st = link->captureAppSessionState();
+        if (std::abs (st.tempo() - clamped) > 0.01)
+        {
+            st.setTempo (clamped, link->clock().micros());
+            link->commitAppSessionState (st);
+        }
+    }
 
     // Every plugin, not just the ones sounding: a preloaded program should not
     // come in at the old tempo when it is selected.
@@ -1654,6 +1673,43 @@ void Engine::advanceTrack()
     listeners.call ([] (Listener& l) { l.transportChanged(); });
 }
 
+void Engine::setLinkEnabled (bool on)
+{
+    if (link == nullptr) return;
+    link->enable (on);
+    settings.setValue ("linkEnabled", on);
+    settings.saveIfNeeded();
+    if (on)
+    {
+        // Join at the rig's tempo, unless a session is already running at another: then take that one.
+        auto st = link->captureAppSessionState();
+        if (linkPeers.load() == 0) { st.setTempo (setup.tempoBpm, link->clock().micros()); link->commitAppSessionState (st); }
+        else setTempoBpm (st.tempo());
+    }
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setLinkStartStopSync (bool on)
+{
+    if (link == nullptr) return;
+    link->enableStartStopSync (on);
+    settings.setValue ("linkStartStop", on);
+    settings.saveIfNeeded();
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+int64 Engine::linkStartDelay (int countInBeats, int beatsPerBar) const
+{
+    if (link == nullptr || ! link->isEnabled() || linkPeers.load() == 0) return 0;
+    const double q = jmax (1, beatsPerBar);
+    const auto st = link->captureAppSessionState();
+    const auto at = link->clock().micros() + std::chrono::microseconds ((int64) (outputLatencyMs * 1000.0));
+    double beats = q - st.phaseAtTime (at, q);                        // to the next bar line
+    beats -= countInBeats;                                            // the count-in ends on it
+    while (beats < 0.0) beats += q;
+    return (int64) (beats * 60.0 / jmax (20.0, st.tempo()) * sampleRate);
+}
+
 Engine::LoopState Engine::getLoopState (int i) const
 {
     return i >= 0 && i < (int) runtimes.size() ? (LoopState) runtimes[(size_t) i]->loop.state.load() : LoopState::empty;
@@ -1871,7 +1927,13 @@ void Engine::startTrack()
         output = s.countInOutput;
         if (s.tempoBpm > 0.0) bpm = s.tempoBpm;
     }
-    player->start (beats, 60.0 / bpm, output);
+    const int bpb = trackSong >= 0 && trackSong < (int) setup.songs.size() ? setup.songs[(size_t) trackSong].beatsPerBar : 4;
+    player->start (beats, 60.0 / bpm, output, linkStartDelay (beats, bpb));
+    if (link != nullptr && link->isEnabled() && link->isStartStopSyncEnabled())
+    {
+        auto st = link->captureAppSessionState();
+        if (! st.isPlaying()) { st.setIsPlaying (true, link->clock().micros()); link->commitAppSessionState (st); }
+    }
     listeners.call ([] (Listener& l) { l.transportChanged(); });
 }
 
@@ -1879,6 +1941,11 @@ void Engine::stopTrack()
 {
     if (player == nullptr || ! player->isRunning()) return;
     player->stop();
+    if (link != nullptr && link->isEnabled() && link->isStartStopSyncEnabled())
+    {
+        auto st = link->captureAppSessionState();
+        if (st.isPlaying()) { st.setIsPlaying (false, link->clock().micros()); link->commitAppSessionState (st); }
+    }
     listeners.call ([] (Listener& l) { l.transportChanged(); });
 }
 
@@ -3375,6 +3442,20 @@ void Engine::handleAsyncUpdate()
                     toggleTrack();
                 break;
 
+            case Event::linkTempo:
+                // A peer changed the tempo: the rig follows, and tells the plugins.
+                if (const double bpm = linkTempoFromPeer.load(); bpm > 0.0) setTempoBpm (bpm);
+                listeners.call ([] (Listener& l) { l.setupChanged(); });
+                break;
+
+            case Event::linkStartStop:
+                if (link != nullptr && link->isEnabled() && link->isStartStopSyncEnabled() && hasTrack())
+                {
+                    if (e.a != 0 && ! isTrackRunning()) startTrack();
+                    else if (e.a == 0 && isTrackRunning()) stopTrack();
+                }
+                break;
+
             case Event::looperLearn:
                 if (e.b == 0) setLooperCC (e.a); else setLooperClearCC (e.a);
                 listeners.call ([cc = e.a, clear = e.b != 0] (Listener& l) { l.statusMessage (String (clear ? "Loop clear" : "Loop") + " pedal learned: controller " + String (cc)); });
@@ -3809,6 +3890,10 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
 
     const ScopedLock sl (lock);
     bool panicNow = panicRequested.exchange (false);
+
+    // With Link on, the tempo the audio side uses is the session's, this block.
+    if (link != nullptr && link->isEnabled())
+        tempoAtomic.store (link->captureAudioSessionState().tempo(), std::memory_order_relaxed);
 
     // PipeWire's JACK client may deliver a larger block than jack_get_buffer_size
     // reported at start (another app forcing the graph quantum), so split anything

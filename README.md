@@ -61,6 +61,7 @@ other plugin.
 - **A pedal for a layer or an effect**: mappings can switch an instrument or an effect, or be its level; one knob can move several things.
 - **Backing tracks follow the song's tempo and key**: find the tempo in the audio, and the files stretch and transpose with the song.
 - **Record the gig**: every output to WAV as it left for the desk, and the keyboards to a MIDI file, in a dated folder beside the setup.
+- **Ableton Link**: the tempo and the beat shared over the network with Live, Bitwig, DJ software and loop apps; Play waits for the shared bar.
 - **A global tempo with tap tempo** and **MIDI clock out** to hardware, so tempo-synced delays and arpeggiators
   have something to sync to. Tap it in the toolbar or from a footswitch.
 - **An on-screen keyboard** for building a setup without a controller attached.
@@ -435,6 +436,9 @@ JUCE is included as a submodule and carries [its own licence](https://github.com
 JUCE 8 is offered under the AGPLv3 or a commercial licence, and StageRig uses it
 under the AGPLv3. GPLv3 section 13 allows the two to be combined, so a StageRig
 binary is distributed under the GPLv3 for StageRig's own code and the AGPLv3 for
-JUCE's. The CLAP headers are MIT-licensed.
+JUCE's. The CLAP headers are MIT-licensed. [Ableton Link](https://github.com/Ableton/link)
+is included as a submodule under its GPLv2-or-later licence (it is also
+offered commercially by Ableton), together with the standalone Asio library it
+uses, under the Boost Software License.
 
 Packaging for distributions: see [docs/PACKAGING.md](https://github.com/dguedry/stagerig/blob/main/docs/PACKAGING.md).
