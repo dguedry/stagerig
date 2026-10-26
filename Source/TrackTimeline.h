@@ -112,6 +112,7 @@ private:
     juce::ScrollBar scrollBar { false };
 
     double pxPerSecond = 0.0;                          // 0 until first laid out: fit
+    bool atFit = true;                                 // the whole song is shown, so a resize refits
     double scrollSeconds = 0.0;
     double cue = 0.0;
     int selected = -1;                                 // a marker

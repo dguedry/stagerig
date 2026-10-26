@@ -981,7 +981,12 @@ public:
         addBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
         r.removeFromTop (12);
         sectionsHeader.setBounds (r.removeFromTop (20));
-        if (timeline != nullptr) timeline->setBounds (r.removeFromTop (timeline->preferredHeight()));
+        if (timeline != nullptr)
+        {
+            // The timeline takes whatever height the rest leaves: a bigger window shows more of the music.
+            const int below = 4 + 26 + 6 + 28 * (int) sectionRows.size() + 12 + 24 + 10 + 46;
+            timeline->setBounds (r.removeFromTop (jmax (timeline->preferredHeight(), r.getHeight() - below)));
+        }
         r.removeFromTop (4);
         {
             auto b = r.removeFromTop (26);
@@ -1002,7 +1007,7 @@ public:
         countInOutLabel.setBounds (c.removeFromLeft (30));
         countInOutBox.setBounds (c.removeFromLeft (180));
         r.removeFromTop (10);
-        hint.setBounds (r);
+        hint.setBounds (r.removeFromTop (46));
     }
 
 private:
@@ -1526,20 +1531,44 @@ private:
     std::unique_ptr<FileChooser> chooser;
 };
 
+namespace
+{
+    /** The Backing track window: a document window with the usual title-bar
+        buttons, so it can be maximised to work on a long song. Escape closes it. */
+    class TracksWindow : public DocumentWindow
+    {
+    public:
+        TracksWindow (const String& title, TracksComponent* content)
+            : DocumentWindow (title, bgPanel, DocumentWindow::allButtons)
+        {
+            setContentOwned (content, true);
+            setUsingNativeTitleBar (true);
+            setResizable (true, true);
+            setResizeLimits (700, 500, 10000, 10000);
+            centreWithSize (jmin (getWidth(), getParentMonitorArea().getWidth() - 80), jmin (getHeight(), getParentMonitorArea().getHeight() - 80));
+            setVisible (true);
+            toFront (true);
+        }
+        void closeButtonPressed() override
+        {
+            setVisible (false);
+            MessageManager::callAsync ([w = this] { delete w; });
+        }
+        bool keyPressed (const KeyPress& k) override
+        {
+            if (k == KeyPress::escapeKey) { closeButtonPressed(); return true; }
+            return DocumentWindow::keyPressed (k);
+        }
+    };
+}
+
 void SongsPanel::showTracksDialog (int songIndex)
 {
     const auto& songs = engine.getSongs();
     if (songIndex < 0 || songIndex >= (int) songs.size()) return;
     auto* content = new TracksComponent (engine, *this, songIndex);
     content->setSize (900, 760);
-    DialogWindow::LaunchOptions o;
-    o.content.setOwned (content);
-    o.dialogTitle = "Backing track: " + songs[(size_t) songIndex].name;
-    o.dialogBackgroundColour = bgPanel;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.launchAsync();
+    new TracksWindow ("Backing track: " + songs[(size_t) songIndex].name, content);     // deletes itself when closed
 }
 
 } // namespace perf

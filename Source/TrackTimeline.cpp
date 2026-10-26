@@ -187,7 +187,7 @@ void TrackTimeline::scrollBarMoved (ScrollBar*, double newRangeStart)
 void TrackTimeline::resized()
 {
     scrollBar.setBounds (getLocalBounds().removeFromBottom (kScroll).withTrimmedLeft (kNames));
-    if (pxPerSecond <= 0.0) zoomToFit();
+    if (pxPerSecond <= 0.0 || atFit) zoomToFit();     // showing the whole song: keep showing it at the new width
     else { clampScroll(); updateScrollBar(); }
 }
 
@@ -197,6 +197,7 @@ void TrackTimeline::zoomToFit()
     if (w <= 0) { pxPerSecond = 0.0; return; }     // not laid out yet: fit on the first real resize
     pxPerSecond = w / lengthSeconds();
     scrollSeconds = 0.0;
+    atFit = true;
     updateScrollBar();
     repaint();
 }
@@ -208,6 +209,7 @@ void TrackTimeline::zoomBy (float factor)
     const double anchor = hoverSeconds >= 0.0 ? hoverSeconds : scrollSeconds + visibleSeconds() / 2.0;
     const float anchorX = xOf (anchor);
     pxPerSecond = jlimit (fit, kMaxPxPerSecond, pxPerSecond * (double) factor);
+    atFit = pxPerSecond <= fit + 1e-9;
     scrollSeconds = anchor - (anchorX - (float) timeArea().getX()) / pxPerSecond;
     clampScroll();
     updateScrollBar();
