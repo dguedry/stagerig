@@ -737,17 +737,34 @@ ready, and a Play pressed before then starts the moment they are.
 
 ### Sections and vamps
 
-**+ Add section** under **Sections** marks where a section starts -- type the
-time (*1:23.5*), or press it while the track plays to mark the spot you are
-at. Each section runs to the next one; anything before the first is a section
-of its own. Click a section's name to rename it; **X** removes the marker (the
-music is untouched).
+Under **SECTIONS** the track is drawn along time: each audio file as a
+waveform, each MIDI file as its notes, with a ruler in minutes and seconds
+and, when the song's tempo is known (a MIDI file brings its own; an audio
+file uses the song's tempo), bar numbers too. The sections sit above it as
+named blocks, each running to the next; whatever comes before the first is a
+section of its own, *Start*.
 
-- **Vamp** makes a section repeat until it is released: the intro goes round
-  while the singer talks to the audience, then goes on into the verse at the
-  end of the pass you are in.
-- **Go** goes to a section -- when the current one ends, so the band stays in
-  time. While the track is stopped, it sets where Play starts.
+- **Click** the timeline to put the green cue there; **Play** (or Space)
+  plays the track from the cue, so you can listen for the spot. **Stop** is
+  the same button.
+- **Double-click** where a section starts to make one, and name it. Or press
+  **Mark section here** while the track plays, at the moment the chorus
+  lands; stopped, it marks the cue.
+- **Drag** a section's flag to move it. It snaps to the nearest bar line
+  when it is close; hold Alt to drag freely. The arrow keys nudge a selected
+  section a tenth of a second (Shift: a second).
+- **Double-click** a section to rename it. **Right-click** it for **Vamp**,
+  **Go** and **Remove**; Delete removes the selected one. The list under the
+  timeline shows the same sections with their times, to type one exactly.
+- **Ctrl+wheel** zooms around the mouse, the wheel scrolls, **-** / **+** /
+  **Fit** do the same from the buttons.
+
+A **Vamp** section repeats until it is released: the intro goes round while
+the singer talks to the audience, then goes on into the verse at the end of
+the pass you are in. **Go** goes to a section when the current one ends, so
+the band stays in time; while the track plays, clicking a section on the
+timeline does the same. While the track is stopped, Go sets where Play starts.
+Removing a section never touches the music.
 
 ### Playing it
 
@@ -1271,7 +1288,8 @@ size) and `pipewireTakeover`.
 | `Z` / `X` | Shift the on-screen keyboard down or up an octave. |
 | Double-click a part's level in the Backing track window | Back to 0 dB: the part as the file has it. |
 | The piano roll (**Edit notes...**) | Double-click adds a note (on a note: deletes it); drag its right edge to resize; Delete removes the selection; arrows move it a step (Shift: an octave); Ctrl+wheel zooms; Space plays; `Ctrl+Z` / `Ctrl+Shift+Z` undo and redo. |
-| Click a section's name or time in the Backing track window | Edits it. |
+| The timeline in the Backing track window | Click sets the cue (Play starts there); double-click starts a section; drag a flag moves it (snaps to bars; Alt: free); double-click a section renames it; right-click: vamp, go, remove; Delete removes the selected one; arrows nudge it; Ctrl+wheel zooms; Space plays. |
+| Click a section's name or time in the list under the timeline | Edits it exactly. |
 | Escape | Closes a dialog. |
 
 ## Appendix: If you know Ableton Live

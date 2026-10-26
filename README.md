@@ -72,8 +72,9 @@ other plugin.
   keyboard and by name (*Upper: Big Strings*, kept playing whatever Upper
   itself is on), or a MIDI device. A piano roll edits the notes. With a
   count-in, started and stopped from a footswitch, the laptop or the tablet,
-  where parts can be muted from the stand. Mark its sections and jump between
-  them in time, and vamp an intro until a pedal lets it go on. Tempo-synced
+  where parts can be muted from the stand. Mark its sections on a timeline of
+  the files' waveforms and notes, jump between them in time, and vamp an
+  intro until a pedal lets it go on. Tempo-synced
   effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
   song -- PDF, image, text or ChordPro -- and the tablet shows it, turning

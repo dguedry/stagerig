@@ -4,6 +4,7 @@
 #include "GmSynth.h"
 #include "GmMixer.h"
 #include "MidiEditor.h"
+#include "TrackTimeline.h"
 #include "PatchDialog.h"
 #include <cmath>
 #include <map>
@@ -900,10 +901,33 @@ public:
         addAndMakeVisible (sectionsHeader);
         sectionsHeader.setColour (Label::textColourId, accent);
         sectionsHeader.setFont (FontOptions (13.0f, Font::bold));
+
+        timeline = std::make_unique<TrackTimeline> (engine, songIndex);
+        addAndMakeVisible (*timeline);
+        timeline->onMarkersChanged = [this] { rebuild(); };
+        timeline->onHint = [this] (const String& t) { timelineHint.setText (t.isNotEmpty() ? t : kTimelineHint, dontSendNotification); };
+        addAndMakeVisible (timelineHint);
+        timelineHint.setText (kTimelineHint, dontSendNotification);
+        timelineHint.setColour (Label::textColourId, textDim);
+        timelineHint.setFont (FontOptions (11.5f));
+        timelineHint.setMinimumHorizontalScale (0.8f);
+
+        addAndMakeVisible (playBtn);
+        playBtn.setTooltip ("Play the backing track from the green cue (click the timeline to move it). Space does the same.");
+        playBtn.onClick = [this] { timeline->togglePlay(); };
         addAndMakeVisible (addSectionBtn);
-        addSectionBtn.setTooltip ("A new section where the backing track is now if it is playing, otherwise after the last one. "
-                                  "Edit the time to move it: 1:23.5");
-        addSectionBtn.onClick = [this] { addSection(); };
+        addSectionBtn.setTooltip ("A new section where the track is playing now, or at the green cue while it is stopped. "
+                                  "Or double-click the timeline where the section should start.");
+        addSectionBtn.onClick = [this] { timeline->markHere(); };
+        addAndMakeVisible (zoomOutBtn);
+        addAndMakeVisible (zoomInBtn);
+        addAndMakeVisible (fitBtn);
+        zoomOutBtn.setTooltip ("Zoom out (or Ctrl+wheel on the timeline)");
+        zoomInBtn.setTooltip ("Zoom in (or Ctrl+wheel on the timeline)");
+        fitBtn.setTooltip ("Show the whole song");
+        zoomOutBtn.onClick = [this] { timeline->zoomBy (1.0f / 1.5f); };
+        zoomInBtn.onClick = [this] { timeline->zoomBy (1.5f); };
+        fitBtn.onClick = [this] { timeline->zoomToFit(); };
 
         addAndMakeVisible (hint);
         hint.setColour (Label::textColourId, textDim);
@@ -912,12 +936,12 @@ public:
         hint.setText ("Audio files play on an output; put a click or cue file on your in-ear output. "
                       "A MIDI file plays parts: click a part's sound to choose what plays it. "
                       "Play (songs panel, tablet or footswitch) starts everything together, after the count-in.\n"
-                      "Sections start at their time and run to the next. A vamp section repeats until released "
-                      "(Next, the tablet, or the section footswitch); asking for a section takes you there when "
-                      "the current one ends.", dontSendNotification);
+                      "Sections: double-click the timeline where one starts, or press Mark section here while the track plays. "
+                      "Each runs to the next. A vamp section repeats until released (Next, the tablet, or the section footswitch); "
+                      "asking for a section takes you there when the current one ends.", dontSendNotification);
 
         rebuild();
-        startTimerHz (2);
+        startTimerHz (5);
     }
 
     void rebuild()
@@ -934,6 +958,7 @@ public:
             rows.push_back (std::move (row));
         }
 
+        if (timeline != nullptr) timeline->refresh();
         sectionRows.clear();
         for (int i = 0; i < (int) sg.markers.size(); ++i)
         {
@@ -956,9 +981,19 @@ public:
         addBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
         r.removeFromTop (12);
         sectionsHeader.setBounds (r.removeFromTop (20));
-        for (auto& row : sectionRows) row->setBounds (r.removeFromTop (28));
+        if (timeline != nullptr) timeline->setBounds (r.removeFromTop (timeline->preferredHeight()));
         r.removeFromTop (4);
-        addSectionBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
+        {
+            auto b = r.removeFromTop (26);
+            playBtn.setBounds (b.removeFromLeft (70));          b.removeFromLeft (6);
+            addSectionBtn.setBounds (b.removeFromLeft (150));   b.removeFromLeft (14);
+            zoomOutBtn.setBounds (b.removeFromLeft (30));       b.removeFromLeft (4);
+            zoomInBtn.setBounds (b.removeFromLeft (30));        b.removeFromLeft (4);
+            fitBtn.setBounds (b.removeFromLeft (40));           b.removeFromLeft (10);
+            timelineHint.setBounds (b);
+        }
+        r.removeFromTop (6);
+        for (auto& row : sectionRows) row->setBounds (r.removeFromTop (28));
         r.removeFromTop (12);
         auto c = r.removeFromTop (24);
         countInLabel.setBounds (c.removeFromLeft (70));
@@ -1411,23 +1446,6 @@ private:
         engine.setSongMarkers (songIndex, m);
     }
 
-    void addSection()
-    {
-        auto m = markers();
-        double at = 0.0;
-        if (engine.getTrackSong() == songIndex && engine.isTrackRunning())
-            at = engine.getTrackPosition();
-        else if (! m.empty())
-        {
-            for (const auto& x : m) at = jmax (at, x.seconds);
-            at += 10.0;
-        }
-        m.push_back ({ "Section " + String ((int) m.size() + 1), at, false });
-        std::sort (m.begin(), m.end(), [] (const MarkerDef& a, const MarkerDef& b) { return a.seconds < b.seconds; });
-        engine.setSongMarkers (songIndex, m);
-        rebuild();
-    }
-
     void removeMarker (int index)
     {
         auto m = markers();
@@ -1489,6 +1507,7 @@ private:
             rebuild();
         else
             for (auto& row : rows) if (row->def.isMidi()) row->refreshParts();     // a plugin finished loading, a part was changed elsewhere
+        playBtn.setButtonText (timeline != nullptr && timeline->isPlaying() ? "Stop" : "Play");
     }
 
     Engine& engine;
@@ -1497,7 +1516,10 @@ private:
     std::vector<std::unique_ptr<Row>> rows;
     std::vector<std::unique_ptr<SectionRow>> sectionRows;
     Label sectionsHeader { {}, "SECTIONS" };
-    TextButton addSectionBtn { "+ Add section" };
+    std::unique_ptr<TrackTimeline> timeline;
+    Label timelineHint;
+    static constexpr const char* kTimelineHint = "Click the timeline to set where Play starts. Double-click to start a section there; drag a flag to move it; right-click it for more.";
+    TextButton playBtn { "Play" }, addSectionBtn { "Mark section here" }, zoomOutBtn { "-" }, zoomInBtn { "+" }, fitBtn { "Fit" };
     TextButton addBtn { "+ Add audio or MIDI..." };
     Label countInLabel { {}, "Count-in" }, countInOutLabel { {}, "on" }, hint;
     ComboBox countInBox, countInOutBox;
@@ -1509,7 +1531,7 @@ void SongsPanel::showTracksDialog (int songIndex)
     const auto& songs = engine.getSongs();
     if (songIndex < 0 || songIndex >= (int) songs.size()) return;
     auto* content = new TracksComponent (engine, *this, songIndex);
-    content->setSize (820, 640);
+    content->setSize (900, 760);
     DialogWindow::LaunchOptions o;
     o.content.setOwned (content);
     o.dialogTitle = "Backing track: " + songs[(size_t) songIndex].name;

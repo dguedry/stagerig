@@ -59,6 +59,7 @@ target_sources(StageRig PRIVATE
     Source/LowLatency.cpp
     Source/HelpWindow.cpp
     Source/SongsPanel.cpp
+    Source/TrackTimeline.cpp
     Source/RemoteServer.cpp Source/Charts.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp
     Source/Engine.cpp
     Source/SongPlayer.cpp
