@@ -62,6 +62,7 @@ target_sources(StageRig PRIVATE
     Source/TrackTimeline.cpp
     Source/TempoDetect.cpp
     Source/ChartViewer.cpp
+    Source/SectionActions.cpp
     Source/RemoteServer.cpp Source/Charts.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp
     Source/Engine.cpp
     Source/SongPlayer.cpp

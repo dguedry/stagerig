@@ -294,25 +294,29 @@ void SongPlayer::prepare (double sr, int bs)
 
 void SongPlayer::setMarkers (const std::vector<MarkerDef>& markers)
 {
-    std::vector<MarkerDef> sorted (markers);
-    std::sort (sorted.begin(), sorted.end(), [] (const MarkerDef& a, const MarkerDef& b) { return a.seconds < b.seconds; });
+    std::vector<int> order ((size_t) markers.size());
+    for (int i = 0; i < (int) markers.size(); ++i) order[(size_t) i] = i;
+    std::sort (order.begin(), order.end(), [&markers] (int a, int b) { return markers[(size_t) a].seconds < markers[(size_t) b].seconds; });
 
     /* Whatever comes before the first marker is a section of its own -- the
        intro -- unless the first marker is at the very top. */
     int n = 0;
-    if (sorted.empty() || sorted.front().seconds > 0.001)
+    if (order.empty() || markers[(size_t) order.front()].seconds > 0.001)
     {
         sectionSeconds[0] = 0.0;
-        sectionName[0] = sorted.empty() ? "Song" : "Start";
+        sectionName[0] = order.empty() ? "Song" : "Start";
         sectionVamp[0] = false;
+        sectionMarker[0] = -1;
         n = 1;
     }
-    for (const auto& m : sorted)
+    for (int idx : order)
     {
         if (n >= kMaxSections) break;
+        const auto& m = markers[(size_t) idx];
         sectionSeconds[n] = jmax (0.0, m.seconds);
         sectionName[n] = m.name.isNotEmpty() ? m.name : "Section " + String (n + 1);
         sectionVamp[n] = m.vamp;
+        sectionMarker[n] = idx;
         ++n;
     }
     for (int i = 0; i < n; ++i)
@@ -323,6 +327,7 @@ void SongPlayer::setMarkers (const std::vector<MarkerDef>& markers)
 }
 
 String SongPlayer::getSectionName (int i) const     { return i >= 0 && i < numSections ? sectionName[i] : String(); }
+int SongPlayer::getSectionMarker (int i) const      { return i >= 0 && i < numSections ? sectionMarker[i] : -1; }
 double SongPlayer::getSectionStart (int i) const    { return i >= 0 && i < numSections ? sectionSeconds[i] : 0.0; }
 bool SongPlayer::isSectionVamp (int i) const        { return i >= 0 && i < numSections && sectionVamp[i]; }
 

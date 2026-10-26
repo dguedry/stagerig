@@ -335,6 +335,28 @@ struct StemDef
     static StemDef fromVar (const juce::var&);
 };
 
+/** Something a section does the moment the track enters it: put a keyboard
+    on a program, mute or unmute a part of the MIDI files, bypass or enable
+    an effect, or send a MIDI message to a device -- a lighting desk's cue.
+    The stage manager's cue sheet, kept with the song. */
+struct ActionDef
+{
+    enum class Kind { program, part, effect, midi };
+    Kind kind = Kind::program;
+    int input = 0;                   // program, effect: which input
+    int program = 0;                 // program: which of the input's programs
+    int channel = 1;                 // part: the part's channel (1-16); midi: the channel
+    bool on = true;                  // part: plays (not muted); effect: on (not bypassed)
+    int chain = -1, effect = 0;      // effect: a ProgramDef chain address and an index in it
+    juce::String portIdentifier, portName;   // midi: the device
+    enum class MidiType { programChange, controller, noteOn };
+    MidiType midiType = MidiType::programChange;
+    int data1 = 0, data2 = 127;      // midi: the program, or the controller and its value, or the note and its velocity
+
+    juce::var toVar() const;
+    static ActionDef fromVar (const juce::var&);
+};
+
 /** A named point in a song's backing track, where a section starts: the
     intro, the verse, the chorus. A vamp section repeats until released --
     the band keeps the intro going until the singer is ready. */
@@ -343,6 +365,7 @@ struct MarkerDef
     juce::String name;
     double seconds = 0.0;
     bool vamp = false;
+    std::vector<ActionDef> actions;
 
     juce::var toVar() const;
     static MarkerDef fromVar (const juce::var&);

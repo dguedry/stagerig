@@ -54,6 +54,13 @@ int main()
         sg.countInBeats = 4; sg.countInOutput = 1;
         sg.click = true; sg.beatsPerBar = 3; sg.firstBeat = 0.25; sg.startSeconds = 1.79;
         sg.markers = { { "Intro", 0.0, true }, { "Verse", 8.5, false } };
+        {
+            ActionDef prog; prog.kind = ActionDef::Kind::program; prog.input = 1; prog.program = 7;
+            ActionDef part; part.kind = ActionDef::Kind::part; part.channel = 10; part.on = false;
+            ActionDef fx; fx.kind = ActionDef::Kind::effect; fx.input = 0; fx.chain = ProgramDef::midiChainOf (2); fx.effect = 1; fx.on = false;
+            ActionDef cue; cue.kind = ActionDef::Kind::midi; cue.portIdentifier = "id:lights"; cue.portName = "Lights"; cue.midiType = ActionDef::MidiType::controller; cue.channel = 16; cue.data1 = 20; cue.data2 = 64;
+            sg.markers[1].actions = { prog, part, fx, cue };
+        }
         s.songs.push_back (sg);
         s.transportCC = 85;
     }
@@ -196,6 +203,15 @@ int main()
     CHECK (loaded.songs[0].countInBeats == 4 && loaded.songs[0].countInOutput == 1 && loaded.transportCC == 85);
     CHECK (loaded.songs[0].click && loaded.songs[0].beatsPerBar == 3 && std::abs (loaded.songs[0].firstBeat - 0.25) < 1e-9);
     CHECK (std::abs (loaded.songs[0].startSeconds - 1.79) < 1e-9);
+    {
+        const auto& acts = loaded.songs[0].markers[1].actions;
+        CHECK (loaded.songs[0].markers[0].actions.empty() && acts.size() == 4);
+        CHECK (acts[0].kind == ActionDef::Kind::program && acts[0].input == 1 && acts[0].program == 7);
+        CHECK (acts[1].kind == ActionDef::Kind::part && acts[1].channel == 10 && ! acts[1].on);
+        CHECK (acts[2].kind == ActionDef::Kind::effect && acts[2].chain == ProgramDef::midiChainOf (2) && acts[2].effect == 1 && ! acts[2].on);
+        CHECK (acts[3].kind == ActionDef::Kind::midi && acts[3].portName == "Lights" && acts[3].midiType == ActionDef::MidiType::controller
+               && acts[3].channel == 16 && acts[3].data1 == 20 && acts[3].data2 == 64);
+    }
     CHECK (loaded.inputs.size() == 4 && loaded.inputs[2].isAudio());
     CHECK (loaded.inputs[2].audioLeft == 2 && loaded.inputs[2].audioRight == -1);
     CHECK (std::abs (loaded.inputs[2].programs[3].inputGainDb + 6.0f) < 1e-6f);

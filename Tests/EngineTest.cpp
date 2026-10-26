@@ -2038,7 +2038,15 @@ int main()
         }
         const int secSong = engine.addSong ("Sections");
         engine.addSongStem (secSong, { "sections.wav", {}, 0, 0.0f });
-        engine.setSongMarkers (secSong, { { "A", 0.0, false }, { "B", 1.0, true }, { "C", 2.0, false } });
+        /* Section B carries a cue sheet: Upper goes to program 3 when the
+           track enters it; nothing happens again while the vamp goes round. */
+        {
+            ActionDef toThree; toThree.kind = ActionDef::Kind::program; toThree.input = 0; toThree.program = 3;
+            std::vector<MarkerDef> ms = { { "A", 0.0, false }, { "B", 1.0, true }, { "C", 2.0, false } };
+            ms[1].actions = { toThree };
+            engine.setSongMarkers (secSong, ms);
+        }
+        engine.selectProgram (0, 0);
         engine.selectSong (secSong);
         CHECK (waitReady());
         CHECK (engine.getTrackSectionCount() == 3 && engine.getTrackSectionName (1) == "B" && engine.isTrackSectionVamp (1));
@@ -2050,6 +2058,13 @@ int main()
         const auto inVamp = peakFor (1.5);                               // B's end has come and gone: still B
         std::printf ("     vamping: section %d, level %.2f, position %.2f s\n", engine.getTrackSection(), inVamp, engine.getTrackPosition());
         CHECK (engine.getTrackSection() == 1 && std::abs (inVamp - 0.5f) < 0.05f && engine.getTrackPosition() < 2.0);
+        pump (30);
+        std::printf ("     entering B put Upper on program %d\n", engine.getSetup().inputs[0].currentProgram);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 3);
+        engine.selectProgram (0, 0);
+        levels (100);                                                    // the vamp goes round again: no second firing
+        pump (30);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 0);
 
         engine.advanceTrack();                                           // the pedal: release
         peakFor (1.1);                                                   // to the end of this pass, then C

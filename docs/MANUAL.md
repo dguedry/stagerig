@@ -806,6 +806,25 @@ section of its own, *Start*.
 - **Ctrl+wheel** zooms around the mouse, the wheel scrolls, **-** / **+** /
   **Fit** do the same from the buttons.
 
+#### What a section does when the track enters it
+
+Each section can carry a cue sheet: right-click it on the timeline (or press
+its **Actions...** button in the list) and **+ Add...** offers, in the setup's
+own words:
+
+- **Put a keyboard on a program** -- Upper to *012 Big Strings* when the
+  chorus arrives, so your hands never leave the keys.
+- **Mute** or **unmute a part of the MIDI files** -- the piano part plays
+  itself in the verse and is yours in the chorus.
+- **Bypass an effect** or **turn an effect on** -- the delay only in the solo.
+- **Send MIDI to a device** -- a program change, controller or note to a
+  lighting desk or a hardware synth: scene 5 when the bridge starts.
+
+They fire the moment the track enters the section: at Play, at a jump, or by
+playing into it. A vamp going round does not fire them again. **Try** on
+each one does it now, to hear or see it; the section shows how many it has.
+Removing a section removes its sheet.
+
 A **Vamp** section repeats until it is released: the intro goes round while
 the singer talks to the audience, then goes on into the verse at the end of
 the pass you are in. **Go** goes to a section when the current one ends, so

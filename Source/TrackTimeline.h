@@ -34,6 +34,8 @@ public:
     std::function<void()> onMarkersChanged;
     /** A line of text about what the mouse is over, for a status label. */
     std::function<void (const juce::String&)> onHint;
+    /** Asked to open a section's actions (its cue sheet), by marker index. */
+    std::function<void (int)> onEditActions;
 
     /** Re-reads the song: its files and markers. Cheap when nothing changed. */
     void refresh();

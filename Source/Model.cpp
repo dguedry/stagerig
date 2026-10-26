@@ -430,12 +430,71 @@ File chartsFolderFor (const File& setupFile)
     return setupFile.getSiblingFile (setupFile.getFileNameWithoutExtension() + ".charts");
 }
 
+var ActionDef::toVar() const
+{
+    auto* o = new DynamicObject();
+    static const char* kinds[] = { "program", "part", "effect", "midi" };
+    o->setProperty ("kind", kinds[(int) kind]);
+    switch (kind)
+    {
+        case Kind::program:
+            o->setProperty ("input", input);
+            o->setProperty ("program", program);
+            break;
+        case Kind::part:
+            o->setProperty ("channel", channel);
+            o->setProperty ("on", on);
+            break;
+        case Kind::effect:
+            o->setProperty ("input", input);
+            o->setProperty ("chain", chain);
+            o->setProperty ("effect", effect);
+            o->setProperty ("on", on);
+            break;
+        case Kind::midi:
+            o->setProperty ("portIdentifier", portIdentifier);
+            o->setProperty ("portName", portName);
+            o->setProperty ("type", midiType == MidiType::programChange ? "pc" : midiType == MidiType::controller ? "cc" : "note");
+            o->setProperty ("channel", channel);
+            o->setProperty ("data1", data1);
+            o->setProperty ("data2", data2);
+            break;
+    }
+    return var (o);
+}
+
+ActionDef ActionDef::fromVar (const var& v)
+{
+    ActionDef a;
+    const auto kind = propStr (v, "kind");
+    a.kind = kind == "part" ? Kind::part : kind == "effect" ? Kind::effect : kind == "midi" ? Kind::midi : Kind::program;
+    a.input   = jmax (0, prop<int> (v, "input", 0));
+    a.program = jlimit (0, InputDef::numPrograms - 1, prop<int> (v, "program", 0));
+    a.channel = jlimit (1, 16, prop<int> (v, "channel", 1));
+    a.on      = prop<bool> (v, "on", true);
+    a.chain   = prop<int> (v, "chain", -1);
+    a.effect  = jmax (0, prop<int> (v, "effect", 0));
+    a.portIdentifier = propStr (v, "portIdentifier");
+    a.portName = propStr (v, "portName");
+    const auto t = propStr (v, "type");
+    a.midiType = t == "cc" ? MidiType::controller : t == "note" ? MidiType::noteOn : MidiType::programChange;
+    a.data1 = jlimit (0, 127, prop<int> (v, "data1", 0));
+    a.data2 = jlimit (0, 127, prop<int> (v, "data2", 127));
+    return a;
+}
+
 var MarkerDef::toVar() const
 {
     auto* o = new DynamicObject();
     o->setProperty ("name", name);
     o->setProperty ("seconds", seconds);
     if (vamp) o->setProperty ("vamp", true);
+    if (! actions.empty())
+    {
+        Array<var> arr;
+        for (const auto& a : actions) arr.add (a.toVar());
+        o->setProperty ("actions", arr);
+    }
     return var (o);
 }
 
@@ -445,6 +504,8 @@ MarkerDef MarkerDef::fromVar (const var& v)
     m.name    = propStr (v, "name");
     m.seconds = jmax (0.0, prop<double> (v, "seconds", 0.0));
     m.vamp    = prop<bool> (v, "vamp", false);
+    if (auto* arr = v.getProperty ("actions", var()).getArray())
+        for (const auto& a : *arr) m.actions.push_back (ActionDef::fromVar (a));
     return m;
 }
 

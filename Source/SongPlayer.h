@@ -69,6 +69,8 @@ public:
     int  getNumSections() const                   { return numSections; }
     juce::String getSectionName (int) const;
     double getSectionStart (int) const;           // seconds
+    /** The index in the song's markers a section came from, or -1 for the stretch before the first. */
+    int  getSectionMarker (int) const;
     bool isSectionVamp (int) const;
     int  getCurrentSection() const                { return currentSection.load(); }
     int  getQueuedSection() const                 { return queuedSection.load(); }
@@ -154,6 +156,7 @@ private:
     bool sectionVamp[kMaxSections] {};
     juce::String sectionName[kMaxSections];
     double sectionSeconds[kMaxSections] {};
+    int sectionMarker[kMaxSections] {};
     int numSections = 1;
 
     std::atomic<int> state { (int) State::idle };

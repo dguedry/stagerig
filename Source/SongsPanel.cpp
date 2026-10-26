@@ -7,6 +7,7 @@
 #include "TrackTimeline.h"
 #include "TempoDetect.h"
 #include "ChartViewer.h"
+#include "SectionActions.h"
 #include <thread>
 #include "PatchDialog.h"
 #include <cmath>
@@ -1002,6 +1003,7 @@ public:
         timeline = std::make_unique<TrackTimeline> (engine, songIndex);
         addAndMakeVisible (*timeline);
         timeline->onMarkersChanged = [this] { rebuild(); };
+        timeline->onEditActions = [this] (int marker) { editActions (marker); };
         timeline->onHint = [this] (const String& t) { timelineHint.setText (t.isNotEmpty() ? t : kTimelineHint, dontSendNotification); };
         addAndMakeVisible (timelineHint);
         timelineHint.setText (kTimelineHint, dontSendNotification);
@@ -1534,6 +1536,11 @@ private:
             go.setTooltip ("Go here: at the end of the current section if the backing track is playing, otherwise where Play starts");
             go.onClick = [this] { owner.goToMarker (index); };
 
+            addAndMakeVisible (actions);
+            actions.setButtonText (m.actions.empty() ? "Actions..." : String ((int) m.actions.size()) + (m.actions.size() == 1 ? " action..." : " actions..."));
+            actions.setTooltip ("What happens when the track enters this section: a keyboard's program, a part muted, an effect bypassed, a cue to the lights");
+            actions.onClick = [this] { owner.editActions (index); };
+
             addAndMakeVisible (remove);
             remove.setTooltip ("Remove this section marker (the music is untouched)");
             remove.onClick = [this] { owner.removeMarker (index); };
@@ -1555,6 +1562,7 @@ private:
             auto r = getLocalBounds().reduced (0, 2);
             remove.setBounds (r.removeFromRight (28));   r.removeFromRight (6);
             go.setBounds (r.removeFromRight (44));       r.removeFromRight (6);
+            actions.setBounds (r.removeFromRight (96));  r.removeFromRight (6);
             vamp.setBounds (r.removeFromRight (70));     r.removeFromRight (6);
             time.setBounds (r.removeFromRight (90));     r.removeFromRight (6);
             name.setBounds (r);
@@ -1563,8 +1571,14 @@ private:
         int index;
         Label name, time;
         ToggleButton vamp { "Vamp" };
-        TextButton go { "Go" }, remove { "X" };
+        TextButton go { "Go" }, actions, remove { "X" };
     };
+
+    void editActions (int markerIndex)
+    {
+        SafePointer<TracksComponent> self (this);
+        showSectionActions (engine, songIndex, markerIndex, [self] { if (self != nullptr) self->rebuild(); });
+    }
 
     std::vector<MarkerDef> markers() const
     {

@@ -310,6 +310,14 @@ public:
     juce::String getTrackSectionName (int i) const  { return player != nullptr ? player->getSectionName (i) : juce::String(); }
     double getTrackSectionStart (int i) const       { return player != nullptr ? player->getSectionStart (i) : 0.0; }
     bool isTrackSectionVamp (int i) const           { return player != nullptr && player->isSectionVamp (i); }
+    int  getTrackSectionMarker (int i) const        { return player != nullptr ? player->getSectionMarker (i) : -1; }
+    /** Does what one action says, now: the section's cue sheet, one line. Also for trying one out from the window. */
+    void performAction (int songIndex, const ActionDef&);
+    /** A line of words for an action, for the window and the tablet. */
+    juce::String describeAction (const ActionDef&) const;
+    /** Message thread: the MIDI output ports StageRig can send to, for choosing one. */
+    juce::Array<juce::MidiDeviceInfo> midiOutputDevices() const;
+    void sendMidiToDevice (const juce::String& identifier, const juce::String& name, const juce::MidiMessage&);
     int  getTrackSection() const                    { return player != nullptr ? player->getCurrentSection() : -1; }
     int  getQueuedTrackSection() const              { return player != nullptr ? player->getQueuedSection() : -1; }
     bool isTrackVamping() const                     { return player != nullptr && player->isVamping(); }
@@ -502,7 +510,7 @@ private:
     {
         enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
                     songStep, songLearn, editorClosed, outputVolume, outputLearn,
-                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn };
+                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn, sectionEntered };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -676,6 +684,7 @@ private:
     std::atomic<int> sectionCCAtomic { 0 };
     std::atomic<bool> sectionLearnArmed { false };
     int trackSong = -1;                           // message thread
+    int lastTrackSection = -1;                    // audio thread: to notice the track entering a section
     std::atomic<int> transportCCAtomic { 0 };     // read on the MIDI thread
     std::atomic<bool> transportLearnArmed { false };
     void resetPluginPositions();                  // audio thread, under lock

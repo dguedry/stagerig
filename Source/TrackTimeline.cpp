@@ -430,7 +430,8 @@ void TrackTimeline::paint (Graphics& g)
         g.setColour (idx == selected ? accent.withAlpha (0.9f) : m.vamp ? vampCol : accentDim);
         g.fillRoundedRectangle (br, 3.0f);
         g.setColour (Colours::white);
-        g.drawText (m.name + (m.vamp ? "  (vamp)" : String()),
+        g.drawText (m.name + (m.vamp ? "  (vamp)" : String())
+                      + (m.actions.empty() ? String() : "  \u2022 " + String ((int) m.actions.size()) + (m.actions.size() == 1 ? " action" : " actions")),
                     br.reduced (6.0f, 0.0f).toNearestInt(), Justification::centredLeft, true);
     }
     // Marker flags: a line down the lanes, a flag in the band.
@@ -602,6 +603,8 @@ void TrackTimeline::showMarkerMenu (int index, Point<int> at)
     menu.addItem (1, "Rename...");
     menu.addItem (2, "Vamp: repeat until released", true, m[(size_t) index].vamp);
     menu.addItem (3, isPlaying() ? "Go here when this section ends" : "Start Play here", true);
+    menu.addItem (6, m[(size_t) index].actions.empty() ? "Actions when the track enters it..."
+                                                         : String ((int) m[(size_t) index].actions.size()) + (m[(size_t) index].actions.size() == 1 ? " action" : " actions") + " when the track enters it...");
     menu.addItem (5, "Start the song here  (Play from the top begins at this section)", true,
                   song() != nullptr && std::abs (song()->startSeconds - m[(size_t) index].seconds) < 1e-6);
     menu.addSeparator();
@@ -622,6 +625,7 @@ void TrackTimeline::showMarkerMenu (int index, Point<int> at)
             }
             case 3: self->goToMarker (index); break;
             case 4: self->removeMarker (index); break;
+            case 6: if (self->onEditActions) self->onEditActions (index); break;
             case 5:
             {
                 const auto mm = self->markers();

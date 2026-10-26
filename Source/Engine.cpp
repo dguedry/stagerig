@@ -1405,6 +1405,93 @@ void Engine::setSongStart (int songIndex, double seconds)
     listeners.call ([] (Listener& l) { l.transportChanged(); });
 }
 
+void Engine::performAction (int songIndex, const ActionDef& a)
+{
+    switch (a.kind)
+    {
+        case ActionDef::Kind::program:
+            if (validInput (a.input)) selectProgram (a.input, a.program);
+            break;
+        case ActionDef::Kind::part:
+        {
+            const int track = getTrackInput();
+            if (track < 0 || songIndex < 0 || songIndex >= (int) setup.songs.size()) break;
+            if (const int prog = setup.songs[(size_t) songIndex].programFor (track); prog >= 0)
+                setPartMuted (track, prog, a.channel, ! a.on);
+            break;
+        }
+        case ActionDef::Kind::effect:
+            if (validInput (a.input))
+                setEffectBypassed (a.input, setup.inputs[(size_t) a.input].currentProgram, a.chain, a.effect, ! a.on);
+            break;
+        case ActionDef::Kind::midi:
+        {
+            const int ch = jlimit (1, 16, a.channel);
+            MidiMessage m = a.midiType == ActionDef::MidiType::programChange ? MidiMessage::programChange (ch, a.data1)
+                          : a.midiType == ActionDef::MidiType::controller    ? MidiMessage::controllerEvent (ch, a.data1, a.data2)
+                                                                             : MidiMessage::noteOn (ch, a.data1, (uint8) a.data2);
+            sendMidiToDevice (a.portIdentifier, a.portName, m);
+            if (a.midiType == ActionDef::MidiType::noteOn)
+            {
+                // A cue note is a press: let it go a moment later so a lighting desk sees a key, not a stuck one.
+                const auto id = a.portIdentifier, name = a.portName;
+                Timer::callAfterDelay (100, [this, id, name, ch, note = a.data1] { sendMidiToDevice (id, name, MidiMessage::noteOff (ch, note)); });
+            }
+            break;
+        }
+    }
+}
+
+String Engine::describeAction (const ActionDef& a) const
+{
+    switch (a.kind)
+    {
+        case ActionDef::Kind::program:
+        {
+            if (! validInput (a.input)) return "a keyboard that is gone";
+            const auto& in = setup.inputs[(size_t) a.input];
+            const auto& pn = in.programs[(size_t) jlimit (0, InputDef::numPrograms - 1, a.program)].name;
+            return in.name + " to " + String (a.program).paddedLeft ('0', 3) + (pn.isNotEmpty() ? " " + pn : String());
+        }
+        case ActionDef::Kind::part:
+            return String (a.on ? "Unmute" : "Mute") + " the part on channel " + String (a.channel);
+        case ActionDef::Kind::effect:
+        {
+            if (! validInput (a.input)) return "an effect on a keyboard that is gone";
+            const auto& in = setup.inputs[(size_t) a.input];
+            const auto& prog = in.programs[(size_t) in.currentProgram];
+            String what = "effect " + String (a.effect + 1);
+            if (auto* chain = prog.chainFor (a.chain); chain != nullptr && a.effect < (int) chain->size())
+                what = (*chain)[(size_t) a.effect].displayName();
+            const String where = a.chain < 0 ? "the whole program"
+                               : ProgramDef::slotOfChain (a.chain) < (int) prog.slots.size() ? prog.slots[(size_t) ProgramDef::slotOfChain (a.chain)].displayName()
+                                                                                              : String ("an instrument");
+            return String (a.on ? "Turn on " : "Bypass ") + what + " (" + where + ") on " + in.name;
+        }
+        case ActionDef::Kind::midi:
+        {
+            const String what = a.midiType == ActionDef::MidiType::programChange ? "program " + String (a.data1 + 1)
+                              : a.midiType == ActionDef::MidiType::controller    ? "controller " + String (a.data1) + " = " + String (a.data2)
+                                                                                 : "note " + MidiMessage::getMidiNoteName (a.data1, true, true, 4) + " (" + String (a.data2) + ")";
+            return "Send " + what + " on channel " + String (a.channel) + " to " + a.portName;
+        }
+    }
+    return {};
+}
+
+Array<MidiDeviceInfo> Engine::midiOutputDevices() const
+{
+    Array<MidiDeviceInfo> out;
+    for (const auto& d : MidiOutput::getAvailableDevices())
+        if (! d.name.containsIgnoreCase ("Midi Through")) out.add (d);
+    return out;
+}
+
+void Engine::sendMidiToDevice (const String& identifier, const String& name, const MidiMessage& m)
+{
+    if (const int port = midiOuts.portFor (identifier, name); port >= 0) midiOuts.sendNow (port, m);
+}
+
 void Engine::setSongMarkers (int songIndex, const std::vector<MarkerDef>& markers)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
@@ -2976,6 +3063,19 @@ void Engine::handleAsyncUpdate()
                 listeners.call ([] (Listener& l) { l.transportChanged(); });
                 break;
 
+            case Event::sectionEntered:
+                if (trackSong >= 0 && trackSong < (int) setup.songs.size())
+                {
+                    const int mk = getTrackSectionMarker (e.input);
+                    const auto& song = setup.songs[(size_t) trackSong];
+                    if (mk >= 0 && mk < (int) song.markers.size())
+                    {
+                        const auto actions = song.markers[(size_t) mk].actions;      // a copy: an action may edit the setup
+                        for (const auto& a : actions) performAction (trackSong, a);
+                    }
+                }
+                break;
+
             case Event::songStep:
             {
                 if (setup.currentSet < 0)
@@ -3377,7 +3477,19 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
                 resetPluginPositions();
             else if (happened == SongPlayer::Happened::ended || happened == SongPlayer::Happened::stopped)
                 postEvent ({ Event::trackFinished, 0, 0, 0, 0, 0 });
+
+            /* Entering a section -- at Play, at a jump, or by playing into it
+               -- fires its actions. A vamp going round stays in its section
+               and fires nothing more. */
+            const int sec = player->getState() == SongPlayer::State::playing ? player->getCurrentSection() : -1;
+            if (sec != lastTrackSection)
+            {
+                lastTrackSection = sec;
+                if (sec >= 0) postEvent ({ Event::sectionEntered, sec, 0, 0, 0, 0 });
+            }
         }
+        else
+            lastTrackSection = -1;
 
         /* Which programs are lent this block: named by a slot of a program
            that is current (or still sounding). Those play whether or not
