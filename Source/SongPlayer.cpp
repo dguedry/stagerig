@@ -24,6 +24,7 @@ SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef
         stems.push_back (std::move (stem));
     }
     numStemDefs = (int) stems.size();
+    setClick (song.click, song.beatsPerBar, song.firstBeat);
     fadeLength = jmax (1, (int) (0.03 * sampleRate));
     scratch.setSize (2, blockSize, false, true, true);
     setMarkers (song.markers);
@@ -68,8 +69,17 @@ void SongPlayer::load()
         loadProgress.store ((float) (i + 1) / (float) stems.size());
     }
     if (loaderStop.load()) return;
-    lengthSamples = longest;
+    // A metronome with no files runs for an hour, or until it is stopped.
+    lengthSamples = stems.empty() ? (int64) (3600.0 * sampleRate) : longest;
+    if (stems.empty()) loadProgress.store (1.0f);
     ready.store (true);
+}
+
+void SongPlayer::setClick (bool on, int beatsPerBar, double firstBeatSeconds)
+{
+    clickOn.store (on);
+    clickBeatsPerBar.store (jlimit (1, 16, beatsPerBar));
+    firstBeat.store (jmax (0.0, firstBeatSeconds));
 }
 
 bool SongPlayer::loadStem (Stem& s)
@@ -370,29 +380,55 @@ void SongPlayer::setStemMix (int stemIndex, int output, float gainDb)
 }
 
 //==============================================================================
-void SongPlayer::addClicks (float* l, float* r, int n)
+float SongPlayer::clickSample (int64 inBeat, bool accent) const
 {
-    /* A short sine blip on every beat, higher on the first: the sound of a
-       drummer's sticks, enough to count in by on an in-ear mix. */
-    const int clickLen = (int) (0.03 * sampleRate);
+    /* A short sine blip on every beat, higher on the first of the bar: the
+       sound of a drummer's sticks, enough to count by on an in-ear mix. */
+    const int64 clickLen = (int64) (0.03 * sampleRate);
+    if (inBeat < 0 || inBeat >= clickLen) return 0.0f;
+    const double freq = accent ? 1600.0 : 1000.0;
+    const float env = 1.0f - (float) inBeat / (float) clickLen;
+    return 0.5f * env * (float) std::sin (MathConstants<double>::twoPi * freq * (double) inBeat / sampleRate);
+}
+
+void SongPlayer::addCountInClicks (float* l, float* r, int n)
+{
     for (int i = 0; i < n; ++i)
     {
         const int64 t = countInDone + i;
         const int64 beat = t / beatSamples;
-        const int64 inBeat = t % beatSamples;
-        if (beat >= countInTotalBeats || inBeat >= clickLen) continue;
-        const double freq = beat == 0 ? 1600.0 : 1000.0;
-        const float env = 1.0f - (float) inBeat / (float) clickLen;
-        const float v = 0.5f * env * (float) std::sin (MathConstants<double>::twoPi * freq * (double) inBeat / sampleRate);
+        if (beat >= countInTotalBeats) continue;
+        const float v = clickSample (t % beatSamples, beat == 0);
         if (l != nullptr) l[i] += v;
         if (r != nullptr) r[i] += v;
+    }
+}
+
+void SongPlayer::addClickRun (float* l, float* r, int at, int64 from, int count)
+{
+    /* The click through the song: a beat every `beatSamples` from the first
+       beat, accented every bar. Follows the position, so a vamp or a jump
+       keeps it on the music's own grid. */
+    const int64 fb = (int64) (firstBeat.load (std::memory_order_relaxed) * sampleRate);
+    const int bpb = jmax (1, clickBeatsPerBar.load (std::memory_order_relaxed));
+    const int64 clickLen = (int64) (0.03 * sampleRate);
+    for (int i = 0; i < count; ++i)
+    {
+        const int64 rel = from + i - fb;
+        int64 k = rel / beatSamples;
+        if (rel < 0 && k * beatSamples != rel) --k;                 // floor, for a beat before the first
+        const int64 inBeat = rel - k * beatSamples;
+        if (inBeat >= clickLen) { i += (int) jmin ((int64) (count - i - 1), beatSamples - inBeat - 1); continue; }
+        const float v = clickSample (inBeat, ((k % bpb) + bpb) % bpb == 0);
+        if (l != nullptr) l[at + i] += v;
+        if (r != nullptr) r[at + i] += v;
     }
 }
 
 SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, MidiBuffer* trackMidi, int n)
 {
     auto st = getState();
-    if (st == State::idle || stems.empty()) return Happened::nothing;
+    if (st == State::idle || (stems.empty() && ! clickOn.load (std::memory_order_relaxed))) return Happened::nothing;
     if (n > scratch.getNumSamples()) return Happened::nothing;    // larger than prepared: never allocate here
 
     Happened happened = Happened::nothing;
@@ -402,7 +438,20 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
         if (! ready.load()) return Happened::nothing;
         countInTotalBeats = pendingCountInBeats.load();
         beatSamples = jmax ((int64) 1, (int64) (pendingBeatSeconds.load() * sampleRate));
-        countInRemaining = (int64) countInTotalBeats * beatSamples;
+        /* The count-in leads into the music's own beat: its last click is one
+           beat before the first beat at or after the cue, so when the first
+           beat sits a little way into the file (a lead-in, a breath) the
+           files start that little way before the count-in's grid ends. */
+        int64 phase = 0;
+        if (countInTotalBeats > 0)
+        {
+            const int64 fb = (int64) (firstBeat.load() * sampleRate);
+            const int64 rel = position.load() - fb;
+            int64 k = rel / beatSamples;
+            if (rel < 0 && k * beatSamples != rel) --k;
+            phase = (k * beatSamples + beatSamples - rel) % beatSamples;     // to the next grid beat, in [0, beat)
+        }
+        countInRemaining = countInTotalBeats > 0 ? (int64) countInTotalBeats * beatSamples - phase : 0;
         countInDone = 0;
         lastRunEnd = -1;
         for (auto& stem : stems) stem->needsChase = true;      // the instruments are told where the file is
@@ -415,7 +464,7 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
     {
         const int now = (int) jmin ((int64) n, countInRemaining);
         if (const int o = countInOutput.load(); o >= 0 && o < numOutputs)
-            addClicks (outputs[o][0], outputs[o][1], now);
+            addCountInClicks (outputs[o][0], outputs[o][1], now);
         countInDone += now;
         countInRemaining -= now;
         offset = now;
@@ -533,6 +582,11 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
                         dest[offset + i] += src[offset + i] * g * (startGain + (endGain - startGain) * (float) i / (float) len);
             }
     }
+
+    if (clickOn.load (std::memory_order_relaxed) && st != State::stopping)
+        if (const int o = countInOutput.load(); o >= 0 && o < numOutputs)
+            for (int r = 0; r < numRuns; ++r)
+                addClickRun (outputs[o][0], outputs[o][1], runs[r].at, runs[r].from, runs[r].count);
 
     if (numRuns > 0) lastRunEnd = runs[numRuns - 1].from + runs[numRuns - 1].count;
 

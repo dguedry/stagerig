@@ -728,8 +728,18 @@ to the same thing. To remove a part's instrument altogether, press its **X**
 here.
 
 **Count-in** clicks a number of beats at the song's tempo before the files
-start: **No count-in** or **1** to **8 beats**, **on** the output you choose
--- usually the in-ears.
+start: **No count-in** or **1** to **8 beats**. **Click** adds a metronome
+through the whole song, accented on beat 1 of every bar (**4 beats per bar**
+unless you say otherwise), following the track through vamps and jumps. Both
+are **Heard on** the output you choose -- usually the in-ears, where the
+audience never hears them. A song with no files and a click is a plain
+metronome: Play runs it at the song's tempo until Stop. The tablet's Play bar
+has a **Click** button to turn it on or off from the stand.
+
+When a recording does not start on the beat -- a breath, a lead-in -- set
+**First beat** (see *Finding the tempo* below) and the click, the count-in
+and the bar lines all line up with it: the count-in's last click lands one
+beat before the music's first.
 
 A song's files are read in when the song is selected, so they can jump and
 loop without a gap; the line beside **Play** says *loading* until they are
@@ -859,7 +869,8 @@ With a song selected (its track ready but not started), the Play bar at the
 top carries **Play** / **Stop** and where the track is, under a **BACKING
 TRACK** caption, with the song's sections under it: tap a section to go there
 when the current one ends; a vamping section reads *↻ vamp*, and **End vamp
-▸** lets it through. **Parts of the track** lists the MIDI files' parts --
+▸** lets it through. **Click** turns the song's metronome on or off (see
+*Backing tracks*). **Parts of the track** lists the MIDI files' parts --
 *Piano: Acoustic Grand Piano · General MIDI*, *Strings: Upper: Big Strings*
 -- each with **Mute** (for the part you will play yourself tonight) and, when a
 plugin in the song's own program plays it, **GUI** to open that plugin's

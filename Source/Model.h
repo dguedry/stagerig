@@ -382,6 +382,14 @@ struct SongDef
         play on `countInOutput`, which is usually the in-ear pair. */
     int countInBeats = 0;
     int countInOutput = 0;
+    /** A click through the whole track, on `countInOutput`, at the song's
+        tempo -- the metronome in the drummer's ears. Beat 1 of bar 1 falls
+        `firstBeat` seconds into the files (0 unless the recording has a
+        lead-in), and the click is accented every `beatsPerBar` beats. A
+        song with no files and a click is a plain metronome. */
+    bool click = false;
+    int beatsPerBar = 4;
+    double firstBeat = 0.0;
     /** Sections of the backing track, by where each starts. */
     std::vector<MarkerDef> markers;
 

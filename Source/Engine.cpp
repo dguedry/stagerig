@@ -1373,6 +1373,29 @@ void Engine::setSongCountIn (int songIndex, int beats, int output)
     s.countInOutput = jmax (0, output);
 }
 
+void Engine::setSongClick (int songIndex, bool on, int beatsPerBar)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& s = setup.songs[(size_t) songIndex];
+    s.click = on;
+    s.beatsPerBar = jlimit (1, 16, beatsPerBar);
+    if (songIndex == trackSong)
+    {
+        if (player != nullptr) player->setClick (s.click, s.beatsPerBar, s.firstBeat);
+        else if (on) armTrack (songIndex);                 // no files: the click alone is the track
+    }
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+void Engine::setSongFirstBeat (int songIndex, double seconds)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& s = setup.songs[(size_t) songIndex];
+    s.firstBeat = jmax (0.0, seconds);
+    if (songIndex == trackSong && player != nullptr) player->setClick (s.click, s.beatsPerBar, s.firstBeat);
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
 void Engine::setSongMarkers (int songIndex, const std::vector<MarkerDef>& markers)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
@@ -1424,7 +1447,8 @@ void Engine::armTrack (int songIndex)
 
     // Read into memory on its own thread; Play before it is done waits for it.
     std::unique_ptr<SongPlayer> fresh;
-    if (songIndex >= 0 && songIndex < (int) setup.songs.size() && ! setup.songs[(size_t) songIndex].stems.empty())
+    if (songIndex >= 0 && songIndex < (int) setup.songs.size()
+        && (! setup.songs[(size_t) songIndex].stems.empty() || setup.songs[(size_t) songIndex].click))
     {
         fresh = std::make_unique<SongPlayer> (trackFormats, getChartsFolder(),
                                               setup.songs[(size_t) songIndex], sampleRate, blockSize);

@@ -88,6 +88,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .sheet .part button.on { background:#a3282d; }
   .sheet .part.muted .who { opacity:.45; }
   .transport button.parts { background:var(--row); color:#fff; font-weight:700; }
+  .transport button.click.on { background:var(--accent); color:#06121f; }
   .loading { color:#d8a657; font-size:14px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
   button.p { background:var(--row); color:#fff; border:0; border-radius:10px; padding:14px 12px; text-align:left;
@@ -337,11 +338,12 @@ function showTransport(t) {
   if (!transportUi || !t) return;
   transportUi.button.textContent = t.running ? "Stop" : "Play";
   transportUi.button.classList.toggle("running", !!t.running);
+  if (transportUi.clickBtn) transportUi.clickBtn.classList.toggle("on", !!t.click);
   const sec = (t.sections || [])[t.section];
   const status = !t.ready ? ("Loading " + Math.round((t.loading || 0) * 100) + "%")
     : t.countIn ? "Counting in…"
     : ((t.sections || []).length > 1 && sec ? sec.name + (t.vamping ? " — repeating (vamp)" : "") : t.name) + " · "
-      + mmss(t.pos) + " / " + mmss(t.len)
+      + (t.len > 3000 ? "click " + mmss(t.pos) : mmss(t.pos) + " / " + mmss(t.len))
       + (t.queued >= 0 && t.sections[t.queued] ? " · next: " + t.sections[t.queued].name : "");
   transportUi.text.innerHTML = '<small></small><span></span>';
   transportUi.text.querySelector("small").textContent = "BACKING TRACK";
@@ -461,12 +463,18 @@ function renderSets(s) {
     const parts = document.createElement("button"); parts.className = "parts"; parts.textContent = "Parts of the track";
     parts.style.display = "none";
     parts.onclick = showParts;
-    bar.appendChild(b); bar.appendChild(t); bar.appendChild(parts);
+    const click = document.createElement("button"); click.className = "parts click"; click.textContent = "Click";
+    click.title = "The metronome in the in-ears, through the song";
+    click.onclick = async () => {
+      try { showTransport(await api("/api/transport?do=click", { method: "POST" })); }
+      catch (e) { if (!e.gate) show(e.message); }
+    };
+    bar.appendChild(b); bar.appendChild(t); bar.appendChild(click); bar.appendChild(parts);
     wrap.appendChild(bar);
     const secs = document.createElement("div"); secs.className = "sections";
     wrap.appendChild(secs);
     wrap.appendChild(cap);
-    transportUi = { button: b, text: t, sections: secs, partsBtn: parts, parts: [], key: "", caption: cap };
+    transportUi = { button: b, text: t, sections: secs, partsBtn: parts, clickBtn: click, parts: [], key: "", caption: cap };
   } else {
     transportUi = null;
   }
@@ -1870,6 +1878,7 @@ String RemoteServer::transportJson() const
     o->setProperty ("section", engine.getTrackSection());
     o->setProperty ("queued", engine.getQueuedTrackSection());
     o->setProperty ("vamping", engine.isTrackVamping());
+    o->setProperty ("click", song >= 0 && song < (int) songs.size() && songs[(size_t) song].click);
     Array<var> sections;
     for (int i = 0; i < engine.getTrackSectionCount(); ++i)
     {
@@ -2381,6 +2390,12 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                 else if (what == "stop")    engine.stopTrack();
                 else if (what == "next")    engine.advanceTrack();
                 else if (what == "section") engine.queueTrackSection (sectionIndex);
+                else if (what == "click")
+                {
+                    const int song = engine.getTrackSong();
+                    if (song >= 0 && song < (int) engine.getSongs().size())
+                        engine.setSongClick (song, ! engine.getSongs()[(size_t) song].click, engine.getSongs()[(size_t) song].beatsPerBar);
+                }
                 return transportJson();
             }, body, 3000))
             sendResponse (sock, "200 OK", "application/json", body);

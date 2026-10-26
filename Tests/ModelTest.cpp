@@ -52,6 +52,7 @@ int main()
         sg.stems.push_back (midiStem);
         sg.programs = { 5, -1, -1, 0 };
         sg.countInBeats = 4; sg.countInOutput = 1;
+        sg.click = true; sg.beatsPerBar = 3; sg.firstBeat = 0.25;
         sg.markers = { { "Intro", 0.0, true }, { "Verse", 8.5, false } };
         s.songs.push_back (sg);
         s.transportCC = 85;
@@ -193,6 +194,7 @@ int main()
     CHECK (loaded.songs[0].markers.size() == 2 && loaded.songs[0].markers[0].vamp && loaded.songs[0].markers[1].name == "Verse"
            && std::abs (loaded.songs[0].markers[1].seconds - 8.5) < 1e-9);
     CHECK (loaded.songs[0].countInBeats == 4 && loaded.songs[0].countInOutput == 1 && loaded.transportCC == 85);
+    CHECK (loaded.songs[0].click && loaded.songs[0].beatsPerBar == 3 && std::abs (loaded.songs[0].firstBeat - 0.25) < 1e-9);
     CHECK (loaded.inputs.size() == 4 && loaded.inputs[2].isAudio());
     CHECK (loaded.inputs[2].audioLeft == 2 && loaded.inputs[2].audioRight == -1);
     CHECK (std::abs (loaded.inputs[2].programs[3].inputGainDb + 6.0f) < 1e-6f);

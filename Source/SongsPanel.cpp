@@ -260,7 +260,9 @@ void SongsPanel::refreshTransport()
         text = songs[(size_t) song].name + "  -- counting in";
     else
     {
-        text = mmss (engine.getTrackPosition()) + " / " + mmss (engine.getTrackLength());
+        // A metronome with no files has no length worth showing.
+        text = songs[(size_t) song].stems.empty() ? "click  " + mmss (engine.getTrackPosition())
+                                                   : mmss (engine.getTrackPosition()) + " / " + mmss (engine.getTrackLength());
         if (engine.getTrackSectionCount() > 1)
         {
             text = engine.getTrackSectionName (engine.getTrackSection()) + (vamping ? " (vamp)" : "") + "  " + text;
@@ -892,10 +894,22 @@ public:
         for (int b = 1; b <= 8; ++b) countInBox.addItem (String (b) + (b == 1 ? " beat" : " beats"), b + 1);
         countInBox.setTooltip ("Clicks before the track starts, at the song's tempo");
         countInBox.onChange = [this] { applyCountIn(); };
+        addAndMakeVisible (clickLabel);
+        clickLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (clickBox);
+        clickBox.addItem ("No click", 1);
+        clickBox.addItem ("Click through the song", 2);
+        clickBox.setTooltip ("A metronome through the whole track at the song's tempo, on the same output as the count-in. "
+                             "With no files, Play is a plain metronome.");
+        clickBox.onChange = [this] { applyCountIn(); };
+        addAndMakeVisible (barBox);
+        for (int b = 2; b <= 7; ++b) barBox.addItem (String (b) + " beats per bar", b);
+        barBox.setTooltip ("The click is accented on beat 1 of every bar");
+        barBox.onChange = [this] { applyCountIn(); };
         addAndMakeVisible (countInOutLabel);
         countInOutLabel.setColour (Label::textColourId, textDim);
         addAndMakeVisible (countInOutBox);
-        countInOutBox.setTooltip ("Which output hears the count-in (your in-ears)");
+        countInOutBox.setTooltip ("Which output hears the count-in and the click (your in-ears)");
         countInOutBox.onChange = [this] { applyCountIn(); };
 
         addAndMakeVisible (sectionsHeader);
@@ -935,7 +949,8 @@ public:
         hint.setJustificationType (Justification::topLeft);
         hint.setText ("Audio files play on an output; put a click or cue file on your in-ear output. "
                       "A MIDI file plays parts: click a part's sound to choose what plays it. "
-                      "Play (songs panel, tablet or footswitch) starts everything together, after the count-in.\n"
+                      "Play (songs panel, tablet or footswitch) starts everything together, after the count-in; "
+                      "the click is a metronome through the song for the in-ears.\n"
                       "Sections: double-click the timeline where one starts, or press Mark section here while the track plays. "
                       "Each runs to the next. A vamp section repeats until released (Next, the tablet, or the section footswitch); "
                       "asking for a section takes you there when the current one ends.", dontSendNotification);
@@ -969,7 +984,10 @@ public:
 
         fillOutputs (countInOutBox, sg.countInOutput);
         countInBox.setSelectedId (sg.countInBeats + 1, dontSendNotification);
-        countInOutBox.setEnabled (sg.countInBeats > 0);
+        clickBox.setSelectedId (sg.click ? 2 : 1, dontSendNotification);
+        barBox.setSelectedId (jlimit (2, 7, sg.beatsPerBar), dontSendNotification);
+        barBox.setEnabled (sg.click);
+        countInOutBox.setEnabled (sg.countInBeats > 0 || sg.click);
         resized();
     }
 
@@ -984,7 +1002,7 @@ public:
         if (timeline != nullptr)
         {
             // The timeline takes whatever height the rest leaves: a bigger window shows more of the music.
-            const int below = 4 + 26 + 6 + 28 * (int) sectionRows.size() + 12 + 24 + 10 + 46;
+            const int below = 4 + 26 + 6 + 28 * (int) sectionRows.size() + 12 + 24 + 6 + 24 + 10 + 46;
             timeline->setBounds (r.removeFromTop (jmax (timeline->preferredHeight(), r.getHeight() - below)));
         }
         r.removeFromTop (4);
@@ -1003,9 +1021,15 @@ public:
         auto c = r.removeFromTop (24);
         countInLabel.setBounds (c.removeFromLeft (70));
         countInBox.setBounds (c.removeFromLeft (130));
-        c.removeFromLeft (12);
-        countInOutLabel.setBounds (c.removeFromLeft (30));
-        countInOutBox.setBounds (c.removeFromLeft (180));
+        c.removeFromLeft (16);
+        clickLabel.setBounds (c.removeFromLeft (40));
+        clickBox.setBounds (c.removeFromLeft (190));
+        c.removeFromLeft (8);
+        barBox.setBounds (c.removeFromLeft (150));
+        r.removeFromTop (6);
+        c = r.removeFromTop (24);
+        countInOutLabel.setBounds (c.removeFromLeft (70));
+        countInOutBox.setBounds (c.removeFromLeft (240));
         r.removeFromTop (10);
         hint.setBounds (r.removeFromTop (46));
     }
@@ -1499,8 +1523,11 @@ private:
     void applyCountIn()
     {
         const int beats = jmax (0, countInBox.getSelectedId() - 1);
+        const bool click = clickBox.getSelectedId() == 2;
         engine.setSongCountIn (songIndex, beats, jmax (0, countInOutBox.getSelectedId() - 1));
-        countInOutBox.setEnabled (beats > 0);
+        engine.setSongClick (songIndex, click, jmax (2, barBox.getSelectedId()));
+        barBox.setEnabled (click);
+        countInOutBox.setEnabled (beats > 0 || click);
     }
 
     void timerCallback() override
@@ -1526,8 +1553,8 @@ private:
     static constexpr const char* kTimelineHint = "Click the timeline to set where Play starts. Double-click to start a section there; drag a flag to move it; right-click it for more.";
     TextButton playBtn { "Play" }, addSectionBtn { "Mark section here" }, zoomOutBtn { "-" }, zoomInBtn { "+" }, fitBtn { "Fit" };
     TextButton addBtn { "+ Add audio or MIDI..." };
-    Label countInLabel { {}, "Count-in" }, countInOutLabel { {}, "on" }, hint;
-    ComboBox countInBox, countInOutBox;
+    Label countInLabel { {}, "Count-in" }, clickLabel { {}, "Click" }, countInOutLabel { {}, "Heard on" }, hint;
+    ComboBox countInBox, clickBox, barBox, countInOutBox;
     std::unique_ptr<FileChooser> chooser;
 };
 

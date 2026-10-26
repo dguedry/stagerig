@@ -530,11 +530,14 @@ var SongDef::toVar() const
         for (const auto& st : stems) arr.add (st.toVar());
         o->setProperty ("stems", arr);
     }
-    if (countInBeats > 0)
+    if (countInBeats > 0 || click)
     {
         o->setProperty ("countInBeats", countInBeats);
         o->setProperty ("countInOutput", countInOutput);
     }
+    if (click)              o->setProperty ("click", true);
+    if (beatsPerBar != 4)   o->setProperty ("beatsPerBar", beatsPerBar);
+    if (firstBeat != 0.0)   o->setProperty ("firstBeat", firstBeat);
     if (! markers.empty())
     {
         juce::Array<juce::var> arr;
@@ -569,6 +572,9 @@ SongDef SongDef::fromVar (const var& v)
                 s.markers.push_back (MarkerDef::fromVar (m));
         s.countInBeats  = jlimit (0, 16, (int) o->getProperty ("countInBeats"));
         s.countInOutput = jmax (0, (int) o->getProperty ("countInOutput"));
+        s.click         = (bool) o->getProperty ("click");
+        s.beatsPerBar   = o->hasProperty ("beatsPerBar") ? jlimit (1, 16, (int) o->getProperty ("beatsPerBar")) : 4;
+        s.firstBeat     = jmax (0.0, (double) o->getProperty ("firstBeat"));
     }
     return s;
 }

@@ -1842,6 +1842,57 @@ int main()
         std::printf ("     ended: running %d\n", (int) engine.isTrackRunning());
         CHECK (! engine.isTrackRunning());
 
+        /* The click through the song: at 120 bpm a beat is 24000 samples, a
+           click 1440, so of 47 blocks of 512 (one beat) the first three carry
+           the click and the rest are silent. Without the count-in it starts
+           on beat 1 of the file. */
+        engine.setSongCountIn (song, 0, click);
+        engine.setSongClick (song, true, 4);
+        CHECK (engine.hasTrack());
+        engine.startTrack();
+        const auto onBeat = levels (3), offBeat = levels (40), nextBeat = levels (6);
+        std::printf ("     click through the song: on the beat %.3f, between %.3f, next beat %.3f\n", onBeat[2], offBeat[2], nextBeat[2]);
+        CHECK (onBeat[2] > 0.2f && offBeat[2] < 1e-4f && nextBeat[2] > 0.2f);
+        CHECK (onBeat[0] > 0.2f);                                        // the stem plays too (at -6 dB from above)
+        engine.stopTrack();
+        levels (4);
+        pump (50);
+
+        // Moving the first beat moves the click: a quarter of a second in, the first click comes 23 blocks later.
+        engine.setSongFirstBeat (song, 0.25);
+        engine.startTrack();
+        const auto early = levels (20), onFirst = levels (6);
+        std::printf ("     first beat at 0.25 s: before %.3f, on it %.3f\n", early[2], onFirst[2]);
+        CHECK (early[2] < 1e-4f && onFirst[2] > 0.2f);
+        engine.stopTrack();
+        levels (4);
+        pump (50);
+        engine.setSongFirstBeat (song, 0.0);
+        engine.setSongClick (song, false, 4);
+        engine.setSongCountIn (song, 2, click);                          // as the save below expects
+
+        // A song with no files but a click is a metronome: Play runs until stopped.
+        {
+            const int metro = engine.addSong ("Metronome");
+            engine.setSongTempo (metro, 120.0);
+            engine.setSongCountIn (metro, 0, click);
+            engine.setSongClick (metro, true, 4);
+            engine.selectSong (metro);
+            CHECK (engine.hasTrack());
+            CHECK (waitReady());
+            engine.startTrack();
+            const auto m1 = levels (3), m2 = levels (40), m3 = levels (6);
+            std::printf ("     metronome: %.3f %.3f %.3f, running %d\n", m1[2], m2[2], m3[2], (int) engine.isTrackRunning());
+            CHECK (m1[2] > 0.2f && m2[2] < 1e-4f && m3[2] > 0.2f && engine.isTrackRunning());
+            CHECK (m1[0] < 1e-4f);                                       // nothing on Main
+            engine.stopTrack();
+            levels (4);
+            pump (50);
+            CHECK (! engine.isTrackRunning());
+            engine.selectSong (song);
+            CHECK (waitReady());
+        }
+
         // Sections: a three-second stem whose level steps up each second -- A 0.2, B 0.5, C 0.8.
         {
             const auto f = folder.getChildFile ("sections.wav");

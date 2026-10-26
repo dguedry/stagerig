@@ -280,10 +280,14 @@ public:
     void setSongStem (int songIndex, int stemIndex, const StemDef&);
     void setSongCountIn (int songIndex, int beats, int output);
     void setSongMarkers (int songIndex, const std::vector<MarkerDef>&);
+    /** The click through the song, and its accent; takes effect at once if the song is the one armed. */
+    void setSongClick (int songIndex, bool on, int beatsPerBar);
+    /** Where beat 1 of bar 1 falls in the song's files (seconds): the click and the count-in line up with it. */
+    void setSongFirstBeat (int songIndex, double seconds);
 
     /** The song whose track is ready to play: the one selected last, or -1. */
     int  getTrackSong() const                       { return trackSong; }
-    bool hasTrack() const                           { return player != nullptr && player->hasStems(); }
+    bool hasTrack() const                           { return player != nullptr && (player->hasStems() || player->hasClick()); }
     /** False while the stems are still being read into memory. */
     bool isTrackReady() const                       { return player != nullptr && player->isReady(); }
     float getTrackLoadProgress() const              { return player != nullptr ? player->getLoadProgress() : 0.0f; }

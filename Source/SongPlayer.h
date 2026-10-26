@@ -38,6 +38,11 @@ public:
     ~SongPlayer();
 
     bool hasStems() const                         { return numStemDefs > 0; }
+    /** A click through the song: with no stems, a plain metronome. */
+    bool hasClick() const                         { return clickOn.load(); }
+    /** The click, live: on or off, its accent, and where beat 1 of bar 1
+        falls in the files (seconds). Also lines the count-in up with it. */
+    void setClick (bool on, int beatsPerBar, double firstBeatSeconds);
     bool isReady() const                          { return ready.load(); }
     float getLoadProgress() const                 { return loadProgress.load(); }
     juce::String getProblems() const;             // files that could not be read; once ready
@@ -118,7 +123,10 @@ private:
     void stopLoading();
     void load();                                  // loader thread
     bool loadStem (Stem&);
-    void addClicks (float* l, float* r, int numSamples);
+    void addCountInClicks (float* l, float* r, int numSamples);
+    void addClickRun (float* l, float* r, int at, juce::int64 from, int count);
+    /** One click's sample `inBeat` samples after its beat, or 0 past its length. */
+    float clickSample (juce::int64 inBeat, bool accent) const;
     int  sectionAt (juce::int64 pos) const;
     juce::int64 sectionEnd (int section) const;
 
@@ -155,6 +163,11 @@ private:
     std::atomic<double> pendingBeatSeconds { 0.5 };
     juce::int64 countInRemaining = 0, beatSamples = 1, countInDone = 0;
     int countInTotalBeats = 0;
+
+    // the click through the song
+    std::atomic<bool> clickOn { false };
+    std::atomic<int> clickBeatsPerBar { 4 };
+    std::atomic<double> firstBeat { 0.0 };          // seconds into the files
 
     // fade-out, audio thread
     int fadeRemaining = 0, fadeLength = 1;

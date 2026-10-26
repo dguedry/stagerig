@@ -71,7 +71,7 @@ other plugin.
   built-in General MIDI player (FluidSynth), one of your own programs by
   keyboard and by name (*Upper: Big Strings*, kept playing whatever Upper
   itself is on), or a MIDI device. A piano roll edits the notes. With a
-  count-in, started and stopped from a footswitch, the laptop or the tablet,
+  count-in and a click for the in-ears, started and stopped from a footswitch, the laptop or the tablet,
   where parts can be muted from the stand. Mark its sections on a timeline of
   the files' waveforms and notes, jump between them in time, and vamp an
   intro until a pedal lets it go on. Tempo-synced
