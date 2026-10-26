@@ -493,6 +493,12 @@ struct Setup
         reason the tempo is: a footswitch should work whatever is loaded. */
     int tapTempoCC = 0;
 
+    /** MIDI devices that are sent MIDI clock at the rig's tempo -- a drum
+        machine, a hardware synth's arpeggiator, a pedal -- with Start and
+        Stop when the backing track starts and stops. Empty for none. */
+    struct MidiPortRef { juce::String identifier, name; };
+    std::vector<MidiPortRef> clockOut;
+
     juce::var toVar() const;
     static Setup fromVar (const juce::var&);
 

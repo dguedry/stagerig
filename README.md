@@ -55,7 +55,8 @@ other plugin.
   only itself down; the rest of the rig plays on.
 - **Built for low latency**: a native PipeWire/JACK client, 128-sample blocks
   by default, parallel plugin loading, and a late-block counter you can watch.
-- **A global tempo with tap tempo**, so tempo-synced delays and arpeggiators
+- **Record the gig**: every output to WAV as it left for the desk, and the keyboards to a MIDI file, in a dated folder beside the setup.
+- **A global tempo with tap tempo** and **MIDI clock out** to hardware, so tempo-synced delays and arpeggiators
   have something to sync to. Tap it in the toolbar or from a footswitch.
 - **An on-screen keyboard** for building a setup without a controller attached.
 - **Tablet control -- the whole plugin, not a remote control for it.** A

@@ -480,6 +480,7 @@ void Engine::setTempoBpm (double bpm)
     const auto clamped = jlimit (20.0, 300.0, bpm);
     if (std::abs (clamped - setup.tempoBpm) < 0.001) return;
     setup.tempoBpm = clamped;
+    tempoAtomic.store (clamped);
 
     // Every plugin, not just the ones sounding: a preloaded program should not
     // come in at the old tempo when it is selected.
@@ -551,6 +552,8 @@ void Engine::setTapTempoCC (int cc)
 void Engine::rebuildRuntimes()
 {
     buildOutputs();
+    tempoAtomic.store (setup.tempoBpm);
+    resolveClockPorts();
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
     {
         auto rt = std::make_unique<InputRuntime>();
@@ -1010,10 +1013,89 @@ void Engine::setInputRespondToProgramChange (int inputIndex, bool b)
     runtimes[(size_t) inputIndex]->respondToProgramChange.store (b);
 }
 
+File Engine::getRecordingsFolder() const
+{
+    if (setupFile != File())
+        return setupFile.getSiblingFile (setupFile.getFileNameWithoutExtension().upToLastOccurrenceOf (".stagerig", false, false) + ".stagerig.recordings");
+    return File::getSpecialLocation (File::userMusicDirectory).getChildFile ("StageRig recordings");
+}
+
+bool Engine::startRecording (String& error)
+{
+    if (recorder.isRecording()) return true;
+    StringArray outNames, inNames;
+    for (const auto& o : setup.outputs) outNames.add (o.name);
+    for (const auto& in : setup.inputs) inNames.add (in.name);
+    if (outNames.isEmpty()) outNames.add ("Main");
+    const File take = getRecordingsFolder().getChildFile (Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M"));
+    const bool ok = recorder.start (take, outNames, inNames, sampleRate, jmax (blockSize, 64), error);
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+    return ok;
+}
+
+void Engine::stopRecording()
+{
+    if (! recorder.isRecording()) return;
+    recorder.stop();
+    listeners.call ([] (Listener& l) { l.transportChanged(); });
+}
+
+bool Engine::sendsClockTo (const String& identifier) const
+{
+    for (const auto& c : setup.clockOut) if (c.identifier == identifier) return true;
+    return false;
+}
+
+void Engine::setClockTo (const MidiDeviceInfo& device, bool on)
+{
+    auto& list = setup.clockOut;
+    list.erase (std::remove_if (list.begin(), list.end(), [&] (const Setup::MidiPortRef& c) { return c.identifier == device.identifier; }), list.end());
+    if (on) list.push_back ({ device.identifier, device.name });
+    resolveClockPorts();
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::resolveClockPorts()
+{
+    int n = 0;
+    for (const auto& c : setup.clockOut)
+    {
+        if (n >= MidiOuts::kMaxPorts) break;
+        if (const int port = midiOuts.portFor (c.identifier, c.name); port >= 0) clockPorts[n++].store (port);
+    }
+    numClockPorts.store (n);
+}
+
+void Engine::sendClock (int numSamples, double chunkStartMs, bool trackStarted, bool trackStopped)
+{
+    const int n = numClockPorts.load (std::memory_order_relaxed);
+    if (n <= 0) { clockSamplesToNext = 0.0; return; }
+    /* Twenty-four ticks a beat, free-running at the rig's tempo so a synced
+       device follows a tap at once; Start when the track starts, so its bar
+       one is the device's bar one, and Stop when the track stops. */
+    if (trackStarted)
+    {
+        clockSamplesToNext = 0.0;
+        for (int i = 0; i < n; ++i) midiOuts.push (clockPorts[i].load (std::memory_order_relaxed), MidiMessage::midiStart(), chunkStartMs);
+    }
+    const double samplesPerTick = sampleRate * 60.0 / (jmax (20.0, tempoAtomic.load (std::memory_order_relaxed)) * 24.0);
+    while (clockSamplesToNext < (double) numSamples)
+    {
+        const double at = chunkStartMs + clockSamplesToNext * 1000.0 / sampleRate;
+        for (int i = 0; i < n; ++i) midiOuts.push (clockPorts[i].load (std::memory_order_relaxed), MidiMessage::midiClock(), at);
+        clockTicks.fetch_add (1, std::memory_order_relaxed);
+        clockSamplesToNext += samplesPerTick;
+    }
+    clockSamplesToNext -= (double) numSamples;
+    if (trackStopped)
+        for (int i = 0; i < n; ++i) midiOuts.push (clockPorts[i].load (std::memory_order_relaxed), MidiMessage::midiStop(), chunkStartMs + numSamples * 1000.0 / sampleRate);
+}
+
 void Engine::refreshMidiDevices()
 {
     openMidiDevices();
     midiOuts.refresh();
+    resolveClockPorts();
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
@@ -3214,7 +3296,10 @@ void Engine::handleIncomingMidiMessage (MidiInput* source, const MidiMessage& m)
     const ScopedLock sl (lock);
     for (int i = 0; i < (int) runtimes.size(); ++i)
         if (runtimes[(size_t) i]->deviceIdentifier == id)
+        {
+            recorder.writeMidi (i, m);
             routeMidi (*runtimes[(size_t) i], i, m);
+        }
 }
 
 void Engine::injectMidi (int inputIndex, const MidiMessage& m)
@@ -3225,6 +3310,7 @@ void Engine::injectMidi (int inputIndex, const MidiMessage& m)
         stamped.setTimeStamp (Time::getMillisecondCounterHiRes() * 0.001);
 
     const ScopedLock sl (lock);
+    if (inputIndex >= 0 && inputIndex < (int) runtimes.size()) recorder.writeMidi (inputIndex, stamped);
     if (inputIndex >= 0 && inputIndex < (int) runtimes.size())
         routeMidi (*runtimes[(size_t) inputIndex], inputIndex, stamped);
 }
@@ -3477,6 +3563,8 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
                 resetPluginPositions();
             else if (happened == SongPlayer::Happened::ended || happened == SongPlayer::Happened::stopped)
                 postEvent ({ Event::trackFinished, 0, 0, 0, 0, 0 });
+            sendClock (n, chunkStartMs, happened == SongPlayer::Happened::stemsStarted,
+                       happened == SongPlayer::Happened::ended || happened == SongPlayer::Happened::stopped);
 
             /* Entering a section -- at Play, at a jump, or by playing into it
                -- fires its actions. A vamp going round stays in its section
@@ -3489,7 +3577,10 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
             }
         }
         else
+        {
             lastTrackSection = -1;
+            sendClock (n, chunkStartMs, false, false);
+        }
 
         /* Which programs are lent this block: named by a slot of a program
            that is current (or still sounding). Those play whether or not
@@ -3532,6 +3623,7 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
             const int r = o->right.load (std::memory_order_relaxed);
             if (l >= 0 && l < numOut && chunk[l] != nullptr) FloatVectorOperations::addWithMultiply (chunk[l], view.getReadPointer (0), g, n);
             if (r >= 0 && r < numOut && chunk[r] != nullptr) FloatVectorOperations::addWithMultiply (chunk[r], view.getReadPointer (1), g, n);
+            recorder.writeAudio ((int) (&o - outputs.data()), view.getReadPointer (0), view.getReadPointer (1), g, n);
         }
         panicNow = false;
     }

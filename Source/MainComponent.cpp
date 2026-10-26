@@ -2358,7 +2358,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
        fit a 1280-wide window: the tempo readout was squashed to nothing and
        the preload checkbox hidden, on exactly the laptop this runs on. */
     addAndMakeVisible (optionsBtn);
-    optionsBtn.setTooltip ("Outputs and master effects, the songs panel, preloading, note hold, MIDI rescan, a printable program list, General MIDI sounds");
+    optionsBtn.setTooltip ("Outputs and master effects, the songs panel, preloading, note hold, MIDI rescan, a printable program list, General MIDI sounds, MIDI clock to hardware");
     optionsBtn.onClick = [this]
     {
         const auto& setup = engine.getSetup();
@@ -2374,9 +2374,36 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
             const auto sf = GmSynth::findSoundfont (engine.getGmSoundfont());
             m.addItem (7, "General MIDI sounds (soundfont file)..." + (sf != File() ? "  (" + sf.getFileName() + ")" : String ("  (none found)")));
         }
+        {
+            /* MIDI clock to hardware: tick a device and it keeps time with the
+               rig -- a drum machine, a synth's arpeggiator, a delay pedal. */
+            PopupMenu clock;
+            const auto devices = engine.midiOutputDevices();
+            for (int i = 0; i < devices.size(); ++i)
+                clock.addItem (100 + i, devices[i].name, true, engine.sendsClockTo (devices[i].identifier));
+            if (devices.isEmpty()) clock.addItem (-1, "No MIDI devices found", false);
+            const int sending = (int) setup.clockOut.size();
+            m.addSubMenu ("Send MIDI clock to" + (sending > 0 ? "  (" + String (sending) + (sending == 1 ? " device)" : " devices)") : String()), clock);
+        }
+        m.addSeparator();
+        m.addItem (8, engine.isRecording() ? "Stop recording the gig  (" + formatElapsed (engine.getRecordingSeconds()) + ")"
+                                            : "Record the gig  (every output to WAV, the keyboards to MIDI)");
         m.showMenuAsync (PopupMenu::Options().withTargetComponent (optionsBtn), [this] (int r)
         {
             const auto& s = engine.getSetup();
+            if (r == 8) { toggleRecording(); return; }
+            if (r >= 100)
+            {
+                const auto devices = engine.midiOutputDevices();
+                if (r - 100 < devices.size())
+                {
+                    const auto& d = devices[r - 100];
+                    engine.setClockTo (d, ! engine.sendsClockTo (d.identifier));
+                    showStatus (engine.sendsClockTo (d.identifier) ? "Sending MIDI clock to " + d.name + " at the rig's tempo; Start and Stop with the backing track"
+                                                                    : "No longer sending MIDI clock to " + d.name);
+                }
+                return;
+            }
             switch (r)
             {
                 case 1: engine.setPreloadAllPrograms (! s.preloadAllPrograms); break;
@@ -2743,6 +2770,28 @@ void MainComponent::savePaneWidths()
     settings.saveIfNeeded();
 }
 
+String MainComponent::formatElapsed (double seconds)
+{
+    const int s = (int) seconds;
+    return String (s / 60) + ":" + String (s % 60).paddedLeft ('0', 2);
+}
+
+void MainComponent::toggleRecording()
+{
+    if (engine.isRecording())
+    {
+        const auto folder = engine.getRecordingFolder();
+        engine.stopRecording();
+        showStatus ("Recording saved in " + folder.getFullPathName());
+        return;
+    }
+    String error;
+    if (engine.startRecording (error))
+        showStatus ("Recording every output to " + engine.getRecordingFolder().getFullPathName() + "  (Options to stop)");
+    else
+        showStatus ("Could not record: " + error);
+}
+
 void MainComponent::timerCallback()
 {
     PluginView::dropDeadSessions();      // a mirrored window that was closed ends its session
@@ -2762,11 +2811,13 @@ void MainComponent::timerCallback()
         const bool clockHeld = wanted > 0 && engine.getLastBlockSize() > wanted
                                && engine.getDeviceManager().getCurrentAudioDevice() != nullptr
                                && engine.getDeviceManager().getCurrentAudioDevice()->getTypeName() == "JACK";
-        cpuLabel.setText ("CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + dev
+        cpuLabel.setText ((engine.isRecording() ? "REC " + formatElapsed (engine.getRecordingSeconds()) + "  |  " : String())
+                          + "CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + dev
                           + (clockHeld ? "  |  clock held by another app" : String())
                           + (engine.getLateBlockCount() > 0 ? "  |  " + String (engine.getLateBlockCount()) + " dropouts" : String()), dontSendNotification);
         cpuLabel.setTooltip (clockHeld ? "StageRig asked for a " + String (wanted) + "-sample buffer but the system is running a bigger one: another application (Bitwig, for example) has forced it. Close that app, or set its buffer to " + String (wanted) + "." : String());
-        cpuLabel.setColour (Label::textColourId, (engine.getLateBlockCount() > 0 || clockHeld) ? Colours::orange : textDim);
+        cpuLabel.setColour (Label::textColourId, (engine.getLateBlockCount() > 0 || clockHeld) ? Colours::orange
+                                                 : engine.isRecording() ? Colour (0xffe05a5a) : textDim);
     }
     if (statusText.isNotEmpty() && now - statusTime > 8000.0)
     {

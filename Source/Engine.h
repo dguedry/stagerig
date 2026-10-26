@@ -5,6 +5,7 @@
 #include "RemotePlugin.h"
 #include "SongPlayer.h"
 #include "MidiOuts.h"
+#include "Recorder.h"
 #include "GmSynth.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -127,6 +128,27 @@ public:
         belongs to the rig, not to one sound. 0 = nothing assigned. Channel 0
         means any channel, so a footswitch works wherever it is plugged in. */
     int getTapTempoCC() const                       { return setup.tapTempoCC; }
+
+    /** MIDI clock out: 24 ticks a beat at the rig's tempo to these devices,
+        with Start when the backing track starts and Stop when it stops, so
+        a drum machine or an arpeggiator on a hardware synth keeps time with
+        the rig. Message thread. */
+    const std::vector<Setup::MidiPortRef>& getClockOut() const { return setup.clockOut; }
+    bool sendsClockTo (const juce::String& identifier) const;
+    void setClockTo (const juce::MidiDeviceInfo&, bool on);
+    /** Ticks produced since the engine started, for tests. */
+    int  getClockTicksForTesting() const            { return clockTicks.load(); }
+
+    /** Recording the gig: every output to a WAV as it leaves for the desk,
+        and what the keyboards sent to a MIDI file, in a dated folder beside
+        the setup. Message thread. */
+    bool startRecording (juce::String& error);
+    void stopRecording();
+    bool isRecording() const                        { return recorder.isRecording(); }
+    double getRecordingSeconds() const              { return recorder.elapsedSeconds(); }
+    juce::File getRecordingFolder() const           { return recorder.getFolder(); }
+    /** Where takes go: "<setup>.recordings/" beside the setup file. */
+    juce::File getRecordingsFolder() const;
     void setTapTempoCC (int cc);
 
     /** Waits for the next controller and makes that the tap controller, so you
@@ -667,6 +689,7 @@ private:
 
     // External instruments
     MidiOuts midiOuts;
+    Recorder recorder;
     double chunkStartMs = 0.0;                    // audio thread: when this chunk will be heard, on Time's hi-res clock
     double outputLatencyMs = 0.0;
     const float* const* chunkIn = nullptr;        // audio thread: this chunk's device inputs
@@ -682,6 +705,15 @@ private:
 
     bool trackProblemsReported = true;            // message thread
     std::atomic<int> sectionCCAtomic { 0 };
+
+    // MIDI clock out: the ports (resolved on the message thread), read by the audio thread
+    std::atomic<int> clockPorts[MidiOuts::kMaxPorts] {};
+    std::atomic<int> numClockPorts { 0 };
+    std::atomic<double> tempoAtomic { 120.0 };
+    std::atomic<int> clockTicks { 0 };
+    double clockSamplesToNext = 0.0;              // audio thread
+    void resolveClockPorts();                     // message thread
+    void sendClock (int numSamples, double chunkStartMs, bool trackStarted, bool trackStopped);   // audio thread
     std::atomic<bool> sectionLearnArmed { false };
     int trackSong = -1;                           // message thread
     int lastTrackSection = -1;                    // audio thread: to notice the track entering a section

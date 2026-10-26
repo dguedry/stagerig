@@ -63,6 +63,7 @@ int main()
         }
         s.songs.push_back (sg);
         s.transportCC = 85;
+        s.clockOut = { { "alsa:20:0", "TR-8S" }, { "alsa:24:0", "Minilogue" } };
     }
 
     InputDef guitar; guitar.name = "Guitar"; guitar.kind = InputDef::Kind::audio;
@@ -201,6 +202,7 @@ int main()
     CHECK (loaded.songs[0].markers.size() == 2 && loaded.songs[0].markers[0].vamp && loaded.songs[0].markers[1].name == "Verse"
            && std::abs (loaded.songs[0].markers[1].seconds - 8.5) < 1e-9);
     CHECK (loaded.songs[0].countInBeats == 4 && loaded.songs[0].countInOutput == 1 && loaded.transportCC == 85);
+    CHECK (loaded.clockOut.size() == 2 && loaded.clockOut[0].identifier == "alsa:20:0" && loaded.clockOut[1].name == "Minilogue");
     CHECK (loaded.songs[0].click && loaded.songs[0].beatsPerBar == 3 && std::abs (loaded.songs[0].firstBeat - 0.25) < 1e-9);
     CHECK (std::abs (loaded.songs[0].startSeconds - 1.79) < 1e-9);
     {

@@ -1751,6 +1751,80 @@ int main()
         render (engine, 30);
     }
 
+    // --- recording the gig: every output to WAV, the keyboards to MIDI ----------------------
+    {
+        engine.setSetupFile (scratchDir.getChildFile ("rec.stagerig.json"));
+        String err;
+        CHECK (engine.startRecording (err));
+        CHECK (engine.isRecording());
+        const auto take = engine.getRecordingFolder();
+        std::printf ("     recording into %s\n", take.getFullPathName().toRawUTF8());
+        CHECK (take.isDirectory() && take.getParentDirectory().getFileName() == "rec.stagerig.recordings");
+        engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+        AudioBuffer<float> rec (2, kBlock);
+        for (int b = 0; b < 40; ++b) { rec.clear(); engine.renderBlockForTesting (rec.getArrayOfWritePointers(), 2, kBlock); }
+        engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+        for (int b = 0; b < 10; ++b) { rec.clear(); engine.renderBlockForTesting (rec.getArrayOfWritePointers(), 2, kBlock); }
+        pump (600);                                                      // the MIDI queue is drained twice a second
+        engine.stopRecording();
+        CHECK (! engine.isRecording());
+
+        const auto wav = take.getChildFile ("Main.wav");
+        const auto mid = take.getChildFile ("keyboards.mid");
+        CHECK (wav.existsAsFile() && mid.existsAsFile());
+        AudioFormatManager fm;
+        fm.registerBasicFormats();
+        std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (wav));
+        CHECK (reader != nullptr);
+        if (reader != nullptr)
+        {
+            AudioBuffer<float> got (2, (int) reader->lengthInSamples);
+            reader->read (&got, 0, got.getNumSamples(), 0, true, true);
+            std::printf ("     take: %lld samples at %.0f Hz, peak %.3f\n", (long long) reader->lengthInSamples, reader->sampleRate, got.getMagnitude (0, got.getNumSamples()));
+            CHECK (reader->lengthInSamples == 50 * kBlock && reader->numChannels == 2 && got.getMagnitude (0, got.getNumSamples()) > 0.01f);
+        }
+        MidiFile mf;
+        FileInputStream in (mid);
+        CHECK (mf.readFrom (in) && mf.getNumTracks() >= 1);
+        int notes = 0;
+        for (int t = 0; t < mf.getNumTracks(); ++t)
+            for (const auto* e : *mf.getTrack (t)) if (e->message.isNoteOn()) ++notes;
+        std::printf ("     MIDI file: %d tracks, %d note-ons\n", mf.getNumTracks(), notes);
+        CHECK (notes == 1);
+        engine.setSetupFile (File());
+    }
+
+    // --- MIDI clock out: 24 ticks a beat at the rig's tempo ---------------------------------
+    {
+        /* No device need be open for the ticks to be made; a port that is not
+           there just drops them. 120 bpm is 48 ticks a second; 60 bpm, 24. */
+        AudioBuffer<float> out2 (2, kBlock);
+        const int blocksPerSecond = roundToInt (engine.getSampleRate() / kBlock);
+        auto second = [&]
+        {
+            const int before = engine.getClockTicksForTesting();
+            for (int b = 0; b < blocksPerSecond; ++b)
+            {
+                out2.clear();
+                engine.renderBlockForTesting (out2.getArrayOfWritePointers(), 2, kBlock);
+            }
+            return engine.getClockTicksForTesting() - before;
+        };
+        CHECK (second() == 0);                                           // nothing asked for: no ticks
+        engine.setTempoBpm (120.0);
+        engine.setClockTo ({ "Nowhere", "test:nowhere" }, true);
+        CHECK (engine.sendsClockTo ("test:nowhere") && engine.getClockOut().size() == 1);
+        const int at120 = second();
+        engine.setTempoBpm (60.0);
+        const int at60 = second();
+        const double seconds = blocksPerSecond * kBlock / engine.getSampleRate();
+        std::printf ("     MIDI clock: %d ticks in %.3f s at 120 bpm, %d at 60\n", at120, seconds, at60);
+        CHECK (std::abs (at120 - 48.0 * seconds) <= 1.0 && std::abs (at60 - 24.0 * seconds) <= 1.0);
+        engine.setClockTo ({ "Nowhere", "test:nowhere" }, false);
+        CHECK (second() == 0 && engine.getClockOut().empty());
+        engine.setTempoBpm (120.0);
+    }
+
     // --- finding the tempo of a recording -------------------------------------------------
     {
         /* A drum pattern at an awkward tempo with a lead-in before the first

@@ -1082,6 +1082,27 @@ from bar one at the current tempo. When a backing track starts, the position
 jumps to its bar one and follows it. If a plugin's delay still does not sync,
 it may simply never ask the host for the tempo; set it in the plugin.
 
+### Recording the gig
+
+**Options ▸ Record the gig** writes every output to its own WAV file --
+*Main.wav*, *In-ears.wav* -- exactly as it left for the desk, after the
+master effects and volume, and everything the keyboards sent to
+*keyboards.mid*, a track per input, timed to the clock. The status bar reads
+**REC** with the time; **Options ▸ Stop recording** finishes the files. A
+take is a folder named by date and time inside `MySetup.stagerig.recordings/`
+beside the setup, so it travels with it like the charts. Listen back to a
+rehearsal, or keep the night that went well.
+
+### MIDI clock to hardware
+
+**Options ▸ Send MIDI clock to** lists the MIDI devices on the computer; tick
+one and StageRig sends it MIDI clock -- 24 ticks a beat at the rig's tempo --
+so a drum machine, a hardware synth's arpeggiator or a delay pedal keeps time
+with everything else. A tapped tempo reaches it at once. When the backing
+track starts, the device gets **Start**, so its bar one is the track's; when
+the track stops, **Stop**. Several devices can be ticked. The choice is saved
+with the setup.
+
 ## Printing the program list
 
 **Options ▸ Print the program list (for the stand)...** writes a sheet of

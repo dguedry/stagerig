@@ -677,6 +677,18 @@ var Setup::toVar() const
     o->setProperty ("holdAcrossChange", holdAcrossChange);
     o->setProperty ("tempoBpm", tempoBpm);
     o->setProperty ("tapTempoCC", tapTempoCC);
+    if (! clockOut.empty())
+    {
+        Array<var> ports;
+        for (const auto& c : clockOut)
+        {
+            auto* po = new DynamicObject();
+            po->setProperty ("identifier", c.identifier);
+            po->setProperty ("name", c.name);
+            ports.add (var (po));
+        }
+        o->setProperty ("clockOut", ports);
+    }
     Array<var> arr;
     for (auto& i : inputs) arr.add (i.toVar());
     o->setProperty ("inputs", arr);
@@ -720,6 +732,10 @@ Setup Setup::fromVar (const var& v)
     s.holdAcrossChange = prop<bool> (v, "holdAcrossChange", true);
     s.tempoBpm           = prop<double> (v, "tempoBpm", 120.0);   // absent in older setups
     s.tapTempoCC         = prop<int>    (v, "tapTempoCC", 0);
+    if (auto* ports = obj (v) != nullptr ? obj (v)->getProperty ("clockOut").getArray() : nullptr)
+        for (const auto& pv : *ports)
+            if (const auto id = propStr (pv, "identifier"); id.isNotEmpty())
+                s.clockOut.push_back ({ id, propStr (pv, "name") });
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("inputs").getArray() : nullptr)
         for (auto& iv : *arr) s.inputs.push_back (InputDef::fromVar (iv));
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("outputs").getArray() : nullptr)
