@@ -78,7 +78,8 @@ var EffectDef::toVar() const
             if (kind == Kind::run)
             {
                 o->setProperty ("notes", runNotes);
-                o->setProperty ("rate", runRate);
+                o->setProperty ("beats", runBeats);
+                if (runDegree) o->setProperty ("degree", runDegree);
                 if (runDown) o->setProperty ("down", true);
                 if (runToKey) o->setProperty ("toKey", true);
                 if (! runHoldLast) o->setProperty ("holdLast", false);
@@ -113,7 +114,8 @@ EffectDef EffectDef::fromVar (const var& v)
     {
         e.kind = kind == "arpeggio" ? Kind::arpeggio : kind == "chord" ? Kind::chord : kind == "scale" ? Kind::scale : Kind::run;
         e.runNotes   = jlimit (2, 16, prop<int> (v, "notes", 8));
-        e.runRate    = jlimit (0, 4, prop<int> (v, "rate", 2));
+        e.runBeats   = jlimit (0.25f, 16.0f, (float) prop<double> (v, "beats", 1.0));
+        e.runDegree  = jlimit (0, 6, prop<int> (v, "degree", 0));
         e.runDown    = prop<bool> (v, "down", false) ? 1 : 0;
         e.runToKey   = prop<bool> (v, "toKey", false) ? 1 : 0;
         e.runHoldLast = prop<bool> (v, "holdLast", true);

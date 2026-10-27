@@ -44,7 +44,7 @@ int main()
         EffectDef arpB; arpB.kind = EffectDef::Kind::arpeggio; arpB.arpRate = 3; arpB.arpMode = 2; arpB.arpOctaves = 2; arpB.arpGate = 50; arpB.arpLatch = true;
         EffectDef ch; ch.kind = EffectDef::Kind::chord; ch.chordType = 4; ch.bypassed = true;
         EffectDef sc; sc.kind = EffectDef::Kind::scale; sc.scaleRoot = 9; sc.scaleMode = 1;
-        EffectDef run; run.kind = EffectDef::Kind::run; run.scaleRoot = 2; run.scaleMode = 3; run.runNotes = 7; run.runRate = 1; run.runDown = 1; run.runToKey = 1; run.runHoldLast = false;
+        EffectDef run; run.kind = EffectDef::Kind::run; run.scaleRoot = 2; run.scaleMode = 3; run.runNotes = 7; run.runBeats = 2.0f; run.runDegree = 2; run.runDown = 1; run.runToKey = 1; run.runHoldLast = false;
         gm.midiEffects = { arpB, ch, sc, run };
         upper.programs[9].slots.push_back (gm);
     }
@@ -218,7 +218,7 @@ int main()
         CHECK (fx[1].kind == EffectDef::Kind::chord && fx[1].chordType == 4 && fx[1].bypassed && fx[1].displayName() == "Chord");
         CHECK (fx[2].kind == EffectDef::Kind::scale && fx[2].scaleRoot == 9 && fx[2].scaleMode == 1 && fx[2].isBuiltIn() && ! fx[2].isSend());
         CHECK (fx.size() == 4 && fx[3].kind == EffectDef::Kind::run && fx[3].scaleRoot == 2 && fx[3].scaleMode == 3 && fx[3].runNotes == 7
-               && fx[3].runRate == 1 && fx[3].runDown == 1 && fx[3].runToKey == 1 && ! fx[3].runHoldLast && fx[3].displayName() == "Run");
+               && std::abs (fx[3].runBeats - 2.0f) < 1e-6f && fx[3].runDegree == 2 && fx[3].runDown == 1 && fx[3].runToKey == 1 && ! fx[3].runHoldLast && fx[3].displayName() == "Run");
     }
     CHECK (loaded.songs[0].click && loaded.songs[0].beatsPerBar == 3 && std::abs (loaded.songs[0].firstBeat - 0.25) < 1e-9);
     CHECK (std::abs (loaded.songs[0].startSeconds - 1.79) < 1e-9);

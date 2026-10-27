@@ -38,8 +38,9 @@ struct EffectDef
     int chordType = 0;                // index into MidiFx::chordTypes
     int scaleRoot = 0;                // 0 = C .. 11 = B           (scale and run)
     int scaleMode = 0;                // index into MidiFx::scaleModes
-    int runNotes = 8;                 // how many notes the run has, the key's own included
-    int runRate = 2;                  // index into MidiFx::arpRates
+    int runNotes = 8;                 // how many notes the run has, the first included (8 = an octave, 15 = two)
+    float runBeats = 1.0f;            // the run takes this long, in beats; the last note lands at the end of it
+    int runDegree = 0;                // it starts this many scale degrees above the key (0 = on the key)
     int runDown = 0;                  // 0 = up, 1 = down
     int runToKey = 0;                 // 0 = starts on the key, 1 = lands on the key
     bool runHoldLast = true;          // the last note sounds for as long as the key is held

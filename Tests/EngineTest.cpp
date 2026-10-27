@@ -1870,9 +1870,9 @@ int main()
             std::printf ("     C# and E in C major: %s\n", notesOn (out).toRawUTF8());
             CHECK (notesOn (out) == "60 64");
         }
-        // Run: E pressed in C major, eight notes up at sixteenths (120 bpm: a note every 0.125 s), the last one held.
+        // Run: E pressed in C major, an octave up in one beat (120 bpm: eight notes across half a second), the last one held.
         {
-            EffectDef d; d.kind = EffectDef::Kind::run; d.scaleRoot = 0; d.scaleMode = 0; d.runNotes = 8; d.runRate = 2; d.runDown = 0; d.runToKey = 0;
+            EffectDef d; d.kind = EffectDef::Kind::run; d.scaleRoot = 0; d.scaleMode = 0; d.runNotes = 8; d.runBeats = 1.0f; d.runDown = 0; d.runToKey = 0;
             auto fx = MidiFx::create (d);
             MidiBuffer in, out;
             in.addEvent (MidiMessage::noteOn (1, 64, (uint8) 90), 0);
@@ -1887,6 +1887,34 @@ int main()
             }
             std::printf ("     run from E: %s (%d note-offs so far)\n", played.joinIntoString (" ").toRawUTF8(), offs);
             CHECK (played.joinIntoString (" ") == "64 65 67 69 71 72 74 76" && offs == 7);     // the last note is still held
+            // The timing: all eight within the beat, the last one landing on it (0.5 s at 120).
+            {
+                auto fx2 = MidiFx::create (d);
+                MidiBuffer in2, out2;
+                in2.addEvent (MidiMessage::noteOn (1, 64, (uint8) 90), 0);
+                int ons = 0, lastAt = -1, blocks = 0;
+                for (int b = 0; b < 60; ++b)
+                {
+                    out2.clear();
+                    fx2->process (in2, out2, 512, 48000.0, 120.0);
+                    in2.clear();
+                    for (const auto m : out2) if (m.getMessage().isNoteOn()) { ++ons; lastAt = b * 512 + m.samplePosition; }
+                    ++blocks;
+                }
+                std::printf ("     octave in a beat: %d notes, the last at %.3f s\n", ons, lastAt / 48000.0);
+                CHECK (ons == 8 && std::abs (lastAt / 48000.0 - 0.5) < 0.012);
+            }
+            // From the 3rd above the key: C pressed starts the run on E.
+            {
+                EffectDef d3 = d; d3.runDegree = 2;
+                auto fx3 = MidiFx::create (d3);
+                MidiBuffer in3, out3;
+                in3.addEvent (MidiMessage::noteOn (1, 60, (uint8) 90), 0);
+                StringArray got;
+                for (int b = 0; b < 60; ++b) { out3.clear(); fx3->process (in3, out3, 512, 48000.0, 120.0); in3.clear(); for (const auto m : out3) if (m.getMessage().isNoteOn()) got.add (String (m.getMessage().getNoteNumber())); }
+                std::printf ("     C pressed, from the 3rd: %s\n", got.joinIntoString (" ").toRawUTF8());
+                CHECK (got.joinIntoString (" ") == "64 65 67 69 71 72 74 76");
+            }
             in.addEvent (MidiMessage::noteOff (1, 64), 0);
             out.clear();
             fx->process (in, out, 512, 48000.0, 120.0);

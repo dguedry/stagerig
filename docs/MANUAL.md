@@ -352,11 +352,15 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   the nearest note on it, so a wrong note is never wrong; **Run** turns each
   key into a scale run, as a string section plays one: press the third and
   the notes climb the scale from it, in time, and the last one sits there
-  while the key is held. Its settings are the key and scale, the length
-  (**8 notes** is an octave), the rate, and whether it runs **up** or
-  **down**, **from the key** or **to the key** (begins below and lands on
-  the note you pressed). A chord pressed is a run in every voice,
-  harmonised in the scale. Each shows its settings in words on its row.
+  while the key is held. Its settings are the key and scale; **Length** (an
+  octave, two octaves, or any count of notes); **Takes**, how long the whole
+  run lasts at the song's tempo, from a quarter of a beat to a bar, with the
+  last note landing exactly at the end, so *an octave in a beat* is two
+  picks; **Starts on**, the key pressed or the 2nd to 7th above it in the
+  scale, so pressing C can run from E; and whether it runs **up** or
+  **down**, or **to the key** (begins below and lands on the note you
+  pressed). A chord pressed is a run in every voice, harmonised in the
+  scale. Each shows its settings in words on its row.
 - **Send to a MIDI device too** -- the instrument's notes go out of a MIDI port
   as well, so a hardware synth doubles the plugin, or a lighting controller
   follows the keys.

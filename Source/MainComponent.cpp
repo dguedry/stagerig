@@ -890,13 +890,22 @@ private:
             m.addSubMenu ("Scale", mode);
             if (def.kind == EffectDef::Kind::run)
             {
-                PopupMenu notes, rate;
-                for (int n = 3; n <= 16; ++n) notes.addItem (900 + n, String (n) + " notes" + (n == 8 ? "  (an octave)" : n == 15 ? "  (two octaves)" : ""), true, def.runNotes == n);
-                for (int i = 0; i < MidiFx::numArpRates(); ++i) rate.addItem (1000 + i, MidiFx::arpRates[i], true, def.runRate == i);
+                PopupMenu notes, takes, starts;
+                notes.addItem (900 + 8, "An octave  (8 notes)", true, def.runNotes == 8);
+                notes.addItem (900 + 15, "Two octaves  (15 notes)", true, def.runNotes == 15);
+                notes.addItem (900 + 5, "A fifth  (5 notes)", true, def.runNotes == 5);
+                notes.addSeparator();
+                for (int n = 3; n <= 16; ++n) if (n != 5 && n != 8 && n != 15) notes.addItem (900 + n, String (n) + " notes", true, def.runNotes == n);
+                const float options[] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
+                const char* names[] = { "A quarter of a beat", "Half a beat", "A beat", "Two beats", "A bar  (four beats)" };
+                for (int i = 0; i < 5; ++i) takes.addItem (1000 + i, names[i], true, std::abs (def.runBeats - options[i]) < 0.01f);
+                static const char* ordinals[] = { "The key pressed", "The 2nd above it", "The 3rd above it", "The 4th above it", "The 5th above it", "The 6th above it", "The 7th above it" };
+                for (int i = 0; i < 7; ++i) starts.addItem (1300 + i, ordinals[i], true, def.runDegree == i);
                 m.addSubMenu ("Length", notes);
-                m.addSubMenu ("Rate", rate);
-                m.addItem (1100, "Up from the key", true, def.runDown == 0 && def.runToKey == 0);
-                m.addItem (1101, "Down from the key", true, def.runDown == 1 && def.runToKey == 0);
+                m.addSubMenu ("Takes  (the last note lands at the end)", takes);
+                m.addSubMenu ("Starts on", starts, def.runToKey == 0);
+                m.addItem (1100, "Up from where it starts", true, def.runDown == 0 && def.runToKey == 0);
+                m.addItem (1101, "Down from where it starts", true, def.runDown == 1 && def.runToKey == 0);
                 m.addItem (1102, "Up to the key  (begins below it, lands on it)", true, def.runDown == 0 && def.runToKey == 1);
                 m.addItem (1103, "Down to the key  (begins above it, lands on it)", true, def.runDown == 1 && def.runToKey == 1);
                 m.addItem (1200, "Hold the last note while the key is held", true, def.runHoldLast);
@@ -915,7 +924,8 @@ private:
             else if (r >= 700 && r < 800) d.scaleRoot = r - 700;
             else if (r >= 800 && r < 900) d.scaleMode = r - 800;
             else if (r >= 900 && r < 1000) d.runNotes = r - 900;
-            else if (r >= 1000 && r < 1100) d.runRate = r - 1000;
+            else if (r >= 1000 && r < 1100) { const float options[] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f }; d.runBeats = options[jlimit (0, 4, r - 1000)]; }
+            else if (r >= 1300 && r < 1400) d.runDegree = r - 1300;
             else if (r >= 1100 && r <= 1103) { d.runDown = (r - 1100) & 1; d.runToKey = (r - 1100) >> 1; }
             else if (r == 1200) d.runHoldLast = ! d.runHoldLast;
             engine.setBuiltInMidiEffect (a.first, a.second, s, index, d);

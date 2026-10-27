@@ -279,7 +279,8 @@ namespace
             root.store (jlimit (0, 11, d.scaleRoot));
             mode.store (jlimit (0, MidiFx::numScaleModes() - 1, d.scaleMode));
             notes.store (jlimit (2, 16, d.runNotes));
-            rate.store (jlimit (0, MidiFx::numArpRates() - 1, d.runRate));
+            beats.store (jlimit (0.25f, 16.0f, d.runBeats));
+            degree.store (jlimit (0, 6, d.runDegree));
             down.store (d.runDown != 0);
             toKey.store (d.runToKey != 0);
             holdLast.store (d.runHoldLast);
@@ -287,7 +288,8 @@ namespace
         void reset() override { for (auto& v : voices) v.key = -1; }
         void process (const MidiBuffer& in, MidiBuffer& out, int numSamples, double sampleRate, double bpm) override
         {
-            const double stepSamples = jmax (1.0, sampleRate * 60.0 / jmax (20.0, bpm) * kRateBeats[rate.load()]);
+            // The whole run takes `beats`; its last note lands at the end of them.
+            const double stepSamples = jmax (1.0, sampleRate * 60.0 / jmax (20.0, bpm) * (double) beats.load() / (double) jmax (1, notes.load() - 1));
             for (const auto meta : in)
             {
                 const auto m = meta.getMessage();
@@ -299,8 +301,8 @@ namespace
                     if (v == nullptr) continue;
                     if (v->key >= 0 && v->sounding >= 0) out.addEvent (MidiMessage::noteOff (v->channel, v->sounding), meta.samplePosition);
                     plan (*v, ch, m.getNoteNumber(), (int) m.getVelocity());
-                    v->samplesToStep = 0.0;
-                    advance (out, *v, meta.samplePosition);
+                    advance (out, *v, meta.samplePosition);                 // the first note, as the key goes down
+                    v->samplesToStep = meta.samplePosition + stepSamples;   // the next one a step later
                 }
                 else if (m.isNoteOff())
                 {
@@ -354,6 +356,7 @@ namespace
             v.key = key; v.channel = ch; v.velocity = velocity; v.sounding = -1; v.index = 0; v.count = 0;
             const int n = notes.load(), dir = down.load() ? -1 : 1;
             int start = snapDown (key);
+            for (int i = 0; i < degree.load(); ++i) { const int p = step (start, 1); if (p < 0) break; start = p; }   // from a degree above the key
             if (toKey.load())
             {
                 // Lands on the key: begin n - 1 scale notes before it, against the run's direction.
@@ -379,7 +382,8 @@ namespace
             if (v.index >= v.count && ! holdLast.load() && v.count < 17) v.seq[v.count++] = -1;
         }
 
-        std::atomic<int> root { 0 }, mode { 0 }, notes { 8 }, rate { 2 };
+        std::atomic<int> root { 0 }, mode { 0 }, notes { 8 }, degree { 0 };
+        std::atomic<float> beats { 1.0f };
         std::atomic<bool> down { false }, toKey { false }, holdLast { true };
     };
 }
@@ -412,9 +416,17 @@ String MidiFx::describe (const EffectDef& d)
         case EffectDef::Kind::scale:
             return String (noteNames[jlimit (0, 11, d.scaleRoot)]) + " " + String (scaleModes[jlimit (0, numScaleModes() - 1, d.scaleMode)]).toLowerCase();
         case EffectDef::Kind::run:
+        {
+            static const char* ordinals[] = { "", "2nd", "3rd", "4th", "5th", "6th", "7th" };
+            const int n = jlimit (2, 16, d.runNotes);
+            const String length = n == 8 ? "an octave" : n == 15 ? "two octaves" : String (n) + " notes";
+            const float b = d.runBeats;
+            const String takes = std::abs (b - 0.5f) < 0.01f ? "half a beat" : std::abs (b - 1.0f) < 0.01f ? "a beat" : std::abs (b - 2.0f) < 0.01f ? "two beats"
+                               : std::abs (b - 4.0f) < 0.01f ? "a bar" : String (b, 2) + " beats";
             return String (noteNames[jlimit (0, 11, d.scaleRoot)]) + " " + String (scaleModes[jlimit (0, numScaleModes() - 1, d.scaleMode)]).toLowerCase()
-                   + ", " + String (jlimit (2, 16, d.runNotes)) + " notes " + (d.runDown ? "down" : "up") + (d.runToKey ? " to the key" : " from the key")
-                   + ", " + String (arpRates[jlimit (0, numArpRates() - 1, d.runRate)]);
+                   + ", " + length + " " + (d.runDown ? "down" : "up") + (d.runToKey ? " to the key" : d.runDegree > 0 ? " from the " + String (ordinals[jlimit (1, 6, d.runDegree)]) + " above the key" : " from the key")
+                   + " in " + takes;
+        }
         default: return {};
     }
 }
