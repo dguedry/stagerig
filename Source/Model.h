@@ -17,7 +17,7 @@ struct EffectDef
     /** A plugin, or -- in a slot's MIDI chain only -- a send: the MIDI at
         that point also goes out of a port, to a hardware synth or another
         program, and carries on unchanged to the next block. */
-    enum class Kind { plugin, midiSend, arpeggio, chord, scale };
+    enum class Kind { plugin, midiSend, arpeggio, chord, scale, run };
     Kind kind = Kind::plugin;
 
     juce::PluginDescription plugin;
@@ -36,11 +36,16 @@ struct EffectDef
     int arpGate = 80;                 // percent of the step the note sounds for
     bool arpLatch = false;            // held notes keep going after they are let go
     int chordType = 0;                // index into MidiFx::chordTypes
-    int scaleRoot = 0;                // 0 = C .. 11 = B
+    int scaleRoot = 0;                // 0 = C .. 11 = B           (scale and run)
     int scaleMode = 0;                // index into MidiFx::scaleModes
+    int runNotes = 8;                 // how many notes the run has, the key's own included
+    int runRate = 2;                  // index into MidiFx::arpRates
+    int runDown = 0;                  // 0 = up, 1 = down
+    int runToKey = 0;                 // 0 = starts on the key, 1 = lands on the key
+    bool runHoldLast = true;          // the last note sounds for as long as the key is held
 
     bool isSend() const               { return kind == Kind::midiSend; }
-    bool isBuiltIn() const            { return kind == Kind::arpeggio || kind == Kind::chord || kind == Kind::scale; }
+    bool isBuiltIn() const            { return kind == Kind::arpeggio || kind == Kind::chord || kind == Kind::scale || kind == Kind::run; }
     bool isPlugin() const             { return kind == Kind::plugin; }
     juce::String displayName() const
     {
@@ -50,6 +55,7 @@ struct EffectDef
             case Kind::arpeggio: return "Arpeggiator";
             case Kind::chord:    return "Chord";
             case Kind::scale:    return "Scale";
+            case Kind::run:      return "Run";
             default:             return plugin.name;
         }
     }

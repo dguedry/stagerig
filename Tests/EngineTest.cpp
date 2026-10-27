@@ -1870,6 +1870,43 @@ int main()
             std::printf ("     C# and E in C major: %s\n", notesOn (out).toRawUTF8());
             CHECK (notesOn (out) == "60 64");
         }
+        // Run: E pressed in C major, eight notes up at sixteenths (120 bpm: a note every 0.125 s), the last one held.
+        {
+            EffectDef d; d.kind = EffectDef::Kind::run; d.scaleRoot = 0; d.scaleMode = 0; d.runNotes = 8; d.runRate = 2; d.runDown = 0; d.runToKey = 0;
+            auto fx = MidiFx::create (d);
+            MidiBuffer in, out;
+            in.addEvent (MidiMessage::noteOn (1, 64, (uint8) 90), 0);
+            StringArray played;
+            int offs = 0;
+            for (int b = 0; b < (int) (1.2 * 48000 / 512); ++b)
+            {
+                out.clear();
+                fx->process (in, out, 512, 48000.0, 120.0);
+                in.clear();
+                for (const auto m : out) { if (m.getMessage().isNoteOn()) played.add (String (m.getMessage().getNoteNumber())); if (m.getMessage().isNoteOff()) ++offs; }
+            }
+            std::printf ("     run from E: %s (%d note-offs so far)\n", played.joinIntoString (" ").toRawUTF8(), offs);
+            CHECK (played.joinIntoString (" ") == "64 65 67 69 71 72 74 76" && offs == 7);     // the last note is still held
+            in.addEvent (MidiMessage::noteOff (1, 64), 0);
+            out.clear();
+            fx->process (in, out, 512, 48000.0, 120.0);
+            int lastOff = -1; for (const auto m : out) if (m.getMessage().isNoteOff()) lastOff = m.getMessage().getNoteNumber();
+            CHECK (lastOff == 76);
+            // Up to the key: the same eight notes land on E.
+            d.runToKey = 1;
+            fx->configure (d);
+            in.clear(); out.clear(); played.clear();
+            in.addEvent (MidiMessage::noteOn (1, 76, (uint8) 90), 0);
+            for (int b = 0; b < (int) (1.2 * 48000 / 512); ++b)
+            {
+                out.clear();
+                fx->process (in, out, 512, 48000.0, 120.0);
+                in.clear();
+                for (const auto m : out) if (m.getMessage().isNoteOn()) played.add (String (m.getMessage().getNoteNumber()));
+            }
+            std::printf ("     run up to E: %s\n", played.joinIntoString (" ").toRawUTF8());
+            CHECK (played.joinIntoString (" ") == "64 65 67 69 71 72 74 76");
+        }
         // Arpeggiator: C and E held, eighths at 120 (a step every 0.25 s): four notes a second, alternating.
         {
             EffectDef d; d.kind = EffectDef::Kind::arpeggio; d.arpRate = 1; d.arpMode = 0; d.arpOctaves = 1; d.arpGate = 50;

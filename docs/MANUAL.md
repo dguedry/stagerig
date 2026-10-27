@@ -349,8 +349,14 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   hold one at a time, in time with the rig's tempo (rate, pattern, octaves,
   note length and latch under **Settings...**); **Chord** makes every note a
   chord of the kind you pick; **Scale** moves any note off the scale down to
-  the nearest note on it, so a wrong note is never wrong. Each shows its
-  settings in words on its row.
+  the nearest note on it, so a wrong note is never wrong; **Run** turns each
+  key into a scale run, as a string section plays one: press the third and
+  the notes climb the scale from it, in time, and the last one sits there
+  while the key is held. Its settings are the key and scale, the length
+  (**8 notes** is an octave), the rate, and whether it runs **up** or
+  **down**, **from the key** or **to the key** (begins below and lands on
+  the note you pressed). A chord pressed is a run in every voice,
+  harmonised in the scale. Each shows its settings in words on its row.
 - **Send to a MIDI device too** -- the instrument's notes go out of a MIDI port
   as well, so a hardware synth doubles the plugin, or a lighting controller
   follows the keys.

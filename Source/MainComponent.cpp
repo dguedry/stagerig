@@ -766,6 +766,7 @@ private:
                 name.setText (def.displayName() + "  [" + MidiFx::describe (def) + "]", dontSendNotification);
                 name.setTooltip (def.kind == EffectDef::Kind::arpeggio ? "Plays the notes you hold one at a time, in time with the rig's tempo"
                                : def.kind == EffectDef::Kind::chord    ? "Every note you play becomes this chord"
+                               : def.kind == EffectDef::Kind::run      ? "Each key you press starts a run up (or down) the scale from it, in time; the last note holds while the key does. A chord is a run in each voice."
                                                                         : "Notes off the scale are moved down to the nearest note on it");
                 guiBtn.setButtonText ("Settings...");
                 guiBtn.setTooltip ("Its settings");
@@ -887,6 +888,19 @@ private:
             for (int i = 0; i < MidiFx::numScaleModes(); ++i) mode.addItem (800 + i, MidiFx::scaleModes[i], true, def.scaleMode == i);
             m.addSubMenu ("Key", root);
             m.addSubMenu ("Scale", mode);
+            if (def.kind == EffectDef::Kind::run)
+            {
+                PopupMenu notes, rate;
+                for (int n = 3; n <= 16; ++n) notes.addItem (900 + n, String (n) + " notes" + (n == 8 ? "  (an octave)" : n == 15 ? "  (two octaves)" : ""), true, def.runNotes == n);
+                for (int i = 0; i < MidiFx::numArpRates(); ++i) rate.addItem (1000 + i, MidiFx::arpRates[i], true, def.runRate == i);
+                m.addSubMenu ("Length", notes);
+                m.addSubMenu ("Rate", rate);
+                m.addItem (1100, "Up from the key", true, def.runDown == 0 && def.runToKey == 0);
+                m.addItem (1101, "Down from the key", true, def.runDown == 1 && def.runToKey == 0);
+                m.addItem (1102, "Up to the key  (begins below it, lands on it)", true, def.runDown == 0 && def.runToKey == 1);
+                m.addItem (1103, "Down to the key  (begins above it, lands on it)", true, def.runDown == 1 && def.runToKey == 1);
+                m.addItem (1200, "Hold the last note while the key is held", true, def.runHoldLast);
+            }
         }
         m.showMenuAsync (PopupMenu::Options().withTargetComponent (target), [this, a, s, index, def] (int r)
         {
@@ -900,6 +914,10 @@ private:
             else if (r >= 600 && r < 700) d.chordType = r - 600;
             else if (r >= 700 && r < 800) d.scaleRoot = r - 700;
             else if (r >= 800 && r < 900) d.scaleMode = r - 800;
+            else if (r >= 900 && r < 1000) d.runNotes = r - 900;
+            else if (r >= 1000 && r < 1100) d.runRate = r - 1000;
+            else if (r >= 1100 && r <= 1103) { d.runDown = (r - 1100) & 1; d.runToKey = (r - 1100) >> 1; }
+            else if (r == 1200) d.runHoldLast = ! d.runHoldLast;
             engine.setBuiltInMidiEffect (a.first, a.second, s, index, d);
             owner.markDirty();
         });
@@ -937,6 +955,7 @@ private:
             procMenu.addItem (300001, "Arpeggiator  (held notes played one at a time, in time)");
             procMenu.addItem (300002, "Chord  (every note becomes a chord)");
             procMenu.addItem (300003, "Scale  (wrong notes bent to a scale)");
+            procMenu.addItem (300004, "Run  (a scale run from each key, as a string section plays one)");
             procMenu.addSectionHeader ("Plugins");
             addPluginsToMenu (procMenu, all, engine.getPluginHost().getIcons(), midiBase);
             if (all.isEmpty()) procMenu.addItem (99998, "No plugins known yet: scan under Plugins...", false);
@@ -949,9 +968,10 @@ private:
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, effects, all, ports] (int result)
         {
             const auto a = address();
-            if (result >= 300001 && result <= 300003)
+            if (result >= 300001 && result <= 300004)
             {
-                const auto kind = result == 300001 ? EffectDef::Kind::arpeggio : result == 300002 ? EffectDef::Kind::chord : EffectDef::Kind::scale;
+                const auto kind = result == 300001 ? EffectDef::Kind::arpeggio : result == 300002 ? EffectDef::Kind::chord
+                                : result == 300003 ? EffectDef::Kind::scale : EffectDef::Kind::run;
                 engine.addBuiltInMidiEffect (a.first, a.second, slot, kind);
                 owner.showStatus ("Added. Settings... on its row sets it up; it works at the rig's tempo.");
                 owner.markDirty();

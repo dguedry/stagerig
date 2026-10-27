@@ -264,6 +264,126 @@ namespace
     };
 }
 
+namespace
+{
+    /** A scale run from each key, as a string section plays one: press the
+        third and the notes climb the scale from it, in time, and the last
+        one sits there while the key is held. A chord pressed is a run in
+        each voice, harmonised in the scale. */
+    class Run : public MidiFx
+    {
+    public:
+        Run() { reset(); }
+        void configure (const EffectDef& d) override
+        {
+            root.store (jlimit (0, 11, d.scaleRoot));
+            mode.store (jlimit (0, MidiFx::numScaleModes() - 1, d.scaleMode));
+            notes.store (jlimit (2, 16, d.runNotes));
+            rate.store (jlimit (0, MidiFx::numArpRates() - 1, d.runRate));
+            down.store (d.runDown != 0);
+            toKey.store (d.runToKey != 0);
+            holdLast.store (d.runHoldLast);
+        }
+        void reset() override { for (auto& v : voices) v.key = -1; }
+        void process (const MidiBuffer& in, MidiBuffer& out, int numSamples, double sampleRate, double bpm) override
+        {
+            const double stepSamples = jmax (1.0, sampleRate * 60.0 / jmax (20.0, bpm) * kRateBeats[rate.load()]);
+            for (const auto meta : in)
+            {
+                const auto m = meta.getMessage();
+                if (m.isNoteOn())
+                {
+                    const int ch = jlimit (1, 16, m.getChannel());
+                    auto* v = find (ch, m.getNoteNumber());
+                    if (v == nullptr) v = free();
+                    if (v == nullptr) continue;
+                    if (v->key >= 0 && v->sounding >= 0) out.addEvent (MidiMessage::noteOff (v->channel, v->sounding), meta.samplePosition);
+                    plan (*v, ch, m.getNoteNumber(), (int) m.getVelocity());
+                    v->samplesToStep = 0.0;
+                    advance (out, *v, meta.samplePosition);
+                }
+                else if (m.isNoteOff())
+                {
+                    if (auto* v = find (jlimit (1, 16, m.getChannel()), m.getNoteNumber()))
+                    {
+                        if (v->sounding >= 0) out.addEvent (MidiMessage::noteOff (v->channel, v->sounding), meta.samplePosition);
+                        v->key = -1;
+                    }
+                }
+                else if (m.isAllNotesOff() || m.isAllSoundOff())
+                {
+                    reset();
+                    out.addEvent (m, meta.samplePosition);
+                }
+                else
+                    out.addEvent (m, meta.samplePosition);
+            }
+            // Each voice steps on its own clock; a step inside this block lands at its sample.
+            for (auto& v : voices)
+            {
+                if (v.key < 0 || v.index >= v.count) continue;
+                while (v.samplesToStep < (double) numSamples && v.index < v.count)
+                {
+                    advance (out, v, (int) jmax (0.0, v.samplesToStep));
+                    if (v.index >= v.count) break;
+                    v.samplesToStep += stepSamples;
+                }
+                if (v.index < v.count) v.samplesToStep -= numSamples;
+            }
+        }
+
+    private:
+        struct Voice { int key = -1, channel = 1, velocity = 100, sounding = -1; int seq[17]; int count = 0, index = 0; double samplesToStep = 0.0; };
+        static constexpr int kVoices = 16;
+        Voice voices[kVoices];
+
+        Voice* find (int ch, int key) { for (auto& v : voices) if (v.key == key && v.channel == ch) return &v; return nullptr; }
+        Voice* free() { for (auto& v : voices) if (v.key < 0) return &v; return nullptr; }
+
+        bool inScale (int note) const
+        {
+            const auto& steps = kScaleSteps[mode.load()];
+            const int pc = ((note - root.load()) % 12 + 12) % 12;
+            return std::find (steps.begin(), steps.end(), pc) != steps.end();
+        }
+        int snapDown (int note) const { for (int n = note; n >= 0 && n > note - 12; --n) if (inScale (n)) return n; return note; }
+        int step (int note, int dir) const { for (int n = note + dir; n >= 0 && n <= 127; n += dir) if (inScale (n)) return n; return -1; }
+
+        void plan (Voice& v, int ch, int key, int velocity)
+        {
+            v.key = key; v.channel = ch; v.velocity = velocity; v.sounding = -1; v.index = 0; v.count = 0;
+            const int n = notes.load(), dir = down.load() ? -1 : 1;
+            int start = snapDown (key);
+            if (toKey.load())
+            {
+                // Lands on the key: begin n - 1 scale notes before it, against the run's direction.
+                for (int i = 1; i < n; ++i) { const int p = step (start, -dir); if (p < 0) break; start = p; }
+            }
+            int cur = start;
+            for (int i = 0; i < n && cur >= 0; ++i)
+            {
+                v.seq[v.count++] = cur;
+                cur = step (cur, dir);
+            }
+        }
+
+        void advance (MidiBuffer& out, Voice& v, int at)
+        {
+            if (v.sounding >= 0) { out.addEvent (MidiMessage::noteOff (v.channel, v.sounding), at); v.sounding = -1; }
+            if (v.index >= v.count) return;
+            const int note = v.seq[v.index++];
+            if (note < 0) return;                                      // the step that only lets the last note go
+            out.addEvent (MidiMessage::noteOn (v.channel, note, (uint8) v.velocity), at);
+            v.sounding = note;
+            // The last note: held while the key is, or let go at the next step like the rest.
+            if (v.index >= v.count && ! holdLast.load() && v.count < 17) v.seq[v.count++] = -1;
+        }
+
+        std::atomic<int> root { 0 }, mode { 0 }, notes { 8 }, rate { 2 };
+        std::atomic<bool> down { false }, toKey { false }, holdLast { true };
+    };
+}
+
 std::unique_ptr<MidiFx> MidiFx::create (const EffectDef& def)
 {
     std::unique_ptr<MidiFx> fx;
@@ -272,6 +392,7 @@ std::unique_ptr<MidiFx> MidiFx::create (const EffectDef& def)
         case EffectDef::Kind::arpeggio: fx = std::make_unique<Arpeggiator>(); break;
         case EffectDef::Kind::chord:    fx = std::make_unique<Chord>(); break;
         case EffectDef::Kind::scale:    fx = std::make_unique<Scale>(); break;
+        case EffectDef::Kind::run:      fx = std::make_unique<Run>(); break;
         default: return nullptr;
     }
     fx->configure (def);
@@ -290,6 +411,10 @@ String MidiFx::describe (const EffectDef& d)
             return String (chordTypes[jlimit (0, numChordTypes() - 1, d.chordType)]);
         case EffectDef::Kind::scale:
             return String (noteNames[jlimit (0, 11, d.scaleRoot)]) + " " + String (scaleModes[jlimit (0, numScaleModes() - 1, d.scaleMode)]).toLowerCase();
+        case EffectDef::Kind::run:
+            return String (noteNames[jlimit (0, 11, d.scaleRoot)]) + " " + String (scaleModes[jlimit (0, numScaleModes() - 1, d.scaleMode)]).toLowerCase()
+                   + ", " + String (jlimit (2, 16, d.runNotes)) + " notes " + (d.runDown ? "down" : "up") + (d.runToKey ? " to the key" : " from the key")
+                   + ", " + String (arpRates[jlimit (0, numArpRates() - 1, d.runRate)]);
         default: return {};
     }
 }

@@ -61,7 +61,7 @@ var EffectDef::toVar() const
     }
     if (isBuiltIn())
     {
-        o->setProperty ("kind", kind == Kind::arpeggio ? "arpeggio" : kind == Kind::chord ? "chord" : "scale");
+        o->setProperty ("kind", kind == Kind::arpeggio ? "arpeggio" : kind == Kind::chord ? "chord" : kind == Kind::scale ? "scale" : "run");
         if (kind == Kind::arpeggio)
         {
             o->setProperty ("rate", arpRate);
@@ -71,7 +71,19 @@ var EffectDef::toVar() const
             if (arpLatch) o->setProperty ("latch", true);
         }
         else if (kind == Kind::chord) o->setProperty ("chord", chordType);
-        else { o->setProperty ("root", scaleRoot); o->setProperty ("scale", scaleMode); }
+        else
+        {
+            o->setProperty ("root", scaleRoot);
+            o->setProperty ("scale", scaleMode);
+            if (kind == Kind::run)
+            {
+                o->setProperty ("notes", runNotes);
+                o->setProperty ("rate", runRate);
+                if (runDown) o->setProperty ("down", true);
+                if (runToKey) o->setProperty ("toKey", true);
+                if (! runHoldLast) o->setProperty ("holdLast", false);
+            }
+        }
         o->setProperty ("bypassed", bypassed);
         return var (o);
     }
@@ -97,9 +109,14 @@ EffectDef EffectDef::fromVar (const var& v)
         e.bypassed = prop<bool> (v, "bypassed", false);
         return e;
     }
-    if (const auto kind = propStr (v, "kind"); kind == "arpeggio" || kind == "chord" || kind == "scale")
+    if (const auto kind = propStr (v, "kind"); kind == "arpeggio" || kind == "chord" || kind == "scale" || kind == "run")
     {
-        e.kind = kind == "arpeggio" ? Kind::arpeggio : kind == "chord" ? Kind::chord : Kind::scale;
+        e.kind = kind == "arpeggio" ? Kind::arpeggio : kind == "chord" ? Kind::chord : kind == "scale" ? Kind::scale : Kind::run;
+        e.runNotes   = jlimit (2, 16, prop<int> (v, "notes", 8));
+        e.runRate    = jlimit (0, 4, prop<int> (v, "rate", 2));
+        e.runDown    = prop<bool> (v, "down", false) ? 1 : 0;
+        e.runToKey   = prop<bool> (v, "toKey", false) ? 1 : 0;
+        e.runHoldLast = prop<bool> (v, "holdLast", true);
         e.arpRate    = jlimit (0, 4, prop<int> (v, "rate", 2));
         e.arpMode    = jlimit (0, 4, prop<int> (v, "mode", 0));
         e.arpOctaves = jlimit (1, 4, prop<int> (v, "octaves", 1));

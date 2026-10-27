@@ -3109,6 +3109,7 @@ void Engine::setBuiltInMidiEffect (int inputIndex, int program, int slotIndex, i
     auto& ed = chain[(size_t) effect];
     ed.arpRate = settings.arpRate; ed.arpMode = settings.arpMode; ed.arpOctaves = settings.arpOctaves; ed.arpGate = settings.arpGate; ed.arpLatch = settings.arpLatch;
     ed.chordType = settings.chordType; ed.scaleRoot = settings.scaleRoot; ed.scaleMode = settings.scaleMode;
+    ed.runNotes = settings.runNotes; ed.runRate = settings.runRate; ed.runDown = settings.runDown; ed.runToKey = settings.runToKey; ed.runHoldLast = settings.runHoldLast;
     if (auto* fx = static_cast<EffectRuntime*> (getNode (inputIndex, program, ProgramDef::midiChainOf (slotIndex), effect)))
         if (fx->builtIn != nullptr) fx->builtIn->configure (ed);
     notifyContent (inputIndex, program);

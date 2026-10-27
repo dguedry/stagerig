@@ -44,7 +44,8 @@ int main()
         EffectDef arpB; arpB.kind = EffectDef::Kind::arpeggio; arpB.arpRate = 3; arpB.arpMode = 2; arpB.arpOctaves = 2; arpB.arpGate = 50; arpB.arpLatch = true;
         EffectDef ch; ch.kind = EffectDef::Kind::chord; ch.chordType = 4; ch.bypassed = true;
         EffectDef sc; sc.kind = EffectDef::Kind::scale; sc.scaleRoot = 9; sc.scaleMode = 1;
-        gm.midiEffects = { arpB, ch, sc };
+        EffectDef run; run.kind = EffectDef::Kind::run; run.scaleRoot = 2; run.scaleMode = 3; run.runNotes = 7; run.runRate = 1; run.runDown = 1; run.runToKey = 1; run.runHoldLast = false;
+        gm.midiEffects = { arpB, ch, sc, run };
         upper.programs[9].slots.push_back (gm);
     }
 
@@ -213,9 +214,11 @@ int main()
     CHECK (loaded.clockOut.size() == 2 && loaded.clockOut[0].identifier == "alsa:20:0" && loaded.clockOut[1].name == "Minilogue");
     {
         const auto& fx = loaded.inputs[0].programs[9].slots[0].midiEffects;
-        CHECK (fx.size() == 3 && fx[0].kind == EffectDef::Kind::arpeggio && fx[0].arpRate == 3 && fx[0].arpMode == 2 && fx[0].arpOctaves == 2 && fx[0].arpGate == 50 && fx[0].arpLatch);
+        CHECK (fx.size() == 4 && fx[0].kind == EffectDef::Kind::arpeggio && fx[0].arpRate == 3 && fx[0].arpMode == 2 && fx[0].arpOctaves == 2 && fx[0].arpGate == 50 && fx[0].arpLatch);
         CHECK (fx[1].kind == EffectDef::Kind::chord && fx[1].chordType == 4 && fx[1].bypassed && fx[1].displayName() == "Chord");
         CHECK (fx[2].kind == EffectDef::Kind::scale && fx[2].scaleRoot == 9 && fx[2].scaleMode == 1 && fx[2].isBuiltIn() && ! fx[2].isSend());
+        CHECK (fx.size() == 4 && fx[3].kind == EffectDef::Kind::run && fx[3].scaleRoot == 2 && fx[3].scaleMode == 3 && fx[3].runNotes == 7
+               && fx[3].runRate == 1 && fx[3].runDown == 1 && fx[3].runToKey == 1 && ! fx[3].runHoldLast && fx[3].displayName() == "Run");
     }
     CHECK (loaded.songs[0].click && loaded.songs[0].beatsPerBar == 3 && std::abs (loaded.songs[0].firstBeat - 0.25) < 1e-9);
     CHECK (std::abs (loaded.songs[0].startSeconds - 1.79) < 1e-9);
