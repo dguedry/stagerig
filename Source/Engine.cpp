@@ -1704,18 +1704,23 @@ void Engine::advanceTrack()
 void Engine::setLinkEnabled (bool on)
 {
     if (link == nullptr) return;
-    link->enable (on);
-    settings.setValue ("linkEnabled", on);
-    settings.saveIfNeeded();
     if (on)
     {
-        /* Join at the rig's tempo. Peers are not known yet at this point; when
-           the sessions merge, Link settles the tempo and the tempo callback
-           brings the rig along if it is not ours. */
+        /* Join at the rig's tempo, told to Link before it is switched on:
+           switching on makes Link reset its session on its own thread, keeping
+           the session's tempo as it stands then. Told after, the reset could
+           land second and put the old tempo back, and its tempo callback would
+           carry the rig off to it. Both are queued to the same thread in order,
+           so first the tempo, then the switch. Peers are not known yet at this
+           point; when the sessions merge, Link settles the tempo and the tempo
+           callback brings the rig along if it is not ours. */
         auto st = link->captureAppSessionState();
         st.setTempo (setup.tempoBpm, link->clock().micros());
         link->commitAppSessionState (st);
     }
+    link->enable (on);
+    settings.setValue ("linkEnabled", on);
+    settings.saveIfNeeded();
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 

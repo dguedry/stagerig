@@ -2108,8 +2108,11 @@ int main()
         engine.setLinkEnabled (true);
         CHECK (engine.isLinkEnabled());
         engine.setTempoBpm (100.0);
-        std::printf ("     Link on: session tempo %.1f\n", engine.getLinkTempoForTesting());
-        CHECK (std::abs (engine.getLinkTempoForTesting() - 100.0) < 0.01);
+        // Link resets its session on its own thread as it comes on: the rig's tempo must survive that.
+        for (int i = 0; i < 40 && std::abs (engine.getLinkTempoForTesting() - 100.0) > 0.01; ++i) pump (50);
+        const double sessionTempo = engine.getLinkTempoForTesting();
+        std::printf ("     Link on: session tempo %.3f\n", sessionTempo);
+        CHECK (std::abs (sessionTempo - 100.0) < 0.01);
 
         /* A second Link in this process is another app on the network. It
            needs multicast on the loopback, which not every machine allows;

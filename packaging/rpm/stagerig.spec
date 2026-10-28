@@ -38,6 +38,7 @@ BuildRequires:  libXext-devel
 BuildRequires:  freetype-devel
 BuildRequires:  fontconfig-devel
 BuildRequires:  mesa-libGL-devel
+BuildRequires:  libatomic
 BuildRequires:  ladspa-devel
 BuildRequires:  desktop-file-utils
 BuildRequires:  appstream

@@ -115,7 +115,7 @@ jobs:
           dnf install -y git cmake ninja-build gcc-c++ rpm-build \
             alsa-lib-devel pipewire-jack-audio-connection-kit-devel libX11-devel libXrandr-devel \
             libXinerama-devel libXcursor-devel libXext-devel freetype-devel fontconfig-devel \
-            mesa-libGL-devel ladspa-devel lv2-calf-plugins xorg-x11-server-Xvfb procps-ng
+            mesa-libGL-devel ladspa-devel lv2-calf-plugins xorg-x11-server-Xvfb procps-ng libatomic
       - uses: actions/checkout@v4
         with:
           submodules: recursive
