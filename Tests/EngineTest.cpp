@@ -1962,6 +1962,52 @@ int main()
             std::printf ("     run up to E: %s\n", played.joinIntoString (" ").toRawUTF8());
             CHECK (played.joinIntoString (" ") == "64 65 67 69 71 72 74 76");
         }
+        // Run, as on the rig: C phrygian, two octaves up from the key in a beat at 90, 128-sample blocks.
+        // Every note the run starts must be let go, whether the key is held past the run or released mid-way.
+        {
+            auto runAndCount = [&] (double releaseAfterSeconds, int& stuck, StringArray& played)
+            {
+                /* Counted in the order the plugin hears them: a note-off that
+                   comes before its note-on (the old build stepped the run at
+                   sample 0, ahead of the key that started it) leaves that
+                   note sounding, and counts as stuck here too. */
+                EffectDef d; d.kind = EffectDef::Kind::run; d.scaleRoot = 0; d.scaleMode = 6; d.runNotes = 15; d.runBeats = 1.0f; d.runDown = 0; d.runToKey = 0;
+                auto fx = MidiFx::create (d);
+                int held[128] = {};
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 37);
+                const int blocks = (int) (3.0 * 48000 / 128);
+                const int releaseBlock = (int) (releaseAfterSeconds * 48000 / 128);
+                for (int b = 0; b < blocks; ++b)
+                {
+                    if (b == releaseBlock) in.addEvent (MidiMessage::noteOff (1, 60), 5);
+                    out.clear();
+                    fx->process (in, out, 128, 48000.0, 90.0);
+                    in.clear();
+                    for (const auto m : out)
+                    {
+                        const auto msg = m.getMessage();
+                        if (msg.isNoteOn()) { ++held[msg.getNoteNumber()]; played.add (String (msg.getNoteNumber())); }
+                        else if (msg.isNoteOff() && held[msg.getNoteNumber()] > 0) --held[msg.getNoteNumber()];
+                        else if (msg.isNoteOff()) held[msg.getNoteNumber()] = 1000;   // let go before it began: it will never be let go
+                    }
+                }
+                stuck = 0;
+                for (int n = 0; n < 128; ++n) if (held[n] != 0) ++stuck;
+            };
+            int stuck = -1; StringArray played;
+            runAndCount (2.0, stuck, played);
+            std::printf ("     rig run (key held 2 s): %s -> %d note(s) left sounding\n", played.joinIntoString (" ").toRawUTF8(), stuck);
+            CHECK (played.size() == 15 && stuck == 0);
+            played.clear();
+            runAndCount (0.2, stuck, played);
+            std::printf ("     rig run (key let go at 0.2 s): %d notes played, %d left sounding\n", played.size(), stuck);
+            CHECK (stuck == 0);
+            played.clear();
+            runAndCount (0.01, stuck, played);
+            std::printf ("     rig run (key let go at once): %d notes played, %d left sounding\n", played.size(), stuck);
+            CHECK (stuck == 0);
+        }
         // Arpeggiator: C and E held, eighths at 120 (a step every 0.25 s): four notes a second, alternating.
         {
             EffectDef d; d.kind = EffectDef::Kind::arpeggio; d.arpRate = 1; d.arpMode = 0; d.arpOctaves = 1; d.arpGate = 50;
