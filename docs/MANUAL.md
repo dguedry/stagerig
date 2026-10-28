@@ -38,7 +38,6 @@ works inside, see the [README](../README.md).
 - [Reading the stage display](#reading-the-stage-display)
 - [The tablet](#the-tablet)
   - [Set list](#set-list)
-  - [Now](#now)
   - [Programs](#programs)
   - [Showing a plugin's own window](#showing-a-plugins-own-window)
   - [If the tablet cannot connect](#if-the-tablet-cannot-connect)
@@ -345,6 +344,23 @@ transpose, curve and channels decide which notes enter at all. Left to right:
 
 - **Effect on the sound** -- reverb, EQ, an amp: after the instrument.
 - **MIDI effect on the notes** -- an arpeggiator, a chord generator: before it.
+  Three are built in, under **Built in** at the top of that list, with
+  nothing to install and nothing to open: **Arpeggiator** plays the notes you
+  hold one at a time, in time with the rig's tempo (rate, pattern, octaves,
+  note length and latch under **Settings...**); **Chord** makes every note a
+  chord of the kind you pick; **Scale** moves any note off the scale down to
+  the nearest note on it, so a wrong note is never wrong; **Run** turns each
+  key into a scale run, as a string section plays one: press the third and
+  the notes climb the scale from it, in time, and the last one sits there
+  while the key is held. Its settings are the key and scale; **Length** (an
+  octave, two octaves, or any count of notes); **Takes**, how long the whole
+  run lasts at the song's tempo, from a quarter of a beat to a bar, with the
+  last note landing exactly at the end, so *an octave in a beat* is two
+  picks; **Starts on**, the key pressed or the 2nd to 7th above it in the
+  scale, so pressing C can run from E; and whether it runs **up** or
+  **down**, or **to the key** (begins below and lands on the note you
+  pressed). A chord pressed is a run in every voice, harmonised in the
+  scale. Each shows its settings in words on its row.
 - **Send to a MIDI device too** -- the instrument's notes go out of a MIDI port
   as well, so a hardware synth doubles the plugin, or a lighting controller
   follows the keys.
@@ -477,6 +493,20 @@ effect**, **Parameter**, **Min**, **Max** and **Pass on**.
 **Use last moved** is often faster: open the plugin's own window, move the knob
 you care about, press the button, and StageRig selects that parameter.
 
+**A pedal for a layer or an effect.** The parameter list begins with the
+thing itself, before any plugin parameter: **On / off (pedal down = on)**,
+**On / off, toggled by each press** and, for an instrument, **Level**. Map a
+footswitch to the strings layer's *toggled* entry and each press brings the
+strings in or takes them out; map an expression pedal to its *Level* and the
+pedal is its fader. The same works for every effect, so a pedal can be the
+delay's bypass. No plugin is needed, so a hardware synth or the General MIDI
+player can be switched the same way.
+
+**One knob, several things.** A controller may appear in as many rows as you
+like, each with its own target and range: one knob that opens the filter on
+the pad while it closes the one on the bass (reverse Min and Max on the
+second row) is two rows with the same controller. That is a macro.
+
 To change a mapping, select it in the table, change the boxes and press
 **Update**; **Remove** deletes the selected one.
 
@@ -522,7 +552,7 @@ can be more:
   pedal** unlearns it.
 
 The tablet's **GUI** chooser lists an output's master effects under every input
-that lands on it, and the Now tab has every output's volume.
+that lands on it.
 
 ## Songs and set lists
 
@@ -565,15 +595,14 @@ keyboard you are not using in that number.
   zero. Use it for a song where the tempo is whatever you last tapped.
 - **Transpose** shifts every keyboard by that many semitones while the song is
   in play -- down a step for the singer. The backing track's parts are not
-  shifted. Set it here, or from the tablet's Now tab and press **Save this
-  sound to "song"** there; selecting the song applies it.
+  shifted. Selecting the song applies it.
 - **-** deletes the selected song, and takes it out of every set list that
   used it.
 - **^ v** beside the songs list reorder it. Set lists keep playing their own
   order: they follow the song, not its position.
-- **Attach...** offers **Attach a chart...** (see *Charts on the stand*),
-  **Backing track...** (see *Backing tracks*) and, under **Attached**,
-  **Remove** for each chart the song has.
+- **Chart...** is the song's sheet music: open one, **New chord chart...**,
+  **Attach a file...** and **Remove** (see *Charts on the stand*).
+  **Backing track...** opens the song's track (see *Backing tracks*).
 
 ### Making a set list
 
@@ -614,11 +643,11 @@ tablet*.
 ## Charts on the stand
 
 A song can carry its sheet music -- a lead sheet, a scan, a typed chord
-chart -- and the tablet shows it. Press **Attach... ▸ Attach a chart...** under
+chart -- and the tablet shows it. Press **Chart... ▸ Attach a file...** under
 the songs list, or drop a file onto a song. PDF, PNG, JPEG, GIF and WebP are
 accepted, plain text (`.txt`) is shown as it is in a monospace face, and a
 ChordPro file (`.cho`, `.crd`, `.chordpro`) has its chords set above the
-words. A song may have several; they appear as tabs. **Attach... ▸ Remove
+words. A song may have several; they appear as tabs. **Chart... ▸ Remove
 <name>** takes one off the song.
 
 The file is copied, not referred to: it goes into a folder beside the setup
@@ -631,6 +660,24 @@ A PDF is turned into page images when it is attached, so every tablet turns
 it a page at a time: tap the right third of the page or swipe left for the
 next page, the left third or swipe right for the previous. This needs the
 `poppler-utils` package; without it the tablet scrolls the PDF instead.
+
+### Charts on the laptop
+
+**Chart... ▸ Open <name>...** opens the chart in a window of its own on the
+laptop, to look it over before the gig: a PDF a page at a time (**< Page**,
+**Page >**, the arrow keys), an image, **-** / **+** / **Fit** for the size,
+and **Open in the system app...** for anything else. A song with several
+charts shows them as tabs.
+
+A typed chart -- plain text or ChordPro -- opens with its text on the left
+and the page as the stand will show it on the right, so a chord can be fixed
+in the dressing room: edit, watch the page follow, press **Save** (Ctrl+S).
+The tablet shows the saved version from then on. **Chart... ▸ New chord
+chart...** starts one from a few lines that show the ChordPro way: chords in
+square brackets before the syllable they fall on, `{title: ...}`,
+`{subtitle: ...}` and `{comment: ...}` for the headings; a line without
+brackets is just words. Writing notation -- a score with staves -- is a job
+for MuseScore or the like; export its PDF and attach that.
 
 On the tablet, a song with a chart shows a **Chart** button on its row. It
 opens the chart in its own tab, which **follows the set list**: when the song
@@ -646,7 +693,7 @@ mix, or drums, bass and pads on their own, plus a click and spoken cues for
 your in-ears -- and MIDI files, whose parts play on instruments of your
 choosing.
 
-**Attach... ▸ Backing track...** on a song opens its track. **+ Add audio or
+**Backing track...** under the songs list opens the song's track. **+ Add audio or
 MIDI...** adds WAV, AIFF, FLAC, Ogg or MP3 files, or MIDI files (or drop them
 on the song in the songs panel). Like charts, they are copied into the folder
 beside the setup, so the setup and its tracks travel together. Adding a file
@@ -728,8 +775,56 @@ to the same thing. To remove a part's instrument altogether, press its **X**
 here.
 
 **Count-in** clicks a number of beats at the song's tempo before the files
-start: **No count-in** or **1** to **8 beats**, **on** the output you choose
--- usually the in-ears.
+start: **No count-in** or **1** to **8 beats**. **Click** adds a metronome
+through the whole song, accented on beat 1 of every bar (**4 beats per bar**
+unless you say otherwise), following the track through vamps and jumps. Both
+are **Heard on** the output you choose -- usually the in-ears, where the
+audience never hears them. A song with no files and a click is a plain
+metronome: Play runs it at the song's tempo until Stop. The tablet's Play bar
+has a **Click** button to turn it on or off from the stand.
+
+When a recording does not start on the beat -- a breath, a lead-in -- set
+**First beat** (see *Finding the tempo* below) and the click, the count-in
+and the bar lines all line up with it: the count-in's last click lands one
+beat before the music's first.
+
+### Playing the files at another tempo, or in another key
+
+Once a song knows the tempo its files were made at (**Files at**, which
+**Find the tempo** fills in), its files follow the song's own tempo: set the
+song to 110 where the files are 117.4 (**Edit...** on the song) and they play
+stretched to 110, drums, bass and all, with the click and the bar lines
+along. The window says so (*files stretched -6%*). **Transpose the files with
+the song** makes the song's transpose move the files' pitch too, and the MIDI
+files' notes (drums aside), so one setting takes the whole band down a step
+for the singer. Either change re-reads the files, which takes a few seconds,
+so make it at the sound check, not between the verse and the chorus.
+
+The stretching is StageRig's own and needs nothing installed. It is made for
+the changes a gig needs -- a few percent of tempo, a few semitones -- and a
+track pushed far from its own speed starts to smear, as every such method
+does. Blank **Files at** and the files play exactly as they are.
+
+### Finding the tempo
+
+Under **Tempo** the window says what tempo the song uses: its own, or
+whatever the tempo is now when the song sets none (**Edit...** on the song
+sets it by hand). **Find the tempo in the audio...** listens to the song's
+longest audio file and comes back with its tempo and where the first beat of
+a bar falls -- *123.4 bpm, with the first beat of a bar at 0:00.42* -- and
+asks before using it. **Use it** sets the song's tempo and **First beat**,
+and the click, the count-in and the bar lines on the timeline follow.
+
+It works on recordings with a steady beat, which is nearly every backing
+track. A track that speeds up, slows down or breathes gets the tempo it
+mostly keeps, and the window says so (*a faint beat: check it against the
+click*). Half or double is the one thing no detector can settle -- a
+backbeat at 168 is also a slow 84 -- so if the band counts it twice or half
+as fast, **x2** and **/2** fix the tempo in one press. If the accent lands on
+the wrong beat of the bar -- the click says *one* where the band says
+*three* -- **< beat** and **beat >** move the first beat a beat at a time.
+**First beat** can also be typed. MIDI files bring their own tempo and need
+none of this.
 
 A song's files are read in when the song is selected, so they can jump and
 loop without a gap; the line beside **Play** says *loading* until they are
@@ -737,19 +832,63 @@ ready, and a Play pressed before then starts the moment they are.
 
 ### Sections and vamps
 
-**+ Add section** under **Sections** marks where a section starts -- type the
-time (*1:23.5*), or press it while the track plays to mark the spot you are
-at. Each section runs to the next one; anything before the first is a section
-of its own. Click a section's name to rename it; **X** removes the marker (the
-music is untouched).
+Under **SECTIONS** the track is drawn along time: each audio file as a
+waveform, each MIDI file as its notes, with a ruler in minutes and seconds
+and, when the song's tempo is known (a MIDI file brings its own; an audio
+file uses the song's tempo), bar numbers too. The sections sit above it as
+named blocks, each running to the next; whatever comes before the first is a
+section of its own, *Start*.
 
-- **Vamp** makes a section repeat until it is released: the intro goes round
-  while the singer talks to the audience, then goes on into the verse at the
-  end of the pass you are in.
-- **Go** goes to a section -- when the current one ends, so the band stays in
-  time. While the track is stopped, it sets where Play starts.
+- **Click** the timeline to put the green cue there; **Play** (or Space)
+  plays the track from the cue, so you can listen for the spot. **Stop** is
+  the same button.
+- **Double-click** where a section starts to make one, and name it. Or press
+  **Mark section here** while the track plays, at the moment the chorus
+  lands; stopped, it marks the cue.
+- **Drag** a section's flag to move it. It snaps to the nearest bar line
+  when it is close; hold Alt to drag freely. The arrow keys nudge a selected
+  section a tenth of a second (Shift: a second).
+- **Double-click** a section to rename it. **Right-click** it for **Vamp**,
+  **Go** and **Remove**; Delete removes the selected one. The list under the
+  timeline shows the same sections with their times, to type one exactly.
+- **Ctrl+wheel** zooms around the mouse, the wheel scrolls, **-** / **+** /
+  **Fit** do the same from the buttons.
+
+#### What a section does when the track enters it
+
+Each section can carry a cue sheet: right-click it on the timeline (or press
+its **Actions...** button in the list) and **+ Add...** offers, in the setup's
+own words:
+
+- **Put a keyboard on a program** -- Upper to *012 Big Strings* when the
+  chorus arrives, so your hands never leave the keys.
+- **Mute** or **unmute a part of the MIDI files** -- the piano part plays
+  itself in the verse and is yours in the chorus.
+- **Bypass an effect** or **turn an effect on** -- the delay only in the solo.
+- **Send MIDI to a device** -- a program change, controller or note to a
+  lighting desk or a hardware synth: scene 5 when the bridge starts.
+
+They fire the moment the track enters the section: at Play, at a jump, or by
+playing into it. A vamp going round does not fire them again. **Try** on
+each one does it now, to hear or see it; the section shows how many it has.
+Removing a section removes its sheet.
+
+A **Vamp** section repeats until it is released: the intro goes round while
+the singer talks to the audience, then goes on into the verse at the end of
+the pass you are in. **Go** goes to a section when the current one ends, so
+the band stays in time; while the track plays, clicking a section on the
+timeline does the same. While the track is stopped, Go sets where Play starts.
+Removing a section never touches the music.
 
 ### Playing it
+
+Play begins where the sound begins: silence at the head of a file is never
+played, so a track exported with an empty bar in front starts the moment you
+press Play. A lead-in that is not silent -- a quiet count-in recorded into
+the file, a breath -- is yours to cut: right-click the timeline where the
+song should begin and choose **Start the song here**, or type the time under
+**Starts at** (blank goes back to the first sound). Sections before that
+point are still there to go to, and the cue shows where Play will start.
 
 Selecting a song makes its track ready but never starts it: starting is always
 on purpose. Then any of these starts it, and the same again stops it with a
@@ -789,10 +928,10 @@ name.
 
 **Tablet** in the toolbar starts a small web app on your network. Nothing is
 installed on the tablet: it is a web page, and a laptop or phone on the same
-network does the same job. It has three tabs: **Set list** (the running order
-and the backing track), **Now** (the song's sound, adjustable) and
-**Programs** (every program on every keyboard). **TAP TEMPO** and **PANIC**
-are in the header.
+network does the same job. It has two tabs: **Set list** (the running order
+and the backing track) and **Programs** (every program on every keyboard, with
+what each keyboard is on now at the top). **TAP TEMPO** and **PANIC** are in
+the header.
 
 ![The tablet set list: the song you are on in large type, the running order, and a search](images/tablet-setlist.png)
 
@@ -819,8 +958,8 @@ Anyone on your network who has the code can change your sounds, which is the
 right level of care for a stage tool and no more: do not expect it to be safe on
 an untrusted network.
 
-`?tab=songs`, `?tab=now` or `?tab=programs` on the address opens the page on
-that tab, for a home-screen shortcut straight to it.
+`?tab=songs` or `?tab=programs` on the address opens the page on that tab,
+for a home-screen shortcut straight to it.
 
 ### Set list
 
@@ -842,36 +981,13 @@ With a song selected (its track ready but not started), the Play bar at the
 top carries **Play** / **Stop** and where the track is, under a **BACKING
 TRACK** caption, with the song's sections under it: tap a section to go there
 when the current one ends; a vamping section reads *↻ vamp*, and **End vamp
-▸** lets it through. **Parts of the track** lists the MIDI files' parts --
+▸** lets it through. **Click** turns the song's metronome on or off (see
+*Backing tracks*). **Parts of the track** lists the MIDI files' parts --
 *Piano: Acoustic Grand Piano · General MIDI*, *Strings: Upper: Big Strings*
 -- each with **Mute** (for the part you will play yourself tonight) and, when a
 plugin in the song's own program plays it, **GUI** to open that plugin's
 window on the tablet like any other. What plays each part is chosen on the
 laptop, in the song's Backing track window; the tablet reads it.
-
-### Now
-
-The **Now** tab is the song's sound, adjustable from the stand -- the things
-that come up at a gig, and nothing that belongs in rehearsal:
-
-- **TRANSPOSE (keyboards only)**: **−** and **+** shift the keyboards' notes
-  in semitones, down a step for the singer. The backing track's parts are not
-  shifted. A note you are holding when you press it is let go properly.
-- **Save this sound to "song"** makes the song in play remember the programs
-  on every input, the tempo and the transpose as they are now, so a fix made
-  at the sound check is still there at the second set.
-- **INSTRUMENTS**: each keyboard's program with its instruments, **ON** /
-  **OFF** for a layer, and a fader for its level.
-- **EFFECTS**: the instruments' own, the program's, and the MIDI chain's --
-  each with **ON** / **OFF**, which is the effect's bypass: lose the reverb
-  when the room is wet.
-- **OUTPUTS**: each one's volume into the desk.
-
-Every change is live and saved with the setup, exactly as the same change on
-the laptop would be: turning a layer down on the tablet turns it down in the
-program. Adding or removing instruments and effects, mappings, splits and
-layers stay on the laptop, on purpose: they are slow on a touch screen and
-easy to get wrong two songs before you need the sound.
 
 ### Programs
 
@@ -1013,6 +1129,61 @@ Without a backing track playing, plugins are told the music is always running,
 from bar one at the current tempo. When a backing track starts, the position
 jumps to its bar one and follows it. If a plugin's delay still does not sync,
 it may simply never ask the host for the tempo; set it in the plugin.
+
+### Looping a passage
+
+**Loop** beside Footswitches... loops what you play on the selected keyboard: press it
+and play; press it again and the passage goes round on its own, trimmed to
+whole bars at the rig's tempo (the nearest; at least one), while you play
+over it. Press again to stop it, again to start it from the top; right-click
+for **Clear**. The button reads *Rec...*, then *2 bars*, then *Loop >*.
+
+A footswitch is the way to do it with your hands on the keys: **Footswitches
+▸ Loop: record / play / stop**, and a second pedal for **Loop: clear**. The
+pedal loops the keyboard it is pressed on. Press it on the *one*: the loop
+starts the moment you press, and ends on the nearest bar line to your second
+press, so a bar's passage played a little long or short still comes round
+in time. The loop plays into whatever program the keyboard is on, so a
+program change changes its sound.
+
+### Recording the gig
+
+**Options ▸ Record the gig** writes every output to its own WAV file --
+*Main.wav*, *In-ears.wav* -- exactly as it left for the desk, after the
+master effects and volume, and everything the keyboards sent to
+*keyboards.mid*, a track per input, timed to the clock. The status bar reads
+**REC** with the time; **Options ▸ Stop recording** finishes the files. A
+take is a folder named by date and time inside `MySetup.stagerig.recordings/`
+beside the setup, so it travels with it like the charts. Listen back to a
+rehearsal, or keep the night that went well.
+
+### Ableton Link
+
+**Options ▸ Ableton Link** shares the tempo and the beat over the network
+with anything else that has Link: Live or Bitwig on another laptop, a loop
+app on a phone, a DJ's software, a drum machine that speaks it. Nothing to
+connect: they find each other on the wifi (StageRig's own hotspot works
+too), and the tempo readout shows *Link · 2* for two others. From then on
+the rig's tempo and theirs are one number, from whichever side set it last:
+tap yours and they follow, let the drummer tap theirs and your click,
+arpeggiators, delays and MIDI clock follow. **Play** on the backing track
+waits for the next shared bar line, count-in included, so its bar one is
+the band's. **Link also starts and stops the others** makes Play and Stop
+go both ways; off, each side keeps its own transport. A venue network that
+keeps devices apart gives *Link* with no number, and nothing else changes.
+
+Link is Ableton's, open source, and is built in -- see *Licence* in the
+README.
+
+### MIDI clock to hardware
+
+**Options ▸ Send MIDI clock to** lists the MIDI devices on the computer; tick
+one and StageRig sends it MIDI clock -- 24 ticks a beat at the rig's tempo --
+so a drum machine, a hardware synth's arpeggiator or a delay pedal keeps time
+with everything else. A tapped tempo reaches it at once. When the backing
+track starts, the device gets **Start**, so its bar one is the track's; when
+the track stops, **Stop**. Several devices can be ticked. The choice is saved
+with the setup.
 
 ## Printing the program list
 
@@ -1271,7 +1442,9 @@ size) and `pipewireTakeover`.
 | `Z` / `X` | Shift the on-screen keyboard down or up an octave. |
 | Double-click a part's level in the Backing track window | Back to 0 dB: the part as the file has it. |
 | The piano roll (**Edit notes...**) | Double-click adds a note (on a note: deletes it); drag its right edge to resize; Delete removes the selection; arrows move it a step (Shift: an octave); Ctrl+wheel zooms; Space plays; `Ctrl+Z` / `Ctrl+Shift+Z` undo and redo. |
-| Click a section's name or time in the Backing track window | Edits it. |
+| The chart window | Arrow keys or Page Up / Page Down turn a PDF's pages; Ctrl+wheel zooms; `Ctrl+S` saves a typed chart. |
+| The timeline in the Backing track window | Click sets the cue (Play starts there); double-click starts a section; drag a flag moves it (snaps to bars; Alt: free); double-click a section renames it; right-click: vamp, go, remove; Delete removes the selected one; arrows nudge it; Ctrl+wheel zooms; Space plays. |
+| Click a section's name or time in the list under the timeline | Edits it exactly. |
 | Escape | Closes a dialog. |
 
 ## Appendix: If you know Ableton Live

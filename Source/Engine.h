@@ -5,6 +5,9 @@
 #include "RemotePlugin.h"
 #include "SongPlayer.h"
 #include "MidiOuts.h"
+#include "Recorder.h"
+#include "MidiFx.h"
+#include <ableton/Link.hpp>
 #include "GmSynth.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -127,6 +130,40 @@ public:
         belongs to the rig, not to one sound. 0 = nothing assigned. Channel 0
         means any channel, so a footswitch works wherever it is plugged in. */
     int getTapTempoCC() const                       { return setup.tapTempoCC; }
+
+    /** Ableton Link: the tempo and the beat shared over the network with
+        anything else that has Link -- Live or Bitwig on another laptop, a
+        phone's loop app, a DJ's software. On, the rig's tempo and Link's are
+        one number, from whichever side changed it last, and Play on the
+        backing track waits for the next shared bar line. With start/stop
+        sync, Play and Stop go both ways too. Message thread. */
+    void setLinkEnabled (bool on);
+    bool isLinkEnabled() const                      { return link != nullptr && link->isEnabled(); }
+    void setLinkStartStopSync (bool on);
+    bool isLinkStartStopSync() const                { return link != nullptr && link->isStartStopSyncEnabled(); }
+    int  getLinkPeers() const                       { return linkPeers.load(); }
+    double getLinkTempoForTesting() const           { return link != nullptr ? link->captureAppSessionState().tempo() : 0.0; }
+
+    /** MIDI clock out: 24 ticks a beat at the rig's tempo to these devices,
+        with Start when the backing track starts and Stop when it stops, so
+        a drum machine or an arpeggiator on a hardware synth keeps time with
+        the rig. Message thread. */
+    const std::vector<Setup::MidiPortRef>& getClockOut() const { return setup.clockOut; }
+    bool sendsClockTo (const juce::String& identifier) const;
+    void setClockTo (const juce::MidiDeviceInfo&, bool on);
+    /** Ticks produced since the engine started, for tests. */
+    int  getClockTicksForTesting() const            { return clockTicks.load(); }
+
+    /** Recording the gig: every output to a WAV as it leaves for the desk,
+        and what the keyboards sent to a MIDI file, in a dated folder beside
+        the setup. Message thread. */
+    bool startRecording (juce::String& error);
+    void stopRecording();
+    bool isRecording() const                        { return recorder.isRecording(); }
+    double getRecordingSeconds() const              { return recorder.elapsedSeconds(); }
+    juce::File getRecordingFolder() const           { return recorder.getFolder(); }
+    /** Where takes go: "<setup>.recordings/" beside the setup file. */
+    juce::File getRecordingsFolder() const;
     void setTapTempoCC (int cc);
 
     /** Waits for the next controller and makes that the tap controller, so you
@@ -280,10 +317,28 @@ public:
     void setSongStem (int songIndex, int stemIndex, const StemDef&);
     void setSongCountIn (int songIndex, int beats, int output);
     void setSongMarkers (int songIndex, const std::vector<MarkerDef>&);
+    /** The click through the song, and its accent; takes effect at once if the song is the one armed. */
+    void setSongClick (int songIndex, bool on, int beatsPerBar);
+    /** Where beat 1 of bar 1 falls in the song's files (seconds): the click and the count-in line up with it. */
+    void setSongFirstBeat (int songIndex, double seconds);
+    /** Where Play from the top begins in the song's files (seconds); 0 = the first sound. */
+    void setSongStart (int songIndex, double seconds);
+    /** The tempo the song's audio files were made at (0 = unknown). With the
+        song's tempo set to something else, the files play stretched to it. */
+    void setSongTrackBpm (int songIndex, double bpm);
+    /** The song's tempo, its files' tempo and its first beat in one edit: the files are re-read once, if the stretch changed. */
+    void setSongTempoAndFiles (int songIndex, double tempoBpm, double trackBpm, double firstBeat);
+    /** Whether the song's transpose also moves its files' pitch. */
+    void setSongTransposeTrack (int songIndex, bool on);
+    /** How the armed track is playing against its files: 1 = as they are. */
+    double getTrackTimeScale() const                { return player != nullptr ? player->getTimeScale() : 1.0; }
+    int    getTrackPitchSemitones() const           { return player != nullptr ? player->getPitchSemitones() : 0; }
+    /** Where the armed track will start from while stopped (seconds). */
+    double getTrackCue() const                      { return player != nullptr ? player->getCueSeconds() : 0.0; }
 
     /** The song whose track is ready to play: the one selected last, or -1. */
     int  getTrackSong() const                       { return trackSong; }
-    bool hasTrack() const                           { return player != nullptr && player->hasStems(); }
+    bool hasTrack() const                           { return player != nullptr && (player->hasStems() || player->hasClick()); }
     /** False while the stems are still being read into memory. */
     bool isTrackReady() const                       { return player != nullptr && player->isReady(); }
     float getTrackLoadProgress() const              { return player != nullptr ? player->getLoadProgress() : 0.0f; }
@@ -302,6 +357,14 @@ public:
     juce::String getTrackSectionName (int i) const  { return player != nullptr ? player->getSectionName (i) : juce::String(); }
     double getTrackSectionStart (int i) const       { return player != nullptr ? player->getSectionStart (i) : 0.0; }
     bool isTrackSectionVamp (int i) const           { return player != nullptr && player->isSectionVamp (i); }
+    int  getTrackSectionMarker (int i) const        { return player != nullptr ? player->getSectionMarker (i) : -1; }
+    /** Does what one action says, now: the section's cue sheet, one line. Also for trying one out from the window. */
+    void performAction (int songIndex, const ActionDef&);
+    /** A line of words for an action, for the window and the tablet. */
+    juce::String describeAction (const ActionDef&) const;
+    /** Message thread: the MIDI output ports StageRig can send to, for choosing one. */
+    juce::Array<juce::MidiDeviceInfo> midiOutputDevices() const;
+    void sendMidiToDevice (const juce::String& identifier, const juce::String& name, const juce::MidiMessage&);
     int  getTrackSection() const                    { return player != nullptr ? player->getCurrentSection() : -1; }
     int  getQueuedTrackSection() const              { return player != nullptr ? player->getQueuedSection() : -1; }
     bool isTrackVamping() const                     { return player != nullptr && player->isVamping(); }
@@ -313,6 +376,23 @@ public:
     int  getSectionCC() const                       { return setup.sectionCC; }
     void setSectionCC (int cc);
     void armSectionLearn()                          { sectionLearnArmed.store (true); }
+
+    /** Looping a passage on a keyboard: record what you play, and it goes
+        round in whole bars at the rig's tempo while you play over it. One
+        pedal does it all -- press to record, press to play, press to stop,
+        press to play again -- and a second clears. The pedal works on the
+        keyboard it is pressed on; the button on the panel on the selected one. */
+    enum class LoopState { empty, recording, playing, stopped };
+    LoopState getLoopState (int inputIndex) const;
+    int  getLoopBars (int inputIndex) const;
+    void loopPedal (int inputIndex);
+    void loopClear (int inputIndex);
+    void loopStop (int inputIndex);
+    int  getLooperCC() const                        { return setup.looperCC; }
+    int  getLooperClearCC() const                   { return setup.looperClearCC; }
+    void setLooperCC (int cc);
+    void setLooperClearCC (int cc);
+    void armLooperLearn (bool clearPedal)           { (clearPedal ? looperClearLearnArmed : looperLearnArmed).store (true); }
     /** The backing-track input: where the songs' MIDI files play. -1 while none. */
     int  getTrackInput() const                      { return setup.trackInput(); }
     /** Makes the backing-track input if there is none, and returns its index. */
@@ -411,6 +491,10 @@ public:
     void setMidiSendPort (int inputIndex, int program, int slot, int effect, const juce::MidiDeviceInfo&);
     /** 0 = as the MIDI arrives at the send, 1..16 = rechannelled for its port. */
     void setMidiSendChannel (int inputIndex, int program, int slot, int effect, int channel);
+    /** A built-in MIDI effect (arpeggiator, chord, scale) at the end of a slot's MIDI chain. */
+    bool addBuiltInMidiEffect (int inputIndex, int program, int slot, EffectDef::Kind kind);
+    /** Its settings, from `def`'s arp/chord/scale fields; takes effect at once. */
+    void setBuiltInMidiEffect (int inputIndex, int program, int slot, int effect, const EffectDef& def);
     /** Sent from the port when the program is selected, as an external instrument's patch; -1 = not sent. */
     void setMidiSendPatch (int inputIndex, int program, int slot, int effect, int bankMsb, int bankLsb, int patch);
 
@@ -494,7 +578,8 @@ private:
     {
         enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
                     songStep, songLearn, editorClosed, outputVolume, outputLearn,
-                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn };
+                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn, sectionEntered, mappedSwitch, looperLearn,
+                    linkTempo, linkStartStop };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -651,6 +736,13 @@ private:
 
     // External instruments
     MidiOuts midiOuts;
+    Recorder recorder;
+    std::unique_ptr<ableton::Link> link;
+    std::atomic<int> linkPeers { 0 };
+    std::atomic<double> linkTempoFromPeer { 0.0 };
+    std::atomic<bool> linkPlayingFromPeer { false };
+    /** Samples until the next shared bar line, less `countInBeats`, at the output; 0 when Link is off. */
+    juce::int64 linkStartDelay (int countInBeats, int beatsPerBar) const;
     double chunkStartMs = 0.0;                    // audio thread: when this chunk will be heard, on Time's hi-res clock
     double outputLatencyMs = 0.0;
     const float* const* chunkIn = nullptr;        // audio thread: this chunk's device inputs
@@ -666,8 +758,24 @@ private:
 
     bool trackProblemsReported = true;            // message thread
     std::atomic<int> sectionCCAtomic { 0 };
+
+    // MIDI clock out: the ports (resolved on the message thread), read by the audio thread
+    std::atomic<int> clockPorts[MidiOuts::kMaxPorts] {};
+    std::atomic<int> numClockPorts { 0 };
+    std::atomic<double> tempoAtomic { 120.0 };
+    std::atomic<int> beatsPerBarAtomic { 4 };     // the song's bar, for the looper
+    int linkStartBeats = 0, linkStartBpb = 4;     // a Play held for Link: its count-in and bar, for placing it when ready
+    static double stretchOf (const SongDef&);     // the files' length over their own: 1 when they play as they are
+    std::atomic<int> clockTicks { 0 };
+    double clockSamplesToNext = 0.0;              // audio thread
+    void resolveClockPorts();                     // message thread
+    void sendClock (int numSamples, double chunkStartMs, bool trackStarted, bool trackStopped);   // audio thread
     std::atomic<bool> sectionLearnArmed { false };
+    std::atomic<int> looperCCAtomic { 0 }, looperClearCCAtomic { 0 };
+    std::atomic<bool> looperLearnArmed { false }, looperClearLearnArmed { false };
+    void loopProcess (InputRuntime& in, int numSamples, bool panicNow);   // audio thread
     int trackSong = -1;                           // message thread
+    int lastTrackSection = -1;                    // audio thread: to notice the track entering a section
     std::atomic<int> transportCCAtomic { 0 };     // read on the MIDI thread
     std::atomic<bool> transportLearnArmed { false };
     void resetPluginPositions();                  // audio thread, under lock

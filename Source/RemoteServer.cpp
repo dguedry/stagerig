@@ -88,6 +88,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .sheet .part button.on { background:#a3282d; }
   .sheet .part.muted .who { opacity:.45; }
   .transport button.parts { background:var(--row); color:#fff; font-weight:700; }
+  .transport button.click.on { background:var(--accent); color:#06121f; }
   .loading { color:#d8a657; font-size:14px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
   button.p { background:var(--row); color:#fff; border:0; border-radius:10px; padding:14px 12px; text-align:left;
@@ -107,25 +108,6 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
          padding:9px 14px; font-size:13px; font-weight:800; letter-spacing:.04em; }
   #tap:active { background:var(--accent); color:#06121f; }
 
-  /* The Now page: the song's sound, adjustable from the stand. Rows big
-     enough for a thumb; faders that a finger can land on. */
-  .nowtop { display:flex; align-items:center; gap:8px; margin:14px 12px 0; flex-wrap:wrap; }
-  .nowtop .tr { display:flex; align-items:center; gap:6px; background:var(--panel); border-radius:12px; padding:6px 8px; }
-  .nowtop .tr span { color:var(--dim); font-size:12px; font-weight:700; letter-spacing:.08em; margin:0 4px; }
-  .nowtop .tr button { background:var(--row); color:#fff; border:0; border-radius:8px; width:44px; height:40px; font-size:20px; font-weight:800; }
-  .nowtop .tr b { min-width:64px; text-align:center; font-variant-numeric:tabular-nums; font-size:17px; }
-  .nowtop .save { margin-left:auto; background:var(--accent); color:#06121f; border:0; border-radius:12px; padding:12px 16px; font-weight:800; font-size:14px; }
-  .nowtop .save:disabled { opacity:.45; }
-  .nowtop .saved { color:var(--dim); font-size:13px; }
-  .nrow { display:flex; align-items:center; gap:10px; background:var(--row); border-radius:10px; padding:8px 10px; margin-top:6px; }
-  .nrow .tog { flex:none; width:54px; padding:11px 0; border:0; border-radius:8px; background:#2a2e38; color:var(--dim); font-weight:800; font-size:12px; letter-spacing:.04em; }
-  .nrow .tog.on { background:#4fb86a; color:#06121f; }
-  .nrow .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; }
-  .nrow.off .nm { opacity:.45; }
-  .nrow input[type=range] { flex:2; min-width:90px; accent-color:var(--accent); height:28px; }
-  .nrow .db { flex:none; width:62px; text-align:right; font-variant-numeric:tabular-nums; color:var(--dim); font-size:13px; }
-  .nrow.fx .nm { font-size:14px; color:#d7dbe2; }
-  .nsec { color:var(--dim); font-size:12px; font-weight:700; letter-spacing:.08em; margin:12px 0 2px; }
   /* Tabs: the set list is what you look at during a gig, the programs are
      what you look at while building one. */
   .tabs { display:flex; gap:8px; padding:10px 12px 0; }
@@ -229,11 +211,9 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 </div>
 <div class="tabs">
   <button id="tabSongs" class="on">Set list</button>
-  <button id="tabNow">Now</button>
   <button id="tabProgs">Programs</button>
 </div>
 <div id="setview"></div>
-<div id="nowview"></div>
 <div id="inputs"></div>
 </div>
 <script>
@@ -263,7 +243,7 @@ let rev = -1;
 function askForCode(message) {
   document.getElementById("gate").style.display = "flex";
   document.getElementById("gatemsg").textContent = message || "";
-  for (const id of ["inputs", "setview", "nowview"]) document.getElementById(id).style.display = "none";
+  for (const id of ["inputs", "setview"]) document.getElementById(id).style.display = "none";
   document.querySelector(".tabs").style.display = "none";
   document.querySelector(".hdr").style.display = "none";
   const f = document.getElementById("codeform");
@@ -309,24 +289,21 @@ const filters = {};          // input index -> chosen group, "" for all
    Programs, someone playing a gig works in the set list, and neither should
    have to re-pick it every time the page reloads. */
 let tab = localStorage.getItem("tab") || "songs";
-/* ?tab=now (or songs, programs) opens on that page: a home-screen shortcut
-   straight to the Now page for the player who only ever adjusts. */
-{ const want = new URLSearchParams(location.search).get("tab"); if (want) { tab = want; localStorage.setItem("tab", tab); } }
+/* ?tab=songs or ?tab=programs opens on that page: a home-screen shortcut
+   straight to the one a player always wants. */
+{ const want = new URLSearchParams(location.search).get("tab"); if (want === "songs" || want === "programs") { tab = want; localStorage.setItem("tab", tab); } }
+if (tab !== "songs" && tab !== "programs") tab = "songs";
 let songFilter = "";          // what is typed in the song search, if anything
 
 function syncTabs() {
   const t = tab;
   document.getElementById("tabSongs").className = t === "songs" ? "on" : "";
-  document.getElementById("tabNow").className   = t === "now" ? "on" : "";
   document.getElementById("tabProgs").className = t === "programs" ? "on" : "";
   document.getElementById("setview").style.display = t === "songs" ? "" : "none";
-  document.getElementById("nowview").style.display = t === "now" ? "" : "none";
   document.getElementById("inputs").style.display  = t === "programs" ? "" : "none";
-  if (t === "now") startNow(); else stopNow();
 }
 
 document.getElementById("tabSongs").onclick = () => { tab = "songs";    localStorage.setItem("tab", tab); syncTabs(); };
-document.getElementById("tabNow").onclick   = () => { tab = "now";      localStorage.setItem("tab", tab); syncTabs(); };
 document.getElementById("tabProgs").onclick = () => { tab = "programs"; localStorage.setItem("tab", tab); syncTabs(); };
 
 /* The backing track's button and clock, kept current twice a second while the
@@ -337,11 +314,12 @@ function showTransport(t) {
   if (!transportUi || !t) return;
   transportUi.button.textContent = t.running ? "Stop" : "Play";
   transportUi.button.classList.toggle("running", !!t.running);
+  if (transportUi.clickBtn) transportUi.clickBtn.classList.toggle("on", !!t.click);
   const sec = (t.sections || [])[t.section];
   const status = !t.ready ? ("Loading " + Math.round((t.loading || 0) * 100) + "%")
     : t.countIn ? "Counting in…"
     : ((t.sections || []).length > 1 && sec ? sec.name + (t.vamping ? " — repeating (vamp)" : "") : t.name) + " · "
-      + mmss(t.pos) + " / " + mmss(t.len)
+      + (t.metronome ? "click " + mmss(t.pos) : mmss(t.pos) + " / " + mmss(t.len))
       + (t.queued >= 0 && t.sections[t.queued] ? " · next: " + t.sections[t.queued].name : "");
   transportUi.text.innerHTML = '<small></small><span></span>';
   transportUi.text.querySelector("small").textContent = "BACKING TRACK";
@@ -461,12 +439,18 @@ function renderSets(s) {
     const parts = document.createElement("button"); parts.className = "parts"; parts.textContent = "Parts of the track";
     parts.style.display = "none";
     parts.onclick = showParts;
-    bar.appendChild(b); bar.appendChild(t); bar.appendChild(parts);
+    const click = document.createElement("button"); click.className = "parts click"; click.textContent = "Click";
+    click.title = "The metronome in the in-ears, through the song";
+    click.onclick = async () => {
+      try { showTransport(await api("/api/transport?do=click", { method: "POST" })); }
+      catch (e) { if (!e.gate) show(e.message); }
+    };
+    bar.appendChild(b); bar.appendChild(t); bar.appendChild(click); bar.appendChild(parts);
     wrap.appendChild(bar);
     const secs = document.createElement("div"); secs.className = "sections";
     wrap.appendChild(secs);
     wrap.appendChild(cap);
-    transportUi = { button: b, text: t, sections: secs, partsBtn: parts, parts: [], key: "", caption: cap };
+    transportUi = { button: b, text: t, sections: secs, partsBtn: parts, clickBtn: click, parts: [], key: "", caption: cap };
   } else {
     transportUi = null;
   }
@@ -891,130 +875,6 @@ document.getElementById("panic").onclick = async () => {
 };
 if (token) refresh(true); else askForCode("");
 setInterval(() => { if (token) refresh(false); }, 1000);
-
-/* The Now page: the song's sound, from the stand. What actually comes up
-   at a gig -- a layer too loud, lose the reverb, down a step for the singer,
-   the keyboards' output into the desk -- and nothing that belongs in
-   rehearsal (no adding plugins, no mappings). Every change is live and saved
-   with the setup like the same change on the laptop; "Save to song" also
-   makes the song remember the programs, tempo and transpose as they are now.
-   Polled once a second while showing, never while a finger is on a fader. */
-let nowTimer = null, nowDragging = 0, nowKey = "";
-async function pollNow() {
-  if (nowDragging) return;
-  try {
-    const d = await api("/api/now");
-    const key = JSON.stringify(d);
-    if (key !== nowKey) { nowKey = key; renderNow(d); }
-  } catch (e) { if (e.gate) askForCode(""); }
-}
-function startNow() { if (!nowTimer) { nowTimer = setInterval(pollNow, 1000); pollNow(); } }
-function stopNow()  { if (nowTimer) { clearInterval(nowTimer); nowTimer = null; nowKey = ""; } }
-async function nowPost(path) {
-  try { await api(path, { method: "POST" }); }
-  catch (e) { if (e.gate) askForCode(""); else show(e.message); }
-}
-const dbText = v => v <= -60 ? "\u2212\u221e dB" : (v > 0 ? "+" : "") + Number(v).toFixed(1) + " dB";
-function fader(value, label, send) {
-  const r = document.createElement("input");
-  r.type = "range"; r.min = -60; r.max = 12; r.step = 0.5; r.value = value;
-  let last = 0, pending = null;
-  const push = () => { pending = null; last = Date.now(); send(parseFloat(r.value)); };
-  r.oninput = () => {
-    label.textContent = dbText(parseFloat(r.value));
-    if (Date.now() - last > 80) push(); else if (!pending) pending = setTimeout(push, 80);
-  };
-  r.onchange = () => { if (pending) clearTimeout(pending); push(); };
-  r.onpointerdown = () => { nowDragging++; };
-  const up = () => { nowDragging = Math.max(0, nowDragging - 1); };
-  r.onpointerup = up; r.onpointercancel = up;
-  return r;
-}
-function nowRow(cls, onNow, name, toggle, right) {
-  const row = document.createElement("div"); row.className = "nrow " + cls + (onNow ? "" : " off");
-  const t = document.createElement("button"); t.className = "tog" + (onNow ? " on" : ""); t.textContent = onNow ? "ON" : "OFF";
-  t.onclick = () => { const want = !t.classList.contains("on"); t.classList.toggle("on", want); t.textContent = want ? "ON" : "OFF"; row.classList.toggle("off", !want); toggle(want); };
-  const nm = document.createElement("div"); nm.className = "nm"; nm.textContent = name;
-  row.appendChild(t); row.appendChild(nm);
-  if (right) right.forEach(x => row.appendChild(x));
-  return row;
-}
-function renderNow(d) {
-  const root = document.getElementById("nowview");
-  root.innerHTML = "";
-
-  const top = document.createElement("div"); top.className = "nowtop";
-  const tr = document.createElement("div"); tr.className = "tr";
-  const lbl = document.createElement("span"); lbl.textContent = "TRANSPOSE (keyboards only)";
-  const minus = document.createElement("button"); minus.textContent = "\u2212";
-  const val = document.createElement("b");
-  const plus = document.createElement("button"); plus.textContent = "+";
-  let st = d.transpose || 0;
-  const showSt = () => { val.textContent = st === 0 ? "0" : (st > 0 ? "+" : "\u2212") + Math.abs(st) + (Math.abs(st) === 1 ? " semitone" : " semitones"); };
-  showSt();
-  minus.onclick = () => { st = Math.max(-24, st - 1); showSt(); nowPost("/api/transpose?st=" + st); };
-  plus.onclick  = () => { st = Math.min(24, st + 1);  showSt(); nowPost("/api/transpose?st=" + st); };
-  tr.appendChild(lbl); tr.appendChild(minus); tr.appendChild(val); tr.appendChild(plus);
-  top.appendChild(tr);
-  const save = document.createElement("button"); save.className = "save";
-  save.textContent = d.song >= 0 ? "Save this sound to \u201c" + d.songName + "\u201d" : "Save to song — start a song first";
-  save.disabled = !(d.song >= 0);
-  save.onclick = async () => { await nowPost("/api/savesong"); save.textContent = "Saved to \u201c" + d.songName + "\u201d"; setTimeout(() => { nowKey = ""; pollNow(); }, 2000); };
-  top.appendChild(save);
-  root.appendChild(top);
-  {
-    const cap = document.createElement("div"); cap.className = "empty"; cap.style.padding = "8px 16px 0"; cap.style.fontSize = "13px";
-    cap.textContent = "ON/OFF and a level for each instrument; ON/OFF on an effect bypasses it. Changes are live and saved, as on the computer.";
-    root.appendChild(cap);
-  }
-  if (!d.inputs.length) {
-    const e = document.createElement("div"); e.className = "empty";
-    e.textContent = "No keyboards or audio inputs are set up on the computer yet.";
-    root.appendChild(e);
-  }
-
-  d.inputs.forEach(inp => {
-    const wrap = document.createElement("div"); wrap.className = "input";
-    const now = document.createElement("div"); now.className = "now";
-    now.innerHTML = '<div class="name"></div><div class="prog"><span class="num"></span><span class="title"></span></div>';
-    now.querySelector(".name").textContent = inp.name.toUpperCase();
-    now.querySelector(".num").textContent = String(inp.program).padStart(3, "0");
-    now.querySelector(".title").textContent = inp.programName || (inp.audio ? "Audio passes straight through (no effects)" : "Empty program — nothing loaded");
-    wrap.appendChild(now);
-    if (!inp.instruments.length && !inp.effects.length) {
-      const e = document.createElement("div"); e.className = "empty"; e.style.padding = "6px 4px"; e.textContent = "Nothing to adjust in this program."; wrap.appendChild(e);
-    }
-    if (inp.instruments.length) { const h = document.createElement("div"); h.className = "nsec"; h.textContent = "INSTRUMENTS"; wrap.appendChild(h); }
-    inp.instruments.forEach(ins => {
-      const db = document.createElement("span"); db.className = "db"; db.textContent = dbText(ins.gainDb);
-      const f = fader(ins.gainDb, db, v => nowPost("/api/slotgain?input=" + inp.index + "&slot=" + ins.slot + "&db=" + v));
-      wrap.appendChild(nowRow("ins", ins.enabled, ins.name,
-        on => nowPost("/api/slotenable?input=" + inp.index + "&slot=" + ins.slot + "&on=" + (on ? 1 : 0)), [f, db]));
-    });
-    if (inp.effects.length) {
-      const h = document.createElement("div"); h.className = "nsec"; h.textContent = "EFFECTS"; wrap.appendChild(h);
-      inp.effects.forEach(fx => wrap.appendChild(nowRow("fx", !fx.bypassed, fx.name,
-        on => nowPost("/api/bypass?input=" + inp.index + "&slot=" + fx.slot + "&effect=" + fx.effect + "&on=" + (on ? 1 : 0)))));
-    }
-    root.appendChild(wrap);
-  });
-
-  if (d.outputs.length) {
-    const wrap = document.createElement("div"); wrap.className = "input";
-    const h = document.createElement("div"); h.className = "nsec"; h.textContent = "OUTPUTS"; wrap.appendChild(h);
-    d.outputs.forEach(o => {
-      const db = document.createElement("span"); db.className = "db"; db.textContent = dbText(o.gainDb);
-      const f = fader(o.gainDb, db, v => nowPost("/api/outgain?output=" + o.index + "&db=" + v));
-      const row = document.createElement("div"); row.className = "nrow out";
-      const nm = document.createElement("div"); nm.className = "nm"; nm.textContent = o.name;
-      row.appendChild(nm); row.appendChild(f); row.appendChild(db);
-      wrap.appendChild(row);
-      o.effects.forEach(fx => wrap.appendChild(nowRow("fx", !fx.bypassed, fx.name,
-        on => nowPost("/api/bypass?output=" + o.index + "&effect=" + fx.effect + "&on=" + (on ? 1 : 0)))));
-    });
-    root.appendChild(wrap);
-  }
-}
 
 // Registering this is what makes a browser offer "install" / "Add to Home
 // Screen" as a prompt rather than something buried in a menu.
@@ -1870,6 +1730,8 @@ String RemoteServer::transportJson() const
     o->setProperty ("section", engine.getTrackSection());
     o->setProperty ("queued", engine.getQueuedTrackSection());
     o->setProperty ("vamping", engine.isTrackVamping());
+    o->setProperty ("click", song >= 0 && song < (int) songs.size() && songs[(size_t) song].click);
+    o->setProperty ("metronome", song >= 0 && song < (int) songs.size() && songs[(size_t) song].stems.empty());
     Array<var> sections;
     for (int i = 0; i < engine.getTrackSectionCount(); ++i)
     {
@@ -2381,6 +2243,12 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                 else if (what == "stop")    engine.stopTrack();
                 else if (what == "next")    engine.advanceTrack();
                 else if (what == "section") engine.queueTrackSection (sectionIndex);
+                else if (what == "click")
+                {
+                    const int song = engine.getTrackSong();
+                    if (song >= 0 && song < (int) engine.getSongs().size())
+                        engine.setSongClick (song, ! engine.getSongs()[(size_t) song].click, engine.getSongs()[(size_t) song].beatsPerBar);
+                }
                 return transportJson();
             }, body, 3000))
             sendResponse (sock, "200 OK", "application/json", body);
@@ -2448,10 +2316,11 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         return;
     }
     {
-        /* The Now page's changes -- an instrument on or off or louder, an
+        /* Live changes from a client -- an instrument on or off or louder, an
            effect bypassed, an output's volume, the transpose, the song
            captured -- each one engine call on the message thread, acknowledged
-           at once; the page reads the result back on its next poll. */
+           at once. The page itself no longer offers them; the routes stay for
+           anything else on the network that wants them. */
         auto number = [&path] (const char* key, double fallback = 0.0)
         {
             for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))

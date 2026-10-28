@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.h"
+#include <functional>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace perf
@@ -25,6 +26,8 @@ class SongsPanel : public juce::Component,
                    private juce::Timer
 {
 public:
+    /** Which keyboard the Loop button works on: the main window says. */
+    std::function<int()> selectedInputProvider;
     /* Narrow on purpose: song names and a tempo, nothing else. The panel
        shares a 1280-wide window with four others, and every pixel it takes
        comes out of the mappings table, which has real columns to fit. */
@@ -49,6 +52,8 @@ private:
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
 
     void timerCallback() override;
+    void refreshLoopButton();
+    void showLoopMenu();
 
     /** Which list a click came from: the ListBox that currently has focus, or
         the one we are painting. JUCE hands a model no sense of "which box", so
@@ -90,14 +95,22 @@ private:
     ListProxy songsModel { *this, false }, setModel { *this, true };
 
     juce::TextButton addBtn { "+" }, removeBtn { "-" },
-                     captureBtn { "Capture" }, editBtn { "Edit..." }, chartBtn { "Attach..." };
+                     captureBtn { "Capture" }, editBtn { "Edit..." }, chartBtn { "Chart..." }, trackBtn { "Backing track..." };
     juce::TextButton toSetBtn { "Add to set list >" }, fromSetBtn { "< Remove" },
                      upBtn { "^" }, downBtn { "v" };
     juce::TextButton songUpBtn { "^" }, songDownBtn { "v" };
     juce::TextButton setBtn { "Set list..." }, footBtn { "Footswitches..." };
 
     // The backing track of the song in play: start/stop, and where it is.
+    /** The Loop button: a click is the pedal, a right-click offers Stop and Clear. */
+    struct LoopButton : public juce::TextButton
+    {
+        LoopButton (SongsPanel& p) : juce::TextButton ("Loop"), panel (p) {}
+        void mouseDown (const juce::MouseEvent& e) override { if (e.mods.isPopupMenu()) panel.showLoopMenu(); else juce::TextButton::mouseDown (e); }
+        SongsPanel& panel;
+    };
     juce::TextButton playBtn { "Play" }, nextBtn { "Next" };
+    LoopButton loopBtn { *this };
     juce::Label trackLabel;
     void refreshTransport();
     void showTracksDialog (int songIndex);
@@ -114,6 +127,7 @@ private:
     // Sheet music: a file copied into the setup's charts folder and listed on the song.
     void showChartMenu();
     void attachChartFile (const juce::File&, int songIndex);
+    void newChordChart (int songIndex);
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 

@@ -4,3 +4,6 @@
 [submodule "external/clap"]
 	path = external/clap
 	url = https://github.com/free-audio/clap.git
+[submodule "external/link"]
+	path = external/link
+	url = https://github.com/Ableton/link

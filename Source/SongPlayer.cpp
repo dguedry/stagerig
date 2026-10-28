@@ -1,4 +1,5 @@
 #include "SongPlayer.h"
+#include "Stretch.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -12,6 +13,12 @@ namespace perf
 SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef& song, double sr, int bs)
     : formats (f), sampleRate (sr > 0.0 ? sr : 48000.0), blockSize (jmax (16, bs))
 {
+    /* Played at the song's tempo when the files' own is known and differs;
+       moved with the song's transpose when asked. Both are baked into the
+       loaded track, so a change re-arms the song. */
+    if (song.trackBpm > 0.0 && song.tempoBpm > 0.0 && std::abs (song.trackBpm - song.tempoBpm) > 0.005)
+        timeScale = jlimit (0.25, 4.0, song.trackBpm / song.tempoBpm);
+    if (song.transposeTrack) pitchSemitones = jlimit (-24, 24, song.transpose);
     for (int i = 0; i < (int) song.stems.size(); ++i)
     {
         const auto& def = song.stems[(size_t) i];
@@ -24,9 +31,15 @@ SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef
         stems.push_back (std::move (stem));
     }
     numStemDefs = (int) stems.size();
+    setClick (song.click, song.beatsPerBar, song.firstBeat);
+    startSeconds = jmax (0.0, song.startSeconds);
+    startSamples.store ((int64) (startSeconds * sampleRate * timeScale));
+    cuedPosition.store (startSamples.load());
+    position.store (startSamples.load());
     fadeLength = jmax (1, (int) (0.03 * sampleRate));
     scratch.setSize (2, blockSize, false, true, true);
     setMarkers (song.markers);
+    currentSection.store (sectionAt (startSamples.load()));      // the section the start point is in, shown while idle
     startLoading();
 }
 
@@ -68,8 +81,44 @@ void SongPlayer::load()
         loadProgress.store ((float) (i + 1) / (float) stems.size());
     }
     if (loaderStop.load()) return;
-    lengthSamples = longest;
+    // A metronome with no files runs for an hour, or until it is stopped.
+    lengthSamples = stems.empty() ? (int64) (3600.0 * sampleRate) : longest;
+    if (stems.empty()) loadProgress.store (1.0f);
+
+    /* Where the song starts: the first sound in any of its files, a little
+       before it so no attack is clipped. Play from the top begins there
+       unless the song has a start point of its own or a cue was asked for. */
+    int64 first = -1;
+    for (auto& st : stems)
+        if (st->midi ? ! st->events.empty() : ! st->left.empty())
+            first = first < 0 ? st->firstSound : jmin (first, st->firstSound);
+    leadIn.store (jmax ((int64) 0, first - (int64) (0.01 * sampleRate)));
+    if (! cuedByUser.load() && startSamples.load() == 0)
+    {
+        cuedPosition.store (leadIn.load());
+        position.store (leadIn.load());
+        currentSection.store (sectionAt (leadIn.load()));
+    }
     ready.store (true);
+}
+
+void SongPlayer::setStart (double seconds)
+{
+    startSeconds = jmax (0.0, seconds);
+    startSamples.store ((int64) (startSeconds * sampleRate * timeScale));
+    if (getState() == State::idle && ! cuedByUser.load())
+    {
+        cuedPosition.store (home());
+        position.store (home());
+        currentSection.store (sectionAt (home()));
+    }
+}
+
+void SongPlayer::setClick (bool on, int beatsPerBar, double firstBeatSeconds)
+{
+    clickOn.store (on);
+    clickBeatsPerBar.store (jlimit (1, 16, beatsPerBar));
+    firstBeat.store (jmax (0.0, firstBeatSeconds));
 }
 
 bool SongPlayer::loadStem (Stem& s)
@@ -136,6 +185,13 @@ bool SongPlayer::loadStem (Stem& s)
     }
     s.left.resize ((size_t) written);
     s.right.resize ((size_t) written);
+    if (std::abs (timeScale - 1.0) > 1e-6 || pitchSemitones != 0)
+        stretchAndShift (s.left, s.right, timeScale, pitchSemitones, sampleRate, [this] { return loaderStop.load(); });
+
+    // The first sample above -45 dBFS on either side: the head of the file up to there is silence.
+    s.firstSound = (int64) s.left.size();
+    for (size_t i = 0; i < s.left.size(); ++i)
+        if (std::abs ((int) s.left[i]) >= 184 || std::abs ((int) s.right[i]) >= 184) { s.firstSound = (int64) i; break; }
     return ! loaderStop.load();
 }
 
@@ -166,13 +222,22 @@ bool SongPlayer::loadMidiStem (Stem& s)
                        || m.isChannelPressure() || m.isProgramChange()))
                     continue;
                 Stem::Event ev {};
-                ev.at = (int64) (m.getTimeStamp() * sampleRate);
+                ev.at = (int64) (m.getTimeStamp() * sampleRate * timeScale);
                 ev.size = (uint8_t) jmin (3, m.getRawDataSize());
                 std::memcpy (ev.data, m.getRawData(), ev.size);
+                if (pitchSemitones != 0 && m.isNoteOnOrOff() && m.getChannel() != 10)      // the drums stay where they are
+                {
+                    const int note = m.getNoteNumber() + pitchSemitones;
+                    if (note < 0 || note > 127) continue;
+                    ev.data[1] = (uint8_t) note;
+                }
                 events.push_back (ev);
             }
     std::stable_sort (events.begin(), events.end(), [] (const Stem::Event& a, const Stem::Event& b) { return a.at < b.at; });
     s.midiLength = events.empty() ? 0 : events.back().at + 1;
+    s.firstSound = s.midiLength;
+    for (const auto& ev : events)
+        if (ev.size == 3 && (ev.data[0] & 0xf0) == 0x90 && ev.data[2] > 0) { s.firstSound = ev.at; break; }
     s.events = std::move (events);
 
     return true;
@@ -241,41 +306,50 @@ void SongPlayer::prepare (double sr, int bs)
     sampleRate = newRate;
     fadeLength = jmax (1, (int) (0.03 * sampleRate));
     for (int i = 0; i < numSections; ++i)
-        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate);
+        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate * timeScale);
+    startSamples.store ((int64) (startSeconds * sampleRate * timeScale));
+    cuedByUser.store (false);
+    cuedPosition.store (startSamples.load());
+    position.store (startSamples.load());
     startLoading();
 }
 
 void SongPlayer::setMarkers (const std::vector<MarkerDef>& markers)
 {
-    std::vector<MarkerDef> sorted (markers);
-    std::sort (sorted.begin(), sorted.end(), [] (const MarkerDef& a, const MarkerDef& b) { return a.seconds < b.seconds; });
+    std::vector<int> order ((size_t) markers.size());
+    for (int i = 0; i < (int) markers.size(); ++i) order[(size_t) i] = i;
+    std::sort (order.begin(), order.end(), [&markers] (int a, int b) { return markers[(size_t) a].seconds < markers[(size_t) b].seconds; });
 
     /* Whatever comes before the first marker is a section of its own -- the
        intro -- unless the first marker is at the very top. */
     int n = 0;
-    if (sorted.empty() || sorted.front().seconds > 0.001)
+    if (order.empty() || markers[(size_t) order.front()].seconds > 0.001)
     {
         sectionSeconds[0] = 0.0;
-        sectionName[0] = sorted.empty() ? "Song" : "Start";
+        sectionName[0] = order.empty() ? "Song" : "Start";
         sectionVamp[0] = false;
+        sectionMarker[0] = -1;
         n = 1;
     }
-    for (const auto& m : sorted)
+    for (int idx : order)
     {
         if (n >= kMaxSections) break;
+        const auto& m = markers[(size_t) idx];
         sectionSeconds[n] = jmax (0.0, m.seconds);
         sectionName[n] = m.name.isNotEmpty() ? m.name : "Section " + String (n + 1);
         sectionVamp[n] = m.vamp;
+        sectionMarker[n] = idx;
         ++n;
     }
     for (int i = 0; i < n; ++i)
-        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate);
+        sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate * timeScale);
     numSections = n;
     if (queuedSection.load() >= numSections) queuedSection.store (-1);
     if (currentSection.load() >= numSections) currentSection.store (0);
 }
 
 String SongPlayer::getSectionName (int i) const     { return i >= 0 && i < numSections ? sectionName[i] : String(); }
+int SongPlayer::getSectionMarker (int i) const      { return i >= 0 && i < numSections ? sectionMarker[i] : -1; }
 double SongPlayer::getSectionStart (int i) const    { return i >= 0 && i < numSections ? sectionSeconds[i] : 0.0; }
 bool SongPlayer::isSectionVamp (int i) const        { return i >= 0 && i < numSections && sectionVamp[i]; }
 
@@ -293,9 +367,11 @@ int64 SongPlayer::sectionEnd (int s) const
 }
 
 //==============================================================================
-void SongPlayer::start (int beats, double beatSeconds, int output)
+void SongPlayer::start (int beats, double beatSeconds, int output, int64 delaySamples)
 {
     if (getState() != State::idle) return;
+    pendingDelay.store (jmax ((int64) -1, delaySamples));         // -1: hold until releaseStart()
+    startDelay = -1;
     pendingCountInBeats.store (jmax (0, beats));
     pendingBeatSeconds.store (jmax (0.05, beatSeconds));
     countInOutput.store (jmax (0, output));
@@ -320,7 +396,8 @@ void SongPlayer::stop()
             state.compare_exchange_strong (expected, (int) State::idle);
         }
     }
-    cuedPosition.store (0);
+    cuedPosition.store (home());
+    cuedByUser.store (false);
     queuedSection.store (-1);
     vamping.store (false);
 }
@@ -331,6 +408,7 @@ void SongPlayer::queueSection (int index)
     if (getState() == State::idle)
     {
         // Stopped: this is where Play will start.
+        cuedByUser.store (true);
         cuedPosition.store (sectionStart[index]);
         position.store (sectionStart[index]);
         currentSection.store (index);
@@ -344,8 +422,9 @@ void SongPlayer::cue (double seconds)
 {
     if (getState() != State::idle) return;
     // Before loading has finished the length is not known yet: the cue is taken as it is.
-    const auto wanted = jmax ((int64) 0, (int64) (seconds * sampleRate));
+    const auto wanted = jmax ((int64) 0, (int64) (seconds * sampleRate * timeScale));
     const auto p = ready.load() ? jmin (wanted, lengthSamples) : wanted;
+    cuedByUser.store (true);
     cuedPosition.store (p);
     position.store (p);
     currentSection.store (sectionAt (p));
@@ -370,29 +449,65 @@ void SongPlayer::setStemMix (int stemIndex, int output, float gainDb)
 }
 
 //==============================================================================
-void SongPlayer::addClicks (float* l, float* r, int n)
+float SongPlayer::clickSample (int64 inBeat, bool accent) const
 {
-    /* A short sine blip on every beat, higher on the first: the sound of a
-       drummer's sticks, enough to count in by on an in-ear mix. */
-    const int clickLen = (int) (0.03 * sampleRate);
+    /* A short sine blip on every beat, higher on the first of the bar: the
+       sound of a drummer's sticks, enough to count by on an in-ear mix. */
+    const int64 clickLen = (int64) (0.03 * sampleRate);
+    if (inBeat < 0 || inBeat >= clickLen) return 0.0f;
+    const double freq = accent ? 1600.0 : 1000.0;
+    const float env = 1.0f - (float) inBeat / (float) clickLen;
+    return 0.5f * env * (float) std::sin (MathConstants<double>::twoPi * freq * (double) inBeat / sampleRate);
+}
+
+void SongPlayer::addCountInClicks (float* l, float* r, int n)
+{
     for (int i = 0; i < n; ++i)
     {
         const int64 t = countInDone + i;
         const int64 beat = t / beatSamples;
-        const int64 inBeat = t % beatSamples;
-        if (beat >= countInTotalBeats || inBeat >= clickLen) continue;
-        const double freq = beat == 0 ? 1600.0 : 1000.0;
-        const float env = 1.0f - (float) inBeat / (float) clickLen;
-        const float v = 0.5f * env * (float) std::sin (MathConstants<double>::twoPi * freq * (double) inBeat / sampleRate);
+        if (beat >= countInTotalBeats) continue;
+        const float v = clickSample (t % beatSamples, beat == 0);
         if (l != nullptr) l[i] += v;
         if (r != nullptr) r[i] += v;
+    }
+}
+
+void SongPlayer::addClickRun (float* l, float* r, int at, int64 from, int count)
+{
+    /* The click through the song: a beat every `beatSamples` from the first
+       beat, accented every bar. Follows the position, so a vamp or a jump
+       keeps it on the music's own grid. */
+    const int64 fb = (int64) (firstBeat.load (std::memory_order_relaxed) * sampleRate * timeScale);
+    const int bpb = jmax (1, clickBeatsPerBar.load (std::memory_order_relaxed));
+    const int64 clickLen = (int64) (0.03 * sampleRate);
+    for (int i = 0; i < count; ++i)
+    {
+        const int64 rel = from + i - fb;
+        int64 k = rel / beatSamples;
+        if (rel < 0 && k * beatSamples != rel) --k;                 // floor, for a beat before the first
+        const int64 inBeat = rel - k * beatSamples;
+        if (inBeat >= clickLen) { i += (int) jmin ((int64) (count - i - 1), beatSamples - inBeat - 1); continue; }
+        const float v = clickSample (inBeat, ((k % bpb) + bpb) % bpb == 0);
+        if (l != nullptr) l[at + i] += v;
+        if (r != nullptr) r[at + i] += v;
     }
 }
 
 SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, MidiBuffer* trackMidi, int n)
 {
     auto st = getState();
-    if (st == State::idle || stems.empty()) return Happened::nothing;
+    if (st == State::idle) return Happened::nothing;
+    if (stems.empty() && ! clickOn.load (std::memory_order_relaxed))
+    {
+        // A metronome whose click was turned off has nothing left to play: it stops, cleanly, rather than sit "playing" for good.
+        state.store ((int) State::idle);
+        position.store (home());
+        cuedPosition.store (home());
+        cuedByUser.store (false);
+        currentSection.store (0);
+        return Happened::stopped;
+    }
     if (n > scratch.getNumSamples()) return Happened::nothing;    // larger than prepared: never allocate here
 
     Happened happened = Happened::nothing;
@@ -400,9 +515,29 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
     if (st == State::waiting)
     {
         if (! ready.load()) return Happened::nothing;
+        // Asked to start on a shared bar line: wait for it, in whole blocks. -1 = not yet told how long: hold.
+        if (startDelay < 0)
+        {
+            if (pendingDelay.load() < 0) return Happened::nothing;
+            startDelay = pendingDelay.exchange (0);
+        }
+        if (startDelay > 0) { startDelay -= n; return Happened::nothing; }
         countInTotalBeats = pendingCountInBeats.load();
         beatSamples = jmax ((int64) 1, (int64) (pendingBeatSeconds.load() * sampleRate));
-        countInRemaining = (int64) countInTotalBeats * beatSamples;
+        /* The count-in leads into the music's own beat: its last click is one
+           beat before the first beat at or after the cue, so when the first
+           beat sits a little way into the file (a lead-in, a breath) the
+           files start that little way before the count-in's grid ends. */
+        int64 phase = 0;
+        if (countInTotalBeats > 0)
+        {
+            const int64 fb = (int64) (firstBeat.load() * sampleRate * timeScale);
+            const int64 rel = position.load() - fb;
+            int64 k = rel / beatSamples;
+            if (rel < 0 && k * beatSamples != rel) --k;
+            phase = (k * beatSamples + beatSamples - rel) % beatSamples;     // to the next grid beat, in [0, beat)
+        }
+        countInRemaining = countInTotalBeats > 0 ? (int64) countInTotalBeats * beatSamples - phase : 0;
         countInDone = 0;
         lastRunEnd = -1;
         for (auto& stem : stems) stem->needsChase = true;      // the instruments are told where the file is
@@ -415,7 +550,7 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
     {
         const int now = (int) jmin ((int64) n, countInRemaining);
         if (const int o = countInOutput.load(); o >= 0 && o < numOutputs)
-            addClicks (outputs[o][0], outputs[o][1], now);
+            addCountInClicks (outputs[o][0], outputs[o][1], now);
         countInDone += now;
         countInRemaining -= now;
         offset = now;
@@ -534,20 +669,26 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
             }
     }
 
+    if (clickOn.load (std::memory_order_relaxed) && st != State::stopping)
+        if (const int o = countInOutput.load(); o >= 0 && o < numOutputs)
+            for (int r = 0; r < numRuns; ++r)
+                addClickRun (outputs[o][0], outputs[o][1], runs[r].at, runs[r].from, runs[r].count);
+
     if (numRuns > 0) lastRunEnd = runs[numRuns - 1].from + runs[numRuns - 1].count;
 
     if (st == State::stopping && fadeRemaining <= 0)
     {
         state.store ((int) State::idle);
-        position.store (0);
+        position.store (home());
         currentSection.store (0);
         return Happened::stopped;
     }
     if (ended)
     {
         state.store ((int) State::idle);
-        position.store (0);
-        cuedPosition.store (0);
+        position.store (home());
+        cuedPosition.store (home());
+        cuedByUser.store (false);
         currentSection.store (0);
         vamping.store (false);
         return Happened::ended;

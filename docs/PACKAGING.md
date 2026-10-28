@@ -6,7 +6,7 @@ What is in the repository for distributions, and how to submit it.
 
 | File | What it is |
 |---|---|
-| `scripts/make-source-tarball.sh` | Makes `stagerig-VERSION.tar.xz`: the tree with its JUCE and CLAP submodules, minus JUCE's examples, tools and the AAX/ASIO SDKs. CI attaches one to every release. Distributions build from this, not from GitHub's "Source code" archives, which leave the submodules out. |
+| `scripts/make-source-tarball.sh` | Makes `stagerig-VERSION.tar.xz`: the tree with its JUCE, CLAP and Ableton Link submodules (Link's Asio included), minus JUCE's examples, tools and the AAX/ASIO SDKs and Link's examples. CI attaches one to every release. Distributions build from this, not from GitHub's "Source code" archives, which leave the submodules out. |
 | `debian/` | Debian packaging (debhelper 13, cmake + ninja). Builds and passes its tests with `dpkg-buildpackage` from the tarball. |
 | `packaging/rpm/stagerig.spec` | Fedora spec, with `Provides: bundled(...)` for what JUCE carries. Fedora has no `clap-devel` yet, so the bundled CLAP headers are used unless built `--with system_clap`. |
 | `Resources/io.github.dguedry.StageRig.metainfo.xml` | AppStream metadata for software centres. |

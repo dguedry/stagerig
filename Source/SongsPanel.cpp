@@ -4,6 +4,11 @@
 #include "GmSynth.h"
 #include "GmMixer.h"
 #include "MidiEditor.h"
+#include "TrackTimeline.h"
+#include "TempoDetect.h"
+#include "ChartViewer.h"
+#include "SectionActions.h"
+#include <thread>
 #include "PatchDialog.h"
 #include <cmath>
 #include <map>
@@ -60,10 +65,22 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     editBtn.onClick = [this] { editSelectedSong(); };
 
     addAndMakeVisible (chartBtn);
-    chartBtn.setTooltip ("A chart for the stand, or the song's backing track: sheet music for the tablet (a PDF, an image, a text "
-                         "chart or a ChordPro file) and audio or MIDI files. Or drop files on the song.");
+    chartBtn.setTooltip ("The song's sheet music, for the stand: open one, write a chord chart, or attach a PDF, an image, "
+                         "a text chart or a ChordPro file. Or drop a file on the song.");
     chartBtn.onClick = [this] { showChartMenu(); };
+    addAndMakeVisible (trackBtn);
+    trackBtn.setTooltip ("The song's backing track: its audio and MIDI files, sections, count-in, click and tempo. Or drop files on the song.");
+    trackBtn.onClick = [this] { if (selectedSong >= 0) showTracksDialog (selectedSong); };
 
+    addAndMakeVisible (loopBtn);
+    loopBtn.setTooltip ("Loop a passage on the selected keyboard: press to record, press again to play it round (whole bars at the rig's tempo), "
+                        "press to stop, press to play again. Right-click clears. A footswitch can do the same (Footswitches...).");
+    loopBtn.onClick = [this]
+    {
+        const int input = selectedInputProvider ? selectedInputProvider() : 0;
+        engine.loopPedal (input);
+        refreshLoopButton();
+    };
     addAndMakeVisible (playBtn);
     playBtn.setTooltip ("Start or stop the backing track of the song in play, after its count-in. "
                         "A footswitch can do the same (Footswitches...).");
@@ -132,8 +149,10 @@ void SongsPanel::resized()
     auto r = getLocalBounds().reduced (6);
 
     auto top = r.removeFromTop (24);
-    setBtn.setBounds (top.removeFromLeft (top.getWidth() / 2).reduced (1, 0));
-    footBtn.setBounds (top.reduced (1, 0));
+    const int third = top.getWidth() / 3;
+    setBtn.setBounds (top.removeFromLeft (third + 10).reduced (1, 0));
+    footBtn.setBounds (top.removeFromLeft (third + 24).reduced (1, 0));
+    loopBtn.setBounds (top.reduced (1, 0));
     r.removeFromTop (4);
     auto transport = r.removeFromTop (24);
     playBtn.setBounds (transport.removeFromLeft (52).reduced (1, 0));
@@ -147,6 +166,8 @@ void SongsPanel::resized()
     r.removeFromTop (6);
 
     songsHeader.setBounds (songsArea.removeFromTop (14));
+    auto songFiles = songsArea.removeFromBottom (26);
+    songsArea.removeFromBottom (2);
     auto songButtons = songsArea.removeFromBottom (26);
     songsArea.removeFromBottom (4);
     auto songMoveCol = songsArea.removeFromRight (28);
@@ -158,10 +179,10 @@ void SongsPanel::resized()
 
     addBtn.setBounds (songButtons.removeFromLeft (28).reduced (1, 0));
     removeBtn.setBounds (songButtons.removeFromLeft (28).reduced (1, 0));
-    const int third = songButtons.getWidth() / 3;
-    captureBtn.setBounds (songButtons.removeFromLeft (third).reduced (1, 0));
-    editBtn.setBounds (songButtons.removeFromLeft (third).reduced (1, 0));
-    chartBtn.setBounds (songButtons.reduced (1, 0));
+    captureBtn.setBounds (songButtons.removeFromLeft (songButtons.getWidth() / 2).reduced (1, 0));
+    editBtn.setBounds (songButtons.reduced (1, 0));
+    chartBtn.setBounds (songFiles.removeFromLeft (songFiles.getWidth() * 2 / 5).reduced (1, 0));
+    trackBtn.setBounds (songFiles.reduced (1, 0));
 
     setHeader.setBounds (r.removeFromTop (14));
     auto setButtons = r.removeFromBottom (26);
@@ -205,6 +226,7 @@ void SongsPanel::refresh()
     captureBtn.setEnabled (haveSong);
     editBtn.setEnabled (haveSong);
     chartBtn.setEnabled (haveSong);
+    trackBtn.setEnabled (haveSong);
     toSetBtn.setEnabled (haveSong && haveSet);
     toSetBtn.setTooltip (haveSet ? "Put the selected song at the end of the set list" : "Make or choose a set list first (Set list...)");
     fromSetBtn.setEnabled (haveSet && selectedInSet >= 0);
@@ -220,8 +242,34 @@ void SongsPanel::refresh()
     setList.repaint();
 }
 
+void SongsPanel::refreshLoopButton()
+{
+    const int input = selectedInputProvider ? selectedInputProvider() : 0;
+    const auto st = engine.getLoopState (input);
+    const int bars = engine.getLoopBars (input);
+    loopBtn.setButtonText (st == Engine::LoopState::recording ? "Rec..." : st == Engine::LoopState::playing ? String (bars) + (bars == 1 ? " bar" : " bars")
+                         : st == Engine::LoopState::stopped ? "Loop >" : "Loop");
+    loopBtn.setColour (TextButton::buttonColourId, st == Engine::LoopState::recording ? Colour (0xffa3282d)
+                                                 : st == Engine::LoopState::playing ? accentDim : getLookAndFeel().findColour (TextButton::buttonColourId));
+}
+
+void SongsPanel::showLoopMenu()
+{
+    const int input = selectedInputProvider ? selectedInputProvider() : 0;
+    PopupMenu m;
+    m.addItem (1, "Stop the loop", engine.getLoopState (input) == Engine::LoopState::playing);
+    m.addItem (2, "Clear the loop", engine.getLoopState (input) != Engine::LoopState::empty);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (loopBtn), [this, input] (int r)
+    {
+        if (r == 1) engine.loopStop (input);
+        else if (r == 2) engine.loopClear (input);
+        refreshLoopButton();
+    });
+}
+
 void SongsPanel::timerCallback()
 {
+    refreshLoopButton();
     /* Follow the set moving under us. Only the highlight and the headers can
        change without a click here, so this is cheap. */
     static int lastSet = -2, lastPos = -2, lastSongs = -1, lastSets = -1;
@@ -252,14 +300,16 @@ void SongsPanel::refreshTransport()
 
     String text;
     if (! has)
-        text = "No backing track (Attach... > Backing track...)";
+        text = "No backing track (Backing track... under the songs)";
     else if (! engine.isTrackReady())
         text = songs[(size_t) song].name + "  -- loading " + String (roundToInt (engine.getTrackLoadProgress() * 100.0f)) + "%";
     else if (engine.isTrackCountingIn())
         text = songs[(size_t) song].name + "  -- counting in";
     else
     {
-        text = mmss (engine.getTrackPosition()) + " / " + mmss (engine.getTrackLength());
+        // A metronome with no files has no length worth showing.
+        text = songs[(size_t) song].stems.empty() ? "click  " + mmss (engine.getTrackPosition())
+                                                   : mmss (engine.getTrackPosition()) + " / " + mmss (engine.getTrackLength());
         if (engine.getTrackSectionCount() > 1)
         {
             text = engine.getTrackSectionName (engine.getTrackSection()) + (vamping ? " (vamp)" : "") + "  " + text;
@@ -715,6 +765,14 @@ void SongsPanel::showFootswitchMenu()
     m.addItem (9, "Learn: press the pedal...");
     if (engine.getTapTempoCC() > 0) m.addItem (10, "Stop using CC " + String (engine.getTapTempoCC()));
 
+    m.addSectionHeader ("Loop: record / play / stop  (on the keyboard the pedal is on)");
+    m.addItem (11, "Learn: press the pedal...");
+    if (engine.getLooperCC() > 0) m.addItem (12, "Stop using CC " + String (engine.getLooperCC()));
+
+    m.addSectionHeader ("Loop: clear");
+    m.addItem (13, "Learn: press the pedal...");
+    if (engine.getLooperClearCC() > 0) m.addItem (14, "Stop using CC " + String (engine.getLooperClearCC()));
+
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (footBtn), [this] (int choice)
     {
         switch (choice)
@@ -729,6 +787,10 @@ void SongsPanel::showFootswitchMenu()
             case 8: engine.setSectionCC (0);     break;
             case 9: engine.armTapTempoLearn (true); break;
             case 10: engine.setTapTempoCC (0);   break;
+            case 11: engine.armLooperLearn (false); break;
+            case 12: engine.setLooperCC (0);     break;
+            case 13: engine.armLooperLearn (true); break;
+            case 14: engine.setLooperClearCC (0); break;
             default: break;
         }
         refresh();
@@ -743,11 +805,14 @@ void SongsPanel::showChartMenu()
     const auto& sg = songs[(size_t) selectedSong];
 
     PopupMenu m;
-    m.addItem (1, "Attach a chart...");
-    m.addItem (2, "Backing track..." + (sg.stems.empty() ? String() : "  (" + String ((int) sg.stems.size()) + (sg.stems.size() == 1 ? " file)" : " files)")));
+    for (int i = 0; i < (int) sg.charts.size(); ++i)
+        m.addItem (200 + i, "Open " + sg.charts[(size_t) i].displayName() + "...");
+    if (! sg.charts.empty()) m.addSeparator();
+    m.addItem (3, "New chord chart...");
+    m.addItem (1, "Attach a file...  (PDF, image, text, ChordPro)");
     if (! sg.charts.empty())
     {
-        m.addSectionHeader ("Attached");
+        m.addSeparator();
         for (int i = 0; i < (int) sg.charts.size(); ++i)
             m.addItem (100 + i, "Remove " + sg.charts[(size_t) i].displayName());
     }
@@ -766,9 +831,13 @@ void SongsPanel::showChartMenu()
                 for (const auto& f : fc.getResults()) attachChartFile (f, idx);
             });
         }
-        else if (r == 2)
+        else if (r == 3)
         {
-            showTracksDialog (idx);
+            newChordChart (idx);
+        }
+        else if (r >= 200)
+        {
+            showChartViewer (engine, idx, r - 200);
         }
         else if (r >= 100)
         {
@@ -778,6 +847,28 @@ void SongsPanel::showChartMenu()
             refresh();
         }
     });
+}
+
+void SongsPanel::newChordChart (int songIndex)
+{
+    /* A typed chart starts from a few lines that show the ChordPro way, in
+       the setup's own folder so it travels with the setup; the viewer opens
+       on it with the editor beside the page. */
+    const auto& songs = engine.getSongs();
+    if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+    const auto folder = engine.getChartsFolder();
+    if (folder == File()) return;
+    folder.createDirectory();
+    const auto& sg = songs[(size_t) songIndex];
+    const File dest = folder.getNonexistentChildFile (File::createLegalFileName (sg.name.isNotEmpty() ? sg.name : "Chart"), ".cho", false);
+    const String text = "{title: " + sg.name + "}\n{subtitle: key, tempo, who starts}\n\n"
+                        "{comment: Intro}\n[C]    [G]    [Am]    [F]\n\n"
+                        "{comment: Verse}\n[C]Chords go in square brackets [G]before the syllable they [Am]fall on, like [F]this.\n"
+                        "A line without brackets is just words.\n";
+    if (! dest.replaceWithText (text)) return;
+    engine.addSongChart (songIndex, { dest.getFileName(), {} });
+    refresh();
+    showChartViewer (engine, songIndex, (int) engine.getSongs()[(size_t) songIndex].charts.size() - 1);
 }
 
 void SongsPanel::attachChartFile (const File& f, int songIndex)
@@ -884,6 +975,55 @@ public:
             });
         };
 
+        addAndMakeVisible (tempoLabel);
+        tempoLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (tempoText);
+        tempoText.setTooltip ("The tempo the click, the count-in and the bar lines use. Edit... on the song sets it by hand.");
+        addAndMakeVisible (findTempoBtn);
+        findTempoBtn.setTooltip ("Listens to the song's longest audio file and finds its tempo and where its first beat falls. "
+                                 "For a recording with a steady beat; a track that speeds up or slows down gets the tempo it mostly keeps.");
+        findTempoBtn.onClick = [this] { findTempo(); };
+        addAndMakeVisible (fileBpmLabel);
+        fileBpmLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (fileBpmText);
+        fileBpmText.setEditable (true);
+        fileBpmText.setJustificationType (Justification::centredRight);
+        fileBpmText.setTooltip ("The tempo the audio files were made at (Find the tempo fills it in). With the song's own tempo set to "
+                                "something else, the files are stretched to play at the song's tempo. Blank: unknown, so they play as they are.");
+        fileBpmText.onTextChange = [this]
+        {
+            engine.setSongTrackBpm (songIndex, fileBpmText.getText().trim().getDoubleValue());
+            refreshTempoRow();
+        };
+        addAndMakeVisible (transposeTrackBtn);
+        transposeTrackBtn.setTooltip ("The song's transpose (Edit... on the song) also moves the files' pitch, and the MIDI files' notes "
+                                      "(drums aside): one setting takes the whole band down a step. The files are re-read when it changes.");
+        transposeTrackBtn.onClick = [this] { engine.setSongTransposeTrack (songIndex, transposeTrackBtn.getToggleState()); refreshTempoRow(); };
+        addAndMakeVisible (halfBtn);
+        addAndMakeVisible (doubleBtn);
+        halfBtn.setTooltip ("Half the tempo: when the band counts it slower than the detector did");
+        doubleBtn.setTooltip ("Double the tempo: when the band counts it faster than the detector did");
+        halfBtn.onClick = [this] { scaleTempo (0.5); };
+        doubleBtn.onClick = [this] { scaleTempo (2.0); };
+        addAndMakeVisible (firstBeatLabel);
+        firstBeatLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (firstBeatText);
+        firstBeatText.setEditable (true);
+        firstBeatText.setJustificationType (Justification::centredRight);
+        firstBeatText.setTooltip ("Where beat 1 of a bar first falls in the files (minutes:seconds). 0:00.00 when the recording starts on the beat. "
+                                  "The click, the count-in and the bar lines line up with it.");
+        firstBeatText.onTextChange = [this]
+        {
+            engine.setSongFirstBeat (songIndex, SectionRow::parseTime (firstBeatText.getText()));
+            refreshTempoRow();
+        };
+        addAndMakeVisible (beatBackBtn);
+        addAndMakeVisible (beatFwdBtn);
+        beatBackBtn.setTooltip ("Move the first beat one beat earlier: when the accent falls on the wrong beat of the bar");
+        beatFwdBtn.setTooltip ("Move the first beat one beat later: when the accent falls on the wrong beat of the bar");
+        beatBackBtn.onClick = [this] { nudgeFirstBeat (-1); };
+        beatFwdBtn.onClick = [this] { nudgeFirstBeat (1); };
+
         addAndMakeVisible (countInLabel);
         countInLabel.setColour (Label::textColourId, textDim);
         addAndMakeVisible (countInBox);
@@ -891,19 +1031,67 @@ public:
         for (int b = 1; b <= 8; ++b) countInBox.addItem (String (b) + (b == 1 ? " beat" : " beats"), b + 1);
         countInBox.setTooltip ("Clicks before the track starts, at the song's tempo");
         countInBox.onChange = [this] { applyCountIn(); };
+        addAndMakeVisible (clickLabel);
+        clickLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (clickBox);
+        clickBox.addItem ("No click", 1);
+        clickBox.addItem ("Click through the song", 2);
+        clickBox.setTooltip ("A metronome through the whole track at the song's tempo, on the same output as the count-in. "
+                             "With no files, Play is a plain metronome.");
+        clickBox.onChange = [this] { applyCountIn(); };
+        addAndMakeVisible (barBox);
+        for (int b = 2; b <= 7; ++b) barBox.addItem (String (b) + " beats per bar", b);
+        barBox.setTooltip ("The click is accented on beat 1 of every bar");
+        barBox.onChange = [this] { applyCountIn(); };
+        addAndMakeVisible (startLabel);
+        startLabel.setColour (Label::textColourId, textDim);
+        addAndMakeVisible (startText);
+        startText.setEditable (true);
+        startText.setJustificationType (Justification::centredRight);
+        startText.setTooltip ("Where Play from the top begins (minutes:seconds). Blank: at the first sound, skipping silence at the head of the files. "
+                              "Set it past a lead-in you do not want to hear, such as a count-in recorded in the file; or right-click the timeline there.");
+        startText.onTextChange = [this]
+        {
+            engine.setSongStart (songIndex, startText.getText().trim().isEmpty() ? 0.0 : SectionRow::parseTime (startText.getText()));
+            refreshTempoRow();
+        };
         addAndMakeVisible (countInOutLabel);
         countInOutLabel.setColour (Label::textColourId, textDim);
         addAndMakeVisible (countInOutBox);
-        countInOutBox.setTooltip ("Which output hears the count-in (your in-ears)");
+        countInOutBox.setTooltip ("Which output hears the count-in and the click (your in-ears)");
         countInOutBox.onChange = [this] { applyCountIn(); };
 
         addAndMakeVisible (sectionsHeader);
         sectionsHeader.setColour (Label::textColourId, accent);
         sectionsHeader.setFont (FontOptions (13.0f, Font::bold));
+
+        timeline = std::make_unique<TrackTimeline> (engine, songIndex);
+        addAndMakeVisible (*timeline);
+        timeline->onMarkersChanged = [this] { rebuild(); };
+        timeline->onEditActions = [this] (int marker) { editActions (marker); };
+        timeline->onHint = [this] (const String& t) { timelineHint.setText (t.isNotEmpty() ? t : kTimelineHint, dontSendNotification); };
+        addAndMakeVisible (timelineHint);
+        timelineHint.setText (kTimelineHint, dontSendNotification);
+        timelineHint.setColour (Label::textColourId, textDim);
+        timelineHint.setFont (FontOptions (11.5f));
+        timelineHint.setMinimumHorizontalScale (0.8f);
+
+        addAndMakeVisible (playBtn);
+        playBtn.setTooltip ("Play the backing track from the green cue (click the timeline to move it). Space does the same.");
+        playBtn.onClick = [this] { timeline->togglePlay(); };
         addAndMakeVisible (addSectionBtn);
-        addSectionBtn.setTooltip ("A new section where the backing track is now if it is playing, otherwise after the last one. "
-                                  "Edit the time to move it: 1:23.5");
-        addSectionBtn.onClick = [this] { addSection(); };
+        addSectionBtn.setTooltip ("A new section where the track is playing now, or at the green cue while it is stopped. "
+                                  "Or double-click the timeline where the section should start.");
+        addSectionBtn.onClick = [this] { timeline->markHere(); };
+        addAndMakeVisible (zoomOutBtn);
+        addAndMakeVisible (zoomInBtn);
+        addAndMakeVisible (fitBtn);
+        zoomOutBtn.setTooltip ("Zoom out (or Ctrl+wheel on the timeline)");
+        zoomInBtn.setTooltip ("Zoom in (or Ctrl+wheel on the timeline)");
+        fitBtn.setTooltip ("Show the whole song");
+        zoomOutBtn.onClick = [this] { timeline->zoomBy (1.0f / 1.5f); };
+        zoomInBtn.onClick = [this] { timeline->zoomBy (1.5f); };
+        fitBtn.onClick = [this] { timeline->zoomToFit(); };
 
         addAndMakeVisible (hint);
         hint.setColour (Label::textColourId, textDim);
@@ -911,13 +1099,20 @@ public:
         hint.setJustificationType (Justification::topLeft);
         hint.setText ("Audio files play on an output; put a click or cue file on your in-ear output. "
                       "A MIDI file plays parts: click a part's sound to choose what plays it. "
-                      "Play (songs panel, tablet or footswitch) starts everything together, after the count-in.\n"
-                      "Sections start at their time and run to the next. A vamp section repeats until released "
-                      "(Next, the tablet, or the section footswitch); asking for a section takes you there when "
-                      "the current one ends.", dontSendNotification);
+                      "Play (songs panel, tablet or footswitch) starts everything together, after the count-in; "
+                      "the click is a metronome through the song for the in-ears.\n"
+                      "Sections: double-click the timeline where one starts, or press Mark section here while the track plays. "
+                      "Each runs to the next. A vamp section repeats until released (Next, the tablet, or the section footswitch); "
+                      "asking for a section takes you there when the current one ends.", dontSendNotification);
 
         rebuild();
-        startTimerHz (2);
+        startTimerHz (5);
+    }
+
+    ~TracksComponent() override
+    {
+        if (detectStop != nullptr) detectStop->store (true);
+        if (detectThread.joinable()) detectThread.join();
     }
 
     void rebuild()
@@ -934,6 +1129,7 @@ public:
             rows.push_back (std::move (row));
         }
 
+        if (timeline != nullptr) timeline->refresh();
         sectionRows.clear();
         for (int i = 0; i < (int) sg.markers.size(); ++i)
         {
@@ -942,9 +1138,13 @@ public:
             sectionRows.push_back (std::move (row));
         }
 
+        refreshTempoRow();
         fillOutputs (countInOutBox, sg.countInOutput);
         countInBox.setSelectedId (sg.countInBeats + 1, dontSendNotification);
-        countInOutBox.setEnabled (sg.countInBeats > 0);
+        clickBox.setSelectedId (sg.click ? 2 : 1, dontSendNotification);
+        barBox.setSelectedId (jlimit (2, 7, sg.beatsPerBar), dontSendNotification);
+        barBox.setEnabled (sg.click);
+        countInOutBox.setEnabled (sg.countInBeats > 0 || sg.click);
         resized();
     }
 
@@ -956,18 +1156,57 @@ public:
         addBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
         r.removeFromTop (12);
         sectionsHeader.setBounds (r.removeFromTop (20));
-        for (auto& row : sectionRows) row->setBounds (r.removeFromTop (28));
+        if (timeline != nullptr)
+        {
+            // The timeline takes whatever height the rest leaves: a bigger window shows more of the music.
+            const int below = 4 + 26 + 6 + 28 * (int) sectionRows.size() + 12 + 24 + 6 + 24 + 6 + 24 + 10 + 60;
+            timeline->setBounds (r.removeFromTop (jmax (timeline->preferredHeight(), r.getHeight() - below)));
+        }
         r.removeFromTop (4);
-        addSectionBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
+        {
+            auto b = r.removeFromTop (26);
+            playBtn.setBounds (b.removeFromLeft (70));          b.removeFromLeft (6);
+            addSectionBtn.setBounds (b.removeFromLeft (150));   b.removeFromLeft (14);
+            zoomOutBtn.setBounds (b.removeFromLeft (30));       b.removeFromLeft (4);
+            zoomInBtn.setBounds (b.removeFromLeft (30));        b.removeFromLeft (4);
+            fitBtn.setBounds (b.removeFromLeft (40));           b.removeFromLeft (10);
+            timelineHint.setBounds (b);
+        }
+        r.removeFromTop (6);
+        for (auto& row : sectionRows) row->setBounds (r.removeFromTop (28));
         r.removeFromTop (12);
         auto c = r.removeFromTop (24);
+        tempoLabel.setBounds (c.removeFromLeft (50));
+        tempoText.setBounds (c.removeFromLeft (190));
+        findTempoBtn.setBounds (c.removeFromLeft (170));   c.removeFromLeft (4);
+        halfBtn.setBounds (c.removeFromLeft (30));          c.removeFromLeft (4);
+        doubleBtn.setBounds (c.removeFromLeft (30));        c.removeFromLeft (10);
+        fileBpmLabel.setBounds (c.removeFromLeft (50));
+        fileBpmText.setBounds (c.removeFromLeft (52));      c.removeFromLeft (10);
+        firstBeatLabel.setBounds (c.removeFromLeft (60));
+        firstBeatText.setBounds (c.removeFromLeft (64));   c.removeFromLeft (4);
+        beatBackBtn.setBounds (c.removeFromLeft (50));     c.removeFromLeft (4);
+        beatFwdBtn.setBounds (c.removeFromLeft (50));
+        r.removeFromTop (6);
+        c = r.removeFromTop (24);
         countInLabel.setBounds (c.removeFromLeft (70));
         countInBox.setBounds (c.removeFromLeft (130));
-        c.removeFromLeft (12);
-        countInOutLabel.setBounds (c.removeFromLeft (30));
-        countInOutBox.setBounds (c.removeFromLeft (180));
+        c.removeFromLeft (16);
+        clickLabel.setBounds (c.removeFromLeft (40));
+        clickBox.setBounds (c.removeFromLeft (190));
+        c.removeFromLeft (8);
+        barBox.setBounds (c.removeFromLeft (150));
+        r.removeFromTop (6);
+        c = r.removeFromTop (24);
+        countInOutLabel.setBounds (c.removeFromLeft (70));
+        countInOutBox.setBounds (c.removeFromLeft (240));
+        c.removeFromLeft (16);
+        startLabel.setBounds (c.removeFromLeft (66));
+        startText.setBounds (c.removeFromLeft (90));
+        c.removeFromLeft (16);
+        transposeTrackBtn.setBounds (c.removeFromLeft (250));
         r.removeFromTop (10);
-        hint.setBounds (r);
+        hint.setBounds (r.removeFromTop (60));
     }
 
 private:
@@ -1365,6 +1604,11 @@ private:
             go.setTooltip ("Go here: at the end of the current section if the backing track is playing, otherwise where Play starts");
             go.onClick = [this] { owner.goToMarker (index); };
 
+            addAndMakeVisible (actions);
+            actions.setButtonText (m.actions.empty() ? "Actions..." : String ((int) m.actions.size()) + (m.actions.size() == 1 ? " action..." : " actions..."));
+            actions.setTooltip ("What happens when the track enters this section: a keyboard's program, a part muted, an effect bypassed, a cue to the lights");
+            actions.onClick = [this] { owner.editActions (index); };
+
             addAndMakeVisible (remove);
             remove.setTooltip ("Remove this section marker (the music is untouched)");
             remove.onClick = [this] { owner.removeMarker (index); };
@@ -1386,6 +1630,7 @@ private:
             auto r = getLocalBounds().reduced (0, 2);
             remove.setBounds (r.removeFromRight (28));   r.removeFromRight (6);
             go.setBounds (r.removeFromRight (44));       r.removeFromRight (6);
+            actions.setBounds (r.removeFromRight (96));  r.removeFromRight (6);
             vamp.setBounds (r.removeFromRight (70));     r.removeFromRight (6);
             time.setBounds (r.removeFromRight (90));     r.removeFromRight (6);
             name.setBounds (r);
@@ -1394,8 +1639,14 @@ private:
         int index;
         Label name, time;
         ToggleButton vamp { "Vamp" };
-        TextButton go { "Go" }, remove { "X" };
+        TextButton go { "Go" }, actions, remove { "X" };
     };
+
+    void editActions (int markerIndex)
+    {
+        SafePointer<TracksComponent> self (this);
+        showSectionActions (engine, songIndex, markerIndex, [self] { if (self != nullptr) self->rebuild(); });
+    }
 
     std::vector<MarkerDef> markers() const
     {
@@ -1409,23 +1660,6 @@ private:
         if (index < 0 || index >= (int) m.size()) return;
         change (m[(size_t) index]);
         engine.setSongMarkers (songIndex, m);
-    }
-
-    void addSection()
-    {
-        auto m = markers();
-        double at = 0.0;
-        if (engine.getTrackSong() == songIndex && engine.isTrackRunning())
-            at = engine.getTrackPosition();
-        else if (! m.empty())
-        {
-            for (const auto& x : m) at = jmax (at, x.seconds);
-            at += 10.0;
-        }
-        m.push_back ({ "Section " + String ((int) m.size() + 1), at, false });
-        std::sort (m.begin(), m.end(), [] (const MarkerDef& a, const MarkerDef& b) { return a.seconds < b.seconds; });
-        engine.setSongMarkers (songIndex, m);
-        rebuild();
     }
 
     void removeMarker (int index)
@@ -1476,8 +1710,134 @@ private:
     void applyCountIn()
     {
         const int beats = jmax (0, countInBox.getSelectedId() - 1);
+        const bool click = clickBox.getSelectedId() == 2;
         engine.setSongCountIn (songIndex, beats, jmax (0, countInOutBox.getSelectedId() - 1));
-        countInOutBox.setEnabled (beats > 0);
+        engine.setSongClick (songIndex, click, jmax (2, barBox.getSelectedId()));
+        barBox.setEnabled (click);
+        countInOutBox.setEnabled (beats > 0 || click);
+    }
+
+    double songBeatSeconds() const
+    {
+        const auto& songs = engine.getSongs();
+        const double bpm = songIndex < (int) songs.size() && songs[(size_t) songIndex].tempoBpm > 0.0 ? songs[(size_t) songIndex].tempoBpm
+                                                                                                     : engine.getTempoBpm();
+        return 60.0 / jmax (20.0, bpm);
+    }
+
+    void refreshTempoRow()
+    {
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+        const auto& sg = songs[(size_t) songIndex];
+        const bool stretched = sg.trackBpm > 0.0 && sg.tempoBpm > 0.0 && std::abs (sg.trackBpm - sg.tempoBpm) > 0.005;
+        tempoText.setText (sg.tempoBpm > 0.0 ? String (sg.tempoBpm, 1) + " bpm, the song's own"
+                                                 + (stretched ? "  (files stretched " + String (roundToInt ((sg.tempoBpm / sg.trackBpm - 1.0) * 100.0)) + "%)" : String())
+                                             : String (engine.getTempoBpm(), 1) + " bpm now (the song sets none)", dontSendNotification);
+        tempoText.setColour (Label::textColourId, sg.tempoBpm > 0.0 ? Colours::white : textDim);
+        tempoText.setTooltip (stretched ? "The files were made at " + String (sg.trackBpm, 1) + " bpm and are stretched to play at the song's "
+                                          + String (sg.tempoBpm, 1) + ". Edit... on the song sets its tempo; Files at sets theirs."
+                                        : "The tempo the click, the count-in and the bar lines use. Edit... on the song sets it by hand.");
+        fileBpmText.setText (sg.trackBpm > 0.0 ? String (sg.trackBpm, 1) : String ("?"), dontSendNotification);
+        fileBpmText.setColour (Label::textColourId, sg.trackBpm > 0.0 ? Colours::white : textDim);
+        transposeTrackBtn.setToggleState (sg.transposeTrack, dontSendNotification);
+        transposeTrackBtn.setButtonText (sg.transposeTrack && sg.transpose != 0
+                                           ? "Transpose the files with the song  (" + String (sg.transpose > 0 ? "+" : "") + String (sg.transpose) + " st now)"
+                                           : "Transpose the files with the song");
+        const int m = (int) (sg.firstBeat / 60.0);
+        firstBeatText.setText (String (m) + ":" + String (sg.firstBeat - m * 60.0, 2).paddedLeft ('0', 5), dontSendNotification);
+        if (sg.startSeconds > 0.0)
+        {
+            const int sm = (int) (sg.startSeconds / 60.0);
+            startText.setText (String (sm) + ":" + String (sg.startSeconds - sm * 60.0, 2).paddedLeft ('0', 5), dontSendNotification);
+            startText.setColour (Label::textColourId, Colours::white);
+        }
+        else
+        {
+            startText.setText ("first sound", dontSendNotification);
+            startText.setColour (Label::textColourId, textDim);
+        }
+        if (timeline != nullptr) timeline->repaint();
+    }
+
+    void scaleTempo (double factor)
+    {
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+        const double bpm = songs[(size_t) songIndex].tempoBpm > 0.0 ? songs[(size_t) songIndex].tempoBpm : engine.getTempoBpm();
+        // Both numbers: the detector heard the octave wrong, not the stretch.
+        const auto& sg = songs[(size_t) songIndex];
+        engine.setSongTempoAndFiles (songIndex, std::round (bpm * factor * 100.0) / 100.0,
+                                     sg.trackBpm > 0.0 ? std::round (sg.trackBpm * factor * 100.0) / 100.0 : 0.0, sg.firstBeat);
+        refreshTempoRow();
+    }
+
+    void nudgeFirstBeat (int beats)
+    {
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+        const auto& sg = songs[(size_t) songIndex];
+        const double beat = songBeatSeconds();
+        double fb = sg.firstBeat + beats * beat;
+        if (fb < 0.0) fb += jmax (1, sg.beatsPerBar) * beat;      // the same downbeat, a bar later
+        engine.setSongFirstBeat (songIndex, jmax (0.0, fb));
+        refreshTempoRow();
+    }
+
+    void findTempo()
+    {
+        const auto& songs = engine.getSongs();
+        if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+        const auto& sg = songs[(size_t) songIndex];
+        File best;
+        for (const auto& st : sg.stems)
+            if (! st.isMidi())
+                if (const File f = engine.getChartsFolder().getChildFile (st.file); f.getSize() > best.getSize())
+                    best = f;
+        if (best == File())
+        {
+            tempoText.setText ("Add an audio file first; MIDI files bring their own tempo.", dontSendNotification);
+            return;
+        }
+        if (detectThread.joinable()) return;
+        findTempoBtn.setEnabled (false);
+        tempoText.setText ("Listening to " + best.getFileName() + "...", dontSendNotification);
+        detectStop = std::make_shared<std::atomic<bool>> (false);
+        SafePointer<TracksComponent> self (this);
+        detectThread = std::thread ([self, best, bpb = sg.beatsPerBar, stop = detectStop]
+        {
+            AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (best));
+            TempoEstimate est;
+            if (reader == nullptr) est.problem = best.getFileName() + " could not be read.";
+            else est = detectTempo (*reader, bpb, [stop] { return stop->load(); });
+            MessageManager::callAsync ([self, est, name = best.getFileName()] { if (self != nullptr) self->tempoFound (est, name); });
+        });
+    }
+
+    void tempoFound (const TempoEstimate& est, const String& fileName)
+    {
+        if (detectThread.joinable()) detectThread.join();
+        findTempoBtn.setEnabled (true);
+        if (! est.ok) { tempoText.setText (est.problem, dontSendNotification); return; }
+        const double bpm = std::round (est.bpm * 100.0) / 100.0;     // two decimals: a tenth of a bpm drifts a beat over a long song
+        const int m = (int) (est.firstBeat / 60.0);
+        const String at = String (m) + ":" + String (est.firstBeat - m * 60.0, 2).paddedLeft ('0', 5);
+        const String how = est.confidence > 0.6 ? "a clear, steady beat" : est.confidence > 0.3 ? "a fair guess: check it against the click" : "a faint beat: check it against the click";
+        refreshTempoRow();
+        SafePointer<TracksComponent> self (this);
+        perf::confirm ("Tempo found",
+                       fileName + " is at " + String (bpm, 1) + " bpm (" + how + "), with the first beat of a bar at " + at + ".\n\n"
+                       "Use it for this song? Its tempo, click, count-in and the bar lines on the timeline will follow it. "
+                       "If the band counts it twice or half as fast, press x2 or /2 afterwards; if the accent lands on the "
+                       "wrong beat, move the first beat a beat with the buttons beside it.",
+                       "Use it", [self, bpm, fb = est.firstBeat]
+        {
+            if (self == nullptr) return;
+            self->engine.setSongTempoAndFiles (self->songIndex, bpm, bpm, fb);
+            self->refreshTempoRow();
+        });
     }
 
     void timerCallback() override
@@ -1489,6 +1849,7 @@ private:
             rebuild();
         else
             for (auto& row : rows) if (row->def.isMidi()) row->refreshParts();     // a plugin finished loading, a part was changed elsewhere
+        playBtn.setButtonText (timeline != nullptr && timeline->isPlaying() ? "Stop" : "Play");
     }
 
     Engine& engine;
@@ -1497,27 +1858,60 @@ private:
     std::vector<std::unique_ptr<Row>> rows;
     std::vector<std::unique_ptr<SectionRow>> sectionRows;
     Label sectionsHeader { {}, "SECTIONS" };
-    TextButton addSectionBtn { "+ Add section" };
+    std::unique_ptr<TrackTimeline> timeline;
+    Label timelineHint;
+    static constexpr const char* kTimelineHint = "Click the timeline to set where Play starts. Double-click to start a section there; drag a flag to move it; right-click it for more.";
+    TextButton playBtn { "Play" }, addSectionBtn { "Mark section here" }, zoomOutBtn { "-" }, zoomInBtn { "+" }, fitBtn { "Fit" };
     TextButton addBtn { "+ Add audio or MIDI..." };
-    Label countInLabel { {}, "Count-in" }, countInOutLabel { {}, "on" }, hint;
-    ComboBox countInBox, countInOutBox;
+    Label countInLabel { {}, "Count-in" }, clickLabel { {}, "Click" }, countInOutLabel { {}, "Heard on" }, hint;
+    ComboBox countInBox, clickBox, barBox, countInOutBox;
+    Label tempoLabel { {}, "Tempo" }, tempoText, fileBpmLabel { {}, "Files at" }, fileBpmText, firstBeatLabel { {}, "First beat" }, firstBeatText,
+          startLabel { {}, "Starts at" }, startText;
+    ToggleButton transposeTrackBtn { "Transpose the files with the song" };
+    TextButton findTempoBtn { "Find the tempo in the audio..." }, halfBtn { "/2" }, doubleBtn { "x2" }, beatBackBtn { "< beat" }, beatFwdBtn { "beat >" };
+    std::thread detectThread;
+    std::shared_ptr<std::atomic<bool>> detectStop;
     std::unique_ptr<FileChooser> chooser;
 };
+
+namespace
+{
+    /** The Backing track window: a document window with the usual title-bar
+        buttons, so it can be maximised to work on a long song. Escape closes it. */
+    class TracksWindow : public DocumentWindow
+    {
+    public:
+        TracksWindow (const String& title, TracksComponent* content)
+            : DocumentWindow (title, bgPanel, DocumentWindow::allButtons)
+        {
+            setContentOwned (content, true);
+            setUsingNativeTitleBar (true);
+            setResizable (true, true);
+            setResizeLimits (700, 500, 10000, 10000);
+            centreWithSize (jmin (getWidth(), getParentMonitorArea().getWidth() - 80), jmin (getHeight(), getParentMonitorArea().getHeight() - 80));
+            setVisible (true);
+            toFront (true);
+        }
+        void closeButtonPressed() override
+        {
+            setVisible (false);
+            MessageManager::callAsync ([w = this] { delete w; });
+        }
+        bool keyPressed (const KeyPress& k) override
+        {
+            if (k == KeyPress::escapeKey) { closeButtonPressed(); return true; }
+            return DocumentWindow::keyPressed (k);
+        }
+    };
+}
 
 void SongsPanel::showTracksDialog (int songIndex)
 {
     const auto& songs = engine.getSongs();
     if (songIndex < 0 || songIndex >= (int) songs.size()) return;
     auto* content = new TracksComponent (engine, *this, songIndex);
-    content->setSize (820, 640);
-    DialogWindow::LaunchOptions o;
-    o.content.setOwned (content);
-    o.dialogTitle = "Backing track: " + songs[(size_t) songIndex].name;
-    o.dialogBackgroundColour = bgPanel;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.launchAsync();
+    content->setSize (900, 760);
+    new TracksWindow ("Backing track: " + songs[(size_t) songIndex].name, content);     // deletes itself when closed
 }
 
 } // namespace perf

@@ -55,7 +55,14 @@ other plugin.
   only itself down; the rest of the rig plays on.
 - **Built for low latency**: a native PipeWire/JACK client, 128-sample blocks
   by default, parallel plugin loading, and a late-block counter you can watch.
-- **A global tempo with tap tempo**, so tempo-synced delays and arpeggiators
+- **Loop a passage** on a keyboard from a footswitch, in whole bars at the rig's tempo, and play over it.
+- **Sections carry a cue sheet**: entering the chorus can change a keyboard's program, mute a part, bypass an effect or cue the lights.
+- **Built-in MIDI effects**: an arpeggiator, a chord and a scale, with nothing to install.
+- **A pedal for a layer or an effect**: mappings can switch an instrument or an effect, or be its level; one knob can move several things.
+- **Backing tracks follow the song's tempo and key**: find the tempo in the audio, and the files stretch and transpose with the song.
+- **Record the gig**: every output to WAV as it left for the desk, and the keyboards to a MIDI file, in a dated folder beside the setup.
+- **Ableton Link**: the tempo and the beat shared over the network with Live, Bitwig, DJ software and loop apps; Play waits for the shared bar.
+- **A global tempo with tap tempo** and **MIDI clock out** to hardware, so tempo-synced delays and arpeggiators
   have something to sync to. Tap it in the toolbar or from a footswitch.
 - **An on-screen keyboard** for building a setup without a controller attached.
 - **Tablet control -- the whole plugin, not a remote control for it.** A
@@ -71,12 +78,14 @@ other plugin.
   built-in General MIDI player (FluidSynth), one of your own programs by
   keyboard and by name (*Upper: Big Strings*, kept playing whatever Upper
   itself is on), or a MIDI device. A piano roll edits the notes. With a
-  count-in, started and stopped from a footswitch, the laptop or the tablet,
-  where parts can be muted from the stand. Mark its sections and jump between
-  them in time, and vamp an intro until a pedal lets it go on. Tempo-synced
+  count-in and a click for the in-ears, started and stopped from a footswitch, the laptop or the tablet,
+  where parts can be muted from the stand. Mark its sections on a timeline of
+  the files' waveforms and notes, jump between them in time, and vamp an
+  intro until a pedal lets it go on. Tempo-synced
   effects lock to the track.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
-  song -- PDF, image, text or ChordPro -- and the tablet shows it, turning
+  song -- PDF, image, text or ChordPro -- or type a chord chart in the app,
+  with the page beside the text -- and the tablet shows it, turning
   PDF pages a tap at a time and following the set list from song to song. Files
   are kept in a folder beside the setup, so the two travel together.
 
@@ -256,11 +265,6 @@ on), and **Parts of the track** -- the MIDI files' parts, each with what plays i
 **Mute** for the one you will play yourself tonight, and **GUI** when a
 plugin in the song's own program plays it.
 
-The **Now** tab is the song's sound from the stand: each instrument on or
-off and its level, every effect's bypass, the outputs' volumes, a transpose
-for the singer, and **Save this sound to "song"** so the fix sticks. What belongs in
-rehearsal -- adding plugins, mappings, splits -- stays on the laptop.
-
 If the tablet cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which
 makes it look like the tablet is at fault. Open the port for private networks
@@ -432,6 +436,9 @@ JUCE is included as a submodule and carries [its own licence](https://github.com
 JUCE 8 is offered under the AGPLv3 or a commercial licence, and StageRig uses it
 under the AGPLv3. GPLv3 section 13 allows the two to be combined, so a StageRig
 binary is distributed under the GPLv3 for StageRig's own code and the AGPLv3 for
-JUCE's. The CLAP headers are MIT-licensed.
+JUCE's. The CLAP headers are MIT-licensed. [Ableton Link](https://github.com/Ableton/link)
+is included as a submodule under its GPLv2-or-later licence (it is also
+offered commercially by Ableton), together with the standalone Asio library it
+uses, under the Boost Software License.
 
 Packaging for distributions: see [docs/PACKAGING.md](https://github.com/dguedry/stagerig/blob/main/docs/PACKAGING.md).

@@ -83,11 +83,22 @@ bool PluginHost::isWineBridged (const String& fileOrIdentifier)
 
 String PluginHost::brokenBridgeTarget (const String& fileOrIdentifier)
 {
+    /* Only the plugin's own binary matters: yabridge mirrors a Windows bundle
+       with symlinks, and a Resources link left dangling by an update that
+       dropped the folder (Serum 2) must not hide a plugin that loads. */
     File f (fileOrIdentifier);
     if (! f.isDirectory()) return {};
     for (const auto& link : f.findChildFiles (File::findFiles, true))
-        if (link.isSymbolicLink() && ! link.getLinkedTarget().exists())
-            return link.getLinkedTarget().getFullPathName();
+    {
+        if (! link.isSymbolicLink() || link.getLinkedTarget().exists()) continue;
+        const auto target = link.getLinkedTarget();
+        const bool binary = target.hasFileExtension ("vst3;dll;clap;so")
+                            || target.getParentDirectory().getFileName().containsIgnoreCase ("x86_64-win")
+                            || target.getParentDirectory().getFileName().containsIgnoreCase ("x86-win");
+        if (binary) return target.getFullPathName();
+        std::fprintf (stderr, "[scan] %s: ignoring dangling link %s (not the plugin's binary)\n",
+                      fileOrIdentifier.toRawUTF8(), target.getFullPathName().toRawUTF8());
+    }
     return {};
 }
 

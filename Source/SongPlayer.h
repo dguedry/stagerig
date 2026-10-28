@@ -38,12 +38,23 @@ public:
     ~SongPlayer();
 
     bool hasStems() const                         { return numStemDefs > 0; }
+    /** A click through the song: with no stems, a plain metronome. */
+    bool hasClick() const                         { return clickOn.load(); }
+    /** The click, live: on or off, its accent, and where beat 1 of bar 1
+        falls in the files (seconds). Also lines the count-in up with it. */
+    void setClick (bool on, int beatsPerBar, double firstBeatSeconds);
     bool isReady() const                          { return ready.load(); }
     float getLoadProgress() const                 { return loadProgress.load(); }
     juce::String getProblems() const;             // files that could not be read; once ready
 
-    double getLengthSeconds() const               { return ready.load() ? (double) lengthSamples / sampleRate : 0.0; }
-    double getPositionSeconds() const             { return (double) position.load() / sampleRate; }
+    /* Times given and taken here are the files' own seconds. Played at a
+       tempo other than the files', the track is longer or shorter inside,
+       by `timeScale`; the conversion happens at this edge, so sections,
+       cues and the clock on the panel all read as the files read. */
+    double getLengthSeconds() const               { return ready.load() ? (double) lengthSamples / (sampleRate * timeScale) : 0.0; }
+    double getPositionSeconds() const             { return (double) position.load() / (sampleRate * timeScale); }
+    double getTimeScale() const                   { return timeScale; }
+    int    getPitchSemitones() const              { return pitchSemitones; }
 
     enum class State { idle, waiting, countIn, playing, stopping };
     State getState() const                        { return (State) state.load(); }
@@ -55,7 +66,10 @@ public:
     /** Starts from the cued position (the top, unless a section was asked
         for while stopped): `countInBeats` clicks of `beatSeconds` each on
         `countInOutput` first. Before loading has finished it waits for it. */
-    void start (int countInBeats, double beatSeconds, int countInOutput);
+    void start (int countInBeats, double beatSeconds, int countInOutput, juce::int64 delaySamples = 0);
+    /** A start made with delaySamples = -1 waits here until told how long; this tells it. */
+    void releaseStart (juce::int64 delaySamples)  { pendingDelay.store (juce::jmax ((juce::int64) 0, delaySamples)); }
+    bool isHoldingStart() const                   { return getState() == State::waiting && pendingDelay.load() < 0; }
     /** Fades out over a few milliseconds and goes idle; the next start is from the top. */
     void stop();
 
@@ -64,6 +78,8 @@ public:
     int  getNumSections() const                   { return numSections; }
     juce::String getSectionName (int) const;
     double getSectionStart (int) const;           // seconds
+    /** The index in the song's markers a section came from, or -1 for the stretch before the first. */
+    int  getSectionMarker (int) const;
     bool isSectionVamp (int) const;
     int  getCurrentSection() const                { return currentSection.load(); }
     int  getQueuedSection() const                 { return queuedSection.load(); }
@@ -75,6 +91,10 @@ public:
     void queueSection (int index);
     /** While stopped: Play starts here (seconds). */
     void cue (double seconds);
+    /** Where Play starts while stopped (seconds): the top of the song unless a section or a cue was asked for. */
+    double getCueSeconds() const                  { return (double) cuedPosition.load() / (sampleRate * timeScale); }
+    /** The song's own start point (seconds); 0 means the first sound in the files. */
+    void setStart (double seconds);
     /** Lets a vamp play on at the end of the current repetition. */
     void releaseVamp()                            { vampHold.store (false); }
     /** The one-pedal control: releases a vamp, or else queues the next section. */
@@ -104,6 +124,7 @@ private:
         struct Event { juce::int64 at; uint8_t data[3]; uint8_t size; };
         std::vector<Event> events;
         juce::int64 midiLength = 0;
+        juce::int64 firstSound = 0;               // where the file first makes a sound, device samples; set by the loader
         bool notesSounding = false;               // audio thread: notes may be held, so a jump sends notes-off
         bool needsChase = true;                   // audio thread: catch the instruments up on programs and controllers first
     };
@@ -118,7 +139,10 @@ private:
     void stopLoading();
     void load();                                  // loader thread
     bool loadStem (Stem&);
-    void addClicks (float* l, float* r, int numSamples);
+    void addCountInClicks (float* l, float* r, int numSamples);
+    void addClickRun (float* l, float* r, int at, juce::int64 from, int count);
+    /** One click's sample `inBeat` samples after its beat, or 0 past its length. */
+    float clickSample (juce::int64 inBeat, bool accent) const;
     int  sectionAt (juce::int64 pos) const;
     juce::int64 sectionEnd (int section) const;
 
@@ -133,6 +157,9 @@ private:
 
     double sampleRate = 48000.0;
     int blockSize = 512;
+    double timeScale = 1.0;                       // stretched length over the files' own: fixed at construction
+    double startSeconds = 0.0;                    // the song's own start point, kept to recompute at a new rate
+    int pitchSemitones = 0;                       // the files' pitch moved by this much: fixed at construction
     juce::int64 lengthSamples = 0;                // the longest stem; written by the loader before `ready`
 
     // Sections, in device samples. Fixed capacity: changed under the engine's lock, never allocated by the audio thread.
@@ -141,11 +168,18 @@ private:
     bool sectionVamp[kMaxSections] {};
     juce::String sectionName[kMaxSections];
     double sectionSeconds[kMaxSections] {};
+    int sectionMarker[kMaxSections] {};
     int numSections = 1;
 
     std::atomic<int> state { (int) State::idle };
     std::atomic<juce::int64> position { 0 };
     std::atomic<juce::int64> cuedPosition { 0 };
+    std::atomic<bool> cuedByUser { false };       // a section or a cue was asked for: the loader leaves it alone
+    /* The top of the song: its own start point if it has one, else the
+       first sound in its files -- silence at the head of a file is never
+       played. `leadIn` is written by the loader before `ready`. */
+    std::atomic<juce::int64> startSamples { 0 }, leadIn { 0 };
+    juce::int64 home() const                      { const auto s = startSamples.load(); return s > 0 ? s : leadIn.load(); }
     std::atomic<int> currentSection { 0 }, queuedSection { -1 };
     std::atomic<bool> vampHold { false }, vamping { false };
 
@@ -155,6 +189,13 @@ private:
     std::atomic<double> pendingBeatSeconds { 0.5 };
     juce::int64 countInRemaining = 0, beatSamples = 1, countInDone = 0;
     int countInTotalBeats = 0;
+    std::atomic<juce::int64> pendingDelay { 0 };   // samples to wait before the count-in: the next bar on a shared beat
+    juce::int64 startDelay = -1;                  // audio thread: -1 = not yet taken from pendingDelay
+
+    // the click through the song
+    std::atomic<bool> clickOn { false };
+    std::atomic<int> clickBeatsPerBar { 4 };
+    std::atomic<double> firstBeat { 0.0 };          // seconds into the files
 
     // fade-out, audio thread
     int fadeRemaining = 0, fadeLength = 1;

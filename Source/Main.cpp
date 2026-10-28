@@ -1,6 +1,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "PluginHost.h"
 #include "Engine.h"
+#include "TempoDetect.h"
 #include "MainComponent.h"
 #include "HelpWindow.h"
 #include "LowLatency.h"
@@ -38,6 +39,30 @@ public:
            is a plain send(), and SIGPIPE's default is to terminate, silently,
            with no core. Treat it as the write error it is. */
         std::signal (SIGPIPE, SIG_IGN);
+
+        // `StageRig --tempo song.mp3 ...` prints what the tempo detector hears in each file, then quits.
+        if (commandLine.contains ("--tempo"))
+        {
+            juce::ArgumentList tempoArgs ("StageRig", commandLine);
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            for (int i = 0; i < tempoArgs.size(); ++i)
+            {
+                if (tempoArgs[i].isLongOption()) continue;
+                const auto f = tempoArgs[i].resolveAsFile();
+                std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+                if (reader == nullptr) { std::printf ("%s: could not be read\n", f.getFileName().toRawUTF8()); continue; }
+                const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                const auto est = perf::detectTempo (*reader, 4);
+                if (est.ok)
+                    std::printf ("%s: %.2f bpm, first beat at %.3f s, confidence %.2f  (%.0f ms)\n",
+                                 f.getFileName().toRawUTF8(), est.bpm, est.firstBeat, est.confidence, juce::Time::getMillisecondCounterHiRes() - t0);
+                else
+                    std::printf ("%s: %s\n", f.getFileName().toRawUTF8(), est.problem.toRawUTF8());
+            }
+            quit();
+            return;
+        }
 
         juce::PropertiesFile::Options opts;
         opts.applicationName = "StageRig";

@@ -59,6 +59,35 @@ var EffectDef::toVar() const
         o->setProperty ("bypassed", bypassed);
         return var (o);
     }
+    if (isBuiltIn())
+    {
+        o->setProperty ("kind", kind == Kind::arpeggio ? "arpeggio" : kind == Kind::chord ? "chord" : kind == Kind::scale ? "scale" : "run");
+        if (kind == Kind::arpeggio)
+        {
+            o->setProperty ("rate", arpRate);
+            o->setProperty ("mode", arpMode);
+            o->setProperty ("octaves", arpOctaves);
+            o->setProperty ("gate", arpGate);
+            if (arpLatch) o->setProperty ("latch", true);
+        }
+        else if (kind == Kind::chord) o->setProperty ("chord", chordType);
+        else
+        {
+            o->setProperty ("root", scaleRoot);
+            o->setProperty ("scale", scaleMode);
+            if (kind == Kind::run)
+            {
+                o->setProperty ("notes", runNotes);
+                o->setProperty ("beats", runBeats);
+                if (runDegree) o->setProperty ("degree", runDegree);
+                if (runDown) o->setProperty ("down", true);
+                if (runToKey) o->setProperty ("toKey", true);
+                if (! runHoldLast) o->setProperty ("holdLast", false);
+            }
+        }
+        o->setProperty ("bypassed", bypassed);
+        return var (o);
+    }
     if (auto xml = plugin.createXml())
         o->setProperty ("plugin", xml->toString (XmlElement::TextFormat().singleLine()));
     o->setProperty ("state", state.toBase64Encoding());
@@ -79,6 +108,26 @@ EffectDef EffectDef::fromVar (const var& v)
         e.bankLsb = jlimit (-1, 127, prop<int> (v, "bankLsb", -1));
         e.patch   = jlimit (-1, 127, prop<int> (v, "patch", -1));
         e.bypassed = prop<bool> (v, "bypassed", false);
+        return e;
+    }
+    if (const auto kind = propStr (v, "kind"); kind == "arpeggio" || kind == "chord" || kind == "scale" || kind == "run")
+    {
+        e.kind = kind == "arpeggio" ? Kind::arpeggio : kind == "chord" ? Kind::chord : kind == "scale" ? Kind::scale : Kind::run;
+        e.runNotes   = jlimit (2, 16, prop<int> (v, "notes", 8));
+        e.runBeats   = jlimit (0.25f, 16.0f, (float) prop<double> (v, "beats", 1.0));
+        e.runDegree  = jlimit (0, 6, prop<int> (v, "degree", 0));
+        e.runDown    = prop<bool> (v, "down", false) ? 1 : 0;
+        e.runToKey   = prop<bool> (v, "toKey", false) ? 1 : 0;
+        e.runHoldLast = prop<bool> (v, "holdLast", true);
+        e.arpRate    = jlimit (0, 4, prop<int> (v, "rate", 2));
+        e.arpMode    = jlimit (0, 4, prop<int> (v, "mode", 0));
+        e.arpOctaves = jlimit (1, 4, prop<int> (v, "octaves", 1));
+        e.arpGate    = jlimit (5, 100, prop<int> (v, "gate", 80));
+        e.arpLatch   = prop<bool> (v, "latch", false);
+        e.chordType  = jlimit (0, 9, prop<int> (v, "chord", 0));
+        e.scaleRoot  = jlimit (0, 11, prop<int> (v, "root", 0));
+        e.scaleMode  = jlimit (0, 10, prop<int> (v, "scale", 0));
+        e.bypassed   = prop<bool> (v, "bypassed", false);
         return e;
     }
     if (auto xml = parseXML (propStr (v, "plugin")))
@@ -430,12 +479,72 @@ File chartsFolderFor (const File& setupFile)
     return setupFile.getSiblingFile (setupFile.getFileNameWithoutExtension() + ".charts");
 }
 
+var ActionDef::toVar() const
+{
+    auto* o = new DynamicObject();
+    static const char* kinds[] = { "program", "part", "effect", "midi" };
+    o->setProperty ("kind", kinds[(int) kind]);
+    switch (kind)
+    {
+        case Kind::program:
+            o->setProperty ("input", input);
+            o->setProperty ("program", program);
+            break;
+        case Kind::part:
+            o->setProperty ("channel", channel);
+            o->setProperty ("on", on);
+            break;
+        case Kind::effect:
+            o->setProperty ("input", input);
+            if (program >= 0) o->setProperty ("program", program);
+            o->setProperty ("chain", chain);
+            o->setProperty ("effect", effect);
+            o->setProperty ("on", on);
+            break;
+        case Kind::midi:
+            o->setProperty ("portIdentifier", portIdentifier);
+            o->setProperty ("portName", portName);
+            o->setProperty ("type", midiType == MidiType::programChange ? "pc" : midiType == MidiType::controller ? "cc" : "note");
+            o->setProperty ("channel", channel);
+            o->setProperty ("data1", data1);
+            o->setProperty ("data2", data2);
+            break;
+    }
+    return var (o);
+}
+
+ActionDef ActionDef::fromVar (const var& v)
+{
+    ActionDef a;
+    const auto kind = propStr (v, "kind");
+    a.kind = kind == "part" ? Kind::part : kind == "effect" ? Kind::effect : kind == "midi" ? Kind::midi : Kind::program;
+    a.input   = jmax (0, prop<int> (v, "input", 0));
+    a.program = jlimit (-1, InputDef::numPrograms - 1, prop<int> (v, "program", a.kind == Kind::effect ? -1 : 0));
+    a.channel = jlimit (1, 16, prop<int> (v, "channel", 1));
+    a.on      = prop<bool> (v, "on", true);
+    a.chain   = prop<int> (v, "chain", -1);
+    a.effect  = jmax (0, prop<int> (v, "effect", 0));
+    a.portIdentifier = propStr (v, "portIdentifier");
+    a.portName = propStr (v, "portName");
+    const auto t = propStr (v, "type");
+    a.midiType = t == "cc" ? MidiType::controller : t == "note" ? MidiType::noteOn : MidiType::programChange;
+    a.data1 = jlimit (0, 127, prop<int> (v, "data1", 0));
+    a.data2 = jlimit (0, 127, prop<int> (v, "data2", 127));
+    return a;
+}
+
 var MarkerDef::toVar() const
 {
     auto* o = new DynamicObject();
     o->setProperty ("name", name);
     o->setProperty ("seconds", seconds);
     if (vamp) o->setProperty ("vamp", true);
+    if (! actions.empty())
+    {
+        Array<var> arr;
+        for (const auto& a : actions) arr.add (a.toVar());
+        o->setProperty ("actions", arr);
+    }
     return var (o);
 }
 
@@ -445,6 +554,8 @@ MarkerDef MarkerDef::fromVar (const var& v)
     m.name    = propStr (v, "name");
     m.seconds = jmax (0.0, prop<double> (v, "seconds", 0.0));
     m.vamp    = prop<bool> (v, "vamp", false);
+    if (auto* arr = v.getProperty ("actions", var()).getArray())
+        for (const auto& a : *arr) m.actions.push_back (ActionDef::fromVar (a));
     return m;
 }
 
@@ -530,11 +641,17 @@ var SongDef::toVar() const
         for (const auto& st : stems) arr.add (st.toVar());
         o->setProperty ("stems", arr);
     }
-    if (countInBeats > 0)
+    if (countInBeats > 0 || click)
     {
         o->setProperty ("countInBeats", countInBeats);
         o->setProperty ("countInOutput", countInOutput);
     }
+    if (click)              o->setProperty ("click", true);
+    if (beatsPerBar != 4)   o->setProperty ("beatsPerBar", beatsPerBar);
+    if (firstBeat != 0.0)   o->setProperty ("firstBeat", firstBeat);
+    if (startSeconds > 0.0) o->setProperty ("start", startSeconds);
+    if (trackBpm > 0.0)     o->setProperty ("trackBpm", trackBpm);
+    if (transposeTrack)     o->setProperty ("transposeTrack", true);
     if (! markers.empty())
     {
         juce::Array<juce::var> arr;
@@ -569,6 +686,12 @@ SongDef SongDef::fromVar (const var& v)
                 s.markers.push_back (MarkerDef::fromVar (m));
         s.countInBeats  = jlimit (0, 16, (int) o->getProperty ("countInBeats"));
         s.countInOutput = jmax (0, (int) o->getProperty ("countInOutput"));
+        s.click         = (bool) o->getProperty ("click");
+        s.beatsPerBar   = o->hasProperty ("beatsPerBar") ? jlimit (1, 16, (int) o->getProperty ("beatsPerBar")) : 4;
+        s.firstBeat     = jmax (0.0, (double) o->getProperty ("firstBeat"));
+        s.startSeconds  = jmax (0.0, (double) o->getProperty ("start"));
+        s.trackBpm      = jmax (0.0, (double) o->getProperty ("trackBpm"));
+        s.transposeTrack = (bool) o->getProperty ("transposeTrack");
     }
     return s;
 }
@@ -608,6 +731,18 @@ var Setup::toVar() const
     o->setProperty ("holdAcrossChange", holdAcrossChange);
     o->setProperty ("tempoBpm", tempoBpm);
     o->setProperty ("tapTempoCC", tapTempoCC);
+    if (! clockOut.empty())
+    {
+        Array<var> ports;
+        for (const auto& c : clockOut)
+        {
+            auto* po = new DynamicObject();
+            po->setProperty ("identifier", c.identifier);
+            po->setProperty ("name", c.name);
+            ports.add (var (po));
+        }
+        o->setProperty ("clockOut", ports);
+    }
     Array<var> arr;
     for (auto& i : inputs) arr.add (i.toVar());
     o->setProperty ("inputs", arr);
@@ -640,6 +775,8 @@ var Setup::toVar() const
     if (prevSongCC > 0) o->setProperty ("prevSongCC", prevSongCC);
     if (transportCC > 0) o->setProperty ("transportCC", transportCC);
     if (sectionCC > 0)   o->setProperty ("sectionCC", sectionCC);
+    if (looperCC > 0)    o->setProperty ("looperCC", looperCC);
+    if (looperClearCC > 0) o->setProperty ("looperClearCC", looperClearCC);
     return var (o);
 }
 
@@ -651,6 +788,10 @@ Setup Setup::fromVar (const var& v)
     s.holdAcrossChange = prop<bool> (v, "holdAcrossChange", true);
     s.tempoBpm           = prop<double> (v, "tempoBpm", 120.0);   // absent in older setups
     s.tapTempoCC         = prop<int>    (v, "tapTempoCC", 0);
+    if (auto* ports = obj (v) != nullptr ? obj (v)->getProperty ("clockOut").getArray() : nullptr)
+        for (const auto& pv : *ports)
+            if (const auto id = propStr (pv, "identifier"); id.isNotEmpty())
+                s.clockOut.push_back ({ id, propStr (pv, "name") });
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("inputs").getArray() : nullptr)
         for (auto& iv : *arr) s.inputs.push_back (InputDef::fromVar (iv));
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("outputs").getArray() : nullptr)
@@ -667,6 +808,8 @@ Setup Setup::fromVar (const var& v)
     s.prevSongCC = prop<int> (v, "prevSongCC", 0);
     s.transportCC = jlimit (0, 127, prop<int> (v, "transportCC", 0));
     s.sectionCC   = jlimit (0, 127, prop<int> (v, "sectionCC", 0));
+    s.looperCC    = jlimit (0, 127, prop<int> (v, "looperCC", 0));
+    s.looperClearCC = jlimit (0, 127, prop<int> (v, "looperClearCC", 0));
     if (auto* o = obj (v))
     {
         if (auto* arr = o->getProperty ("songs").getArray())

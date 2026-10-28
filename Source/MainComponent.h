@@ -59,6 +59,8 @@ private:
     void statusMessage (const juce::String&) override;
 
     void timerCallback() override;
+    void toggleRecording();
+    static juce::String formatElapsed (double seconds);
 
     void refreshAll();
     void refreshProgramView();
