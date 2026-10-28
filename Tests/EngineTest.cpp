@@ -1489,7 +1489,7 @@ int main()
             CHECK (namesInSet() == before);
 
             // Sets reorder too, and keep playing the one you were playing.
-            const int other = engine.addSet ("Second");
+            engine.addSet ("Second");
             engine.selectSet (st);
             const int newPos = engine.moveSet (st, 1);
             CHECK (engine.getCurrentSet() == newPos);

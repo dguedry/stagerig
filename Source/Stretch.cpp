@@ -41,7 +41,6 @@ namespace
 
         const int N = jmax (1024, (int) (sampleRate * 0.045) & ~1);        // ~45 ms window
         const int Hs = N / 2;                                               // synthesis hop: windows overlap by half
-        const double Ha = (double) Hs / scale;                              // analysis hop
         const int search = N / 4;                                           // how far a window may be nudged
         const int step = 2;                                                 // offsets tried, and samples compared, every so often
         const int cmpStep = 4;
