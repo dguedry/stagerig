@@ -32,12 +32,14 @@ SongPlayer::SongPlayer (AudioFormatManager& f, const File& folder, const SongDef
     }
     numStemDefs = (int) stems.size();
     setClick (song.click, song.beatsPerBar, song.firstBeat);
-    startSamples.store ((int64) (jmax (0.0, song.startSeconds) * sampleRate * timeScale));
+    startSeconds = jmax (0.0, song.startSeconds);
+    startSamples.store ((int64) (startSeconds * sampleRate * timeScale));
     cuedPosition.store (startSamples.load());
     position.store (startSamples.load());
     fadeLength = jmax (1, (int) (0.03 * sampleRate));
     scratch.setSize (2, blockSize, false, true, true);
     setMarkers (song.markers);
+    currentSection.store (sectionAt (startSamples.load()));      // the section the start point is in, shown while idle
     startLoading();
 }
 
@@ -102,7 +104,8 @@ void SongPlayer::load()
 
 void SongPlayer::setStart (double seconds)
 {
-    startSamples.store ((int64) (jmax (0.0, seconds) * sampleRate * timeScale));
+    startSeconds = jmax (0.0, seconds);
+    startSamples.store ((int64) (startSeconds * sampleRate * timeScale));
     if (getState() == State::idle && ! cuedByUser.load())
     {
         cuedPosition.store (home());
@@ -304,6 +307,10 @@ void SongPlayer::prepare (double sr, int bs)
     fadeLength = jmax (1, (int) (0.03 * sampleRate));
     for (int i = 0; i < numSections; ++i)
         sectionStart[i] = (int64) (sectionSeconds[i] * sampleRate * timeScale);
+    startSamples.store ((int64) (startSeconds * sampleRate * timeScale));
+    cuedByUser.store (false);
+    cuedPosition.store (startSamples.load());
+    position.store (startSamples.load());
     startLoading();
 }
 
@@ -363,7 +370,7 @@ int64 SongPlayer::sectionEnd (int s) const
 void SongPlayer::start (int beats, double beatSeconds, int output, int64 delaySamples)
 {
     if (getState() != State::idle) return;
-    pendingDelay.store (jmax ((int64) 0, delaySamples));
+    pendingDelay.store (jmax ((int64) -1, delaySamples));         // -1: hold until releaseStart()
     startDelay = -1;
     pendingCountInBeats.store (jmax (0, beats));
     pendingBeatSeconds.store (jmax (0.05, beatSeconds));
@@ -490,7 +497,17 @@ void SongPlayer::addClickRun (float* l, float* r, int at, int64 from, int count)
 SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, MidiBuffer* trackMidi, int n)
 {
     auto st = getState();
-    if (st == State::idle || (stems.empty() && ! clickOn.load (std::memory_order_relaxed))) return Happened::nothing;
+    if (st == State::idle) return Happened::nothing;
+    if (stems.empty() && ! clickOn.load (std::memory_order_relaxed))
+    {
+        // A metronome whose click was turned off has nothing left to play: it stops, cleanly, rather than sit "playing" for good.
+        state.store ((int) State::idle);
+        position.store (home());
+        cuedPosition.store (home());
+        cuedByUser.store (false);
+        currentSection.store (0);
+        return Happened::stopped;
+    }
     if (n > scratch.getNumSamples()) return Happened::nothing;    // larger than prepared: never allocate here
 
     Happened happened = Happened::nothing;
@@ -498,8 +515,12 @@ SongPlayer::Happened SongPlayer::render (float* (*outputs)[2], int numOutputs, M
     if (st == State::waiting)
     {
         if (! ready.load()) return Happened::nothing;
-        // Asked to start on a shared bar line: wait for it, in whole blocks.
-        if (startDelay < 0) startDelay = pendingDelay.exchange (0);
+        // Asked to start on a shared bar line: wait for it, in whole blocks. -1 = not yet told how long: hold.
+        if (startDelay < 0)
+        {
+            if (pendingDelay.load() < 0) return Happened::nothing;
+            startDelay = pendingDelay.exchange (0);
+        }
         if (startDelay > 0) { startDelay -= n; return Happened::nothing; }
         countInTotalBeats = pendingCountInBeats.load();
         beatSamples = jmax ((int64) 1, (int64) (pendingBeatSeconds.load() * sampleRate));

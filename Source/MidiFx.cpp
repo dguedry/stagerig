@@ -46,7 +46,7 @@ namespace
 
         void reset() override
         {
-            numHeld = 0; numPressed = 0; sounding = -1; step = 0; samplesToStep = 0; samplesToOff = -1; goingUp = true;
+            numHeld = 0; numPressed = 0; sounding = -1; step = 0; samplesToStep = 0; samplesToOff = -1;
         }
 
         void process (const MidiBuffer& in, MidiBuffer& out, int numSamples, double sampleRate, double bpm) override
@@ -117,8 +117,6 @@ namespace
                 samplesToStep -= next;
                 if (samplesToOff >= 0) samplesToOff -= next;
             }
-            // Keep the step clock honest when the block ended inside a step.
-            if (numHeld > 0 && at >= numSamples) {}
         }
 
     private:
@@ -173,7 +171,6 @@ namespace
         int sounding = -1, soundingChannel = 1, step = 0;
         double samplesToStep = 0.0;
         int samplesToOff = -1;
-        bool goingUp = true;
         Random random;
     };
 
@@ -222,7 +219,11 @@ namespace
             root.store (jlimit (0, 11, d.scaleRoot));
             mode.store (jlimit (0, numScaleModes() - 1, d.scaleMode));
         }
-        void reset() override { for (auto& c : mapped) for (auto& n : c) n = -1; }
+        void reset() override
+        {
+            for (auto& c : mapped) for (auto& n : c) n = -1;
+            for (auto& c : sounding) for (auto& n : c) n = 0;
+        }
         void process (const MidiBuffer& in, MidiBuffer& out, int, double, double) override
         {
             for (const auto meta : in)
@@ -230,9 +231,15 @@ namespace
                 const auto m = meta.getMessage();
                 if (m.isNoteOn())
                 {
+                    /* Two keys can land on one note (C and C# both on C): the
+                       note sounds while any of them is down, retriggered by the
+                       later one, and lets go only when the last is released. */
                     const int ch = jlimit (1, 16, m.getChannel()), key = m.getNoteNumber();
                     const int to = snap (key);
+                    if (mapped[ch - 1][key] >= 0 && sounding[ch - 1][mapped[ch - 1][key]] > 0) --sounding[ch - 1][mapped[ch - 1][key]];   // the same key again
+                    if (sounding[ch - 1][to] > 0) out.addEvent (MidiMessage::noteOff (ch, to), meta.samplePosition);
                     mapped[ch - 1][key] = to;
+                    ++sounding[ch - 1][to];
                     out.addEvent (MidiMessage::noteOn (ch, to, m.getVelocity()), meta.samplePosition);
                 }
                 else if (m.isNoteOff())
@@ -240,7 +247,8 @@ namespace
                     const int ch = jlimit (1, 16, m.getChannel()), key = m.getNoteNumber();
                     const int to = mapped[ch - 1][key] >= 0 ? mapped[ch - 1][key] : snap (key);
                     mapped[ch - 1][key] = -1;
-                    out.addEvent (MidiMessage::noteOff (ch, to), meta.samplePosition);
+                    if (sounding[ch - 1][to] > 0 && --sounding[ch - 1][to] == 0)
+                        out.addEvent (MidiMessage::noteOff (ch, to), meta.samplePosition);
                 }
                 else
                     out.addEvent (m, meta.samplePosition);
@@ -261,6 +269,7 @@ namespace
         }
         std::atomic<int> root { 0 }, mode { 0 };
         int mapped[16][128];
+        uint8 sounding[16][128];
     };
 }
 

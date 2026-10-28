@@ -67,6 +67,9 @@ public:
         for while stopped): `countInBeats` clicks of `beatSeconds` each on
         `countInOutput` first. Before loading has finished it waits for it. */
     void start (int countInBeats, double beatSeconds, int countInOutput, juce::int64 delaySamples = 0);
+    /** A start made with delaySamples = -1 waits here until told how long; this tells it. */
+    void releaseStart (juce::int64 delaySamples)  { pendingDelay.store (juce::jmax ((juce::int64) 0, delaySamples)); }
+    bool isHoldingStart() const                   { return getState() == State::waiting && pendingDelay.load() < 0; }
     /** Fades out over a few milliseconds and goes idle; the next start is from the top. */
     void stop();
 
@@ -155,6 +158,7 @@ private:
     double sampleRate = 48000.0;
     int blockSize = 512;
     double timeScale = 1.0;                       // stretched length over the files' own: fixed at construction
+    double startSeconds = 0.0;                    // the song's own start point, kept to recompute at a new rate
     int pitchSemitones = 0;                       // the files' pitch moved by this much: fixed at construction
     juce::int64 lengthSamples = 0;                // the longest stem; written by the loader before `ready`
 

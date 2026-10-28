@@ -57,6 +57,7 @@ bool Recorder::start (const File& where, const StringArray& outputNames, const S
 
     thread.startThread (Thread::Priority::normal);
     startMs = Time::getMillisecondCounterHiRes();
+    open = true;
     recording.store (true);
     startTimer (500);
     return true;
@@ -64,7 +65,9 @@ bool Recorder::start (const File& where, const StringArray& outputNames, const S
 
 void Recorder::stop()
 {
-    if (! recording.exchange (false)) return;
+    if (! open) return;
+    open = false;
+    recording.store (false);
     stopTimer();
     drainMidi();
     writers.clear();            // each flushes its buffer and closes the file
@@ -87,8 +90,9 @@ void Recorder::stop()
             if (i == 0) track.addEvent (MidiMessage::tempoMetaEvent (500000), 0.0);     // 120 bpm: one beat is half a second
             for (int e = 0; e < midiTracks[i].getNumEvents(); ++e)
             {
-                const auto& ev = midiTracks[i].getEventPointer (e)->message;
-                track.addEvent (ev, ev.getTimeStamp() * 2.0 * 960.0);          // seconds -> ticks at 120 bpm
+                MidiMessage ev (midiTracks[i].getEventPointer (e)->message);
+                ev.setTimeStamp (ev.getTimeStamp() * 2.0 * 960.0);              // seconds -> ticks at 120 bpm, exactly
+                track.addEvent (ev);
             }
             track.addEvent (MidiMessage::endOfTrack(), track.getEndTime() + 1.0);
             track.updateMatchedPairs();
@@ -107,7 +111,7 @@ void Recorder::stop()
 
 double Recorder::elapsedSeconds() const
 {
-    return recording.load() ? (Time::getMillisecondCounterHiRes() - startMs) * 0.001 : 0.0;
+    return open ? (Time::getMillisecondCounterHiRes() - startMs) * 0.001 : 0.0;
 }
 
 void Recorder::writeAudio (int index, const float* l, const float* r, float gain, int n)

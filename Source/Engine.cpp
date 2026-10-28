@@ -607,6 +607,7 @@ void Engine::rebuildRuntimes()
         rt->collector.reset (sampleRate);
         rt->trackMidi.ensureSize (4096);
         rt->shifted.ensureSize (4096);
+        rt->block.ensureSize (8192);                  // the keys and a loop playing round them
         applyInputDef (*rt, setup.inputs[(size_t) i]);
         runtimes.push_back (std::move (rt));
     }
@@ -1074,7 +1075,7 @@ bool Engine::startRecording (String& error)
     for (const auto& o : setup.outputs) outNames.add (o.name);
     for (const auto& in : setup.inputs) inNames.add (in.name);
     if (outNames.isEmpty()) outNames.add ("Main");
-    const File take = getRecordingsFolder().getChildFile (Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M"));
+    const File take = getRecordingsFolder().getNonexistentChildFile (Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M.%S"), "", false);
     const bool ok = recorder.start (take, outNames, inNames, sampleRate, jmax (blockSize, 64), error);
     listeners.call ([] (Listener& l) { l.transportChanged(); });
     return ok;
@@ -1083,6 +1084,7 @@ bool Engine::startRecording (String& error)
 void Engine::stopRecording()
 {
     if (! recorder.isRecording()) return;
+    { const ScopedLock sl (lock); recorder.disarm(); }       // the audio thread stops writing before the writers go
     recorder.stop();
     listeners.call ([] (Listener& l) { l.transportChanged(); });
 }
@@ -1300,10 +1302,33 @@ void Engine::setSongTempo (int songIndex, double bpm)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
     // 0 means "leave the tempo alone"; anything else is clamped like the global one.
+    const double before = stretchOf (setup.songs[(size_t) songIndex]);
     setup.songs[(size_t) songIndex].tempoBpm = bpm <= 0.0 ? 0.0 : jlimit (20.0, 300.0, bpm);
-    // Files that know their own tempo follow the song's: re-read them at the new stretch.
-    if (songIndex == trackSong && setup.songs[(size_t) songIndex].trackBpm > 0.0) armTrack (songIndex);
+    // Files that know their own tempo follow the song's: re-read them when the stretch actually changes.
+    if (songIndex == trackSong && std::abs (stretchOf (setup.songs[(size_t) songIndex]) - before) > 1e-9) armTrack (songIndex);
     listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+double Engine::stretchOf (const SongDef& s)
+{
+    return s.trackBpm > 0.0 && s.tempoBpm > 0.0 && std::abs (s.trackBpm - s.tempoBpm) > 0.005 ? s.trackBpm / s.tempoBpm : 1.0;
+}
+
+void Engine::setSongTempoAndFiles (int songIndex, double tempoBpm, double trackBpm, double firstBeat)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& s = setup.songs[(size_t) songIndex];
+    const double before = stretchOf (s);
+    s.tempoBpm = tempoBpm <= 0.0 ? 0.0 : jlimit (20.0, 300.0, tempoBpm);
+    s.trackBpm = trackBpm <= 0.0 ? 0.0 : jlimit (20.0, 300.0, trackBpm);
+    s.firstBeat = jmax (0.0, firstBeat);
+    if (songIndex == trackSong)
+    {
+        if (std::abs (stretchOf (s) - before) > 1e-9) armTrack (songIndex);      // one re-read for the whole edit
+        else if (player != nullptr) player->setClick (s.click, s.beatsPerBar, s.firstBeat);
+    }
+    if (songIndex == currentSongIndex() && s.tempoBpm > 0.0) setTempoBpm (s.tempoBpm);
+    listeners.call ([] (Listener& l) { l.setupChanged(); l.transportChanged(); });
 }
 
 void Engine::setSongProgram (int songIndex, int inputIndex, int program)
@@ -1373,6 +1398,7 @@ void Engine::selectSong (int songIndex)
         resetTapTempo();
     }
     setTranspose (s.transpose);
+    beatsPerBarAtomic.store (jmax (1, s.beatsPerBar));
     // Its backing track is made ready, not started: starting is always on purpose.
     armTrack (songIndex);
     listeners.call ([] (Listener& l) { l.setupChanged(); });
@@ -1516,7 +1542,8 @@ void Engine::setSongClick (int songIndex, bool on, int beatsPerBar)
         if (player != nullptr) player->setClick (s.click, s.beatsPerBar, s.firstBeat);
         else if (on) armTrack (songIndex);                 // no files: the click alone is the track
     }
-    listeners.call ([] (Listener& l) { l.transportChanged(); });
+    if (songIndex == currentSongIndex()) beatsPerBarAtomic.store (s.beatsPerBar);
+    listeners.call ([] (Listener& l) { l.transportChanged(); l.setupChanged(); });
 }
 
 void Engine::setSongFirstBeat (int songIndex, double seconds)
@@ -1525,7 +1552,7 @@ void Engine::setSongFirstBeat (int songIndex, double seconds)
     auto& s = setup.songs[(size_t) songIndex];
     s.firstBeat = jmax (0.0, seconds);
     if (songIndex == trackSong && player != nullptr) player->setClick (s.click, s.beatsPerBar, s.firstBeat);
-    listeners.call ([] (Listener& l) { l.transportChanged(); });
+    listeners.call ([] (Listener& l) { l.transportChanged(); l.setupChanged(); });
 }
 
 void Engine::setSongStart (int songIndex, double seconds)
@@ -1534,7 +1561,7 @@ void Engine::setSongStart (int songIndex, double seconds)
     auto& s = setup.songs[(size_t) songIndex];
     s.startSeconds = jmax (0.0, seconds);
     if (songIndex == trackSong && player != nullptr) player->setStart (s.startSeconds);
-    listeners.call ([] (Listener& l) { l.transportChanged(); });
+    listeners.call ([] (Listener& l) { l.transportChanged(); l.setupChanged(); });
 }
 
 void Engine::performAction (int songIndex, const ActionDef& a)
@@ -1554,7 +1581,7 @@ void Engine::performAction (int songIndex, const ActionDef& a)
         }
         case ActionDef::Kind::effect:
             if (validInput (a.input))
-                setEffectBypassed (a.input, setup.inputs[(size_t) a.input].currentProgram, a.chain, a.effect, ! a.on);
+                setEffectBypassed (a.input, a.program >= 0 ? a.program : setup.inputs[(size_t) a.input].currentProgram, a.chain, a.effect, ! a.on);
             break;
         case ActionDef::Kind::midi:
         {
@@ -1566,8 +1593,8 @@ void Engine::performAction (int songIndex, const ActionDef& a)
             if (a.midiType == ActionDef::MidiType::noteOn)
             {
                 // A cue note is a press: let it go a moment later so a lighting desk sees a key, not a stuck one.
-                const auto id = a.portIdentifier, name = a.portName;
-                Timer::callAfterDelay (100, [this, id, name, ch, note = a.data1] { sendMidiToDevice (id, name, MidiMessage::noteOff (ch, note)); });
+                if (const int port = midiOuts.portFor (a.portIdentifier, a.portName); port >= 0)
+                    midiOuts.push (port, MidiMessage::noteOff (ch, a.data1), Time::getMillisecondCounterHiRes() + 100.0);
             }
             break;
         }
@@ -1591,7 +1618,7 @@ String Engine::describeAction (const ActionDef& a) const
         {
             if (! validInput (a.input)) return "an effect on a keyboard that is gone";
             const auto& in = setup.inputs[(size_t) a.input];
-            const auto& prog = in.programs[(size_t) in.currentProgram];
+            const auto& prog = in.programs[(size_t) jlimit (0, InputDef::numPrograms - 1, a.program >= 0 ? a.program : in.currentProgram)];
             String what = "effect " + String (a.effect + 1);
             if (auto* chain = prog.chainFor (a.chain); chain != nullptr && a.effect < (int) chain->size())
                 what = (*chain)[(size_t) a.effect].displayName();
@@ -1627,8 +1654,9 @@ void Engine::sendMidiToDevice (const String& identifier, const String& name, con
 void Engine::setSongTrackBpm (int songIndex, double bpm)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    const double before = stretchOf (setup.songs[(size_t) songIndex]);
     setup.songs[(size_t) songIndex].trackBpm = bpm <= 0.0 ? 0.0 : jlimit (20.0, 300.0, bpm);
-    if (songIndex == trackSong) armTrack (songIndex);                  // the stretch is baked in: read the files again
+    if (songIndex == trackSong && std::abs (stretchOf (setup.songs[(size_t) songIndex]) - before) > 1e-9) armTrack (songIndex);   // the stretch is baked in: read the files again
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
@@ -1681,10 +1709,12 @@ void Engine::setLinkEnabled (bool on)
     settings.saveIfNeeded();
     if (on)
     {
-        // Join at the rig's tempo, unless a session is already running at another: then take that one.
+        /* Join at the rig's tempo. Peers are not known yet at this point; when
+           the sessions merge, Link settles the tempo and the tempo callback
+           brings the rig along if it is not ours. */
         auto st = link->captureAppSessionState();
-        if (linkPeers.load() == 0) { st.setTempo (setup.tempoBpm, link->clock().micros()); link->commitAppSessionState (st); }
-        else setTempoBpm (st.tempo());
+        st.setTempo (setup.tempoBpm, link->clock().micros());
+        link->commitAppSessionState (st);
     }
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
@@ -1765,7 +1795,7 @@ void Engine::loopProcess (InputRuntime& in, int numSamples, bool panicNow)
     if (panicNow) std::memset (lp.held, 0, sizeof (lp.held));
 
     const double bpm = jmax (20.0, tempoAtomic.load (std::memory_order_relaxed));
-    const int64 barSamples = jmax ((int64) 1, (int64) (sampleRate * 60.0 / bpm * 4.0));
+    const int64 barSamples = jmax ((int64) 1, (int64) (sampleRate * 60.0 / bpm * jmax (1, beatsPerBarAtomic.load (std::memory_order_relaxed))));
 
     const int cmd = lp.command.exchange (0);
     auto st = (LoopState) lp.state.load();
@@ -1796,7 +1826,14 @@ void Engine::loopProcess (InputRuntime& in, int numSamples, bool panicNow)
                 // Whole bars, the nearest; at least one. What was played past the end is dropped.
                 const int64 bars = jmax ((int64) 1, (int64) std::llround ((double) lp.recorded / (double) barSamples));
                 lp.length = bars * barSamples;
+                /* Past the end: a note-off whose note-on is inside the loop
+                   moves to the last sample, so the note is let go each pass;
+                   anything else there is dropped. */
+                for (auto& e : lp.events)
+                    if (e.at >= lp.length && e.size == 3 && ((e.data[0] & 0xf0) == 0x80 || ((e.data[0] & 0xf0) == 0x90 && e.data[2] == 0)))
+                        e.at = lp.length - 1;
                 lp.events.erase (std::remove_if (lp.events.begin(), lp.events.end(), [&] (const InputRuntime::Looper::Ev& e) { return e.at >= lp.length; }), lp.events.end());
+                std::stable_sort (lp.events.begin(), lp.events.end(), [] (const InputRuntime::Looper::Ev& a, const InputRuntime::Looper::Ev& b) { return a.at < b.at; });
                 lp.bars.store ((int) bars);
                 lp.pos = 0;
                 st = LoopState::playing;
@@ -1913,7 +1950,7 @@ void Engine::setGmSoundfont (const File& f)
 
 void Engine::startTrack()
 {
-    if (player == nullptr) return;
+    if (player == nullptr || ! hasTrack()) return;
     if (player->isRunning()) return;
     if (! player->isReady())
         listeners.call ([] (Listener& l) { l.statusMessage ("Backing track still loading -- it starts as soon as it is ready."); });
@@ -1928,7 +1965,10 @@ void Engine::startTrack()
         if (s.tempoBpm > 0.0) bpm = s.tempoBpm;
     }
     const int bpb = trackSong >= 0 && trackSong < (int) setup.songs.size() ? setup.songs[(size_t) trackSong].beatsPerBar : 4;
-    player->start (beats, 60.0 / bpm, output, linkStartDelay (beats, bpb));
+    const bool onLinkBar = link != nullptr && link->isEnabled() && linkPeers.load() > 0;
+    // Not loaded yet with Link on: the bar line is only worth computing when the files can actually start, so the start is held and placed by housekeeping.
+    player->start (beats, 60.0 / bpm, output, onLinkBar ? (player->isReady() ? linkStartDelay (beats, bpb) : -1) : 0);
+    linkStartBeats = beats; linkStartBpb = bpb;
     if (link != nullptr && link->isEnabled() && link->isStartStopSyncEnabled())
     {
         auto st = link->captureAppSessionState();
@@ -3594,6 +3634,10 @@ void Engine::timerCallback() { housekeeping(); }
 
 void Engine::housekeeping()
 {
+    // A Play held for Link until the files were ready: place it on the next shared bar line now.
+    if (player != nullptr && player->isHoldingStart() && player->isReady())
+        player->releaseStart (linkStartDelay (linkStartBeats, linkStartBpb));
+
 
     if (! trackProblemsReported && player != nullptr && player->isReady())
     {

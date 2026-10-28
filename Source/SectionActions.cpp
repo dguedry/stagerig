@@ -202,7 +202,7 @@ namespace
                         if (auto* c = prog.chainFor (chain))
                             for (int e = 0; e < (int) c->size(); ++e)
                             {
-                                ActionDef a; a.kind = ActionDef::Kind::effect; a.input = i; a.chain = chain; a.effect = e;
+                                ActionDef a; a.kind = ActionDef::Kind::effect; a.input = i; a.program = in.currentProgram; a.chain = chain; a.effect = e;
                                 const String label = (*c)[(size_t) e].displayName() + "   (" + where + ")";
                                 a.on = false; add (offs, label, a);
                                 a.on = true;  add (ons, label, a);

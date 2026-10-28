@@ -496,6 +496,7 @@ var ActionDef::toVar() const
             break;
         case Kind::effect:
             o->setProperty ("input", input);
+            if (program >= 0) o->setProperty ("program", program);
             o->setProperty ("chain", chain);
             o->setProperty ("effect", effect);
             o->setProperty ("on", on);
@@ -518,7 +519,7 @@ ActionDef ActionDef::fromVar (const var& v)
     const auto kind = propStr (v, "kind");
     a.kind = kind == "part" ? Kind::part : kind == "effect" ? Kind::effect : kind == "midi" ? Kind::midi : Kind::program;
     a.input   = jmax (0, prop<int> (v, "input", 0));
-    a.program = jlimit (0, InputDef::numPrograms - 1, prop<int> (v, "program", 0));
+    a.program = jlimit (-1, InputDef::numPrograms - 1, prop<int> (v, "program", a.kind == Kind::effect ? -1 : 0));
     a.channel = jlimit (1, 16, prop<int> (v, "channel", 1));
     a.on      = prop<bool> (v, "on", true);
     a.chain   = prop<int> (v, "chain", -1);

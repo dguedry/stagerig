@@ -391,8 +391,11 @@ int main()
         render (engine, 10);
         engine.injectMidi (0, MidiMessage::noteOff (1, 64));
         render (engine, blocksPerBar - 11);
+        engine.injectMidi (0, MidiMessage::noteOn (1, 67, (uint8) 100));  // a second note, still down when the loop closes
+        render (engine, 2);
         engine.loopPedal (0);                                            // play: one bar, the nearest
         render (engine, 1);
+        engine.injectMidi (0, MidiMessage::noteOff (1, 67));
         std::printf ("     loop: state %d, %d bar(s)\n", (int) engine.getLoopState (0), engine.getLoopBars (0));
         CHECK (engine.getLoopState (0) == Engine::LoopState::playing && engine.getLoopBars (0) == 1);
         // Round it goes: in the second pass the note sounds again with nothing played.
@@ -401,6 +404,16 @@ int main()
         for (int b = 0; b < 12; ++b) loud = jmax (loud, peakBlock());
         std::printf ("     the loop playing the note again: peak %.3f\n", loud);
         CHECK (loud > 0.01f);
+        /* The note that was still down when the loop closed has its note-off at
+           the loop's last sample now, so each pass lets it go: at the end of a
+           pass the program is quiet again rather than holding it for ever. */
+        render (engine, blocksPerBar - 14);
+        float seam = 0.0f;
+        for (int b = 0; b < 2; ++b) seam = jmax (seam, peakBlock());
+        render (engine, 8);
+        float afterSeam = 0.0f;
+        for (int b = 0; b < 2; ++b) afterSeam = jmax (afterSeam, peakBlock());
+        std::printf ("     around the seam: %.3f then %.3f (the held note is let go, the loop's note restarts)\n", seam, afterSeam);
         engine.loopStop (0);
         render (engine, 30);
         float quiet = 0.0f;
@@ -1869,6 +1882,20 @@ int main()
             fx->process (in, out, 512, 48000.0, 120.0);
             std::printf ("     C# and E in C major: %s\n", notesOn (out).toRawUTF8());
             CHECK (notesOn (out) == "60 64");
+            // C and C# both land on C: letting go of C# must not cut the C that is still held.
+            in.clear(); out.clear();
+            in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0);
+            fx->process (in, out, 512, 48000.0, 120.0);
+            in.clear(); out.clear();
+            in.addEvent (MidiMessage::noteOff (1, 61), 0);
+            fx->process (in, out, 512, 48000.0, 120.0);
+            int offs = 0; for (const auto m : out) if (m.getMessage().isNoteOff()) ++offs;
+            in.clear(); out.clear();
+            in.addEvent (MidiMessage::noteOff (1, 60), 0);
+            fx->process (in, out, 512, 48000.0, 120.0);
+            int offs2 = 0; for (const auto m : out) if (m.getMessage().isNoteOff()) ++offs2;
+            std::printf ("     release C# then C: note-offs %d then %d\n", offs, offs2);
+            CHECK (offs == 0 && offs2 == 1);
         }
         // Run: E pressed in C major, an octave up in one beat (120 bpm: eight notes across half a second), the last one held.
         {
@@ -2379,6 +2406,17 @@ int main()
             std::printf ("     metronome: %.3f %.3f %.3f, running %d\n", m1[2], m2[2], m3[2], (int) engine.isTrackRunning());
             CHECK (m1[2] > 0.2f && m2[2] < 1e-4f && m3[2] > 0.2f && engine.isTrackRunning());
             CHECK (m1[0] < 1e-4f);                                       // nothing on Main
+            // Its click turned off mid-play: nothing left to play, so it stops rather than sit "playing".
+            engine.setSongClick (metro, false, 4);
+            levels (2);
+            pump (50);
+            std::printf ("     click off while playing: running %d\n", (int) engine.isTrackRunning());
+            CHECK (! engine.isTrackRunning());
+            engine.setSongClick (metro, true, 4);
+            CHECK (waitReady());
+            engine.startTrack();
+            levels (2);
+            CHECK (engine.isTrackRunning());
             engine.stopTrack();
             levels (4);
             pump (50);

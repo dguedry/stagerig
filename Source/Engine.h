@@ -326,6 +326,8 @@ public:
     /** The tempo the song's audio files were made at (0 = unknown). With the
         song's tempo set to something else, the files play stretched to it. */
     void setSongTrackBpm (int songIndex, double bpm);
+    /** The song's tempo, its files' tempo and its first beat in one edit: the files are re-read once, if the stretch changed. */
+    void setSongTempoAndFiles (int songIndex, double tempoBpm, double trackBpm, double firstBeat);
     /** Whether the song's transpose also moves its files' pitch. */
     void setSongTransposeTrack (int songIndex, bool on);
     /** How the armed track is playing against its files: 1 = as they are. */
@@ -761,6 +763,9 @@ private:
     std::atomic<int> clockPorts[MidiOuts::kMaxPorts] {};
     std::atomic<int> numClockPorts { 0 };
     std::atomic<double> tempoAtomic { 120.0 };
+    std::atomic<int> beatsPerBarAtomic { 4 };     // the song's bar, for the looper
+    int linkStartBeats = 0, linkStartBpb = 4;     // a Play held for Link: its count-in and bar, for placing it when ready
+    static double stretchOf (const SongDef&);     // the files' length over their own: 1 when they play as they are
     std::atomic<int> clockTicks { 0 };
     double clockSamplesToNext = 0.0;              // audio thread
     void resolveClockPorts();                     // message thread

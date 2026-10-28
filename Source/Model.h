@@ -373,7 +373,7 @@ struct ActionDef
     enum class Kind { program, part, effect, midi };
     Kind kind = Kind::program;
     int input = 0;                   // program, effect: which input
-    int program = 0;                 // program: which of the input's programs
+    int program = 0;                 // program: which of the input's programs; effect: the program the effect lives in (-1 = whichever is current)
     int channel = 1;                 // part: the part's channel (1-16); midi: the channel
     bool on = true;                  // part: plays (not muted); effect: on (not bypassed)
     int chain = -1, effect = 0;      // effect: a ProgramDef chain address and an index in it

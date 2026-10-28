@@ -29,10 +29,12 @@ public:
         file could not be made. */
     bool start (const juce::File& folder, const juce::StringArray& outputNames, const juce::StringArray& inputNames,
                 double sampleRate, int maxBlockSize, juce::String& error);
+    /** Message thread, under the engine's audio lock: no more audio or MIDI is taken from here on. */
+    void disarm()                                 { recording.store (false); }
     /** Message thread: finishes the files. */
     void stop();
 
-    bool isRecording() const                      { return recording.load(); }
+    bool isRecording() const                      { return open; }
     double elapsedSeconds() const;
     juce::File getFolder() const                  { return folder; }
 
@@ -56,7 +58,8 @@ private:
     juce::StringArray trackNames;
     int midiDropped = 0;
 
-    std::atomic<bool> recording { false };
+    std::atomic<bool> recording { false };        // the audio thread may write
+    bool open = false;                            // a take is in progress (message thread)
     double startMs = 0.0, sampleRate = 48000.0;
     juce::File folder;
 };

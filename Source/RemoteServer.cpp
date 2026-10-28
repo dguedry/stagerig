@@ -319,7 +319,7 @@ function showTransport(t) {
   const status = !t.ready ? ("Loading " + Math.round((t.loading || 0) * 100) + "%")
     : t.countIn ? "Counting in…"
     : ((t.sections || []).length > 1 && sec ? sec.name + (t.vamping ? " — repeating (vamp)" : "") : t.name) + " · "
-      + (t.len > 3000 ? "click " + mmss(t.pos) : mmss(t.pos) + " / " + mmss(t.len))
+      + (t.metronome ? "click " + mmss(t.pos) : mmss(t.pos) + " / " + mmss(t.len))
       + (t.queued >= 0 && t.sections[t.queued] ? " · next: " + t.sections[t.queued].name : "");
   transportUi.text.innerHTML = '<small></small><span></span>';
   transportUi.text.querySelector("small").textContent = "BACKING TRACK";
@@ -1731,6 +1731,7 @@ String RemoteServer::transportJson() const
     o->setProperty ("queued", engine.getQueuedTrackSection());
     o->setProperty ("vamping", engine.isTrackVamping());
     o->setProperty ("click", song >= 0 && song < (int) songs.size() && songs[(size_t) song].click);
+    o->setProperty ("metronome", song >= 0 && song < (int) songs.size() && songs[(size_t) song].stems.empty());
     Array<var> sections;
     for (int i = 0; i < engine.getTrackSectionCount(); ++i)
     {

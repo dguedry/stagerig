@@ -1766,8 +1766,9 @@ private:
         if (songIndex < 0 || songIndex >= (int) songs.size()) return;
         const double bpm = songs[(size_t) songIndex].tempoBpm > 0.0 ? songs[(size_t) songIndex].tempoBpm : engine.getTempoBpm();
         // Both numbers: the detector heard the octave wrong, not the stretch.
-        if (songs[(size_t) songIndex].trackBpm > 0.0) engine.setSongTrackBpm (songIndex, std::round (songs[(size_t) songIndex].trackBpm * factor * 100.0) / 100.0);
-        engine.setSongTempo (songIndex, std::round (bpm * factor * 100.0) / 100.0);
+        const auto& sg = songs[(size_t) songIndex];
+        engine.setSongTempoAndFiles (songIndex, std::round (bpm * factor * 100.0) / 100.0,
+                                     sg.trackBpm > 0.0 ? std::round (sg.trackBpm * factor * 100.0) / 100.0 : 0.0, sg.firstBeat);
         refreshTempoRow();
     }
 
@@ -1834,9 +1835,7 @@ private:
                        "Use it", [self, bpm, fb = est.firstBeat]
         {
             if (self == nullptr) return;
-            self->engine.setSongTrackBpm (self->songIndex, bpm);
-            self->engine.setSongTempo (self->songIndex, bpm);
-            self->engine.setSongFirstBeat (self->songIndex, fb);
+            self->engine.setSongTempoAndFiles (self->songIndex, bpm, bpm, fb);
             self->refreshTempoRow();
         });
     }
