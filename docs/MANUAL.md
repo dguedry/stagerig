@@ -352,7 +352,9 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   the nearest note on it, so a wrong note is never wrong; **Run** turns each
   key into a scale run, as a string section plays one: press the third and
   the notes climb the scale from it, in time, and the last one sits there
-  while the key is held. Its settings are the key and scale; **Length** (an
+  while the key is held. A tap plays the whole run too: let go early and it
+  still lands, the last note lifting a step later. Its settings are the key
+  and scale; **Length** (an
   octave, two octaves, or any count of notes); **Takes**, how long the whole
   run lasts at the song's tempo, from a quarter of a beat to a bar, with the
   last note landing exactly at the end, so *an octave in a beat* is two

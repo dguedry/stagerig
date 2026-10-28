@@ -1965,14 +1965,15 @@ int main()
         // Run, as on the rig: C phrygian, two octaves up from the key in a beat at 90, 128-sample blocks.
         // Every note the run starts must be let go, whether the key is held past the run or released mid-way.
         {
-            auto runAndCount = [&] (double releaseAfterSeconds, int& stuck, StringArray& played)
+            auto runAndCount = [&] (double releaseAfterSeconds, bool holdLast, int& stuck, StringArray& played, double& lastOffSeconds)
             {
                 /* Counted in the order the plugin hears them: a note-off that
                    comes before its note-on (the old build stepped the run at
                    sample 0, ahead of the key that started it) leaves that
                    note sounding, and counts as stuck here too. */
-                EffectDef d; d.kind = EffectDef::Kind::run; d.scaleRoot = 0; d.scaleMode = 6; d.runNotes = 15; d.runBeats = 1.0f; d.runDown = 0; d.runToKey = 0;
+                EffectDef d; d.kind = EffectDef::Kind::run; d.scaleRoot = 0; d.scaleMode = 6; d.runNotes = 15; d.runBeats = 1.0f; d.runDown = 0; d.runToKey = 0; d.runHoldLast = holdLast;
                 auto fx = MidiFx::create (d);
+                lastOffSeconds = -1.0;
                 int held[128] = {};
                 MidiBuffer in, out;
                 in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 37);
@@ -1988,25 +1989,30 @@ int main()
                     {
                         const auto msg = m.getMessage();
                         if (msg.isNoteOn()) { ++held[msg.getNoteNumber()]; played.add (String (msg.getNoteNumber())); }
-                        else if (msg.isNoteOff() && held[msg.getNoteNumber()] > 0) --held[msg.getNoteNumber()];
+                        else if (msg.isNoteOff() && held[msg.getNoteNumber()] > 0) { --held[msg.getNoteNumber()]; lastOffSeconds = (b * 128 + m.samplePosition) / 48000.0; }
                         else if (msg.isNoteOff()) held[msg.getNoteNumber()] = 1000;   // let go before it began: it will never be let go
                     }
                 }
                 stuck = 0;
                 for (int n = 0; n < 128; ++n) if (held[n] != 0) ++stuck;
             };
-            int stuck = -1; StringArray played;
-            runAndCount (2.0, stuck, played);
-            std::printf ("     rig run (key held 2 s): %s -> %d note(s) left sounding\n", played.joinIntoString (" ").toRawUTF8(), stuck);
-            CHECK (played.size() == 15 && stuck == 0);
+            // The run takes a beat at 90: 0.667 s, a step of 0.048 s. The last note lifts with the key, or a step after landing.
+            int stuck = -1; StringArray played; double lastOff = 0.0;
+            runAndCount (2.0, true, stuck, played, lastOff);
+            std::printf ("     rig run (key held 2 s): %s -> %d note(s) left sounding, last lifted at %.3f s\n", played.joinIntoString (" ").toRawUTF8(), stuck, lastOff);
+            CHECK (played.size() == 15 && stuck == 0 && lastOff > 1.9);
             played.clear();
-            runAndCount (0.2, stuck, played);
-            std::printf ("     rig run (key let go at 0.2 s): %d notes played, %d left sounding\n", played.size(), stuck);
-            CHECK (stuck == 0);
+            runAndCount (2.0, false, stuck, played, lastOff);
+            std::printf ("     rig run (key held 2 s, not holding the last): %d notes played, %d left sounding, last lifted at %.3f s\n", played.size(), stuck, lastOff);
+            CHECK (played.size() == 15 && stuck == 0 && lastOff > 0.65 && lastOff < 0.8);
             played.clear();
-            runAndCount (0.01, stuck, played);
-            std::printf ("     rig run (key let go at once): %d notes played, %d left sounding\n", played.size(), stuck);
-            CHECK (stuck == 0);
+            runAndCount (0.2, true, stuck, played, lastOff);
+            std::printf ("     rig run (key let go at 0.2 s): %d notes played, %d left sounding, last lifted at %.3f s\n", played.size(), stuck, lastOff);
+            CHECK (played.size() == 15 && stuck == 0 && lastOff > 0.65 && lastOff < 0.8);       // a tap plays the whole run
+            played.clear();
+            runAndCount (0.01, true, stuck, played, lastOff);
+            std::printf ("     rig run (key let go at once): %d notes played, %d left sounding, last lifted at %.3f s\n", played.size(), stuck, lastOff);
+            CHECK (played.size() == 15 && stuck == 0 && lastOff > 0.65 && lastOff < 0.8);
         }
         // Arpeggiator: C and E held, eighths at 120 (a step every 0.25 s): four notes a second, alternating.
         {
@@ -2933,6 +2939,49 @@ int main()
                 engine.removeSlot (0, 91, 0);
                 CHECK (engine.getPlugin (0, 91, midiChain, 0) == nullptr);
                 engine.clearProgram (0, 91);
+            }
+            // --- a built-in run before the sound, as on a rig: the last note holds while the key is held ---
+            {
+                engine.clearProgram (0, 92);
+                engine.selectProgram (0, 92); settle();
+                CHECK (engine.addExternalSlot (0, 92, port));
+                CHECK (engine.addBuiltInMidiEffect (0, 92, 0, EffectDef::Kind::run));
+                EffectDef rd; rd.kind = EffectDef::Kind::run; rd.scaleRoot = 0; rd.scaleMode = 0; rd.runNotes = 15; rd.runBeats = 1.0f; rd.runHoldLast = true;
+                engine.setBuiltInMidiEffect (0, 92, 0, 0, rd);
+                const bool linkWasOn = engine.isLinkEnabled();
+                engine.setLinkEnabled (false);
+                engine.setTempoBpm (90.0);
+                renderAndWait();
+                catcher.take();
+                const double sr = engine.getSampleRate();
+                /* Rendered at the pace of real time: the port's sender orders
+                   what it is handed by the clock, as a device needs, so blocks
+                   rendered in a burst would reach it out of order. */
+                auto renderSeconds = [&] (double seconds)
+                {
+                    AudioBuffer<float> b (2, kBlock);
+                    const double t0 = Time::getMillisecondCounterHiRes(), blockMs = 1000.0 * kBlock / sr;
+                    for (int i = 0, n = (int) (seconds * sr / kBlock); i < n; ++i)
+                    {
+                        b.clear();
+                        engine.renderBlockForTesting (b.getArrayOfWritePointers(), 2, kBlock);
+                        while (Time::getMillisecondCounterHiRes() < t0 + (i + 1) * blockMs) Thread::sleep (1);
+                    }
+                    Thread::sleep (200);
+                    return catcher.take();
+                };
+                engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));
+                auto held = renderSeconds (2.0);                              // the key stays down well past the beat
+                int ons = 0, lastOn = -1; String order;
+                for (auto& m : held) { if (m.isNoteOn()) { ++ons; lastOn = m.getNoteNumber(); order << m.getNoteNumber() << " "; } else if (m.isNoteOff()) order << "-" << m.getNoteNumber() << " "; }
+                const bool lastLetGo = has (held, [lastOn] (const MidiMessage& m) { return m.isNoteOff() && m.getNoteNumber() == lastOn; });
+                std::printf ("     run to the sound, key held: %s\n", order.toRawUTF8());
+                CHECK (ons == 15 && lastOn == 84 && ! lastLetGo);
+                engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+                auto released = renderAndWait();
+                CHECK (has (released, [] (const MidiMessage& m) { return m.isNoteOff() && m.getNoteNumber() == 84; }));
+                engine.clearProgram (0, 92);
+                engine.setLinkEnabled (linkWasOn);
             }
             // --- a MIDI file part to a MIDI device: an instrument in the track's program listens to the file's channel ---
             {

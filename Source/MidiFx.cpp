@@ -317,8 +317,17 @@ namespace
                 {
                     if (auto* v = find (jlimit (1, 16, m.getChannel()), m.getNoteNumber()))
                     {
-                        if (v->sounding >= 0) out.addEvent (MidiMessage::noteOff (v->channel, v->sounding), meta.samplePosition);
-                        v->key = -1;
+                        /* A key let go mid-run does not stop it: a run is a
+                           gesture, and a tap plays the whole of it. It carries
+                           on to its last note, which then lifts a step later
+                           like the others. Let go after the run has landed,
+                           the held last note lifts now. */
+                        if (v->index < v->count) v->keyUp = true;
+                        else
+                        {
+                            if (v->sounding >= 0) out.addEvent (MidiMessage::noteOff (v->channel, v->sounding), meta.samplePosition);
+                            v->key = -1;
+                        }
                     }
                 }
                 else if (m.isAllNotesOff() || m.isAllSoundOff())
@@ -336,7 +345,11 @@ namespace
                 while (v.samplesToStep < (double) numSamples && v.index < v.count)
                 {
                     advance (out, v, (int) jmax (0.0, v.samplesToStep));
-                    if (v.index >= v.count) break;
+                    if (v.index >= v.count)
+                    {
+                        if (v.keyUp) v.key = -1;      // ran on after the key came up: done with it, nothing sounding
+                        break;
+                    }
                     v.samplesToStep += stepSamples;
                 }
                 if (v.index < v.count) v.samplesToStep -= numSamples;
@@ -344,7 +357,7 @@ namespace
         }
 
     private:
-        struct Voice { int key = -1, channel = 1, velocity = 100, sounding = -1; int seq[17]; int count = 0, index = 0; double samplesToStep = 0.0; };
+        struct Voice { int key = -1, channel = 1, velocity = 100, sounding = -1; int seq[17]; int count = 0, index = 0; double samplesToStep = 0.0; bool keyUp = false; };
         static constexpr int kVoices = 16;
         Voice voices[kVoices];
 
@@ -362,7 +375,7 @@ namespace
 
         void plan (Voice& v, int ch, int key, int velocity)
         {
-            v.key = key; v.channel = ch; v.velocity = velocity; v.sounding = -1; v.index = 0; v.count = 0;
+            v.key = key; v.channel = ch; v.velocity = velocity; v.sounding = -1; v.index = 0; v.count = 0; v.keyUp = false;
             const int n = notes.load(), dir = down.load() ? -1 : 1;
             int start = snapDown (key);
             for (int i = 0; i < degree.load(); ++i) { const int p = step (start, 1); if (p < 0) break; start = p; }   // from a degree above the key
@@ -387,8 +400,8 @@ namespace
             if (note < 0) return;                                      // the step that only lets the last note go
             out.addEvent (MidiMessage::noteOn (v.channel, note, (uint8) v.velocity), at);
             v.sounding = note;
-            // The last note: held while the key is, or let go at the next step like the rest.
-            if (v.index >= v.count && ! holdLast.load() && v.count < 17) v.seq[v.count++] = -1;
+            // The last note: held while the key is, or let go at the next step like the rest (as it is when the key is already up).
+            if (v.index >= v.count && (! holdLast.load() || v.keyUp) && v.count < 17) v.seq[v.count++] = -1;
         }
 
         std::atomic<int> root { 0 }, mode { 0 }, notes { 8 }, degree { 0 };
