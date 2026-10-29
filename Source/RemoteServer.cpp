@@ -607,7 +607,9 @@ function renderSets(s) {
      position within the set, or -1 for a song that is not in it. */
   const songRow = (sg, songIndex, pos) => {
     const b = document.createElement("button");
-    const playing = pos >= 0 && pos === s.currentSong;
+    /* The song in play lights up wherever it is: at its position in the set,
+       or among the songs outside it when it was tapped there. */
+    const playing = songIndex === s.playingSong && (pos < 0 || pos === s.currentSong);
     b.className = "song" + (playing ? " on" : "");
 
     if (pos >= 0) {
@@ -746,7 +748,11 @@ function renderSets(s) {
 
   const where = document.createElement("div"); where.className = "empty";
   where.style.padding = "12px 4px 0";
-  where.textContent = s.currentSong >= 0
+  const outside = s.playingSong >= 0 && !inSet.has(s.playingSong) && songs[s.playingSong];
+  where.textContent = outside
+      ? "Playing \u201c" + (songs[s.playingSong].name || "Untitled") + "\u201d, outside the set list"
+        + (s.currentSong >= 0 ? " \u2014 Next goes on from song " + (s.currentSong + 2) : "")
+      : s.currentSong >= 0
       ? "Song " + (s.currentSong + 1) + " of " + cur.songs.length
       : cur.songs.length + (cur.songs.length === 1 ? " song" : " songs") + " in this set list — tap one to start";
   wrap.appendChild(where);
@@ -1125,8 +1131,9 @@ document.getElementById("follow").onclick = () => {
   document.getElementById("follow").className = follow ? "on" : "";
 };
 
-/* Which song the set is on, as an index into state.songs. */
+/* The song in play, as an index into state.songs: the one the rig says, or the set's position. */
 function playingSong(s) {
+  if (s.playingSong >= 0) return s.playingSong;
   const st = (s.sets || [])[s.currentSet];
   if (!st || s.currentSong < 0 || s.currentSong >= st.songs.length) return -1;
   return st.songs[s.currentSong];
@@ -1837,6 +1844,7 @@ String RemoteServer::stateJson() const
         root->setProperty ("sets", setArr);
         root->setProperty ("currentSet", engine.getCurrentSet());
         root->setProperty ("currentSong", engine.getCurrentSongInSet());
+        root->setProperty ("playingSong", engine.currentSongIndex());        // the song in play, in or outside the set list
     }
     return JSON::toString (var (root.get()), true);
 }

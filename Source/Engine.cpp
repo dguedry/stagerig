@@ -437,6 +437,7 @@ void Engine::loadSetup (Setup newSetup)
     }
     teardownRuntimes();
     setup = std::move (newSetup);
+    songInPlay = -1;                        // the set's position says which song, until one is selected
     // A setup with an audio input needs the device's inputs; a keyboard rig does not pay for them.
     for (auto& in : setup.inputs)
         if (in.isAudio()) { ensureAudioInputsOpen(); break; }
@@ -1237,6 +1238,8 @@ void Engine::removeSong (int songIndex)
     }
     if (setup.currentSet >= 0 && setup.currentSongInSet >= (int) setup.sets[(size_t) setup.currentSet].songs.size())
         setup.currentSongInSet = -1;
+    if (songInPlay == songIndex)     songInPlay = -1;
+    else if (songInPlay > songIndex) --songInPlay;
 
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
@@ -1258,6 +1261,8 @@ int Engine::moveSong (int songIndex, int delta)
             if (i == songIndex)   i = to;
             else if (i == to)     i = songIndex;
         }
+    if (songInPlay == songIndex)  songInPlay = to;
+    else if (songInPlay == to)    songInPlay = songIndex;
 
     listeners.call ([] (Listener& l) { l.setupChanged(); });
     return to;
@@ -1425,6 +1430,8 @@ void Engine::setSongTranspose (int songIndex, int semitones)
 
 int Engine::currentSongIndex() const
 {
+    // A song tapped outside the set list is the song in play as much as one stepped to.
+    if (songInPlay >= 0 && songInPlay < (int) setup.songs.size()) return songInPlay;
     if (setup.currentSet < 0 || setup.currentSet >= (int) setup.sets.size()) return -1;
     const auto& songs = setup.sets[(size_t) setup.currentSet].songs;
     if (setup.currentSongInSet < 0 || setup.currentSongInSet >= (int) songs.size()) return -1;
@@ -1435,6 +1442,7 @@ int Engine::currentSongIndex() const
 void Engine::selectSong (int songIndex)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    songInPlay = songIndex;
 
     const auto& s = setup.songs[(size_t) songIndex];
     for (int i = 0; i < (int) setup.inputs.size(); ++i)

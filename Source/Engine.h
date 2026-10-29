@@ -734,6 +734,8 @@ private:
     std::atomic<bool> tapLearnArmed { false };
     std::atomic<bool> panicRequested { false };
     std::atomic<int> liveTranspose { 0 };
+    /** The song last selected, whether from the set list or outside it: the one in play. -1 = none yet. */
+    int songInPlay = -1;
     std::atomic<int> lateBlocks { 0 };
     std::atomic<int> lastBlockSamples { 0 };
     timespec blockDeadline {};

@@ -1509,7 +1509,7 @@ int main()
                 const int copy2 = engine.duplicateSet (es, "");
                 CHECK (engine.getSets()[(size_t) copy2].name == "Edited copy");
                 engine.removeFromSet (es, 1);                                             // the one playing goes: no position, the song plays on
-                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a }) && engine.getCurrentSongInSet() == -1 && engine.currentSongIndex() == -1);
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a }) && engine.getCurrentSongInSet() == -1 && engine.currentSongIndex() == b);
                 engine.moveInSet (es, 0, 1);                                              // off the end: nothing
                 CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a }));
                 engine.removeSet (copy2); engine.removeSet (copy); engine.removeSet (es);
@@ -3026,6 +3026,18 @@ int main()
                 CHECK (engine.currentSongIndex() == keyed);
                 int kr = -1, km = -1;
                 CHECK (engine.keyInPlay (kr, km) && kr == 2 && km == 0);
+                {
+                    // A song tapped outside the set list is the song in play, key and all; the set keeps its place.
+                    const int outside = engine.addSong ("Outside the set");
+                    engine.setSongKey (outside, 9, 1);
+                    engine.selectSong (outside);
+                    CHECK (engine.currentSongIndex() == outside && engine.getCurrentSongInSet() == 0);
+                    CHECK (engine.keyInPlay (kr, km) && kr == 9 && km == 1);
+                    engine.selectSongInSet (0);
+                    CHECK (engine.currentSongIndex() == keyed && engine.keyInPlay (kr, km) && kr == 2);
+                    engine.removeSong (outside);
+                    CHECK (engine.currentSongIndex() == keyed);
+                }
                 CHECK (engine.effectiveEffectDef (rd).scaleRoot == 2 && engine.effectiveEffectDef (rd).scaleMode == 0);
                 renderAndWait();
                 engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));

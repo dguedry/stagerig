@@ -318,12 +318,12 @@ void SongsPanel::timerCallback()
     refreshLoopButton();
     /* Follow the set moving under us. Only the highlight and the headers can
        change without a click here, so this is cheap. */
-    static int lastSet = -2, lastPos = -2, lastSongs = -1, lastSets = -1;
-    const int set = engine.getCurrentSet(), pos = engine.getCurrentSongInSet();
+    static int lastSet = -2, lastPos = -2, lastSongs = -1, lastSets = -1, lastPlaying = -2;
+    const int set = engine.getCurrentSet(), pos = engine.getCurrentSongInSet(), playing = engine.currentSongIndex();
     const int nSongs = (int) engine.getSongs().size(), nSets = (int) engine.getSets().size();
-    if (set != lastSet || pos != lastPos || nSongs != lastSongs || nSets != lastSets)
+    if (set != lastSet || pos != lastPos || nSongs != lastSongs || nSets != lastSets || playing != lastPlaying)
     {
-        lastSet = set; lastPos = pos; lastSongs = nSongs; lastSets = nSets;
+        lastSet = set; lastPos = pos; lastSongs = nSongs; lastSets = nSets; lastPlaying = playing;
         refresh();
     }
     refreshTransport();
@@ -393,6 +393,7 @@ void SongsPanel::ListProxy::paintListBoxItem (int row, Graphics& g, int w, int h
     if (! isSet)
     {
         songIndex = owner.songAtRow (row);
+        playing = songIndex >= 0 && songIndex == owner.engine.currentSongIndex();
     }
     else
     {

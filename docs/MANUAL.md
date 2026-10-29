@@ -993,7 +993,9 @@ compact. Tap any song to jump to it, or use **← PREV SONG** and **NEXT SONG
 the active one.
 
 Songs that are not in the current set list are listed underneath, under
-**SONGS NOT IN THIS SET LIST**, A to Z -- a song you have captured but not yet ordered
+**SONGS NOT IN THIS SET LIST**, A to Z. Tap one and it plays -- it lights up
+there, with its key and notes -- while the set keeps its place, so the
+footswitches go on from where they were. It is a song you have captured but not yet ordered
 is still one you may want to play. Tapping one loads it without changing the
 set list or where the footswitches step from.
 
