@@ -1489,6 +1489,34 @@ int main()
             CHECK (engine.moveSong (last, 1) == last);
             CHECK (namesInSet() == before);
 
+            // Edited a step at a time, as from the stand: the position being played follows its song.
+            {
+                const int a = engine.addSong ("Edit a"), b = engine.addSong ("Edit b"), c = engine.addSong ("Edit c");
+                const int es = engine.addSet ("Edited");
+                engine.addSongToSet (es, a); engine.addSongToSet (es, b); engine.addSongToSet (es, c);
+                engine.addSongToSet (es, 9999);                                           // no such song: ignored
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a, b, c }));
+                engine.selectSet (es);
+                engine.selectSongInSet (1);                                               // playing b
+                engine.moveInSet (es, 1, 1);                                              // b moves last
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a, c, b }) && engine.getCurrentSongInSet() == 2);
+                engine.moveInSet (es, 0, 1);                                              // a and c swap around the playing one
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ c, a, b }) && engine.getCurrentSongInSet() == 2);
+                engine.removeFromSet (es, 0);                                             // one before it goes: the position moves up
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a, b }) && engine.getCurrentSongInSet() == 1);
+                const int copy = engine.duplicateSet (es, "Edited again");
+                CHECK (copy >= 0 && engine.getSets()[(size_t) copy].name == "Edited again" && engine.getSets()[(size_t) copy].songs == std::vector<int> ({ a, b }));
+                const int copy2 = engine.duplicateSet (es, "");
+                CHECK (engine.getSets()[(size_t) copy2].name == "Edited copy");
+                engine.removeFromSet (es, 1);                                             // the one playing goes: no position, the song plays on
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a }) && engine.getCurrentSongInSet() == -1 && engine.currentSongIndex() == -1);
+                engine.moveInSet (es, 0, 1);                                              // off the end: nothing
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a }));
+                engine.removeSet (copy2); engine.removeSet (copy); engine.removeSet (es);
+                engine.removeSong (c); engine.removeSong (b); engine.removeSong (a);
+                engine.selectSet (st);
+            }
+
             // Sets reorder too, and keep playing the one you were playing.
             engine.addSet ("Second");
             engine.selectSet (st);

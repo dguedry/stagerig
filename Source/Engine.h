@@ -303,6 +303,15 @@ public:
     int moveSet (int setIndex, int delta);
     void setSetName (int setIndex, const juce::String&);
     void setSetSongs (int setIndex, const std::vector<int>& songIndices);
+    /** Set-list editing a step at a time, as from the stand: a song put on the
+        end, one taken out, one moved a step. The position being played follows
+        the song it was on; taking that song out leaves no position (the song
+        itself keeps playing). */
+    void addSongToSet (int setIndex, int songIndex);
+    void removeFromSet (int setIndex, int position);
+    void moveInSet (int setIndex, int position, int delta);
+    /** A copy of a set list under a new name -- last gig's set with three changes. Returns its index, or -1. */
+    int duplicateSet (int setIndex, const juce::String& name);
 
     /** Which set is being played and how far into it. -1 = none. */
     int getCurrentSet() const        { return setup.currentSet; }

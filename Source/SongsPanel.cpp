@@ -38,6 +38,15 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
         l->setFont (FontOptions (11.0f));
     }
 
+    /* Find a song by name, notes, or what it loads: a list of hundreds is no
+       use to scroll on a stand. Escape clears it. */
+    addAndMakeVisible (findBox);
+    findBox.setTextToShowWhenEmpty ("Find a song  (name, notes, sound)", textDim);
+    findBox.setFont (FontOptions (12.0f));
+    findBox.setColour (TextEditor::backgroundColourId, bgRow);
+    findBox.onTextChange = [this] { refresh(); };
+    findBox.onEscapeKey = [this] { findBox.clear(); refresh(); };
+
     songsList.setModel (&songsModel);
     setList.setModel (&setModel);
     for (auto* b : { &songsList, &setList })
@@ -167,6 +176,8 @@ void SongsPanel::resized()
     r.removeFromTop (6);
 
     songsHeader.setBounds (songsArea.removeFromTop (14));
+    findBox.setBounds (songsArea.removeFromTop (22));
+    songsArea.removeFromTop (3);
     auto songFiles = songsArea.removeFromBottom (26);
     songsArea.removeFromBottom (2);
     auto songButtons = songsArea.removeFromBottom (26);
@@ -206,8 +217,13 @@ void SongsPanel::refresh()
     const auto& sets  = engine.getSets();
     const int set = engine.getCurrentSet();
 
+    const auto query = findBox.getText().trim();
+    shownSongs.clear();
+    for (int i = 0; i < (int) songs.size(); ++i)
+        if (songMatches (songs[(size_t) i], query)) shownSongs.push_back (i);
     songsHeader.setText (songs.empty() ? "SONGS  (none yet: + stores what is loaded now as a song)"
-                                      : "SONGS  (" + String ((int) songs.size()) + ")",
+                       : query.isEmpty() ? "SONGS  (" + String ((int) songs.size()) + ")"
+                                         : "SONGS  (" + String ((int) shownSongs.size()) + " of " + String ((int) songs.size()) + " match)",
                          dontSendNotification);
 
     if (set >= 0 && set < (int) sets.size())
@@ -239,8 +255,37 @@ void SongsPanel::refresh()
 
     songsList.updateContent();
     setList.updateContent();
+    // The selection follows the song, not the row, as the find box changes what the rows are.
+    if (const int row = rowOfSong (selectedSong); row != songsList.getSelectedRow())
+    {
+        if (row >= 0) songsList.selectRow (row, true);
+        else songsList.deselectAllRows();
+    }
     songsList.repaint();
     setList.repaint();
+}
+
+int SongsPanel::rowOfSong (int songIndex) const
+{
+    for (int r = 0; r < (int) shownSongs.size(); ++r)
+        if (shownSongs[(size_t) r] == songIndex) return r;
+    return -1;
+}
+
+bool SongsPanel::songMatches (const SongDef& sg, const String& query) const
+{
+    if (query.isEmpty()) return true;
+    if (sg.name.containsIgnoreCase (query) || sg.notes.containsIgnoreCase (query)) return true;
+    // What it loads, too: "kontakt" or "002" is how you find a song you cannot name.
+    const auto& inputs = engine.getSetup().inputs;
+    for (int i = 0; i < (int) inputs.size(); ++i)
+    {
+        const int prog = sg.programFor (i);
+        if (prog < 0 || prog >= (int) inputs[(size_t) i].programs.size()) continue;
+        if (String (prog).paddedLeft ('0', 3).contains (query)) return true;
+        if (inputs[(size_t) i].programs[(size_t) prog].name.containsIgnoreCase (query)) return true;
+    }
+    return false;
 }
 
 void SongsPanel::refreshLoopButton()
@@ -331,7 +376,7 @@ void SongsPanel::listBoxItemDoubleClicked (int, const MouseEvent&) {}
 
 int SongsPanel::ListProxy::getNumRows()
 {
-    if (! isSet) return (int) owner.engine.getSongs().size();
+    if (! isSet) return (int) owner.shownSongs.size();
     const int set = owner.engine.getCurrentSet();
     const auto& sets = owner.engine.getSets();
     return set >= 0 && set < (int) sets.size() ? (int) sets[(size_t) set].songs.size() : 0;
@@ -347,7 +392,7 @@ void SongsPanel::ListProxy::paintListBoxItem (int row, Graphics& g, int w, int h
 
     if (! isSet)
     {
-        songIndex = row;
+        songIndex = owner.songAtRow (row);
     }
     else
     {
@@ -418,7 +463,7 @@ void SongsPanel::ListProxy::listBoxItemClicked (int row, const MouseEvent&)
         if (set >= 0 && set < (int) sets.size() && row >= 0 && row < (int) sets[(size_t) set].songs.size())
             owner.selectedSong = sets[(size_t) set].songs[(size_t) row];
     }
-    else owner.selectedSong = row;
+    else owner.selectedSong = owner.songAtRow (row);
     play (row);
 }
 
@@ -428,7 +473,7 @@ void SongsPanel::ListProxy::play (int row)
        footswitch will step from; in the song list it is just "load this",
        without touching the set. */
     if (isSet) owner.engine.selectSongInSet (row);
-    else       owner.engine.selectSong (row);
+    else       owner.engine.selectSong (owner.songAtRow (row));
     owner.refresh();
 }
 
@@ -500,8 +545,8 @@ void SongsPanel::addSong()
         engine.captureSong (selectedSong);      // a new song remembers what is up now
         const auto notes = w->getTextEditorContents ("notes").trim();
         if (notes.isNotEmpty()) engine.setSongNotes (selectedSong, notes);
+        findBox.clear();                        // the new song is shown whatever was being looked for
         refresh();
-        songsList.selectRow (selectedSong);
     }), false);
 }
 
@@ -641,7 +686,6 @@ void SongsPanel::moveSongInList (int delta)
     if (selectedSong < 0 || selectedSong >= (int) engine.getSongs().size()) return;
     selectedSong = engine.moveSong (selectedSong, delta);
     refresh();
-    songsList.selectRow (selectedSong);
 }
 
 void SongsPanel::moveInSet (int delta)
@@ -919,7 +963,7 @@ void SongsPanel::filesDropped (const StringArray& files, int x, int y)
     const auto& songs = engine.getSongs();
     int song = -1;
     if (songsList.getBounds().contains (x, y))
-        song = songsList.getRowContainingPosition (x - songsList.getX(), y - songsList.getY());
+        song = songAtRow (songsList.getRowContainingPosition (x - songsList.getX(), y - songsList.getY()));
     else if (setList.getBounds().contains (x, y))
     {
         const int pos = setList.getRowContainingPosition (x - setList.getX(), y - setList.getY());

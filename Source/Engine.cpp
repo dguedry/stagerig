@@ -2137,6 +2137,52 @@ void Engine::setSetSongs (int setIndex, const std::vector<int>& songIndices)
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
+void Engine::addSongToSet (int setIndex, int songIndex)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size() || songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.sets[(size_t) setIndex].songs.push_back (songIndex);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::removeFromSet (int setIndex, int position)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size()) return;
+    auto& songs = setup.sets[(size_t) setIndex].songs;
+    if (position < 0 || position >= (int) songs.size()) return;
+    songs.erase (songs.begin() + position);
+    if (setup.currentSet == setIndex)
+    {
+        if (setup.currentSongInSet == position)     setup.currentSongInSet = -1;
+        else if (setup.currentSongInSet > position) --setup.currentSongInSet;
+    }
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::moveInSet (int setIndex, int position, int delta)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size()) return;
+    auto& songs = setup.sets[(size_t) setIndex].songs;
+    const int to = position + delta;
+    if (position < 0 || position >= (int) songs.size() || to < 0 || to >= (int) songs.size() || to == position) return;
+    std::swap (songs[(size_t) position], songs[(size_t) to]);
+    if (setup.currentSet == setIndex)
+    {
+        if (setup.currentSongInSet == position)  setup.currentSongInSet = to;
+        else if (setup.currentSongInSet == to)   setup.currentSongInSet = position;
+    }
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+int Engine::duplicateSet (int setIndex, const String& name)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size()) return -1;
+    SetDef copy = setup.sets[(size_t) setIndex];
+    copy.name = name.isNotEmpty() ? name : copy.name + " copy";
+    setup.sets.push_back (std::move (copy));
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+    return (int) setup.sets.size() - 1;
+}
+
 void Engine::selectSet (int setIndex)
 {
     if (setIndex < -1 || setIndex >= (int) setup.sets.size()) return;

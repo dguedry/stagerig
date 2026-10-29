@@ -610,6 +610,9 @@ keyboard you are not using in that number.
   from the stand -- a root, a scale, or none -- and the effects and the chart
   follow at once. *None* leaves every effect on its own key and every chart
   as written.
+- **Find a song** above the list narrows it as you type -- by name, by stage
+  notes, or by what it loads ("kontakt", "002") -- for a list that has grown
+  past scrolling. Escape clears it; the selection follows the song.
 - **-** deletes the selected song, and takes it out of every set list that
   used it.
 - **^ v** beside the songs list reorder it. Set lists keep playing their own
@@ -627,6 +630,9 @@ list...**, **Rename this set list...**, **Move up**, **Move down** and
 With a song selected, **Add to set list >** puts it at the end; **^ v** beside
 the set list order it, and **< Remove** takes it out of the set list without
 deleting the song.
+
+All of this can be done from the tablet too: **Edit** beside its find box
+(see *Set list* under *The tablet*).
 
 A song can appear in more than one set list, and more than once in the same one
 -- encores happen.
@@ -987,9 +993,19 @@ compact. Tap any song to jump to it, or use **← PREV SONG** and **NEXT SONG
 the active one.
 
 Songs that are not in the current set list are listed underneath, under
-**SONGS NOT IN THIS SET LIST** -- a song you have captured but not yet ordered
+**SONGS NOT IN THIS SET LIST**, A to Z -- a song you have captured but not yet ordered
 is still one you may want to play. Tapping one loads it without changing the
 set list or where the footswitches step from.
+
+**Edit**, beside the find box, is set lists from the stand. The row of set
+lists gains **+ New set list**; the chosen one gets **Rename**, **Duplicate**
+(last gig's set with three changes) and **Delete** (the songs are kept).
+Every song in the set shows **▲ ▼ ✕** to move it or take it out, and every
+song below shows **+ Add** to put it on the end -- type in the find box to
+reach one in a long list. Each tap is saved at once and every other tablet
+follows. A row tapped in this mode never starts a song; **Done** goes back to
+playing. The song being played keeps its place when the list changes around
+it.
 
 The **Find a song** box matches the name, the stage notes, and the programs --
 so "piano" or "002" finds a song you cannot quite name.
