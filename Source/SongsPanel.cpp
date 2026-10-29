@@ -1,6 +1,7 @@
 #include "SongsPanel.h"
 #include "Confirm.h"
 #include "Charts.h"
+#include "MidiFx.h"
 #include "GmSynth.h"
 #include "GmMixer.h"
 #include "MidiEditor.h"
@@ -579,6 +580,13 @@ void SongsPanel::editSelectedSong()
     w->getTextEditor ("notes")->setTextToShowWhenEmpty ("key, count-in, a reminder", textDim);
     w->getTextEditor ("tempo")->setTextToShowWhenEmpty ("blank = leave the tempo alone", textDim);
     w->getTextEditor ("transpose")->setTextToShowWhenEmpty ("0", textDim);
+    StringArray roots { "None  (each Scale and Run keeps its own key)" }, scales;
+    for (int i = 0; i < 12; ++i) roots.add (MidiFx::noteNames[i]);
+    for (int i = 0; i < MidiFx::numScaleModes(); ++i) scales.add (MidiFx::scaleModes[i]);
+    w->addComboBox ("key", roots, "Key (the Scale and Run effects play in it; a chord chart that names its key is shown in it)");
+    w->addComboBox ("scale", scales, "Scale");
+    w->getComboBoxComponent ("key")->setSelectedItemIndex (jlimit (0, 12, sg.keyRoot + 1), dontSendNotification);
+    w->getComboBoxComponent ("scale")->setSelectedItemIndex (jlimit (0, MidiFx::numScaleModes() - 1, sg.keyMode), dontSendNotification);
     w->addButton ("Save", 1, KeyPress (KeyPress::returnKey));
     w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
     w->enterModalState (true, ModalCallbackFunction::create ([this, w, idx = selectedSong] (int r)
@@ -592,6 +600,7 @@ void SongsPanel::editSelectedSong()
         const auto typed = w->getTextEditorContents ("tempo").trim();
         engine.setSongTempo (idx, typed.isEmpty() ? 0.0 : typed.getDoubleValue());
         engine.setSongTranspose (idx, w->getTextEditorContents ("transpose").trim().getIntValue());
+        engine.setSongKey (idx, w->getComboBoxComponent ("key")->getSelectedItemIndex() - 1, w->getComboBoxComponent ("scale")->getSelectedItemIndex());
         refresh();
     }), false);
 }
@@ -861,7 +870,9 @@ void SongsPanel::newChordChart (int songIndex)
     folder.createDirectory();
     const auto& sg = songs[(size_t) songIndex];
     const File dest = folder.getNonexistentChildFile (File::createLegalFileName (sg.name.isNotEmpty() ? sg.name : "Chart"), ".cho", false);
-    const String text = "{title: " + sg.name + "}\n{subtitle: key, tempo, who starts}\n\n"
+    // Its key, so the chart can follow the song's: a chart that names no key is shown as written.
+    const String key = sg.hasKey() ? noteNameFor (sg.keyRoot, MidiFx::keyPrefersFlats (sg.keyRoot, sg.keyMode)) + (MidiFx::keyIsMinor (sg.keyMode) ? "m" : "") : String ("C");
+    const String text = "{title: " + sg.name + "}\n{key: " + key + "}\n{subtitle: tempo, who starts}\n\n"
                         "{comment: Intro}\n[C]    [G]    [Am]    [F]\n\n"
                         "{comment: Verse}\n[C]Chords go in square brackets [G]before the syllable they [Am]fall on, like [F]this.\n"
                         "A line without brackets is just words.\n";

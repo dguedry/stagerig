@@ -1359,7 +1359,59 @@ void Engine::setTranspose (int semitones)
 {
     const int st = jlimit (-24, 24, semitones);
     if (liveTranspose.exchange (st) == st) return;
+    applySongKey();                 // the notes the effects hear moved, so the key they play in moves with them
     listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSongKey (int songIndex, int root, int mode)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& s = setup.songs[(size_t) songIndex];
+    s.keyRoot = jlimit (-1, 11, root);
+    s.keyMode = jlimit (0, MidiFx::numScaleModes() - 1, mode);
+    if (songIndex == currentSongIndex()) applySongKey();
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+bool Engine::keyInPlay (int& root, int& mode) const
+{
+    const int song = currentSongIndex();
+    if (song < 0 || ! setup.songs[(size_t) song].hasKey()) return false;
+    const auto& s = setup.songs[(size_t) song];
+    root = ((s.keyRoot + liveTranspose.load()) % 12 + 12) % 12;
+    mode = s.keyMode;
+    return true;
+}
+
+EffectDef Engine::effectiveEffectDef (const EffectDef& d) const
+{
+    if (! d.followSongKey || (d.kind != EffectDef::Kind::scale && d.kind != EffectDef::Kind::run)) return d;
+    int root, mode;
+    if (! keyInPlay (root, mode)) return d;
+    EffectDef e = d;
+    e.scaleRoot = root;
+    e.scaleMode = mode;
+    return e;
+}
+
+void Engine::applySongKey()
+{
+    /* Every one loaded, in every program, not just the ones in play: a
+       preloaded program should not come in on the last song's key. */
+    for (size_t i = 0; i < runtimes.size() && i < setup.inputs.size(); ++i)
+        for (auto& [p, rt] : runtimes[i]->loaded)
+        {
+            if (p < 0 || p >= (int) setup.inputs[i].programs.size()) continue;
+            const auto& pd = setup.inputs[i].programs[(size_t) p];
+            for (size_t s = 0; s < rt->slots.size() && s < pd.slots.size(); ++s)
+            {
+                const auto& defs = pd.slots[s].midiEffects;
+                auto& fxs = rt->slots[s]->midiEffects;
+                for (size_t e = 0; e < fxs.size() && e < defs.size(); ++e)
+                    if (fxs[e]->builtIn != nullptr && defs[e].isBuiltIn())
+                        fxs[e]->builtIn->configure (effectiveEffectDef (defs[e]));
+            }
+        }
 }
 
 void Engine::setSongTranspose (int songIndex, int semitones)
@@ -1398,6 +1450,7 @@ void Engine::selectSong (int songIndex)
         resetTapTempo();
     }
     setTranspose (s.transpose);
+    applySongKey();                 // the song's key, for the effects that follow it
     beatsPerBarAtomic.store (jmax (1, s.beatsPerBar));
     // Its backing track is made ready, not started: starting is always on purpose.
     armTrack (songIndex);
@@ -2345,7 +2398,7 @@ std::unique_ptr<Engine::EffectRuntime> Engine::buildEffect (int inputIndex, int 
     }
     if (def.isBuiltIn())
     {
-        fx->builtIn = MidiFx::create (def);
+        fx->builtIn = MidiFx::create (effectiveEffectDef (def));
         return fx;
     }
     queueLoad (*fx, def.plugin, def.state);
@@ -3155,8 +3208,9 @@ void Engine::setBuiltInMidiEffect (int inputIndex, int program, int slotIndex, i
     ed.arpRate = settings.arpRate; ed.arpMode = settings.arpMode; ed.arpOctaves = settings.arpOctaves; ed.arpGate = settings.arpGate; ed.arpLatch = settings.arpLatch;
     ed.chordType = settings.chordType; ed.scaleRoot = settings.scaleRoot; ed.scaleMode = settings.scaleMode;
     ed.runNotes = settings.runNotes; ed.runBeats = settings.runBeats; ed.runDegree = settings.runDegree; ed.runDown = settings.runDown; ed.runToKey = settings.runToKey; ed.runHoldLast = settings.runHoldLast;
+    ed.followSongKey = settings.followSongKey;
     if (auto* fx = static_cast<EffectRuntime*> (getNode (inputIndex, program, ProgramDef::midiChainOf (slotIndex), effect)))
-        if (fx->builtIn != nullptr) fx->builtIn->configure (ed);
+        if (fx->builtIn != nullptr) fx->builtIn->configure (effectiveEffectDef (ed));
     notifyContent (inputIndex, program);
 }
 

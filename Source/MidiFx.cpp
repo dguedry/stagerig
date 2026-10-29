@@ -426,6 +426,22 @@ std::unique_ptr<MidiFx> MidiFx::create (const EffectDef& def)
     return fx;
 }
 
+String MidiFx::keyName (int root, int mode)
+{
+    return String (noteNames[jlimit (0, 11, root)]) + " " + String (scaleModes[jlimit (0, numScaleModes() - 1, mode)]).toLowerCase();
+}
+
+bool MidiFx::keyIsMinor (int mode)
+{
+    return mode == 1 || mode == 2 || mode == 3 || mode == 6 || mode == 8 || mode == 9;    // natural and harmonic minor, dorian, phrygian, minor pentatonic, blues
+}
+
+bool MidiFx::keyPrefersFlats (int root, int mode)
+{
+    const int major = ((keyIsMinor (mode) ? root + 3 : root) % 12 + 12) % 12;
+    return major == 5 || major == 10 || major == 3 || major == 8 || major == 1 || major == 6;
+}
+
 String MidiFx::describe (const EffectDef& d)
 {
     switch (d.kind)

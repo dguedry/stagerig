@@ -4,6 +4,7 @@
 #include "TempoDetect.h"
 #include "Stretch.h"
 #include "MidiFx.h"
+#include "Charts.h"
 #include <ableton/Link.hpp>
 #include "PluginIcons.h"
 #include "MappingSuggestions.h"
@@ -2980,8 +2981,69 @@ int main()
                 engine.injectMidi (0, MidiMessage::noteOff (1, 60));
                 auto released = renderAndWait();
                 CHECK (has (released, [] (const MidiMessage& m) { return m.isNoteOff() && m.getNoteNumber() == 84; }));
+
+                /* The song's key: a run that follows it plays in it. C pressed in
+                   D major starts from B, the scale note below; with the keyboards
+                   down a tone the key moves too (C major), and the C arrives as
+                   Bb, so the run starts from A. Its own key again when the song
+                   has none. */
+                auto noteOn = [] (int n, int ch) { return [n, ch] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == n && m.getChannel() == ch; }; };
+                const int keyed = engine.addSong ("Keyed");
+                engine.setSongProgram (keyed, 0, 92);
+                engine.setSongKey (keyed, 2, 0);
+                const int keySet = engine.addSet ("Keys");
+                engine.setSetSongs (keySet, { keyed });
+                engine.selectSet (keySet);
+                engine.selectSongInSet (0); settle();
+                CHECK (engine.currentSongIndex() == keyed);
+                int kr = -1, km = -1;
+                CHECK (engine.keyInPlay (kr, km) && kr == 2 && km == 0);
+                CHECK (engine.effectiveEffectDef (rd).scaleRoot == 2 && engine.effectiveEffectDef (rd).scaleMode == 0);
+                renderAndWait();
+                engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));
+                auto inD = renderSeconds (0.3);
+                engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+                renderSeconds (0.2);
+                String firstNotes;
+                for (auto& m : inD) if (m.isNoteOn()) firstNotes << m.getNoteNumber() << " ";
+                std::printf ("     run in the song's key (D major) from C: %s\n", firstNotes.toRawUTF8());
+                CHECK (has (inD, noteOn (59, 1)) && has (inD, noteOn (61, 1)) && ! has (inD, noteOn (60, 1)));
+                engine.setTranspose (-2);
+                CHECK (engine.keyInPlay (kr, km) && kr == 0 && engine.effectiveEffectDef (rd).scaleRoot == 0);
+                engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));
+                auto shifted = renderSeconds (0.3);
+                engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+                renderSeconds (0.2);
+                CHECK (has (shifted, noteOn (57, 1)) && has (shifted, noteOn (59, 1)));
+                engine.setTranspose (0);
+                EffectDef own = rd; own.followSongKey = false; own.scaleRoot = 7;
+                CHECK (engine.effectiveEffectDef (own).scaleRoot == 7);
+                engine.setSongKey (keyed, -1, 0);
+                CHECK (! engine.keyInPlay (kr, km) && engine.effectiveEffectDef (rd).scaleRoot == rd.scaleRoot);
+                engine.removeSet (keySet);
+                engine.removeSong (keyed);
+
                 engine.clearProgram (0, 92);
                 engine.setLinkEnabled (linkWasOn);
+            }
+
+            // --- a chord chart moved to the song's key: the chords, never the words -------------------
+            {
+                CHECK (transposeChordName ("Am7", 2, false) == "Bm7");
+                CHECK (transposeChordName ("F#m/C#", 3, true) == "Am/E");
+                CHECK (transposeChordName ("Bb", 2, false) == "C" && transposeChordName ("E", 1, true) == "F");
+                CHECK (transposeChordName ("N.C.", 5, false) == "N.C." && transposeChordName ("|", 5, false) == "|");
+                CHECK (noteNameFor (10, true) == "Bb" && noteNameFor (10, false) == "A#" && pitchClassOf ("Ebmaj7") == 3 && pitchClassOf ("x") == -1);
+                const String cho = "{title: X}\n{key: G}\n[G]Hel[D/F#]lo [Em7]there\nno chords here [Bm]\n";
+                CHECK (chordProKeyRoot (cho) == 7 && chordProKeyRoot ("{title: Y}\n[C]x") == -1 && chordProKeyRoot ("{key: Am}") == 9);
+                const String inBb = transposeChordPro (cho, 10, true);
+                std::printf ("     chart in Bb:\n%s", inBb.toRawUTF8());
+                CHECK (inBb == "{title: X}\n{key: Bb}\n[Bb]Hel[F/A]lo [Gm7]there\nno chords here [Dm]\n");
+                CHECK (transposeChordPro (cho, 7, true) == cho);                                  // already in G
+                CHECK (transposeChordPro ("[C]no key named", 2, false) == "[C]no key named");    // nowhere to move from
+                CHECK (transposeChordPro ("{key: Am}\n[Am]x [E7]y", 11, false) == "{key: Bm}\n[Bm]x [F#7]y");
+                CHECK (MidiFx::keyPrefersFlats (10, 0) && MidiFx::keyPrefersFlats (7, 1) && ! MidiFx::keyPrefersFlats (7, 0) && ! MidiFx::keyPrefersFlats (9, 1));
+                CHECK (MidiFx::keyName (2, 1) == "D natural minor" && MidiFx::keyIsMinor (1) && ! MidiFx::keyIsMinor (0));
             }
             // --- a MIDI file part to a MIDI device: an instrument in the track's program listens to the file's channel ---
             {

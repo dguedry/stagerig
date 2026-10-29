@@ -362,7 +362,10 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   scale, so pressing C can run from E; and whether it runs **up** or
   **down**, or **to the key** (begins below and lands on the note you
   pressed). A chord pressed is a run in every voice, harmonised in the
-  scale. Each shows its settings in words on its row.
+  scale. Scale and Run **follow the song's key** when the song has one (set
+  with **Edit...** on the song), so one chain serves every song; picking a
+  key on the row gives the effect its own instead. Each shows its settings
+  in words on its row.
 - **Send to a MIDI device too** -- the instrument's notes go out of a MIDI port
   as well, so a hardware synth doubles the plugin, or a lighting controller
   follows the keys.
@@ -588,8 +591,8 @@ editing program 002 changes every song that uses it: one place to fix a sound.
 An input the song does not name is left alone, which is what you want for a
 keyboard you are not using in that number.
 
-- **Edit...** opens the song: **Name**, **Stage notes**, **Tempo** and
-  **Transpose**, and **Save**.
+- **Edit...** opens the song: **Name**, **Stage notes**, **Tempo**,
+  **Transpose**, **Key** and **Scale**, and **Save**.
 - **Stage notes** are free text shown under the song on the tablet while it is
   playing -- the key, a count-in, "watch the horn stabs": whatever you would
   write on a paper set list.
@@ -598,6 +601,13 @@ keyboard you are not using in that number.
 - **Transpose** shifts every keyboard by that many semitones while the song is
   in play -- down a step for the singer. The backing track's parts are not
   shifted. Selecting the song applies it.
+- **Key** and **Scale** are the song's key -- D major, A natural minor.
+  Selecting the song puts every **Scale** and **Run** effect that follows the
+  song's key (they all do unless you pick a key on the row) into it, moved
+  with the transpose, since the notes they hear are. A chord chart that names
+  its key (`{key: G}`) is shown with its chords moved to the song's key. The
+  tablet shows the key under the song. *None* leaves every effect on its own
+  key and every chart as written.
 - **-** deletes the selected song, and takes it out of every set list that
   used it.
 - **^ v** beside the songs list reorder it. Set lists keep playing their own
@@ -649,7 +659,10 @@ chart -- and the tablet shows it. Press **Chart... ▸ Attach a file...** under
 the songs list, or drop a file onto a song. PDF, PNG, JPEG, GIF and WebP are
 accepted, plain text (`.txt`) is shown as it is in a monospace face, and a
 ChordPro file (`.cho`, `.crd`, `.chordpro`) has its chords set above the
-words. A song may have several; they appear as tabs. **Chart... ▸ Remove
+words. A ChordPro chart that names its key (`{key: G}`) is shown in the
+song's key when the song has one (**Edit...** on the song): the chords are
+moved, the words are not, and the file is left as written, so one chart
+serves the song in any key. A song may have several; they appear as tabs. **Chart... ▸ Remove
 <name>** takes one off the song.
 
 The file is copied, not referred to: it goes into a folder beside the setup

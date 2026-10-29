@@ -5,6 +5,7 @@
 #include "MappingSuggestions.h"
 #include "PluginView.h"
 #include "Charts.h"
+#include "MidiFx.h"
 #include <thread>
 #include <fcntl.h>
 #include "BinaryData.h"
@@ -526,9 +527,9 @@ function renderSets(s) {
                                       + (x.name ? " " + x.name : "")).join("  \u00b7  ");
       body.appendChild(pl);
     }
-    if (playing && sg.notes) {
+    if (playing && (sg.notes || sg.key)) {
       const nt = document.createElement("div"); nt.className = "notes";
-      nt.textContent = sg.notes;
+      nt.textContent = [sg.key, sg.notes].filter(Boolean).join("  \u00b7  ");
       body.appendChild(nt);
     }
 
@@ -1634,6 +1635,7 @@ String RemoteServer::stateJson() const
             so->setProperty ("name", sg.name);
             if (sg.tempoBpm > 0.0)     so->setProperty ("tempo", sg.tempoBpm);
             if (sg.notes.isNotEmpty()) so->setProperty ("notes", sg.notes);
+            if (sg.hasKey())           so->setProperty ("key", MidiFx::keyName (sg.keyRoot, sg.keyMode));
 
             /* Charts, by index: the page asks for /chart/<song>/<n>, never for
                a file name, so nothing a tablet sends can name a path. A PDF
@@ -2531,6 +2533,14 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
             sendResponse (sock, "404 Not Found", "text/plain", "No such chart.");
             return;
         }
+        // A chord chart that names its key is shown in the song's, when the song has one.
+        if (page == 0 && chartKindFor (file) == "chordpro")
+            if (const auto& sg = engine.getSongs()[(size_t) song]; sg.hasKey())
+            {
+                sendResponse (sock, "200 OK", chartContentTypeFor (file),
+                              transposeChordPro (file.loadFileAsString(), sg.keyRoot, MidiFx::keyPrefersFlats (sg.keyRoot, sg.keyMode)));
+                return;
+            }
         MemoryBlock data;
         if (! file.loadFileAsData (data)) { sendResponse (sock, "500 Internal Server Error", "text/plain", "Could not read the chart."); return; }
         sendBytes (sock, "200 OK", chartContentTypeFor (file), static_cast<const char*> (data.getData()), (int) data.getSize());
