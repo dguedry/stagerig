@@ -161,6 +161,14 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
                margin:18px 0 8px; }
   .parts { font-size:13px; color:var(--dim); margin-top:4px; }
   .notes { font-size:14px; color:#d8a657; margin-top:4px; font-style:italic; }
+  .notes .key { font-style:normal; font-weight:700; padding:3px 9px; border-radius:8px; background:#d8a65722;
+                border:1px solid #d8a65766; cursor:pointer; }
+  .song.on .notes .key { background:#06121f1a; border-color:#06121f66; }
+  .sheet .keys { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; }
+  .sheet .scales { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin-top:6px; }
+  .sheet .keys button, .sheet .scales button { padding:12px 6px; text-align:center; font-size:15px; }
+  .sheet .keys button.none { grid-column: span 2; }
+  .sheet .keys button.on, .sheet .scales button.on { background:var(--accent); color:#06121f; }
   .song .chart { margin-left:10px; padding:8px 14px; border-radius:10px; background:#2b2d35; color:#d7dbe2;
                  font-size:14px; font-weight:600; flex:0 0 auto; }
   .song.on .chart { background:#06121f; color:#fff; }
@@ -402,6 +410,55 @@ function showParts() {
   refresh();
 }
 
+/* The song's key, picked with a thumb: a root, a scale, or none. Each tap
+   is saved at once and the sheet redraws from the state that comes back. */
+let keySheet = null;
+function showKeyPicker(songIndex) {
+  if (keySheet) { keySheet.back.remove(); keySheet = null; }
+  const back = document.createElement("div"); back.className = "sheet";
+  const card = document.createElement("div"); card.className = "card";
+  const t = document.createElement("div"); t.className = "sheet-title";
+  card.appendChild(t);
+  const roots = document.createElement("div"); roots.className = "keys";
+  const scales = document.createElement("div"); scales.className = "scales";
+  card.appendChild(roots); card.appendChild(scales);
+  const cancel = document.createElement("button"); cancel.className = "cancel"; cancel.textContent = "Done";
+  const close = () => { back.remove(); keySheet = null; };
+  cancel.onclick = close;
+  card.appendChild(cancel);
+  back.appendChild(card);
+  back.onclick = e => { if (e.target === back) close(); };
+  document.body.appendChild(back);
+
+  const set = async (root, mode) => {
+    try { await api("/api/songkey?song=" + songIndex + "&root=" + root + "&mode=" + mode, { method: "POST" }); await refresh(true); }
+    catch (e) { if (!e.gate) show(e.message); }
+  };
+  const draw = () => {
+    const s = lastState; const sg = s && s.songs && s.songs[songIndex];
+    if (!sg) { close(); return; }
+    const root = sg.key ? sg.keyRoot : -1, mode = sg.key ? sg.keyMode : 0;
+    t.textContent = "Key of " + (sg.name || "this song") + (sg.key ? " \u2014 " + sg.key : " \u2014 none");
+    roots.innerHTML = ""; scales.innerHTML = "";
+    (s.roots || []).forEach((name, i) => {
+      const b = document.createElement("button"); b.textContent = name; if (i === root) b.className = "on";
+      b.onclick = () => set(i, mode);
+      roots.appendChild(b);
+    });
+    const none = document.createElement("button"); none.textContent = "None"; none.className = "none" + (root < 0 ? " on" : "");
+    none.title = "Each Scale and Run keeps its own key; a chart is shown as written";
+    none.onclick = () => set(-1, mode);
+    roots.appendChild(none);
+    (s.scales || []).forEach((name, i) => {
+      const b = document.createElement("button"); b.textContent = name; if (root >= 0 && i === mode) b.className = "on";
+      b.onclick = () => set(root >= 0 ? root : 0, i);
+      scales.appendChild(b);
+    });
+  };
+  keySheet = { back, draw };
+  draw();
+}
+
 async function pollTransport() {
   try { showTransport(await api("/api/transport")); } catch (e) { /* the next poll is half a second away */ }
 }
@@ -527,9 +584,17 @@ function renderSets(s) {
                                       + (x.name ? " " + x.name : "")).join("  \u00b7  ");
       body.appendChild(pl);
     }
-    if (playing && (sg.notes || sg.key)) {
+    /* The key, and the stage notes. The key is a chip: tap it to change the
+       song's key from the stand -- the Scale and Run effects and the chart
+       follow at once -- without picking the song again. */
+    if (playing) {
       const nt = document.createElement("div"); nt.className = "notes";
-      nt.textContent = [sg.key, sg.notes].filter(Boolean).join("  \u00b7  ");
+      const k = document.createElement("span"); k.className = "key";
+      k.textContent = sg.key ? sg.key : "Set the key";
+      k.title = "The song's key: the Scale and Run effects play in it, a chord chart is shown in it";
+      k.onclick = (ev) => { ev.stopPropagation(); showKeyPicker(songIndex); };
+      nt.appendChild(k);
+      if (sg.notes) nt.appendChild(document.createTextNode("  \u00b7  " + sg.notes));
       body.appendChild(nt);
     }
 
@@ -861,7 +926,7 @@ async function loadSlots(i) {
 async function refresh(force) {
   try {
     const s = await api("/api/state");
-    if (force || s.revision !== rev) { rev = s.revision; render(s); }
+    if (force || s.revision !== rev) { rev = s.revision; render(s); if (keySheet) keySheet.draw(); }
     syncLevelPolling();
     syncTransportPolling();
     if (transportUi) pollTransport();
@@ -1587,6 +1652,14 @@ String RemoteServer::stateJson() const
     // Whether the song in play has a backing track; the page polls /api/transport for where it is.
     root->setProperty ("track", engine.hasTrack());
     root->setProperty ("tempo", engine.getTempoBpm());
+    {
+        // The names a song's key is picked from on the tablet, the same words as on the laptop.
+        Array<var> roots, scales;
+        for (int i = 0; i < 12; ++i) roots.add (MidiFx::noteNames[i]);
+        for (int i = 0; i < MidiFx::numScaleModes(); ++i) scales.add (MidiFx::scaleModes[i]);
+        root->setProperty ("roots", roots);
+        root->setProperty ("scales", scales);
+    }
     Array<var> inputs;
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
     {
@@ -1635,7 +1708,12 @@ String RemoteServer::stateJson() const
             so->setProperty ("name", sg.name);
             if (sg.tempoBpm > 0.0)     so->setProperty ("tempo", sg.tempoBpm);
             if (sg.notes.isNotEmpty()) so->setProperty ("notes", sg.notes);
-            if (sg.hasKey())           so->setProperty ("key", MidiFx::keyName (sg.keyRoot, sg.keyMode));
+            if (sg.hasKey())
+            {
+                so->setProperty ("key", MidiFx::keyName (sg.keyRoot, sg.keyMode));
+                so->setProperty ("keyRoot", sg.keyRoot);
+                so->setProperty ("keyMode", sg.keyMode);
+            }
 
             /* Charts, by index: the page asks for /chart/<song>/<n>, never for
                a file name, so nothing a tablet sends can name a path. A PDF
@@ -2222,6 +2300,22 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     /* Songs and sets. Each one nudges the revision so every other tablet
        redraws on its next poll rather than showing a stale set list. */
+    if (path.startsWith ("/api/songkey"))
+    {
+        // POST ...?song=<index>&root=<0..11, -1 for none>&mode=<scale>: the song's key, changed from the stand.
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
+        auto number = [&path] (const char* key, int fallback)
+        {
+            for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
+                if (kv.startsWith (String (key) + "=")) return kv.fromFirstOccurrenceOf ("=", false, false).getIntValue();
+            return fallback;
+        };
+        const int song = number ("song", -1), root = number ("root", -1), mode = number ("mode", 0);
+        MessageManager::callAsync ([this, song, root, mode] { engine.setSongKey (song, root, mode); });
+        ++revision;
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
     if (path.startsWith ("/api/song"))
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }

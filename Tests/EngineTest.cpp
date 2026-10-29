@@ -3033,6 +3033,7 @@ int main()
                 CHECK (transposeChordName ("F#m/C#", 3, true) == "Am/E");
                 CHECK (transposeChordName ("Bb", 2, false) == "C" && transposeChordName ("E", 1, true) == "F");
                 CHECK (transposeChordName ("N.C.", 5, false) == "N.C." && transposeChordName ("|", 5, false) == "|");
+                CHECK (transposeChordName ("D/F#", 7, true) == "A/C#" && transposeChordName ("Bb7", 1, false) == "B7" && transposeChordName ("Ab", 1, false) == "A");   // sharp stays sharp, flat stays flat
                 CHECK (noteNameFor (10, true) == "Bb" && noteNameFor (10, false) == "A#" && pitchClassOf ("Ebmaj7") == 3 && pitchClassOf ("x") == -1);
                 const String cho = "{title: X}\n{key: G}\n[G]Hel[D/F#]lo [Em7]there\nno chords here [Bm]\n";
                 CHECK (chordProKeyRoot (cho) == 7 && chordProKeyRoot ("{title: Y}\n[C]x") == -1 && chordProKeyRoot ("{key: Am}") == 9);

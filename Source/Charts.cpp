@@ -145,17 +145,26 @@ int chordProKeyRoot (const String& text)
 
 String transposeChordName (const String& chord, int semitones, bool flats)
 {
+    /* A note written sharp stays sharp, written flat stays flat -- the
+       leading tone in D minor is C#, whatever the key signature says -- and
+       a natural takes the key's spelling. */
+    auto spelt = [flats] (const String& written, int length, int pc)
+    {
+        const bool sharp = length == 2 && written[1] == '#', flat = length == 2 && written[1] == 'b';
+        return noteNameFor (pc, sharp ? false : flat ? true : flats);
+    };
     int n;
     const int root = rootAtHead (chord, n);
     if (root < 0) return chord;
-    String out = noteNameFor (root + semitones, flats);
+    String out = spelt (chord, n, root + semitones);
     String rest = chord.substring (n);
     // A slash bass moves too: D/F# up a tone is E/G#.
     if (const int slash = rest.indexOfChar ('/'); slash >= 0)
     {
         int bn;
-        if (const int bass = rootAtHead (rest.substring (slash + 1), bn); bass >= 0)
-            rest = rest.substring (0, slash + 1) + noteNameFor (bass + semitones, flats) + rest.substring (slash + 1 + bn);
+        const String bassName = rest.substring (slash + 1);
+        if (const int bass = rootAtHead (bassName, bn); bass >= 0)
+            rest = rest.substring (0, slash + 1) + spelt (bassName, bn, bass + semitones) + rest.substring (slash + 1 + bn);
     }
     return out + rest;
 }

@@ -606,8 +606,10 @@ keyboard you are not using in that number.
   song's key (they all do unless you pick a key on the row) into it, moved
   with the transpose, since the notes they hear are. A chord chart that names
   its key (`{key: G}`) is shown with its chords moved to the song's key. The
-  tablet shows the key under the song. *None* leaves every effect on its own
-  key and every chart as written.
+  tablet shows the key under the playing song; **tap it** to change the key
+  from the stand -- a root, a scale, or none -- and the effects and the chart
+  follow at once. *None* leaves every effect on its own key and every chart
+  as written.
 - **-** deletes the selected song, and takes it out of every set list that
   used it.
 - **^ v** beside the songs list reorder it. Set lists keep playing their own
