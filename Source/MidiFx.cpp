@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <bitset>
+#include <cstring>
 
 namespace perf
 {
@@ -623,6 +625,241 @@ String MidiFx::bandChordName (int rowRoot, const std::vector<int>& offsets, bool
     return bandChordNotes (rowRoot, offsets, flats);
 }
 
+namespace
+{
+    /** A player's unevenness, put back: each note lands a little late, by a
+        different amount every time, and a little louder or softer. The note
+        off waits by the same amount as its note on, so lengths are kept and
+        an off can never overtake its on. */
+    class Humanize : public MidiFx
+    {
+    public:
+        Humanize() { reset(); }
+        void configure (const EffectDef& d) override
+        {
+            timingMs.store (jlimit (0, 100, d.humanTimingMs));
+            velocity.store (jlimit (0, 64, d.humanVelocity));
+        }
+        void reset() override
+        {
+            numPending = 0;
+            for (auto& c : delayOf) for (auto& n : c) n = 0;
+        }
+        void process (const MidiBuffer& in, MidiBuffer& out, int numSamples, double sampleRate, double) override
+        {
+            // What earlier blocks left for this one.
+            int kept = 0;
+            for (int i = 0; i < numPending; ++i)
+            {
+                auto& p = pending[i];
+                if (p.samplesLeft < numSamples) out.addEvent (p.data, p.size, p.samplesLeft);
+                else { p.samplesLeft -= numSamples; pending[kept++] = p; }
+            }
+            numPending = kept;
+
+            const int maxDelay = (int) (sampleRate * timingMs.load() / 1000.0);
+            const int vel = velocity.load();
+            for (const auto meta : in)
+            {
+                const auto m = meta.getMessage();
+                if (m.isNoteOn())
+                {
+                    const int ch = jlimit (1, 16, m.getChannel()), note = m.getNoteNumber();
+                    const int delay = maxDelay > 0 ? random.nextInt (maxDelay + 1) : 0;
+                    delayOf[ch - 1][note] = delay;
+                    const int v = vel > 0 ? jlimit (1, 127, (int) m.getVelocity() + random.nextInt (2 * vel + 1) - vel) : (int) m.getVelocity();
+                    schedule (out, MidiMessage::noteOn (ch, note, (uint8) v), meta.samplePosition + delay, numSamples);
+                }
+                else if (m.isNoteOff())
+                {
+                    const int ch = jlimit (1, 16, m.getChannel()), note = m.getNoteNumber();
+                    schedule (out, m, meta.samplePosition + delayOf[ch - 1][note], numSamples);
+                    delayOf[ch - 1][note] = 0;
+                }
+                else if (m.isAllNotesOff() || m.isAllSoundOff())
+                {
+                    // Everything waiting goes now, then the panic itself.
+                    for (int i = 0; i < numPending; ++i) out.addEvent (pending[i].data, pending[i].size, meta.samplePosition);
+                    numPending = 0;
+                    out.addEvent (m, meta.samplePosition);
+                }
+                else
+                    out.addEvent (m, meta.samplePosition);
+            }
+        }
+    private:
+        struct Pending { uint8 data[3]; int size; int samplesLeft; };
+        static constexpr int kMaxPending = 512;
+        void schedule (MidiBuffer& out, const MidiMessage& m, int at, int numSamples)
+        {
+            if (at < numSamples) { out.addEvent (m, at); return; }
+            if (numPending >= kMaxPending || m.getRawDataSize() > 3) { out.addEvent (m, numSamples - 1); return; }    // full: now rather than never
+            auto& p = pending[numPending++];
+            p.size = m.getRawDataSize();
+            std::memcpy (p.data, m.getRawData(), (size_t) p.size);
+            p.samplesLeft = at - numSamples;
+        }
+        std::atomic<int> timingMs { 12 }, velocity { 10 };
+        Pending pending[kMaxPending];
+        int numPending = 0;
+        int delayOf[16][128];
+        Random random;
+    };
+
+    //==========================================================================
+    /** A short MIDI file from each key: a lick, a fill, a riff, moved so that
+        it begins on the key pressed (or sits where it was written), at the
+        rig's tempo, at the key's velocity. A tap plays the whole of it, or
+        it stops when the key does; it can repeat while the key is held. */
+    class Phrase : public MidiFx
+    {
+    public:
+        Phrase() { reset(); }
+        void configure (const EffectDef& d) override
+        {
+            /* Two copies of the notes: the audio thread reads one while this
+               fills the other, then they swap. A voice half way through keeps
+               its place by index; at worst one note of the old phrase. */
+            auto& t = tables[1 - active.load()];
+            t.count = jmin (kMaxNotes, (int) d.phraseNotes.size());
+            float end = 0.0f;
+            for (int i = 0; i < t.count; ++i)
+            {
+                const auto& n = d.phraseNotes[(size_t) i];
+                t.beat[i] = jmax (0.0f, n.beat); t.length[i] = jmax (1.0f / 32.0f, n.length); t.note[i] = jlimit (0, 127, n.note); t.velocity[i] = jlimit (1, 127, n.velocity);
+                end = jmax (end, t.beat[i] + t.length[i]);
+            }
+            t.beats = d.phraseBeats > 0.0f ? d.phraseBeats : std::ceil (end);
+            t.root = d.phraseRoot >= 0 ? d.phraseRoot : t.count > 0 ? t.note[0] : 60;
+            active.store (1 - active.load());
+            stop.store (d.phraseStop);
+            loop.store (d.phraseLoop);
+        }
+        void reset() override
+        {
+            for (auto& v : voices) v.key = -1;
+            for (auto& c : sounding) for (auto& n : c) n = 0;
+        }
+        void process (const MidiBuffer& in, MidiBuffer& out, int numSamples, double sampleRate, double bpm) override
+        {
+            const auto& t = tables[active.load()];
+            const double spb = sampleRate * 60.0 / jmax (20.0, bpm);          // samples per beat, at the tempo now
+            for (const auto meta : in)
+            {
+                const auto m = meta.getMessage();
+                if (m.isNoteOn())
+                {
+                    const int ch = jlimit (1, 16, m.getChannel());
+                    auto* v = find (ch, m.getNoteNumber());
+                    if (v == nullptr) v = free();
+                    if (v == nullptr) continue;
+                    if (v->key >= 0) release (out, *v, meta.samplePosition);
+                    v->key = m.getNoteNumber(); v->channel = ch; v->velocity = (int) m.getVelocity();
+                    v->transpose = v->key - t.root; v->elapsed = -(double) meta.samplePosition; v->keyUp = false;
+                    v->onDone.reset(); v->offDone.reset();
+                    if (t.count == 0) { out.addEvent (m, meta.samplePosition); v->key = -1; }       // nothing loaded: the key itself
+                }
+                else if (m.isNoteOff())
+                {
+                    if (auto* v = find (jlimit (1, 16, m.getChannel()), m.getNoteNumber()))
+                    {
+                        if (stop.load()) { release (out, *v, meta.samplePosition); v->key = -1; }
+                        else v->keyUp = true;
+                    }
+                    else if (t.count == 0) out.addEvent (m, meta.samplePosition);
+                }
+                else if (m.isAllNotesOff() || m.isAllSoundOff())
+                {
+                    reset();
+                    out.addEvent (m, meta.samplePosition);
+                }
+                else
+                    out.addEvent (m, meta.samplePosition);
+            }
+            // Each voice plays the notes whose time falls in this block; at the phrase's end it lets go, and goes round again if it repeats.
+            const double lengthSamples = jmax (1.0, (double) t.beats * spb);
+            for (auto& v : voices)
+            {
+                if (v.key < 0) continue;
+                double from = v.elapsed;          // phrase time at the block sample `offset`
+                int offset = 0, remaining = numSamples;
+                while (remaining > 0 && v.key >= 0)
+                {
+                    const double to = from + remaining, windowEnd = jmin (to, lengthSamples);
+                    for (int i = 0; i < t.count; ++i)
+                    {
+                        const double onAt = t.beat[i] * spb, offAt = (double) (t.beat[i] + t.length[i]) * spb;
+                        if (! v.onDone[(size_t) i] && onAt >= from && onAt < windowEnd)
+                        {
+                            v.onDone[(size_t) i] = true;
+                            const int note = t.note[i] + v.transpose;
+                            if (note >= 0 && note <= 127 && v.numSounding < kMaxSounding)
+                            {
+                                const int at = jlimit (0, numSamples - 1, offset + (int) (onAt - from));
+                                if (sounding[v.channel - 1][note] > 0) out.addEvent (MidiMessage::noteOff (v.channel, note), at);   // another voice has it: retrigger
+                                ++sounding[v.channel - 1][note];
+                                v.soundingNote[v.numSounding] = (uint8) note; v.soundingIndex[v.numSounding++] = (int16) i;
+                                out.addEvent (MidiMessage::noteOn (v.channel, note, (uint8) jlimit (1, 127, t.velocity[i] * v.velocity / 100)), at);
+                            }
+                        }
+                        if (v.onDone[(size_t) i] && ! v.offDone[(size_t) i] && offAt >= from && offAt < windowEnd)
+                        {
+                            v.offDone[(size_t) i] = true;
+                            endNote (out, v, i, jlimit (0, numSamples - 1, offset + (int) (offAt - from)));
+                        }
+                    }
+                    if (to < lengthSamples) { v.elapsed = to; break; }
+                    // The end of the phrase falls in this block: whatever is still sounding lets go there.
+                    const int consumed = jmax (1, (int) std::ceil (lengthSamples - from));
+                    release (out, v, jlimit (0, numSamples - 1, offset + consumed - 1));
+                    if (loop.load() && ! v.keyUp && t.count > 0)
+                    {
+                        v.onDone.reset(); v.offDone.reset();
+                        offset += consumed; remaining -= consumed; from = 0.0; v.elapsed = 0.0;
+                    }
+                    else
+                        v.key = -1;                // played out; a tap plays the whole of it, so nothing waits for the key
+                }
+            }
+        }
+
+    private:
+        static constexpr int kMaxNotes = 512, kVoices = 16, kMaxSounding = 32;
+        struct Table { int count = 0; float beat[kMaxNotes], length[kMaxNotes]; int note[kMaxNotes], velocity[kMaxNotes]; float beats = 0.0f; int root = 60; };
+        struct Voice
+        {
+            int key = -1, channel = 1, velocity = 100, transpose = 0;
+            double elapsed = 0.0;                 // samples since the key went down, at the start of this block
+            bool keyUp = false;
+            std::bitset<kMaxNotes> onDone, offDone;
+            uint8 soundingNote[kMaxSounding]; int16 soundingIndex[kMaxSounding]; int numSounding = 0;
+        };
+        Table tables[2];
+        std::atomic<int> active { 0 };
+        std::atomic<bool> stop { false }, loop { false };
+        Voice voices[kVoices];
+        uint8 sounding[16][128];
+
+        Voice* find (int ch, int key) { for (auto& v : voices) if (v.key == key && v.channel == ch) return &v; return nullptr; }
+        Voice* free() { for (auto& v : voices) if (v.key < 0) return &v; return nullptr; }
+        void endNote (MidiBuffer& out, Voice& v, int index, int at)
+        {
+            for (int k = 0; k < v.numSounding; ++k)
+                if (v.soundingIndex[k] == index)
+                {
+                    const int note = v.soundingNote[k];
+                    if (sounding[v.channel - 1][note] > 0 && --sounding[v.channel - 1][note] == 0) out.addEvent (MidiMessage::noteOff (v.channel, note), at);
+                    v.soundingNote[k] = v.soundingNote[v.numSounding - 1]; v.soundingIndex[k] = v.soundingIndex[v.numSounding - 1]; --v.numSounding;
+                    return;
+                }
+        }
+        void release (MidiBuffer& out, Voice& v, int at)
+        {
+            while (v.numSounding > 0) endNote (out, v, v.soundingIndex[0], at);
+        }
+    };
+}
+
 std::unique_ptr<MidiFx> MidiFx::create (const EffectDef& def)
 {
     std::unique_ptr<MidiFx> fx;
@@ -633,6 +870,8 @@ std::unique_ptr<MidiFx> MidiFx::create (const EffectDef& def)
         case EffectDef::Kind::scale:    fx = std::make_unique<Scale>(); break;
         case EffectDef::Kind::run:      fx = std::make_unique<Run>(); break;
         case EffectDef::Kind::bigBand:  fx = std::make_unique<BigBand>(); break;
+        case EffectDef::Kind::humanize: fx = std::make_unique<Humanize>(); break;
+        case EffectDef::Kind::phrase:   fx = std::make_unique<Phrase>(); break;
         default: return nullptr;
     }
     fx->configure (def);
@@ -690,8 +929,61 @@ String MidiFx::describe (const EffectDef& d)
                     chords.add (bandChordName ((major + step) % 12, d.bandChords[(size_t) step], flats));
             return keyName (d.scaleRoot, d.scaleMode) + ": " + (chords.isEmpty() ? String ("no chords") : chords.joinIntoString (" "));
         }
+        case EffectDef::Kind::humanize:
+        {
+            const int t = jlimit (0, 100, d.humanTimingMs), v = jlimit (0, 64, d.humanVelocity);
+            if (t == 0 && v == 0) return "as played";
+            return (t > 0 ? "up to " + String (t) + " ms late" : String()) + (t > 0 && v > 0 ? ", " : "") + (v > 0 ? "velocity " + String (CharPointer_UTF8 ("\xc2\xb1")) + String (v) : String());
+        }
+        case EffectDef::Kind::phrase:
+        {
+            if (d.phraseNotes.empty()) return "no MIDI file yet: Settings... loads one";
+            const int n = (int) d.phraseNotes.size();
+            const float b = d.phraseBeats;
+            const String beats = std::abs (b - 1.0f) < 0.01f ? "a beat" : std::abs (b - 4.0f) < 0.01f ? "a bar" : std::abs (b - std::round (b)) < 0.01f ? String ((int) std::round (b)) + " beats" : String (b, 2) + " beats";
+            return d.phraseName + ": " + String (n) + (n == 1 ? " note" : " notes") + " over " + beats
+                   + (d.phraseRoot < 0 ? ", starting on the key" : ", as written from " + MidiMessage::getMidiNoteName (d.phraseRoot, true, true, 3))
+                   + (d.phraseLoop ? ", repeating" : "") + (d.phraseStop ? ", stops with the key" : "");
+        }
         default: return {};
     }
+}
+
+bool MidiFx::importPhrase (const File& file, EffectDef& def, String& error)
+{
+    MidiFile mf;
+    FileInputStream in (file);
+    if (! file.existsAsFile() || ! in.openedOk() || ! mf.readFrom (in)) { error = file.getFileName() + ": not a MIDI file StageRig can read"; return false; }
+    /* Beats, not seconds: the phrase plays at the rig's tempo. A file timed
+       in SMPTE frames has no beats, so its seconds are read at 120. */
+    const short format = mf.getTimeFormat();
+    double ticksPerBeat = format > 0 ? (double) format : 0.0;
+    if (ticksPerBeat <= 0.0) { mf.convertTimestampTicksToSeconds(); ticksPerBeat = 0.5; }
+    std::vector<EffectDef::PhraseNote> notes;
+    for (int t = 0; t < mf.getNumTracks(); ++t)
+    {
+        MidiMessageSequence track (*mf.getTrack (t));
+        track.updateMatchedPairs();
+        for (int i = 0; i < track.getNumEvents(); ++i)
+        {
+            const auto* e = track.getEventPointer (i);
+            if (! e->message.isNoteOn()) continue;
+            const double on = e->message.getTimeStamp() / ticksPerBeat;
+            const double off = e->noteOffObject != nullptr ? e->noteOffObject->message.getTimeStamp() / ticksPerBeat : on + 1.0;
+            notes.push_back ({ (float) on, (float) jmax (1.0 / 32.0, off - on), e->message.getNoteNumber(), jmax (1, (int) e->message.getVelocity()) });
+        }
+    }
+    if (notes.empty()) { error = file.getFileName() + ": no notes in it"; return false; }
+    std::stable_sort (notes.begin(), notes.end(), [] (const EffectDef::PhraseNote& a, const EffectDef::PhraseNote& b) { return a.beat < b.beat || (a.beat == b.beat && a.note < b.note); });
+    if (notes.size() > 512) notes.resize (512);
+    // From its first note: the phrase begins as the key goes down.
+    const float first = notes.front().beat;
+    float end = 0.0f;
+    for (auto& n : notes) { n.beat -= first; end = jmax (end, n.beat + n.length); }
+    def.phraseNotes = std::move (notes);
+    def.phraseBeats = jmax (1.0f, std::ceil (end - 0.001f));
+    def.phraseName = file.getFileNameWithoutExtension();
+    return true;
 }
 
 } // namespace perf

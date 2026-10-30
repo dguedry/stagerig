@@ -770,6 +770,8 @@ private:
                                : def.kind == EffectDef::Kind::chord    ? "Every note you play becomes this chord"
                                : def.kind == EffectDef::Kind::run      ? "Each key you press starts a run up (or down) the scale from it, in time; the last note holds while the key does. A chord is a run in each voice."
                                : def.kind == EffectDef::Kind::bigBand  ? "Each key plays the chord on that step of the key, as a big band section voices it: C6 on the tonic, Dm7 on the 2nd, G7 on the 5th. Chords... sets the notes of each."
+                               : def.kind == EffectDef::Kind::humanize ? "Each note lands a little late and a little louder or softer, by a different amount every time: a player's unevenness on keyed or quantised notes"
+                               : def.kind == EffectDef::Kind::phrase   ? "Each key plays a short MIDI file -- a lick, a fill, a riff -- moved to begin on the key pressed, at the rig's tempo and the key's velocity"
                                                                         : "Notes off the scale are moved down to the nearest note on it");
                 guiBtn.setButtonText ("Settings...");
                 guiBtn.setTooltip ("Its settings");
@@ -884,6 +886,29 @@ private:
         {
             for (int i = 0; i < MidiFx::numChordTypes(); ++i) m.addItem (600 + i, MidiFx::chordTypes[i], true, def.chordType == i);
         }
+        else if (def.kind == EffectDef::Kind::humanize)
+        {
+            PopupMenu timing, vel;
+            const int times[] = { 0, 5, 12, 25, 50 };
+            const char* timeNames[] = { "On time", "Tight  (up to 5 ms late)", "Relaxed  (up to 12 ms)", "Lazy  (up to 25 ms)", "Sloppy  (up to 50 ms)" };
+            for (int i = 0; i < 5; ++i) timing.addItem (1600 + times[i], timeNames[i], true, def.humanTimingMs == times[i]);
+            const int vels[] = { 0, 5, 10, 20, 40 };
+            for (int i = 0; i < 5; ++i) vel.addItem (1700 + vels[i], vels[i] == 0 ? String ("As played") : String (CharPointer_UTF8 ("\xc2\xb1")) + String (vels[i]), true, def.humanVelocity == vels[i]);
+            m.addSubMenu ("Timing", timing);
+            m.addSubMenu ("Velocity", vel);
+        }
+        else if (def.kind == EffectDef::Kind::phrase)
+        {
+            PopupMenu root;
+            m.addItem (1800, def.phraseNotes.empty() ? "Load a MIDI file..." : "Load another MIDI file...  (now " + def.phraseName + ")");
+            root.addItem (1900, "Begins on the key pressed  (the file's first note moves to it)", true, def.phraseRoot < 0);
+            root.addItem (1901, "As written  (the key C4 plays it as it is; others move it)", true, def.phraseRoot == 60);
+            root.addItem (1902, "As written from C3", true, def.phraseRoot == 48);
+            root.addItem (1903, "As written from C5", true, def.phraseRoot == 72);
+            m.addSubMenu ("Pitch", root, ! def.phraseNotes.empty());
+            m.addItem (2000, "Stop when the key is let go  (else a tap plays the whole phrase)", ! def.phraseNotes.empty(), def.phraseStop);
+            m.addItem (2001, "Repeat while the key is held", ! def.phraseNotes.empty(), def.phraseLoop);
+        }
         else
         {
             PopupMenu root, mode;
@@ -938,6 +963,12 @@ private:
             else if (r >= 1100 && r <= 1103) { d.runDown = (r - 1100) & 1; d.runToKey = (r - 1100) >> 1; }
             else if (r == 1200) d.runHoldLast = ! d.runHoldLast;
             else if (r == 1500) { showBandChordsDialog (index, def); return; }
+            else if (r >= 1600 && r < 1700) d.humanTimingMs = r - 1600;
+            else if (r >= 1700 && r < 1800) d.humanVelocity = r - 1700;
+            else if (r == 1800) { loadPhraseFile (index, def); return; }
+            else if (r >= 1900 && r <= 1903) { const int roots[] = { -1, 60, 48, 72 }; d.phraseRoot = roots[r - 1900]; }
+            else if (r == 2000) d.phraseStop = ! d.phraseStop;
+            else if (r == 2001) d.phraseLoop = ! d.phraseLoop;
             engine.setBuiltInMidiEffect (a.first, a.second, s, index, d);
             owner.markDirty();
         });
@@ -992,6 +1023,24 @@ private:
         }), false);
     }
 
+    void loadPhraseFile (int index, const EffectDef& def)
+    {
+        const auto a = address();
+        const int s = ProgramDef::slotOfChain (slot);
+        chooser = std::make_unique<FileChooser> ("A MIDI file for the phrase", File::getSpecialLocation (File::userHomeDirectory), "*.mid;*.midi;*.MID");
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this, a, s, index, def] (const FileChooser& fc)
+        {
+            const auto f = fc.getResult();
+            if (f == File()) return;
+            EffectDef d = def;
+            String error;
+            if (! MidiFx::importPhrase (f, d, error)) { owner.showStatus (error); return; }
+            engine.setBuiltInMidiEffect (a.first, a.second, s, index, d);
+            owner.markDirty();
+            owner.showStatus ("Phrase: " + MidiFx::describe (d) + ". Each key plays it, moved to the key pressed.");
+        });
+    }
+
     void showAddMenu()
     {
         Array<PluginDescription> effects, all;
@@ -1026,6 +1075,8 @@ private:
             procMenu.addItem (300003, "Scale  (wrong notes bent to a scale)");
             procMenu.addItem (300004, "Run  (a scale run from each key, as a string section plays one)");
             procMenu.addItem (300005, "Big band  (each key plays the chord on that step of the key: C6, Dm7, G7)");
+            procMenu.addItem (300006, "Humanize  (notes land a little late, a little louder or softer, as a player's do)");
+            procMenu.addItem (300007, "Phrase  (each key plays a short MIDI file, moved to the key pressed)");
             procMenu.addSectionHeader ("Plugins");
             addPluginsToMenu (procMenu, all, engine.getPluginHost().getIcons(), midiBase);
             if (all.isEmpty()) procMenu.addItem (99998, "No plugins known yet: scan under Plugins...", false);
@@ -1038,12 +1089,14 @@ private:
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, effects, all, ports] (int result)
         {
             const auto a = address();
-            if (result >= 300001 && result <= 300005)
+            if (result >= 300001 && result <= 300007)
             {
                 const auto kind = result == 300001 ? EffectDef::Kind::arpeggio : result == 300002 ? EffectDef::Kind::chord
-                                : result == 300003 ? EffectDef::Kind::scale : result == 300005 ? EffectDef::Kind::bigBand : EffectDef::Kind::run;
+                                : result == 300003 ? EffectDef::Kind::scale : result == 300005 ? EffectDef::Kind::bigBand
+                                : result == 300006 ? EffectDef::Kind::humanize : result == 300007 ? EffectDef::Kind::phrase : EffectDef::Kind::run;
                 engine.addBuiltInMidiEffect (a.first, a.second, slot, kind);
-                owner.showStatus ("Added. Settings... on its row sets it up; it works at the rig's tempo.");
+                owner.showStatus (kind == EffectDef::Kind::phrase ? "Added. Settings... on its row loads the MIDI file it plays."
+                                                                  : "Added. Settings... on its row sets it up; it works at the rig's tempo.");
                 owner.markDirty();
                 return;
             }
@@ -1076,6 +1129,7 @@ private:
     int slot;
     TextButton addBtn { "+ Add effect..." };
     std::vector<std::unique_ptr<Row>> rows;
+    std::unique_ptr<FileChooser> chooser;
 
     friend struct Row;
 };

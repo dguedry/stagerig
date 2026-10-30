@@ -70,7 +70,8 @@ var EffectDef::toVar() const
     }
     if (isBuiltIn())
     {
-        o->setProperty ("kind", kind == Kind::arpeggio ? "arpeggio" : kind == Kind::chord ? "chord" : kind == Kind::scale ? "scale" : kind == Kind::bigBand ? "bigBand" : "run");
+        o->setProperty ("kind", kind == Kind::arpeggio ? "arpeggio" : kind == Kind::chord ? "chord" : kind == Kind::scale ? "scale" : kind == Kind::bigBand ? "bigBand"
+                              : kind == Kind::humanize ? "humanize" : kind == Kind::phrase ? "phrase" : "run");
         if (kind == Kind::arpeggio)
         {
             o->setProperty ("rate", arpRate);
@@ -80,6 +81,22 @@ var EffectDef::toVar() const
             if (arpLatch) o->setProperty ("latch", true);
         }
         else if (kind == Kind::chord) o->setProperty ("chord", chordType);
+        else if (kind == Kind::humanize)
+        {
+            o->setProperty ("timing", humanTimingMs);
+            o->setProperty ("velocity", humanVelocity);
+        }
+        else if (kind == Kind::phrase)
+        {
+            if (phraseName.isNotEmpty()) o->setProperty ("name", phraseName);
+            o->setProperty ("beats", phraseBeats);
+            if (phraseRoot >= 0) o->setProperty ("root", phraseRoot);
+            if (phraseStop) o->setProperty ("stop", true);
+            if (phraseLoop) o->setProperty ("loop", true);
+            Array<var> notes;
+            for (const auto& n : phraseNotes) { Array<var> one; one.add (n.beat); one.add (n.length); one.add (n.note); one.add (n.velocity); notes.add (var (one)); }
+            o->setProperty ("notes", var (notes));
+        }
         else
         {
             o->setProperty ("root", scaleRoot);
@@ -126,9 +143,28 @@ EffectDef EffectDef::fromVar (const var& v)
         e.bypassed = prop<bool> (v, "bypassed", false);
         return e;
     }
-    if (const auto kind = propStr (v, "kind"); kind == "arpeggio" || kind == "chord" || kind == "scale" || kind == "run" || kind == "bigBand")
+    if (const auto kind = propStr (v, "kind"); kind == "arpeggio" || kind == "chord" || kind == "scale" || kind == "run" || kind == "bigBand" || kind == "humanize" || kind == "phrase")
     {
-        e.kind = kind == "arpeggio" ? Kind::arpeggio : kind == "chord" ? Kind::chord : kind == "scale" ? Kind::scale : kind == "bigBand" ? Kind::bigBand : Kind::run;
+        e.kind = kind == "arpeggio" ? Kind::arpeggio : kind == "chord" ? Kind::chord : kind == "scale" ? Kind::scale : kind == "bigBand" ? Kind::bigBand
+               : kind == "humanize" ? Kind::humanize : kind == "phrase" ? Kind::phrase : Kind::run;
+        if (e.kind == Kind::humanize)
+        {
+            e.humanTimingMs = jlimit (0, 100, prop<int> (v, "timing", 12));
+            e.humanVelocity = jlimit (0, 64, prop<int> (v, "velocity", 10));
+        }
+        if (e.kind == Kind::phrase)
+        {
+            e.phraseName = propStr (v, "name");
+            e.phraseBeats = jlimit (0.0f, 1024.0f, (float) prop<double> (v, "beats", 0.0));
+            e.phraseRoot = jlimit (-1, 127, prop<int> (v, "root", -1));
+            e.phraseStop = prop<bool> (v, "stop", false);
+            e.phraseLoop = prop<bool> (v, "loop", false);
+            if (auto* notes = v.getProperty ("notes", var()).getArray())
+                for (const auto& one : *notes)
+                    if (auto* f = one.getArray(); f != nullptr && f->size() == 4 && e.phraseNotes.size() < 512)
+                        e.phraseNotes.push_back ({ jlimit (0.0f, 1024.0f, (float) (double) (*f)[0]), jlimit (0.0f, 1024.0f, (float) (double) (*f)[1]),
+                                                   jlimit (0, 127, (int) (*f)[2]), jlimit (1, 127, (int) (*f)[3]) });
+        }
         if (auto* rows = v.getProperty ("chords", var()).getArray(); rows != nullptr && rows->size() == 12)
             for (int r = 0; r < 12; ++r)
             {

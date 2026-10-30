@@ -13,6 +13,7 @@
 #include "MidiEditor.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
+#include <map>
 #include <cmath>
 #include <set>
 #include <signal.h>
@@ -2035,6 +2036,161 @@ int main()
             dd.scaleRoot = 9; dd.scaleMode = 1;
             CHECK (MidiFx::describe (dd) == "A natural minor: C6 Dm7 Em7 F6 G7 Am7 Bm7b5");
             std::printf ("     chords read and named: %s\n", MidiFx::describe (dd).toRawUTF8());
+        }
+        // Humanize: every note lands within the window, never early; its off follows by the note's own length; velocity stays within the band.
+        {
+            EffectDef d; d.kind = EffectDef::Kind::humanize; d.humanTimingMs = 25; d.humanVelocity = 10;
+            auto fx = MidiFx::create (d);
+            const int window = (int) (48000.0 * 0.025);
+            std::map<int, int> onAt, offAt, velAt;
+            int block = 0, maxDelay = 0, velSpread = 0, lateOffs = 0;
+            auto run = [&] (MidiBuffer& in)
+            {
+                MidiBuffer out;
+                fx->process (in, out, 256, 48000.0, 120.0);
+                for (const auto m : out)
+                {
+                    const auto msg = m.getMessage();
+                    const int t = block * 256 + m.samplePosition;
+                    if (msg.isNoteOn()) { onAt[msg.getNoteNumber()] = t; velAt[msg.getNoteNumber()] = msg.getVelocity(); }
+                    else if (msg.isNoteOff()) offAt[msg.getNoteNumber()] = t;
+                }
+                ++block;
+                in.clear();
+            };
+            // 60 notes, one every 3 blocks (16 ms), each held 2 blocks: ons and offs interleave across blocks.
+            std::map<int, int> keyDown;
+            for (int n = 0; n < 60; ++n)
+            {
+                MidiBuffer in;
+                in.addEvent (MidiMessage::noteOn (1, 30 + n, (uint8) 80), 100);
+                keyDown[30 + n] = block * 256 + 100;
+                run (in);
+                run (in);
+                in.addEvent (MidiMessage::noteOff (1, 30 + n), 100);
+                run (in);
+            }
+            for (int i = 0; i < 20; ++i) { MidiBuffer in; run (in); }
+            CHECK ((int) onAt.size() == 60 && (int) offAt.size() == 60);
+            for (auto& [note, t] : onAt)
+            {
+                const int delay = t - keyDown[note];
+                CHECK (delay >= 0 && delay <= window);
+                maxDelay = jmax (maxDelay, delay);
+                CHECK (offAt[note] - t == 512);                      // held two blocks, exactly, whatever the delay
+                CHECK (velAt[note] >= 70 && velAt[note] <= 90);
+                velSpread = jmax (velSpread, std::abs (velAt[note] - 80));
+                if (offAt[note] < t) ++lateOffs;
+            }
+            std::printf ("     humanize: 60 notes, latest %d ms late (window 25), velocity spread %d (band 10), %d offs before their on\n", maxDelay * 1000 / 48000, velSpread, lateOffs);
+            CHECK (maxDelay > window / 4 && velSpread > 2 && lateOffs == 0);        // it does something, and nothing impossible
+            // Switched to "on time, as played": straight through.
+            d.humanTimingMs = 0; d.humanVelocity = 0; fx->configure (d);
+            MidiBuffer in, out;
+            in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 77), 5);
+            fx->process (in, out, 256, 48000.0, 120.0);
+            int straight = 0; for (const auto m : out) if (m.getMessage().isNoteOn() && m.samplePosition == 5 && m.getMessage().getVelocity() == 77) ++straight;
+            CHECK (straight == 1);
+        }
+        // Phrase: a three-note MIDI file (C D E, a beat each), imported and played from G: G A B at 0, 0.5 and 1.0 s at 120.
+        {
+            MidiMessageSequence seq;
+            const int tpq = 480;
+            for (int i = 0; i < 3; ++i)
+            {
+                seq.addEvent (MidiMessage::noteOn (1, 60 + 2 * i, (uint8) 100), 960 + tpq * i);     // the file starts after two silent beats
+                seq.addEvent (MidiMessage::noteOff (1, 60 + 2 * i), 960 + tpq * i + tpq / 2);      // half-beat notes
+            }
+            seq.updateMatchedPairs();
+            MidiFile mf; mf.setTicksPerQuarterNote (tpq); mf.addTrack (seq);
+            TemporaryFile tmp (".mid");
+            { FileOutputStream os (tmp.getFile()); mf.writeTo (os, 1); }
+            EffectDef d; d.kind = EffectDef::Kind::phrase;
+            String error;
+            CHECK (MidiFx::importPhrase (tmp.getFile(), d, error));
+            CHECK (d.phraseNotes.size() == 3 && std::abs (d.phraseNotes[0].beat) < 1e-5f && std::abs (d.phraseNotes[1].beat - 1.0f) < 1e-5f
+                   && std::abs (d.phraseNotes[2].length - 0.5f) < 1e-5f && d.phraseNotes[2].note == 64 && std::abs (d.phraseBeats - 3.0f) < 1e-5f);
+            std::printf ("     imported %s: %s\n", tmp.getFile().getFileName().toRawUTF8(), MidiFx::describe (d).toRawUTF8());
+            CHECK (MidiFx::describe (d).contains ("3 notes over 3 beats, starting on the key"));
+            File bad = tmp.getFile().getSiblingFile ("not-midi.mid"); bad.replaceWithText ("hello");
+            EffectDef junk; junk.kind = EffectDef::Kind::phrase;
+            CHECK (! MidiFx::importPhrase (bad, junk, error) && error.isNotEmpty() && junk.phraseNotes.empty());
+            bad.deleteFile();
+
+            auto play = [&] (const EffectDef& def, int key, int keyUpBlock, int blocks)
+            {
+                auto fx = MidiFx::create (def);
+                std::vector<std::pair<double, String>> events;
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, key, (uint8) 100), 0);
+                for (int b = 0; b < blocks; ++b)
+                {
+                    if (b == keyUpBlock) in.addEvent (MidiMessage::noteOff (1, key), 0);
+                    out.clear();
+                    fx->process (in, out, 480, 48000.0, 120.0);     // 10 ms blocks
+                    in.clear();
+                    for (const auto m : out)
+                    {
+                        const auto msg = m.getMessage();
+                        events.push_back ({ (b * 480 + m.samplePosition) / 48000.0, (msg.isNoteOn() ? "on " : msg.isNoteOff() ? "off " : "? ") + String (msg.getNoteNumber()) });
+                    }
+                }
+                return events;
+            };
+            auto text = [] (const std::vector<std::pair<double, String>>& ev) { StringArray a; for (auto& e : ev) a.add (e.second + "@" + String (e.first, 2)); return a.joinIntoString (" "); };
+            // A tap (key up after 30 ms): the whole phrase still plays, moved to G.
+            auto ev = play (d, 67, 3, 200);
+            std::printf ("     phrase from G, tapped: %s\n", text (ev).toRawUTF8());
+            CHECK (text (ev) == "on 67@0.00 off 67@0.25 on 69@0.50 off 69@0.75 on 71@1.00 off 71@1.25");
+            // Stop with the key: let go at 0.6 s, the A is cut and the B never comes.
+            d.phraseStop = true;
+            ev = play (d, 67, 60, 200);
+            std::printf ("     phrase stopped at 0.6 s: %s\n", text (ev).toRawUTF8());
+            CHECK (text (ev) == "on 67@0.00 off 67@0.25 on 69@0.50 off 69@0.60");
+            // Repeat while held: round again at 1.5 s, until the key lifts at 2.0 s (the second pass's A plays through to its end; nothing after the end of the pass).
+            d.phraseStop = false; d.phraseLoop = true;
+            ev = play (d, 67, 200, 400);
+            std::printf ("     phrase repeating, key up at 2.0 s: %s\n", text (ev).toRawUTF8());
+            CHECK (text (ev) == "on 67@0.00 off 67@0.25 on 69@0.50 off 69@0.75 on 71@1.00 off 71@1.25 on 67@1.50 off 67@1.75 on 69@2.00 off 69@2.25 on 71@2.50 off 71@2.75");
+            // As written: the key C4 plays the file as it is; the velocity of the key scales the file's.
+            d.phraseLoop = false; d.phraseRoot = 60;
+            ev = play (d, 60, 3, 200);
+            CHECK (text (ev) == "on 60@0.00 off 60@0.25 on 62@0.50 off 62@0.75 on 64@1.00 off 64@1.25");
+            {
+                auto fx = MidiFx::create (d);
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, 62, (uint8) 50), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                int vel = -1, note = -1; for (const auto m : out) if (m.getMessage().isNoteOn()) { vel = m.getMessage().getVelocity(); note = m.getMessage().getNoteNumber(); }
+                CHECK (note == 62 && vel == 50);     // file velocity 100 at a key velocity of 50
+            }
+            // Two keys at once share no notes here, and each voice ends on its own.
+            {
+                auto fx = MidiFx::create (d);
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0);
+                in.addEvent (MidiMessage::noteOn (1, 67, (uint8) 100), 0);
+                int ons = 0, offs = 0;
+                for (int b = 0; b < 200; ++b)
+                {
+                    out.clear();
+                    fx->process (in, out, 480, 48000.0, 120.0);
+                    in.clear();
+                    for (const auto m : out) { if (m.getMessage().isNoteOn()) ++ons; if (m.getMessage().isNoteOff()) ++offs; }
+                }
+                CHECK (ons == 6 && offs == 6);
+            }
+            // Nothing loaded: the keys pass straight through.
+            {
+                EffectDef empty; empty.kind = EffectDef::Kind::phrase;
+                auto fx = MidiFx::create (empty);
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 3);
+                in.addEvent (MidiMessage::noteOff (1, 60), 40);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                int n = 0; for (const auto m : out) ++n;
+                CHECK (n == 2);
+            }
         }
         // Run: E pressed in C major, an octave up in one beat (120 bpm: eight notes across half a second), the last one held.
         {

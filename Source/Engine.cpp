@@ -3263,6 +3263,9 @@ void Engine::setBuiltInMidiEffect (int inputIndex, int program, int slotIndex, i
     ed.chordType = settings.chordType; ed.scaleRoot = settings.scaleRoot; ed.scaleMode = settings.scaleMode;
     ed.runNotes = settings.runNotes; ed.runBeats = settings.runBeats; ed.runDegree = settings.runDegree; ed.runDown = settings.runDown; ed.runToKey = settings.runToKey; ed.runHoldLast = settings.runHoldLast;
     ed.followSongKey = settings.followSongKey; ed.bandChords = settings.bandChords;
+    ed.humanTimingMs = settings.humanTimingMs; ed.humanVelocity = settings.humanVelocity;
+    ed.phraseNotes = settings.phraseNotes; ed.phraseName = settings.phraseName; ed.phraseBeats = settings.phraseBeats;
+    ed.phraseRoot = settings.phraseRoot; ed.phraseStop = settings.phraseStop; ed.phraseLoop = settings.phraseLoop;
     if (auto* fx = static_cast<EffectRuntime*> (getNode (inputIndex, program, ProgramDef::midiChainOf (slotIndex), effect)))
         if (fx->builtIn != nullptr) fx->builtIn->configure (effectiveEffectDef (ed));
     notifyContent (inputIndex, program);

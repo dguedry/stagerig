@@ -17,7 +17,7 @@ struct EffectDef
     /** A plugin, or -- in a slot's MIDI chain only -- a send: the MIDI at
         that point also goes out of a port, to a hardware synth or another
         program, and carries on unchanged to the next block. */
-    enum class Kind { plugin, midiSend, arpeggio, chord, scale, run, bigBand };
+    enum class Kind { plugin, midiSend, arpeggio, chord, scale, run, bigBand, humanize, phrase };
     Kind kind = Kind::plugin;
 
     juce::PluginDescription plugin;
@@ -50,9 +50,20 @@ struct EffectDef
         the key pressed. An empty row: that key plays alone. */
     std::vector<std::vector<int>> bandChords = defaultBandChords();
     static std::vector<std::vector<int>> defaultBandChords();   // 6ths and 7ths on the scale, diminished 7ths between
+    // Humanize: a player's unevenness put back on quantised or keyed notes.
+    int humanTimingMs = 12;           // each note lands up to this late, at random (0 = on time)
+    int humanVelocity = 10;           // each velocity moves by up to this, either way (0 = as played)
+    // Phrase: a short MIDI file played from each key, moved to the key pressed.
+    struct PhraseNote { float beat = 0.0f, length = 0.25f; int note = 60, velocity = 100; };
+    std::vector<PhraseNote> phraseNotes;   // the file's notes, from beat 0, in order
+    juce::String phraseName;          // the file it came from
+    float phraseBeats = 0.0f;         // how long the phrase is, in whole beats
+    int phraseRoot = -1;              // the file's note the key pressed stands for; -1 = the first note in the file
+    bool phraseStop = false;          // letting go of the key stops the phrase (else a tap plays the whole of it)
+    bool phraseLoop = false;          // repeats while the key is held
 
     bool isSend() const               { return kind == Kind::midiSend; }
-    bool isBuiltIn() const            { return kind == Kind::arpeggio || kind == Kind::chord || kind == Kind::scale || kind == Kind::run || kind == Kind::bigBand; }
+    bool isBuiltIn() const            { return kind == Kind::arpeggio || kind == Kind::chord || kind == Kind::scale || kind == Kind::run || kind == Kind::bigBand || kind == Kind::humanize || kind == Kind::phrase; }
     bool isPlugin() const             { return kind == Kind::plugin; }
     juce::String displayName() const
     {
@@ -64,6 +75,8 @@ struct EffectDef
             case Kind::scale:    return "Scale";
             case Kind::run:      return "Run";
             case Kind::bigBand:  return "Big band";
+            case Kind::humanize: return "Humanize";
+            case Kind::phrase:   return "Phrase";
             default:             return plugin.name;
         }
     }

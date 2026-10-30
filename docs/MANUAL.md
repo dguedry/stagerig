@@ -344,7 +344,7 @@ transpose, curve and channels decide which notes enter at all. Left to right:
 
 - **Effect on the sound** -- reverb, EQ, an amp: after the instrument.
 - **MIDI effect on the notes** -- an arpeggiator, a chord generator: before it.
-  Five are built in, under **Built in** at the top of that list, with
+  Seven are built in, under **Built in** at the top of that list, with
   nothing to install and nothing to open: **Arpeggiator** plays the notes you
   hold one at a time, in time with the rig's tempo (rate, pattern, octaves,
   note length and latch under **Settings...**); **Chord** makes every note a
@@ -374,7 +374,23 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   plays Am7 on A and C6 on C. Scale, Run and Big band **follow the song's
   key** when the song has one (set with **Edit...** on the song), so one
   chain serves every song; picking a key on the row gives the effect its own
-  instead. Each shows its settings in words on its row.
+  instead. **Humanize** puts a player's unevenness back on notes that arrive
+  too even -- from an arpeggiator, a chord, a run, or a keyboard with a hard
+  action: each note lands a little late, by a different amount every time
+  (**Timing**: tight, relaxed, lazy or sloppy, up to 5, 12, 25 or 50 ms),
+  and a little louder or softer (**Velocity**, up to 5, 10, 20 or 40 either
+  way); a note's end moves with its start, so lengths are kept. Put it after
+  the effect whose notes it should loosen. **Phrase** plays a short MIDI
+  file from each key -- a lick, a fill, a riff, a drum pattern: **Load a MIDI
+  file...** under **Settings...** reads the notes in (every track, from its
+  first note), and the setup keeps them, so the file can go. The phrase
+  **begins on the key pressed** -- its first note moves to the key, and the
+  rest follow -- or plays **as written** with the key C4 leaving it as it
+  is and the others moving it. It runs at the rig's tempo and at the key's
+  velocity (a key at 100 plays the file as recorded). A tap plays the whole
+  of it; **Stop when the key is let go** cuts it instead, and **Repeat while
+  the key is held** rounds again until the key lifts. Each shows its settings
+  in words on its row.
 - **Send to a MIDI device too** -- the instrument's notes go out of a MIDI port
   as well, so a hardware synth doubles the plugin, or a lighting controller
   follows the keys.

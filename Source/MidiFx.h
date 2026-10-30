@@ -2,6 +2,7 @@
 
 #include "Model.h"
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_core/juce_core.h>
 #include <atomic>
 #include <memory>
 
@@ -50,6 +51,9 @@ public:
     static juce::String bandChordName (int rowRoot, const std::vector<int>& offsets, bool flats);
     /** The chord's notes, "D F A C". */
     static juce::String bandChordNotes (int rowRoot, const std::vector<int>& offsets, bool flats);
+    /** Phrase: reads a MIDI file's notes into `def` (every track, from its first note, at the file's beat), naming it after the file.
+        False, with a reason, when it cannot be read or has no notes. Up to 512 notes. */
+    static bool importPhrase (const juce::File& file, EffectDef& def, juce::String& error);
     static int numArpRates();
     static int numArpModes();
     static int numChordTypes();
