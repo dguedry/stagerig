@@ -776,8 +776,32 @@ int main()
             AudioPluginFormat* vst3 = nullptr;
             for (auto* fmt : host.getFormatManager().getFormats()) if (fmt->getName() == "VST3") vst3 = fmt;
 
+            /* Plugins the rig's owner switched off (Remove in the Plugins window
+               puts them on the rig's blacklist) stay off here too: a bridged
+               plugin with no licence puts a dialog on the desktop each time it
+               is probed. STAGERIG_TEST_SKIP_PLUGINS names more, by substring,
+               separated by colons. */
+            StringArray skipped;
+            {
+                File settingsFile = File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("StageRig/StageRig.settings");
+                if (const char* dir = std::getenv ("STAGERIG_SETTINGS_DIR"); dir != nullptr && *dir != 0) settingsFile = File (dir).getChildFile ("StageRig.settings");
+                if (auto xml = parseXML (settingsFile))
+                    for (auto* v : xml->getChildWithTagNameIterator ("VALUE"))
+                        if (v->getStringAttribute ("name") == "pluginList")
+                            if (auto* kp = v->getChildByName ("KNOWNPLUGINS"))
+                                for (auto* b : kp->getChildWithTagNameIterator ("BLACKLISTED")) skipped.add (b->getStringAttribute ("id"));
+                if (const char* more = std::getenv ("STAGERIG_TEST_SKIP_PLUGINS"); more != nullptr && *more != 0)
+                    for (const auto& part : StringArray::fromTokens (String (more), ":", ""))
+                        for (const auto& bundle : yabridgeDir.findChildFiles (File::findFilesAndDirectories, true, "*.vst3"))
+                            if (part.isNotEmpty() && bundle.getFileName().containsIgnoreCase (part)
+                                && (bundle.getParentDirectory().getFileName() == "yabridge" || bundle.getParentDirectory().getParentDirectory().getFileName() == "yabridge"))
+                                skipped.addIfNotAlreadyThere (bundle.getFullPathName());     // the bundle, not the DLL inside it
+            }
+            for (const auto& f : skipped) std::printf ("     (skipping %s: switched off on this rig)\n", File (f).getFileName().toRawUTF8());
+
             KnownPluginList list;
             list.setCustomScanner (std::make_unique<PluginHost::OutOfProcessScanner>());
+            for (const auto& f : skipped) list.addToBlacklist (f);
             TemporaryFile dmp (".txt");
             PluginDirectoryScanner ds (list, *vst3, FileSearchPath (yabridgeDir.getFullPathName()), true, dmp.getFile(), false);
             /* Bundles whose Windows plugin is currently missing (being reinstalled)
@@ -795,6 +819,7 @@ int main()
                     && bundle.getParentDirectory().getParentDirectory().getFileName() != "yabridge")
                     continue;
 
+                if (skipped.contains (bundle.getFullPathName())) continue;
                 if (PluginHost::brokenBridgeTarget (bundle.getFullPathName()).isEmpty()) ++expected;
                 else std::printf ("     (skipping %s: bridge target missing)\n", bundle.getFileName().toRawUTF8());
             }
@@ -822,10 +847,10 @@ int main()
             std::printf ("     dialog-style scan of %s: %d plugin(s) expected, %d found, %d blacklisted, %d failed, %.1f s\n",
                          yabridgeDir.getFullPathName().toRawUTF8(), expected, list.getNumTypes(),
                          list.getBlacklistedFiles().size(), ds.getFailedFiles().size(), (Time::getMillisecondCounterHiRes() - t0) / 1000.0);
-            for (auto& b : list.getBlacklistedFiles()) std::printf ("       BLACKLISTED %s\n", b.toRawUTF8());
+            for (auto& b : list.getBlacklistedFiles()) if (! skipped.contains (b)) std::printf ("       BLACKLISTED %s\n", b.toRawUTF8());
             // A probe stopped by the teardown may legitimately yield nothing (it will be
             // scanned next time); what must never happen is a blacklist entry.
-            CHECK (list.getBlacklistedFiles().isEmpty());
+            CHECK (list.getBlacklistedFiles().size() == skipped.size());
             /* One bundle can hold more than one plugin -- a VST3 "shell" exposes
                several, and at least one here does -- so the count found may
                exceed the number of bundles. What matters is that nothing went
@@ -836,6 +861,7 @@ int main()
 
             // The app-owned background scanner (what the Plugins window uses).
             auto& sc = host.getScanner();
+            for (const auto& f : skipped) host.getKnownPlugins().addToBlacklist (f);
             CHECK (! sc.isScanning());
             CHECK (sc.startScan (*vst3, FileSearchPath (yabridgeDir.getFullPathName())));
             CHECK (sc.isScanning());

@@ -37,7 +37,7 @@ public:
         folderBtn.onClick = [this] { chooseFolder(); };
 
         addAndMakeVisible (removeBtn);
-        removeBtn.setTooltip ("Remove the selected plugin from the list, or switch back on one that was switched off after it hung");
+        removeBtn.setTooltip ("Remove the selected plugin: it stays off, out of later scans too. Or switch back on one of the switched-off ones listed below");
         removeBtn.onClick = [this] { removeSelected(); };
 
         addAndMakeVisible (clearBtn);
@@ -118,8 +118,13 @@ private:
         const auto types = kpl.getTypes();
         if (row < types.size())
         {
-            status ("Removed " + types[row].name);
-            kpl.removeType (types[row]);
+            /* Off the list, and off the next scan too: a plugin removed by hand
+               -- one with no licence, one that puts up a dialog -- must not
+               come back the next time the folder is scanned. It sits in the
+               switched-off rows below, where Remove switches it back on. */
+            status ("Removed " + types[row].name + ". It stays off until you select it below and switch it back on.");
+            kpl.addToBlacklist (types[row].fileOrIdentifier);
+            for (const auto& t : kpl.getTypes()) if (t.fileOrIdentifier == types[row].fileOrIdentifier) kpl.removeType (t);
         }
         else
         {

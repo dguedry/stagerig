@@ -1428,7 +1428,8 @@ switching the plugin off; scan again once the install has finished.
 | What you see | What it means | What to do |
 |---|---|---|
 | An instrument's row is red, with **Reload** instead of **Window** | That plugin crashed. Only that plugin is affected. | Press **Reload**; it restarts with the saved state. |
-| A plugin shows *Deactivated* in the Plugins window | It hung or crashed twice while being scanned. | Select it and press **Remove selected** to give it another chance. |
+| A plugin shows *Deactivated* in the Plugins window | It hung or crashed twice while being scanned, or you removed it. | Select it and press **Remove selected** to give it another chance. |
+| A plugin puts up a dialog every time it is looked at (no licence, a demo that nags) | It is loaded whenever its folder is scanned. | Select it in **Plugins...** and press **Remove selected**: it is switched off and left alone by later scans, until you switch it back on the same way. |
 | *late N* climbing while playing | Plugins are not keeping up with the buffer. | Raise the buffer size in **Audio...**, or check realtime scheduling. |
 | *clock held by another app* | Another audio application forces the system's buffer size. | Close it, or set its buffer size to match. |
 | Static or crackle on a USB interface under the ALSA type | The buffer is below 128 samples, or the input is on a different device from the output. | Set 256 (or 128) in **Audio...**, and the same interface for input and output; the status line says which it is. |
