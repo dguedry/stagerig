@@ -44,13 +44,15 @@ public:
     static const char* const bandDegrees[];
     /** The major key whose chords a key in this scale uses: A natural minor's are C major's. */
     static int bandMajorRoot (int root, int mode);
-    /** A chord typed for the step on `rowRoot` (a pitch class): notes ("C E G A", the first one the key pressed)
-        or a name ("C6", "Dm7", "G7", "Bm7b5"). False when it reads as neither. Blank: an empty chord. */
+    /** A chord typed for the step on `rowRoot` (a pitch class). Notes with their octaves place each exactly, the
+        key pressed being octave 4 ("G3 C4 E4 A4": the G under the key); notes without climb from the key ("C E G A");
+        or a name ("C6", "Dm7", "G7", "Bm7b5", "C6/E" with the bass under). False when it reads as none of these. Blank: no chord. */
     static bool parseBandChord (const juce::String& text, int rowRoot, std::vector<int>& offsets);
-    /** The chord on `rowRoot` by name when it has one ("Dm7"), else its notes ("D F A C"). Blank for no chord. */
+    /** The chord on `rowRoot` by name when it has one ("Dm7"), else its notes. Blank for no chord. */
     static juce::String bandChordName (int rowRoot, const std::vector<int>& offsets, bool flats);
-    /** The chord's notes, "D F A C". */
-    static juce::String bandChordNotes (int rowRoot, const std::vector<int>& offsets, bool flats);
+    /** The chord's notes: "D4 F4 A4 C5" with octaves (the key pressed in octave 4), or "D F A C" without. */
+    static juce::String bandChordNotes (int rowRoot, const std::vector<int>& offsets, bool flats, bool octaves = true);
+    static constexpr int maxBandNotes = 8;    // notes in one chord
     /** Phrase: reads a MIDI file's notes into `def` (every track, from its first note, at the file's beat), naming it after the file.
         False, with a reason, when it cannot be read or has no notes. Up to 512 notes. */
     static bool importPhrase (const juce::File& file, EffectDef& def, juce::String& error);

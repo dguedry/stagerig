@@ -366,11 +366,14 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   of the key, as a sax section voices it: in C, the C plays C6, the D Dm7,
   the E Em7, the F F6, the G G7, the A Am7, the B Bm7b5, and a key between
   the steps a diminished 7th, so a chromatic passing note is harmonised too.
-  **Chords...** on its row sets the notes of each of the twelve: write them
-  as notes (C E G A, the first the key pressed) or as a name (C6, Dm7, G7,
-  Bm7b5, C#dim7, Cmaj7, C6/9), with a note below the key as easily as above
-  (A C E G on the tonic puts the A under it); leave a step blank and that key
-  plays alone. A minor key's chords are its relative major's, so A minor
+  **Chords...** on its row sets the notes of each of the twelve. Write a
+  chord as notes with their octaves, the key pressed being octave 4, and
+  each note lands exactly where you put it: *G3 C4 E4 A4* puts the G under
+  the key, *E3 G3 A3 C4* puts the key on top with the section below it, and
+  a voicing can spread over two octaves or more (up to eight notes). Bare
+  notes climb from the key (*C E G A*), and a name does too (*C6*, *Dm7*,
+  *G7*, *Bm7b5*, *C#dim7*, *Cmaj7*, *C6/9*; *C6/E* puts the E under).
+  Leave a step blank and that key plays alone. A minor key's chords are its relative major's, so A minor
   plays Am7 on A and C6 on C. Scale, Run and Big band **follow the song's
   key** when the song has one (set with **Edit...** on the song), so one
   chain serves every song; picking a key on the row gives the effect its own

@@ -480,7 +480,7 @@ namespace
             }
         }
     private:
-        static constexpr int kMaxNotes = 6;
+        static constexpr int kMaxNotes = MidiFx::maxBandNotes;
         static constexpr uint8 kNone = 255;
         void release (MidiBuffer& out, int ch, int key, int at)
         {
@@ -573,43 +573,70 @@ bool MidiFx::parseBandChord (const String& text, int rowRoot, std::vector<int>& 
     tokens.removeEmptyStrings();
     if (tokens.isEmpty()) return true;
     auto nearest = [rowRoot] (int pc) { int d = ((pc - rowRoot) % 12 + 12) % 12; return d >= 6 ? d - 12 : d; };   // -6..5 from the step's root: a tritone away sits below
-    // Notes: every token a note name and nothing more.
-    bool allNotes = true;
-    for (const auto& t : tokens) { int len; if (rootOf (t, len) < 0 || len != t.length()) { allNotes = false; break; } }
-    if (allNotes)
+    /* One token that reads as a chord name is the chord: G7 and C6 are
+       chords here, not notes in the seventh and sixth octaves. */
+    if (tokens.size() == 1)
     {
-        int len, prev = 0;
-        for (int i = 0; i < tokens.size(); ++i)
-        {
-            const int pc = rootOf (tokens[i], len);
-            if (i == 0) prev = nearest (pc);
-            else { int d = ((pc - rowRoot - prev) % 12 + 12) % 12; if (d == 0) d = 12; prev += d; }        // each the next one up
-            offsets.push_back (prev);
-        }
-        return true;
+        int len;
+        const int pc = rootOf (tokens[0], len);
+        if (pc < 0) return false;
+        const auto rest = tokens[0].substring (len);
+        const bool sixNine = rest.contains ("6/9") || rest.contains ("69");
+        const auto quality = normaliseQuality (sixNine ? "6/9" : rest.upToFirstOccurrenceOf ("/", false, false));
+        for (const auto& q : kQualities)
+            if (quality == q.name || quality.toLowerCase() == String (q.name).toLowerCase())
+            {
+                const int base = nearest (pc);
+                if (! sixNine && rest.contains ("/"))
+                {
+                    // A slash bass goes under the chord: C6/E puts the E below.
+                    int bl;
+                    const int bass = rootOf (rest.fromFirstOccurrenceOf ("/", false, false), bl);
+                    if (bass < 0) return false;
+                    int b = ((bass - rowRoot) % 12 + 12) % 12 - 12 + base;                                  // the bass pitch class, in the octave under the root
+                    while (b + 12 <= base - 1) b += 12;
+                    offsets.push_back (b);
+                }
+                for (int n : q.notes) offsets.push_back (base + n);
+                return offsets.size() <= (size_t) maxBandNotes;
+            }
     }
-    if (tokens.size() != 1) return false;
-    int len;
-    const int pc = rootOf (tokens[0], len);
-    if (pc < 0) return false;
-    const auto quality = normaliseQuality (tokens[0].substring (len).upToFirstOccurrenceOf ("/", false, false)
-                                           + (tokens[0].substring (len).contains ("6/9") ? "/9" : ""));
-    for (const auto& q : kQualities)
-        if (quality == q.name || quality.toLowerCase() == String (q.name).toLowerCase())
-        {
-            const int base = nearest (pc);
-            for (int n : q.notes) offsets.push_back (base + n);
-            return true;
-        }
-    return false;
+    /* Notes: every token a note name, with an octave or without. With one
+       the note is placed exactly, the key pressed standing in octave 4;
+       without, the first sits nearest the key and each next one climbs. */
+    auto octaveOf = [] (const String& t, int len) -> int
+    {
+        const auto rest = t.substring (len);
+        if (rest.isEmpty()) return 99;                                       // none given
+        if (rest.length() <= 2 && rest.containsOnly ("-0123456789") && rest != "-") return rest.getIntValue();
+        return 98;                                                           // not a note
+    };
+    for (const auto& t : tokens) { int len; if (rootOf (t, len) < 0 || octaveOf (t, len) == 98) return false; }
+    if (tokens.size() > maxBandNotes) return false;
+    int len, prev = 0;
+    for (int i = 0; i < tokens.size(); ++i)
+    {
+        const int pc = rootOf (tokens[i], len);
+        const int oct = octaveOf (tokens[i], len);
+        if (oct != 99) prev = pc + 12 * (oct + 1) - (60 + rowRoot);                                        // placed: the key is 60 + its pitch class
+        else if (i == 0) prev = nearest (pc);
+        else { int d = ((pc - rowRoot - prev) % 12 + 12) % 12; if (d == 0) d = 12; prev += d; }        // each the next one up
+        if (prev < -36 || prev > 36) return false;
+        offsets.push_back (prev);
+    }
+    return true;
 }
 
-String MidiFx::bandChordNotes (int rowRoot, const std::vector<int>& offsets, bool flats)
+String MidiFx::bandChordNotes (int rowRoot, const std::vector<int>& offsets, bool flats, bool octaves)
 {
     static const char* sharps[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     static const char* flatNames[] = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
     StringArray names;
-    for (int o : offsets) names.add ((flats ? flatNames : sharps)[((rowRoot + o) % 12 + 12) % 12]);
+    for (int o : offsets)
+    {
+        const int note = 60 + rowRoot + o;                                   // the key pressed in octave 4
+        names.add (String ((flats ? flatNames : sharps)[(note % 12 + 12) % 12]) + (octaves ? String (note / 12 - 1) : String()));
+    }
     return names.joinIntoString (" ");
 }
 

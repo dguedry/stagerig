@@ -171,7 +171,7 @@ EffectDef EffectDef::fromVar (const var& v)
                 auto& row = e.bandChords[(size_t) r];
                 row.clear();
                 if (auto* notes = (*rows)[r].getArray())
-                    for (const auto& n : *notes) if (row.size() < 6) row.push_back (jlimit (-36, 36, (int) n));
+                    for (const auto& n : *notes) if (row.size() < 8) row.push_back (jlimit (-36, 36, (int) n));
             }
         e.runNotes   = jlimit (2, 16, prop<int> (v, "notes", 8));
         e.runBeats   = jlimit (0.25f, 16.0f, (float) prop<double> (v, "beats", 1.0));

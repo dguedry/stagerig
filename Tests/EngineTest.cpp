@@ -2028,8 +2028,28 @@ int main()
             CHECK (MidiFx::bandChordName (0, { 0, 4, 7, 9 }, false) == "C6");
             CHECK (MidiFx::bandChordName (10, { 0, 4, 7, 10 }, true) == "Bb7");
             CHECK (MidiFx::bandChordName (7, { -6, -2, 1, 4 }, true) == "Db7");
-            CHECK (MidiFx::bandChordName (0, { 0, 1, 2 }, false) == "C C# D");                // no name for it: its notes
-            CHECK (MidiFx::bandChordNotes (2, { 0, 3, 7, 10 }, false) == "D F A C");
+            CHECK (MidiFx::bandChordName (0, { 0, 1, 2 }, false) == "C4 C#4 D4");             // no name for it: its notes
+            CHECK (MidiFx::bandChordNotes (2, { 0, 3, 7, 10 }, false, false) == "D F A C");
+            CHECK (MidiFx::bandChordNotes (2, { 0, 3, 7, 10 }, false) == "D4 F4 A4 C5");
+            CHECK (MidiFx::bandChordNotes (7, { -12, 0, 4, 10, 14 }, false) == "G3 G4 B4 F5 A5");
+            // Octaves place notes exactly, so a voicing reads back as it was written: the key under, the key on top, two octaves wide.
+            CHECK (MidiFx::parseBandChord ("G3 C4 E4 A4", 0, o) && o == (std::vector<int> { -5, 0, 4, 9 }));
+            CHECK (MidiFx::parseBandChord ("E3 G3 A3 C4", 0, o) && o == (std::vector<int> { -8, -5, -3, 0 }));
+            CHECK (MidiFx::parseBandChord ("D3 D4 F#4 C5 E5", 2, o) && o == (std::vector<int> { -12, 0, 4, 10, 14 }));
+            CHECK (MidiFx::parseBandChord ("C3 E4 G4 A5", 0, o) && o == (std::vector<int> { -12, 4, 7, 21 }));
+            CHECK (MidiFx::parseBandChord ("G3 G4 B4 F5 A5", 7, o) && o == (std::vector<int> { -12, 0, 4, 10, 14 }));
+            CHECK (MidiFx::parseBandChord ("Bb3 D4 F4", 10, o) && o == (std::vector<int> { -12, -8, -5 }));          // the key is Bb4: this whole chord sits under it
+            CHECK (MidiFx::parseBandChord ("C4 E G A", 0, o) && o == (std::vector<int> { 0, 4, 7, 9 }));            // placed, then climbing
+            CHECK (MidiFx::parseBandChord ("C6/E", 0, o) && o == (std::vector<int> { -8, 0, 4, 7, 9 }));            // slash bass under
+            CHECK (MidiFx::parseBandChord ("G7/B", 7, o) && o == (std::vector<int> { -8, 0, 4, 7, 10 }));
+            CHECK (! MidiFx::parseBandChord ("C4 E4 G4 A4 C5 E5 G5 A5 C6", 0, o));                               // nine: too many
+            CHECK (! MidiFx::parseBandChord ("C9 E9", 0, o));                                                  // out of reach
+            for (const auto& written : { "G3 C4 E4 A4", "E3 G3 A3 C4", "D3 D4 F#4 C5 E5", "C4 E4 G4 A4" })
+            {
+                std::vector<int> back;
+                CHECK (MidiFx::parseBandChord (written, written[0] == 'D' ? 2 : 0, o) && MidiFx::parseBandChord (MidiFx::bandChordNotes (written[0] == 'D' ? 2 : 0, o, false), written[0] == 'D' ? 2 : 0, back) && back == o);
+            }
+            std::printf ("     voicings with octaves read back as written\n");
             CHECK (MidiFx::bandMajorRoot (9, 1) == 0 && MidiFx::bandMajorRoot (2, 3) == 0 && MidiFx::bandMajorRoot (7, 4) == 0 && MidiFx::bandMajorRoot (0, 0) == 0);
             EffectDef dd; dd.kind = EffectDef::Kind::bigBand; dd.scaleRoot = 0; dd.scaleMode = 0;
             CHECK (MidiFx::describe (dd) == "C major: C6 Dm7 Em7 F6 G7 Am7 Bm7b5");

@@ -988,7 +988,8 @@ private:
         const bool relative = major != eff.scaleRoot;
         auto* w = new AlertWindow ("Big band chords",
                                    "The chord each key plays, in " + key + (relative ? " (its chords are " + String (MidiFx::noteNames[major]) + " major's)" : String())
-                                     + ". Write the notes (C E G A), the first the key pressed, or a name (C6, Dm7, G7, Bm7b5). "
+                                     + ". Write each chord as notes with their octaves, the key pressed being octave 4 -- G3 C4 E4 A4 puts the G under the key, "
+                                       "E4 G4 A4 C5 puts the key on top -- or as bare notes that climb from the key (C E G A), or as a name (C6, Dm7, G7, Bm7b5, C6/E). "
                                        "A blank step plays the key alone. The same chords serve every key: change the song's key and they move with it.",
                                    MessageBoxIconType::NoIcon);
         for (int r = 0; r < 12; ++r)
@@ -997,7 +998,7 @@ private:
             const auto& row = (size_t) r < def.bandChords.size() ? def.bandChords[(size_t) r] : std::vector<int>();
             const String name = MidiFx::bandChordName (rowRoot, row, flats);
             const String notes = MidiFx::bandChordNotes (rowRoot, row, flats);
-            w->addTextEditor ("c" + String (r), notes, String (MidiFx::bandDegrees[r]) + "  (" + MidiFx::bandChordNotes (rowRoot, { 0 }, flats) + ")"
+            w->addTextEditor ("c" + String (r), notes, String (MidiFx::bandDegrees[r]) + "  (" + MidiFx::bandChordNotes (rowRoot, { 0 }, flats, false) + ")"
                                                             + (name.isNotEmpty() && name != notes ? "   " + name : String()));
             w->getTextEditor ("c" + String (r))->setTextToShowWhenEmpty ("the key alone", textDim);
         }
