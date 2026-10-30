@@ -1390,7 +1390,7 @@ bool Engine::keyInPlay (int& root, int& mode) const
 
 EffectDef Engine::effectiveEffectDef (const EffectDef& d) const
 {
-    if (! d.followSongKey || (d.kind != EffectDef::Kind::scale && d.kind != EffectDef::Kind::run)) return d;
+    if (! d.followSongKey || (d.kind != EffectDef::Kind::scale && d.kind != EffectDef::Kind::run && d.kind != EffectDef::Kind::bigBand)) return d;
     int root, mode;
     if (! keyInPlay (root, mode)) return d;
     EffectDef e = d;
@@ -3262,7 +3262,7 @@ void Engine::setBuiltInMidiEffect (int inputIndex, int program, int slotIndex, i
     ed.arpRate = settings.arpRate; ed.arpMode = settings.arpMode; ed.arpOctaves = settings.arpOctaves; ed.arpGate = settings.arpGate; ed.arpLatch = settings.arpLatch;
     ed.chordType = settings.chordType; ed.scaleRoot = settings.scaleRoot; ed.scaleMode = settings.scaleMode;
     ed.runNotes = settings.runNotes; ed.runBeats = settings.runBeats; ed.runDegree = settings.runDegree; ed.runDown = settings.runDown; ed.runToKey = settings.runToKey; ed.runHoldLast = settings.runHoldLast;
-    ed.followSongKey = settings.followSongKey;
+    ed.followSongKey = settings.followSongKey; ed.bandChords = settings.bandChords;
     if (auto* fx = static_cast<EffectRuntime*> (getNode (inputIndex, program, ProgramDef::midiChainOf (slotIndex), effect)))
         if (fx->builtIn != nullptr) fx->builtIn->configure (effectiveEffectDef (ed));
     notifyContent (inputIndex, program);

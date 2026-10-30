@@ -39,6 +39,17 @@ public:
     static bool keyIsMinor (int mode);
     /** Whether chord names in this key are spelt with flats: F, Bb, Eb, Ab, Db, Gb and their minors. */
     static bool keyPrefersFlats (int root, int mode);
+    /** Big band: the twelve steps above the key's root, "I", "bII", "II" ... "VII". */
+    static const char* const bandDegrees[];
+    /** The major key whose chords a key in this scale uses: A natural minor's are C major's. */
+    static int bandMajorRoot (int root, int mode);
+    /** A chord typed for the step on `rowRoot` (a pitch class): notes ("C E G A", the first one the key pressed)
+        or a name ("C6", "Dm7", "G7", "Bm7b5"). False when it reads as neither. Blank: an empty chord. */
+    static bool parseBandChord (const juce::String& text, int rowRoot, std::vector<int>& offsets);
+    /** The chord on `rowRoot` by name when it has one ("Dm7"), else its notes ("D F A C"). Blank for no chord. */
+    static juce::String bandChordName (int rowRoot, const std::vector<int>& offsets, bool flats);
+    /** The chord's notes, "D F A C". */
+    static juce::String bandChordNotes (int rowRoot, const std::vector<int>& offsets, bool flats);
     static int numArpRates();
     static int numArpModes();
     static int numChordTypes();

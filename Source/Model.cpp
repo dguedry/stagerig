@@ -44,6 +44,15 @@ static std::vector<EffectDef> effectsFromVar (const var& parent, const char* key
     return out;
 }
 
+std::vector<std::vector<int>> EffectDef::defaultBandChords()
+{
+    /* The chords of a major key as a big band section voices them: the 6th
+       on I and IV, 7ths on the rest, and a diminished 7th on each step in
+       between, so a chromatic passing note is harmonised too. */
+    const std::vector<int> sixth { 0, 4, 7, 9 }, minor7 { 0, 3, 7, 10 }, dom7 { 0, 4, 7, 10 }, halfDim { 0, 3, 6, 10 }, dim7 { 0, 3, 6, 9 };
+    return { sixth, dim7, minor7, dim7, minor7, sixth, dim7, dom7, dim7, minor7, dim7, halfDim };
+}
+
 var EffectDef::toVar() const
 {
     auto* o = new DynamicObject();
@@ -61,7 +70,7 @@ var EffectDef::toVar() const
     }
     if (isBuiltIn())
     {
-        o->setProperty ("kind", kind == Kind::arpeggio ? "arpeggio" : kind == Kind::chord ? "chord" : kind == Kind::scale ? "scale" : "run");
+        o->setProperty ("kind", kind == Kind::arpeggio ? "arpeggio" : kind == Kind::chord ? "chord" : kind == Kind::scale ? "scale" : kind == Kind::bigBand ? "bigBand" : "run");
         if (kind == Kind::arpeggio)
         {
             o->setProperty ("rate", arpRate);
@@ -83,6 +92,12 @@ var EffectDef::toVar() const
                 if (runDown) o->setProperty ("down", true);
                 if (runToKey) o->setProperty ("toKey", true);
                 if (! runHoldLast) o->setProperty ("holdLast", false);
+            }
+            if (kind == Kind::bigBand)
+            {
+                Array<var> rows;
+                for (const auto& row : bandChords) { Array<var> notes; for (int n : row) notes.add (n); rows.add (var (notes)); }
+                o->setProperty ("chords", var (rows));
             }
             if (! followSongKey) o->setProperty ("ownKey", true);
         }
@@ -111,9 +126,17 @@ EffectDef EffectDef::fromVar (const var& v)
         e.bypassed = prop<bool> (v, "bypassed", false);
         return e;
     }
-    if (const auto kind = propStr (v, "kind"); kind == "arpeggio" || kind == "chord" || kind == "scale" || kind == "run")
+    if (const auto kind = propStr (v, "kind"); kind == "arpeggio" || kind == "chord" || kind == "scale" || kind == "run" || kind == "bigBand")
     {
-        e.kind = kind == "arpeggio" ? Kind::arpeggio : kind == "chord" ? Kind::chord : kind == "scale" ? Kind::scale : Kind::run;
+        e.kind = kind == "arpeggio" ? Kind::arpeggio : kind == "chord" ? Kind::chord : kind == "scale" ? Kind::scale : kind == "bigBand" ? Kind::bigBand : Kind::run;
+        if (auto* rows = v.getProperty ("chords", var()).getArray(); rows != nullptr && rows->size() == 12)
+            for (int r = 0; r < 12; ++r)
+            {
+                auto& row = e.bandChords[(size_t) r];
+                row.clear();
+                if (auto* notes = (*rows)[r].getArray())
+                    for (const auto& n : *notes) if (row.size() < 6) row.push_back (jlimit (-36, 36, (int) n));
+            }
         e.runNotes   = jlimit (2, 16, prop<int> (v, "notes", 8));
         e.runBeats   = jlimit (0.25f, 16.0f, (float) prop<double> (v, "beats", 1.0));
         e.runDegree  = jlimit (0, 6, prop<int> (v, "degree", 0));

@@ -1,6 +1,7 @@
 #include "MidiFx.h"
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace perf
 {
@@ -13,6 +14,7 @@ const char* const MidiFx::chordTypes[] = { "Major", "Minor", "Dominant 7th", "Ma
 const char* const MidiFx::scaleModes[] = { "Major", "Natural minor", "Harmonic minor", "Dorian", "Mixolydian", "Lydian", "Phrygian",
                                            "Major pentatonic", "Minor pentatonic", "Blues", "Whole tone" };
 const char* const MidiFx::noteNames[]  = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+const char* const MidiFx::bandDegrees[] = { "I", "bII", "II", "bIII", "III", "IV", "#IV", "V", "bVI", "VI", "bVII", "VII" };
 int MidiFx::numArpRates()   { return 5; }
 int MidiFx::numArpModes()   { return 5; }
 int MidiFx::numChordTypes() { return 10; }
@@ -410,6 +412,217 @@ namespace
     };
 }
 
+namespace
+{
+    /** A big band section: each key plays the chord on that step of the key,
+        a 6th on the tonic, 7ths on the others, voiced as the player set
+        them. The melody is the key pressed; the band fills in under it. */
+    class BigBand : public MidiFx
+    {
+    public:
+        BigBand() { reset(); }
+        void configure (const EffectDef& d) override
+        {
+            root.store (MidiFx::bandMajorRoot (jlimit (0, 11, d.scaleRoot), jlimit (0, MidiFx::numScaleModes() - 1, d.scaleMode)));
+            for (int r = 0; r < 12; ++r)
+            {
+                const auto& row = (size_t) r < d.bandChords.size() ? d.bandChords[(size_t) r] : std::vector<int>();
+                const int n = jmin (kMaxNotes, (int) row.size());
+                for (int i = 0; i < n; ++i) table[r][i].store (row[(size_t) i]);
+                count[r].store (n);
+            }
+        }
+        void reset() override
+        {
+            for (auto& c : notes) for (auto& k : c) for (auto& n : k) n = kNone;
+            for (auto& c : sounding) for (auto& n : c) n = 0;
+        }
+        void process (const MidiBuffer& in, MidiBuffer& out, int, double, double) override
+        {
+            for (const auto meta : in)
+            {
+                const auto m = meta.getMessage();
+                if (m.isNoteOn())
+                {
+                    const int ch = jlimit (1, 16, m.getChannel()), key = m.getNoteNumber();
+                    auto* mine = notes[ch - 1][key];
+                    if (mine[0] != kNone) release (out, ch, key, meta.samplePosition);      // the same key again
+                    const int pc = ((key - root.load()) % 12 + 12) % 12;
+                    const int n = count[pc].load();
+                    int slot = 0;
+                    auto play = [&] (int note)
+                    {
+                        if (note < 0 || note > 127 || slot >= kMaxNotes) return;
+                        for (int i = 0; i < slot; ++i) if (mine[i] == note) return;          // a doubled note in the voicing
+                        /* Two chords can share a note (C6 and Am7 share all four):
+                           it sounds while either is down, retriggered by the later. */
+                        if (sounding[ch - 1][note] > 0) out.addEvent (MidiMessage::noteOff (ch, note), meta.samplePosition);
+                        ++sounding[ch - 1][note];
+                        mine[slot++] = (uint8) note;
+                        out.addEvent (MidiMessage::noteOn (ch, note, m.getVelocity()), meta.samplePosition);
+                    };
+                    if (n == 0) play (key);                                                  // no chord on this step: the key alone
+                    for (int i = 0; i < n; ++i) play (key + table[pc][i].load());
+                }
+                else if (m.isNoteOff())
+                {
+                    release (out, jlimit (1, 16, m.getChannel()), m.getNoteNumber(), meta.samplePosition);
+                }
+                else if (m.isAllNotesOff() || m.isAllSoundOff())
+                {
+                    reset();
+                    out.addEvent (m, meta.samplePosition);
+                }
+                else
+                    out.addEvent (m, meta.samplePosition);
+            }
+        }
+    private:
+        static constexpr int kMaxNotes = 6;
+        static constexpr uint8 kNone = 255;
+        void release (MidiBuffer& out, int ch, int key, int at)
+        {
+            auto* mine = notes[ch - 1][key];
+            for (int i = 0; i < kMaxNotes && mine[i] != kNone; ++i)
+            {
+                const int note = mine[i];
+                if (sounding[ch - 1][note] > 0 && --sounding[ch - 1][note] == 0) out.addEvent (MidiMessage::noteOff (ch, note), at);
+                mine[i] = kNone;
+            }
+        }
+        std::atomic<int> root { 0 };
+        std::atomic<int> table[12][kMaxNotes];
+        std::atomic<int> count[12];
+        uint8 notes[16][128][kMaxNotes];
+        uint8 sounding[16][128];
+    };
+
+    //==========================================================================
+    // Chord names and their notes, for the big band's table.
+    struct ChordQuality { const char* name; std::vector<int> notes; };
+    const ChordQuality kQualities[] = {
+        { "", { 0, 4, 7 } }, { "m", { 0, 3, 7 } }, { "6", { 0, 4, 7, 9 } }, { "m6", { 0, 3, 7, 9 } },
+        { "7", { 0, 4, 7, 10 } }, { "maj7", { 0, 4, 7, 11 } }, { "m7", { 0, 3, 7, 10 } }, { "m7b5", { 0, 3, 6, 10 } },
+        { "dim", { 0, 3, 6 } }, { "dim7", { 0, 3, 6, 9 } }, { "aug", { 0, 4, 8 } }, { "7#5", { 0, 4, 8, 10 } }, { "7b5", { 0, 4, 6, 10 } },
+        { "9", { 0, 4, 7, 10, 14 } }, { "m9", { 0, 3, 7, 10, 14 } }, { "maj9", { 0, 4, 7, 11, 14 } }, { "6/9", { 0, 4, 7, 9, 14 } },
+        { "7b9", { 0, 4, 7, 10, 13 } }, { "7#9", { 0, 4, 7, 10, 15 } }, { "13", { 0, 4, 7, 10, 21 } }, { "11", { 0, 7, 10, 14, 17 } },
+        { "sus4", { 0, 5, 7 } }, { "sus2", { 0, 2, 7 } }, { "7sus4", { 0, 5, 7, 10 } }, { "mMaj7", { 0, 3, 7, 11 } },
+        { "add9", { 0, 4, 7, 14 } }, { "madd9", { 0, 3, 7, 14 } }, { "5", { 0, 7 } } };
+
+    /** The pitch class a note or chord name starts with, and how long that root is; -1 when it is not one. */
+    int rootOf (const String& s, int& length)
+    {
+        length = 0;
+        if (s.isEmpty()) return -1;
+        const juce_wchar c = CharacterFunctions::toUpperCase (s[0]);
+        if (c < 'A' || c > 'G') return -1;
+        static const int base[] = { 9, 11, 0, 2, 4, 5, 7 };
+        int pc = base[c - 'A'];
+        length = 1;
+        while (length < s.length())
+        {
+            const juce_wchar a = s[length];
+            if (a == '#' || a == 0x266F) ++pc;
+            else if (a == 'b' || a == 0x266D) --pc;
+            else break;
+            ++length;
+        }
+        return (pc % 12 + 12) % 12;
+    }
+
+    String normaliseQuality (String q)
+    {
+        q = q.removeCharacters (" ()");
+        q = q.replace ("M7", "maj7").replace ("M9", "maj9").replace (String (CharPointer_UTF8 ("\xce\x94")), "maj7")
+             .replace (String (CharPointer_UTF8 ("\xc2\xb0")), "dim").replace (String (CharPointer_UTF8 ("\xc3\xb8")), "m7b5").replace ("+", "aug")
+             .replace ("min", "m").replace ("Maj", "maj").replace ("MAJ", "maj").replace ("-", "m").replace ("dom", "").replace ("69", "6/9");
+        if (q.startsWith ("mmaj7")) return "mMaj7";
+        return q;
+    }
+
+    /** The quality whose notes these are, with the first note the root: "m7", or null. */
+    const ChordQuality* qualityOf (const std::vector<int>& offsets)
+    {
+        if (offsets.empty()) return nullptr;
+        std::vector<int> mine;
+        for (int o : offsets) { const int pc = ((o - offsets[0]) % 12 + 12) % 12; if (std::find (mine.begin(), mine.end(), pc) == mine.end()) mine.push_back (pc); }
+        std::sort (mine.begin(), mine.end());
+        for (const auto& q : kQualities)
+        {
+            std::vector<int> theirs;
+            for (int o : q.notes) { const int pc = o % 12; if (std::find (theirs.begin(), theirs.end(), pc) == theirs.end()) theirs.push_back (pc); }
+            std::sort (theirs.begin(), theirs.end());
+            if (theirs == mine) return &q;
+        }
+        return nullptr;
+    }
+}
+
+int MidiFx::bandMajorRoot (int root, int mode)
+{
+    static const int up[] = { 0, 3, 3, 10, 5, 7, 8, 0, 3, 3, 0 };    // major, natural minor, harmonic minor, dorian, mixolydian, lydian, phrygian, major pent, minor pent, blues, whole tone
+    return (root + up[jlimit (0, 10, mode)]) % 12;
+}
+
+bool MidiFx::parseBandChord (const String& text, int rowRoot, std::vector<int>& offsets)
+{
+    offsets.clear();
+    auto tokens = StringArray::fromTokens (text.replaceCharacter (',', ' '), " \t", "");
+    tokens.removeEmptyStrings();
+    if (tokens.isEmpty()) return true;
+    auto nearest = [rowRoot] (int pc) { int d = ((pc - rowRoot) % 12 + 12) % 12; return d >= 6 ? d - 12 : d; };   // -6..5 from the step's root: a tritone away sits below
+    // Notes: every token a note name and nothing more.
+    bool allNotes = true;
+    for (const auto& t : tokens) { int len; if (rootOf (t, len) < 0 || len != t.length()) { allNotes = false; break; } }
+    if (allNotes)
+    {
+        int len, prev = 0;
+        for (int i = 0; i < tokens.size(); ++i)
+        {
+            const int pc = rootOf (tokens[i], len);
+            if (i == 0) prev = nearest (pc);
+            else { int d = ((pc - rowRoot - prev) % 12 + 12) % 12; if (d == 0) d = 12; prev += d; }        // each the next one up
+            offsets.push_back (prev);
+        }
+        return true;
+    }
+    if (tokens.size() != 1) return false;
+    int len;
+    const int pc = rootOf (tokens[0], len);
+    if (pc < 0) return false;
+    const auto quality = normaliseQuality (tokens[0].substring (len).upToFirstOccurrenceOf ("/", false, false)
+                                           + (tokens[0].substring (len).contains ("6/9") ? "/9" : ""));
+    for (const auto& q : kQualities)
+        if (quality == q.name || quality.toLowerCase() == String (q.name).toLowerCase())
+        {
+            const int base = nearest (pc);
+            for (int n : q.notes) offsets.push_back (base + n);
+            return true;
+        }
+    return false;
+}
+
+String MidiFx::bandChordNotes (int rowRoot, const std::vector<int>& offsets, bool flats)
+{
+    static const char* sharps[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    static const char* flatNames[] = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
+    StringArray names;
+    for (int o : offsets) names.add ((flats ? flatNames : sharps)[((rowRoot + o) % 12 + 12) % 12]);
+    return names.joinIntoString (" ");
+}
+
+String MidiFx::bandChordName (int rowRoot, const std::vector<int>& offsets, bool flats)
+{
+    if (offsets.empty()) return {};
+    if (const auto* q = qualityOf (offsets))
+    {
+        static const char* sharps[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        static const char* flatNames[] = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
+        return String ((flats ? flatNames : sharps)[((rowRoot + offsets[0]) % 12 + 12) % 12]) + q->name;
+    }
+    return bandChordNotes (rowRoot, offsets, flats);
+}
+
 std::unique_ptr<MidiFx> MidiFx::create (const EffectDef& def)
 {
     std::unique_ptr<MidiFx> fx;
@@ -419,6 +632,7 @@ std::unique_ptr<MidiFx> MidiFx::create (const EffectDef& def)
         case EffectDef::Kind::chord:    fx = std::make_unique<Chord>(); break;
         case EffectDef::Kind::scale:    fx = std::make_unique<Scale>(); break;
         case EffectDef::Kind::run:      fx = std::make_unique<Run>(); break;
+        case EffectDef::Kind::bigBand:  fx = std::make_unique<BigBand>(); break;
         default: return nullptr;
     }
     fx->configure (def);
@@ -464,6 +678,17 @@ String MidiFx::describe (const EffectDef& d)
             return String (noteNames[jlimit (0, 11, d.scaleRoot)]) + " " + String (scaleModes[jlimit (0, numScaleModes() - 1, d.scaleMode)]).toLowerCase()
                    + ", " + length + " " + (d.runDown ? "down" : "up") + (d.runToKey ? " to the key" : d.runDegree > 0 ? " from the " + String (ordinals[jlimit (1, 6, d.runDegree)]) + " above the key" : " from the key")
                    + " in " + takes;
+        }
+        case EffectDef::Kind::bigBand:
+        {
+            // The key, then the chords on its scale steps: "C major: C6 Dm7 Em7 F6 G7 Am7 Bm7b5".
+            const int major = bandMajorRoot (jlimit (0, 11, d.scaleRoot), jlimit (0, numScaleModes() - 1, d.scaleMode));
+            const bool flats = keyPrefersFlats (d.scaleRoot, d.scaleMode);
+            StringArray chords;
+            for (int step : { 0, 2, 4, 5, 7, 9, 11 })
+                if ((size_t) step < d.bandChords.size() && ! d.bandChords[(size_t) step].empty())
+                    chords.add (bandChordName ((major + step) % 12, d.bandChords[(size_t) step], flats));
+            return keyName (d.scaleRoot, d.scaleMode) + ": " + (chords.isEmpty() ? String ("no chords") : chords.joinIntoString (" "));
         }
         default: return {};
     }

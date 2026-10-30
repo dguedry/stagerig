@@ -45,7 +45,8 @@ int main()
         EffectDef ch; ch.kind = EffectDef::Kind::chord; ch.chordType = 4; ch.bypassed = true;
         EffectDef sc; sc.kind = EffectDef::Kind::scale; sc.scaleRoot = 9; sc.scaleMode = 1; sc.followSongKey = false;
         EffectDef run; run.kind = EffectDef::Kind::run; run.scaleRoot = 2; run.scaleMode = 3; run.runNotes = 7; run.runBeats = 2.0f; run.runDegree = 2; run.runDown = 1; run.runToKey = 1; run.runHoldLast = false;
-        gm.midiEffects = { arpB, ch, sc, run };
+        EffectDef band; band.kind = EffectDef::Kind::bigBand; band.scaleRoot = 5; band.bandChords[1].clear(); band.bandChords[7] = { -12, 0, 4, 10, 14 };
+        gm.midiEffects = { arpB, ch, sc, run, band };
         upper.programs[9].slots.push_back (gm);
     }
 
@@ -215,12 +216,14 @@ int main()
     CHECK (loaded.clockOut.size() == 2 && loaded.clockOut[0].identifier == "alsa:20:0" && loaded.clockOut[1].name == "Minilogue");
     {
         const auto& fx = loaded.inputs[0].programs[9].slots[0].midiEffects;
-        CHECK (fx.size() == 4 && fx[0].kind == EffectDef::Kind::arpeggio && fx[0].arpRate == 3 && fx[0].arpMode == 2 && fx[0].arpOctaves == 2 && fx[0].arpGate == 50 && fx[0].arpLatch);
+        CHECK (fx.size() == 5 && fx[0].kind == EffectDef::Kind::arpeggio && fx[0].arpRate == 3 && fx[0].arpMode == 2 && fx[0].arpOctaves == 2 && fx[0].arpGate == 50 && fx[0].arpLatch);
         CHECK (fx[1].kind == EffectDef::Kind::chord && fx[1].chordType == 4 && fx[1].bypassed && fx[1].displayName() == "Chord");
         CHECK (fx[2].kind == EffectDef::Kind::scale && fx[2].scaleRoot == 9 && fx[2].scaleMode == 1 && fx[2].isBuiltIn() && ! fx[2].isSend());
         CHECK (! fx[2].followSongKey && fx[3].followSongKey && fx[0].followSongKey);
-        CHECK (fx.size() == 4 && fx[3].kind == EffectDef::Kind::run && fx[3].scaleRoot == 2 && fx[3].scaleMode == 3 && fx[3].runNotes == 7
+        CHECK (fx.size() == 5 && fx[3].kind == EffectDef::Kind::run && fx[3].scaleRoot == 2 && fx[3].scaleMode == 3 && fx[3].runNotes == 7
                && std::abs (fx[3].runBeats - 2.0f) < 1e-6f && fx[3].runDegree == 2 && fx[3].runDown == 1 && fx[3].runToKey == 1 && ! fx[3].runHoldLast && fx[3].displayName() == "Run");
+        CHECK (fx[4].kind == EffectDef::Kind::bigBand && fx[4].scaleRoot == 5 && fx[4].followSongKey && fx[4].displayName() == "Big band" && fx[4].bandChords.size() == 12
+               && fx[4].bandChords[1].empty() && fx[4].bandChords[7] == (std::vector<int> { -12, 0, 4, 10, 14 }) && fx[4].bandChords[0] == (std::vector<int> { 0, 4, 7, 9 }));
     }
     CHECK (loaded.songs[0].click && loaded.songs[0].beatsPerBar == 3 && std::abs (loaded.songs[0].firstBeat - 0.25) < 1e-9);
     CHECK (std::abs (loaded.songs[0].startSeconds - 1.79) < 1e-9);

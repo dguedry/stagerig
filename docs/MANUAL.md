@@ -344,7 +344,7 @@ transpose, curve and channels decide which notes enter at all. Left to right:
 
 - **Effect on the sound** -- reverb, EQ, an amp: after the instrument.
 - **MIDI effect on the notes** -- an arpeggiator, a chord generator: before it.
-  Three are built in, under **Built in** at the top of that list, with
+  Five are built in, under **Built in** at the top of that list, with
   nothing to install and nothing to open: **Arpeggiator** plays the notes you
   hold one at a time, in time with the rig's tempo (rate, pattern, octaves,
   note length and latch under **Settings...**); **Chord** makes every note a
@@ -362,10 +362,19 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   scale, so pressing C can run from E; and whether it runs **up** or
   **down**, or **to the key** (begins below and lands on the note you
   pressed). A chord pressed is a run in every voice, harmonised in the
-  scale. Scale and Run **follow the song's key** when the song has one (set
-  with **Edit...** on the song), so one chain serves every song; picking a
-  key on the row gives the effect its own instead. Each shows its settings
-  in words on its row.
+  scale. **Big band** makes each key the melody over the chord on that step
+  of the key, as a sax section voices it: in C, the C plays C6, the D Dm7,
+  the E Em7, the F F6, the G G7, the A Am7, the B Bm7b5, and a key between
+  the steps a diminished 7th, so a chromatic passing note is harmonised too.
+  **Chords...** on its row sets the notes of each of the twelve: write them
+  as notes (C E G A, the first the key pressed) or as a name (C6, Dm7, G7,
+  Bm7b5, C#dim7, Cmaj7, C6/9), with a note below the key as easily as above
+  (A C E G on the tonic puts the A under it); leave a step blank and that key
+  plays alone. A minor key's chords are its relative major's, so A minor
+  plays Am7 on A and C6 on C. Scale, Run and Big band **follow the song's
+  key** when the song has one (set with **Edit...** on the song), so one
+  chain serves every song; picking a key on the row gives the effect its own
+  instead. Each shows its settings in words on its row.
 - **Send to a MIDI device too** -- the instrument's notes go out of a MIDI port
   as well, so a hardware synth doubles the plugin, or a lighting controller
   follows the keys.

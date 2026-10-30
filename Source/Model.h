@@ -17,7 +17,7 @@ struct EffectDef
     /** A plugin, or -- in a slot's MIDI chain only -- a send: the MIDI at
         that point also goes out of a port, to a hardware synth or another
         program, and carries on unchanged to the next block. */
-    enum class Kind { plugin, midiSend, arpeggio, chord, scale, run };
+    enum class Kind { plugin, midiSend, arpeggio, chord, scale, run, bigBand };
     Kind kind = Kind::plugin;
 
     juce::PluginDescription plugin;
@@ -44,10 +44,15 @@ struct EffectDef
     int runDown = 0;                  // 0 = up, 1 = down
     int runToKey = 0;                 // 0 = starts on the key, 1 = lands on the key
     bool runHoldLast = true;          // the last note sounds for as long as the key is held
-    bool followSongKey = true;        // scale and run: in the song's key when the song has one, else their own
+    bool followSongKey = true;        // scale, run and big band: in the song's key when the song has one, else their own
+    /** Big band: the chord each key plays, one row per step above the key's
+        root (I, bII, II ... VII, of the relative major), as semitones from
+        the key pressed. An empty row: that key plays alone. */
+    std::vector<std::vector<int>> bandChords = defaultBandChords();
+    static std::vector<std::vector<int>> defaultBandChords();   // 6ths and 7ths on the scale, diminished 7ths between
 
     bool isSend() const               { return kind == Kind::midiSend; }
-    bool isBuiltIn() const            { return kind == Kind::arpeggio || kind == Kind::chord || kind == Kind::scale || kind == Kind::run; }
+    bool isBuiltIn() const            { return kind == Kind::arpeggio || kind == Kind::chord || kind == Kind::scale || kind == Kind::run || kind == Kind::bigBand; }
     bool isPlugin() const             { return kind == Kind::plugin; }
     juce::String displayName() const
     {
@@ -58,6 +63,7 @@ struct EffectDef
             case Kind::chord:    return "Chord";
             case Kind::scale:    return "Scale";
             case Kind::run:      return "Run";
+            case Kind::bigBand:  return "Big band";
             default:             return plugin.name;
         }
     }

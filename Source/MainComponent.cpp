@@ -764,11 +764,12 @@ private:
             if (def.isBuiltIn())
             {
                 int kr, km;
-                const bool inSongKey = def.followSongKey && (def.kind == EffectDef::Kind::scale || def.kind == EffectDef::Kind::run) && chain.engine.keyInPlay (kr, km);
+                const bool inSongKey = def.followSongKey && (def.kind == EffectDef::Kind::scale || def.kind == EffectDef::Kind::run || def.kind == EffectDef::Kind::bigBand) && chain.engine.keyInPlay (kr, km);
                 name.setText (def.displayName() + "  [" + MidiFx::describe (chain.engine.effectiveEffectDef (def)) + (inSongKey ? ", the song's key" : "") + "]", dontSendNotification);
                 name.setTooltip (def.kind == EffectDef::Kind::arpeggio ? "Plays the notes you hold one at a time, in time with the rig's tempo"
                                : def.kind == EffectDef::Kind::chord    ? "Every note you play becomes this chord"
                                : def.kind == EffectDef::Kind::run      ? "Each key you press starts a run up (or down) the scale from it, in time; the last note holds while the key does. A chord is a run in each voice."
+                               : def.kind == EffectDef::Kind::bigBand  ? "Each key plays the chord on that step of the key, as a big band section voices it: C6 on the tonic, Dm7 on the 2nd, G7 on the 5th. Chords... sets the notes of each."
                                                                         : "Notes off the scale are moved down to the nearest note on it");
                 guiBtn.setButtonText ("Settings...");
                 guiBtn.setTooltip ("Its settings");
@@ -915,6 +916,8 @@ private:
                 m.addItem (1103, "Down to the key  (begins above it, lands on it)", true, def.runDown == 1 && def.runToKey == 1);
                 m.addItem (1200, "Hold the last note while the key is held", true, def.runHoldLast);
             }
+            if (def.kind == EffectDef::Kind::bigBand)
+                m.addItem (1500, "Chords...  (the chord each key plays, step by step)");
         }
         m.showMenuAsync (PopupMenu::Options().withTargetComponent (target), [this, a, s, index, def] (int r)
         {
@@ -934,9 +937,59 @@ private:
             else if (r >= 1300 && r < 1400) d.runDegree = r - 1300;
             else if (r >= 1100 && r <= 1103) { d.runDown = (r - 1100) & 1; d.runToKey = (r - 1100) >> 1; }
             else if (r == 1200) d.runHoldLast = ! d.runHoldLast;
+            else if (r == 1500) { showBandChordsDialog (index, def); return; }
             engine.setBuiltInMidiEffect (a.first, a.second, s, index, d);
             owner.markDirty();
         });
+    }
+
+    void showBandChordsDialog (int index, const EffectDef& def)
+    {
+        /* Twelve lines, one per step of the key, each the chord that key
+           plays: written as notes or as a name, whichever the player thinks
+           in. Shown in the key in play, so the words match the chart. */
+        const auto a = address();
+        const int s = ProgramDef::slotOfChain (slot);
+        const auto eff = engine.effectiveEffectDef (def);
+        const int major = MidiFx::bandMajorRoot (eff.scaleRoot, eff.scaleMode);
+        const bool flats = MidiFx::keyPrefersFlats (eff.scaleRoot, eff.scaleMode);
+        const String key = MidiFx::keyName (eff.scaleRoot, eff.scaleMode);
+        const bool relative = major != eff.scaleRoot;
+        auto* w = new AlertWindow ("Big band chords",
+                                   "The chord each key plays, in " + key + (relative ? " (its chords are " + String (MidiFx::noteNames[major]) + " major's)" : String())
+                                     + ". Write the notes (C E G A), the first the key pressed, or a name (C6, Dm7, G7, Bm7b5). "
+                                       "A blank step plays the key alone. The same chords serve every key: change the song's key and they move with it.",
+                                   MessageBoxIconType::NoIcon);
+        for (int r = 0; r < 12; ++r)
+        {
+            const int rowRoot = (major + r) % 12;
+            const auto& row = (size_t) r < def.bandChords.size() ? def.bandChords[(size_t) r] : std::vector<int>();
+            const String name = MidiFx::bandChordName (rowRoot, row, flats);
+            const String notes = MidiFx::bandChordNotes (rowRoot, row, flats);
+            w->addTextEditor ("c" + String (r), notes, String (MidiFx::bandDegrees[r]) + "  (" + MidiFx::bandChordNotes (rowRoot, { 0 }, flats) + ")"
+                                                            + (name.isNotEmpty() && name != notes ? "   " + name : String()));
+            w->getTextEditor ("c" + String (r))->setTextToShowWhenEmpty ("the key alone", textDim);
+        }
+        w->addButton ("Save", 1, KeyPress (KeyPress::returnKey));
+        w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+        w->enterModalState (true, ModalCallbackFunction::create ([this, w, a, s, index, def, major] (int r)
+        {
+            std::unique_ptr<AlertWindow> owned (w);
+            if (r == 0) return;
+            EffectDef d = def;
+            d.bandChords.resize (12);
+            StringArray bad;
+            for (int i = 0; i < 12; ++i)
+            {
+                std::vector<int> offsets;
+                const auto text = w->getTextEditorContents ("c" + String (i)).trim();
+                if (MidiFx::parseBandChord (text, (major + i) % 12, offsets)) d.bandChords[(size_t) i] = offsets;
+                else bad.add (String (MidiFx::bandDegrees[i]) + " (\"" + text + "\")");
+            }
+            engine.setBuiltInMidiEffect (a.first, a.second, s, index, d);
+            owner.markDirty();
+            if (! bad.isEmpty()) owner.showStatus ("Could not read the chord on " + bad.joinIntoString (", ") + ": kept as it was. Write notes (D F A C) or a name (Dm7).");
+        }), false);
     }
 
     void showAddMenu()
@@ -972,6 +1025,7 @@ private:
             procMenu.addItem (300002, "Chord  (every note becomes a chord)");
             procMenu.addItem (300003, "Scale  (wrong notes bent to a scale)");
             procMenu.addItem (300004, "Run  (a scale run from each key, as a string section plays one)");
+            procMenu.addItem (300005, "Big band  (each key plays the chord on that step of the key: C6, Dm7, G7)");
             procMenu.addSectionHeader ("Plugins");
             addPluginsToMenu (procMenu, all, engine.getPluginHost().getIcons(), midiBase);
             if (all.isEmpty()) procMenu.addItem (99998, "No plugins known yet: scan under Plugins...", false);
@@ -984,10 +1038,10 @@ private:
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, effects, all, ports] (int result)
         {
             const auto a = address();
-            if (result >= 300001 && result <= 300004)
+            if (result >= 300001 && result <= 300005)
             {
                 const auto kind = result == 300001 ? EffectDef::Kind::arpeggio : result == 300002 ? EffectDef::Kind::chord
-                                : result == 300003 ? EffectDef::Kind::scale : EffectDef::Kind::run;
+                                : result == 300003 ? EffectDef::Kind::scale : result == 300005 ? EffectDef::Kind::bigBand : EffectDef::Kind::run;
                 engine.addBuiltInMidiEffect (a.first, a.second, slot, kind);
                 owner.showStatus ("Added. Settings... on its row sets it up; it works at the rig's tempo.");
                 owner.markDirty();

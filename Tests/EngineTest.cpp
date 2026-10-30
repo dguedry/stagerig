@@ -1952,6 +1952,90 @@ int main()
             std::printf ("     release C# then C: note-offs %d then %d\n", offs, offs2);
             CHECK (offs == 0 && offs2 == 1);
         }
+        // Big band: in C major each key plays the chord on its step; a tap on C is C6, on D is Dm7, on G is G7, on C# a diminished 7th.
+        {
+            EffectDef d; d.kind = EffectDef::Kind::bigBand; d.scaleRoot = 0; d.scaleMode = 0;
+            auto fx = MidiFx::create (d);
+            auto chordFor = [&] (int key)
+            {
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, key, (uint8) 90), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                std::vector<int> ons;
+                for (const auto m : out) if (m.getMessage().isNoteOn()) ons.push_back (m.getMessage().getNoteNumber());
+                in.clear(); out.clear();
+                in.addEvent (MidiMessage::noteOff (1, key), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                int offs = 0; for (const auto m : out) if (m.getMessage().isNoteOff()) ++offs;
+                CHECK (offs == (int) ons.size());
+                return ons;
+            };
+            CHECK (chordFor (60) == (std::vector<int> { 60, 64, 67, 69 }));     // C6
+            CHECK (chordFor (62) == (std::vector<int> { 62, 65, 69, 72 }));     // Dm7
+            CHECK (chordFor (67) == (std::vector<int> { 67, 71, 74, 77 }));     // G7
+            CHECK (chordFor (71) == (std::vector<int> { 71, 74, 77, 81 }));     // Bm7b5
+            CHECK (chordFor (61) == (std::vector<int> { 61, 64, 67, 70 }));     // C# dim7, the passing chord
+            std::printf ("     big band in C: C6, Dm7, G7, Bm7b5, C#dim7 as expected\n");
+
+            // Shared notes: C6 and Am7 share C, E and G. Hold C, add A, let go of C: the band is still playing.
+            {
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 90), 0);
+                in.addEvent (MidiMessage::noteOn (1, 57, (uint8) 90), 10);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                in.clear(); out.clear();
+                in.addEvent (MidiMessage::noteOff (1, 60), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                int offs = 0; for (const auto m : out) if (m.getMessage().isNoteOff()) ++offs;
+                in.clear(); out.clear();
+                in.addEvent (MidiMessage::noteOff (1, 57), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                int offs2 = 0; for (const auto m : out) if (m.getMessage().isNoteOff()) ++offs2;
+                std::printf ("     C6 then Am7, C let go: %d note-off (the A, theirs alone), then A let go: %d\n", offs, offs2);
+                CHECK (offs == 1 && offs2 == 4);     // C E G are shared and keep sounding; only the A above lifts
+            }
+
+            // The song's key: in A minor the chords are C major's, so A is Am7 and C is C6; in F major, F is F6 and C is C7.
+            d.scaleRoot = 9; d.scaleMode = 1; fx->configure (d);
+            CHECK (chordFor (57) == (std::vector<int> { 57, 60, 64, 67 }));     // Am7
+            CHECK (chordFor (60) == (std::vector<int> { 60, 64, 67, 69 }));     // C6
+            d.scaleRoot = 5; d.scaleMode = 0; fx->configure (d);
+            CHECK (chordFor (65) == (std::vector<int> { 65, 69, 72, 74 }));     // F6
+            CHECK (chordFor (60) == (std::vector<int> { 60, 64, 67, 70 }));     // C7, the V
+            // A blank step: the key alone. The player's own voicing: the II as a 9th, with the root below.
+            d.scaleRoot = 0; d.bandChords[1].clear(); d.bandChords[2] = { -12, 0, 3, 7, 10, 14 }; fx->configure (d);
+            CHECK (chordFor (61) == (std::vector<int> { 61 }));
+            CHECK (chordFor (62) == (std::vector<int> { 50, 62, 65, 69, 72, 76 }));
+            std::printf ("     keys and own voicings follow\n");
+
+            // Reading the chords a player types: as notes or as names.
+            std::vector<int> o;
+            CHECK (MidiFx::parseBandChord ("C E G A", 0, o) && o == (std::vector<int> { 0, 4, 7, 9 }));
+            CHECK (MidiFx::parseBandChord ("D F A C", 2, o) && o == (std::vector<int> { 0, 3, 7, 10 }));
+            CHECK (MidiFx::parseBandChord ("Dm7", 2, o) && o == (std::vector<int> { 0, 3, 7, 10 }));
+            CHECK (MidiFx::parseBandChord ("G7", 7, o) && o == (std::vector<int> { 0, 4, 7, 10 }));
+            CHECK (MidiFx::parseBandChord ("Bm7b5", 11, o) && o == (std::vector<int> { 0, 3, 6, 10 }));
+            CHECK (MidiFx::parseBandChord ("C#dim7", 1, o) && o == (std::vector<int> { 0, 3, 6, 9 }));
+            CHECK (MidiFx::parseBandChord ("Db7", 7, o) && o == (std::vector<int> { -6, -2, 1, 4 }));     // a tritone substitute on the V
+            CHECK (MidiFx::parseBandChord ("A C E G", 0, o) && o == (std::vector<int> { -3, 0, 4, 7 }));  // Am7 under the tonic, A below
+            CHECK (MidiFx::parseBandChord ("Cmaj7", 0, o) && o == (std::vector<int> { 0, 4, 7, 11 }));
+            CHECK (MidiFx::parseBandChord ("C6/9", 0, o) && o == (std::vector<int> { 0, 4, 7, 9, 14 }));
+            CHECK (MidiFx::parseBandChord ("", 0, o) && o.empty());
+            CHECK (! MidiFx::parseBandChord ("Hm7", 0, o));
+            CHECK (! MidiFx::parseBandChord ("C E G nope", 0, o));
+            CHECK (MidiFx::bandChordName (2, { 0, 3, 7, 10 }, false) == "Dm7");
+            CHECK (MidiFx::bandChordName (0, { 0, 4, 7, 9 }, false) == "C6");
+            CHECK (MidiFx::bandChordName (10, { 0, 4, 7, 10 }, true) == "Bb7");
+            CHECK (MidiFx::bandChordName (7, { -6, -2, 1, 4 }, true) == "Db7");
+            CHECK (MidiFx::bandChordName (0, { 0, 1, 2 }, false) == "C C# D");                // no name for it: its notes
+            CHECK (MidiFx::bandChordNotes (2, { 0, 3, 7, 10 }, false) == "D F A C");
+            CHECK (MidiFx::bandMajorRoot (9, 1) == 0 && MidiFx::bandMajorRoot (2, 3) == 0 && MidiFx::bandMajorRoot (7, 4) == 0 && MidiFx::bandMajorRoot (0, 0) == 0);
+            EffectDef dd; dd.kind = EffectDef::Kind::bigBand; dd.scaleRoot = 0; dd.scaleMode = 0;
+            CHECK (MidiFx::describe (dd) == "C major: C6 Dm7 Em7 F6 G7 Am7 Bm7b5");
+            dd.scaleRoot = 9; dd.scaleMode = 1;
+            CHECK (MidiFx::describe (dd) == "A natural minor: C6 Dm7 Em7 F6 G7 Am7 Bm7b5");
+            std::printf ("     chords read and named: %s\n", MidiFx::describe (dd).toRawUTF8());
+        }
         // Run: E pressed in C major, an octave up in one beat (120 bpm: eight notes across half a second), the last one held.
         {
             EffectDef d; d.kind = EffectDef::Kind::run; d.scaleRoot = 0; d.scaleMode = 0; d.runNotes = 8; d.runBeats = 1.0f; d.runDown = 0; d.runToKey = 0;
