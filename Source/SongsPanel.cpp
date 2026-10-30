@@ -96,8 +96,8 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
                         "A footswitch can do the same (Footswitches...).");
     playBtn.onClick = [this] { engine.toggleTrack(); refreshTransport(); };
     addAndMakeVisible (nextBtn);
-    nextBtn.setTooltip ("Releases a vamp at the end of its pass, or queues the next section of the backing track. "
-                        "A footswitch can do the same (Footswitches...).");
+    nextBtn.setTooltip ("Releases a vamp at the end of its pass, or queues the next section of the backing track; "
+                        "for a song played by hand, its next scene. A footswitch can do the same (Footswitches...).");
     nextBtn.onClick = [this] { engine.advanceTrack(); refreshTransport(); };
     addAndMakeVisible (trackLabel);
     trackLabel.setFont (FontOptions (12.0f));
@@ -335,17 +335,21 @@ void SongsPanel::refreshTransport()
     const int song = engine.getTrackSong();
     const auto& songs = engine.getSongs();
     const bool has = engine.hasTrack() && song >= 0 && song < (int) songs.size();
+    const bool scenes = ! has && engine.songHasScenes (song);
 
     playBtn.setEnabled (has);
     playBtn.setButtonText (engine.isTrackRunning() ? "Stop" : "Play");
     const bool vamping = engine.isTrackVamping();
-    nextBtn.setEnabled (has && (engine.getTrackSectionCount() > 1));
-    nextBtn.setButtonText (vamping ? "End vamp" : "Next");
+    nextBtn.setEnabled ((has && engine.getTrackSectionCount() > 1) || (scenes && engine.getScene() + 1 < engine.getSceneCount()));
+    nextBtn.setButtonText (vamping ? "End vamp" : scenes ? "Next scene" : "Next");
     nextBtn.setColour (TextButton::buttonColourId, vamping ? Colour (0xff8a5a12) : getLookAndFeel().findColour (TextButton::buttonColourId));
     playBtn.setColour (TextButton::buttonColourId, engine.isTrackRunning() ? accentDim : getLookAndFeel().findColour (TextButton::buttonColourId));
 
     String text;
-    if (! has)
+    if (scenes)
+        text = songs[(size_t) song].name + "  --  scene " + String (engine.getScene() + 1) + "/" + String (engine.getSceneCount()) + ": "
+             + songs[(size_t) song].markers[(size_t) jlimit (0, engine.getSceneCount() - 1, engine.getScene())].name;
+    else if (! has)
         text = "No backing track (Backing track... under the songs)";
     else if (! engine.isTrackReady())
         text = songs[(size_t) song].name + "  -- loading " + String (roundToInt (engine.getTrackLoadProgress() * 100.0f)) + "%";
@@ -811,7 +815,7 @@ void SongsPanel::showFootswitchMenu()
     m.addItem (5, "Learn: press the pedal...");
     if (playCC > 0) m.addItem (6, "Stop using CC " + String (playCC));
 
-    m.addSectionHeader ("Backing track: next section / release vamp");
+    m.addSectionHeader ("Next section of the track, or next scene / release vamp");
     m.addItem (7, "Learn: press the pedal...");
     if (engine.getSectionCC() > 0) m.addItem (8, "Stop using CC " + String (engine.getSectionCC()));
 
@@ -1138,7 +1142,12 @@ public:
         addAndMakeVisible (addSectionBtn);
         addSectionBtn.setTooltip ("A new section where the track is playing now, or at the green cue while it is stopped. "
                                   "Or double-click the timeline where the section should start.");
-        addSectionBtn.onClick = [this] { timeline->markHere(); };
+        addSectionBtn.onClick = [this]
+        {
+            if (! scenes) { timeline->markHere(); return; }
+            engine.addScene (songIndex, {});
+            MessageManager::callAsync ([this] { rebuild(); });
+        };
         addAndMakeVisible (zoomOutBtn);
         addAndMakeVisible (zoomInBtn);
         addAndMakeVisible (fitBtn);
@@ -1185,11 +1194,23 @@ public:
             rows.push_back (std::move (row));
         }
 
-        if (timeline != nullptr) timeline->refresh();
+        /* No files and no click: a song played by hand. Its sections are
+           scenes, stepped by hand, so the timeline and its tools make way. */
+        scenes = sg.stems.empty() && ! sg.click;
+        sectionsHeader.setText (scenes ? "SCENES" : "SECTIONS", dontSendNotification);
+        addSectionBtn.setButtonText (scenes ? "+ Add scene" : "Mark section here");
+        addSectionBtn.setTooltip (scenes ? "A new scene at the end, holding the programs loaded on every keyboard now"
+                                         : "A new section where the track is playing now, or at the green cue while it is stopped. "
+                                           "Or double-click the timeline where the section should start.");
+        for (auto* c : std::initializer_list<Component*> { timeline.get(), &playBtn, &zoomOutBtn, &zoomInBtn, &fitBtn }) c->setVisible (! scenes);
+        timelineHint.setText (scenes ? String ("Verse, chorus, solo: each scene is what happens when you go to it -- every keyboard's program, a part, an effect, "
+                                               "a cue. Entering the song enters the first. Next, the section footswitch and the tablet step through them; Go goes straight there.")
+                                     : String (kTimelineHint), dontSendNotification);
+        if (timeline != nullptr && ! scenes) timeline->refresh();
         sectionRows.clear();
         for (int i = 0; i < (int) sg.markers.size(); ++i)
         {
-            auto row = std::make_unique<SectionRow> (*this, i, sg.markers[(size_t) i]);
+            auto row = std::make_unique<SectionRow> (*this, i, sg.markers[(size_t) i], scenes);
             addAndMakeVisible (row.get());
             sectionRows.push_back (std::move (row));
         }
@@ -1212,13 +1233,20 @@ public:
         addBtn.setBounds (r.removeFromTop (26).removeFromLeft (180));
         r.removeFromTop (12);
         sectionsHeader.setBounds (r.removeFromTop (20));
-        if (timeline != nullptr)
+        if (timeline != nullptr && ! scenes)
         {
             // The timeline takes whatever height the rest leaves: a bigger window shows more of the music.
             const int below = 4 + 26 + 6 + 28 * (int) sectionRows.size() + 12 + 24 + 6 + 24 + 6 + 24 + 10 + 60;
             timeline->setBounds (r.removeFromTop (jmax (timeline->preferredHeight(), r.getHeight() - below)));
         }
         r.removeFromTop (4);
+        if (scenes)
+        {
+            timelineHint.setBounds (r.removeFromTop (44));
+            r.removeFromTop (4);
+            addSectionBtn.setBounds (r.removeFromTop (26).removeFromLeft (150));
+        }
+        else
         {
             auto b = r.removeFromTop (26);
             playBtn.setBounds (b.removeFromLeft (70));          b.removeFromLeft (6);
@@ -1632,7 +1660,7 @@ private:
 
     struct SectionRow : public Component
     {
-        SectionRow (TracksComponent& o, int i, const MarkerDef& m) : owner (o), index (i)
+        SectionRow (TracksComponent& o, int i, const MarkerDef& m, bool scene = false) : owner (o), index (i), isScene (scene)
         {
             addAndMakeVisible (name);
             name.setText (m.name, dontSendNotification);
@@ -1657,17 +1685,30 @@ private:
             vamp.onClick = [this] { const bool v = vamp.getToggleState(); owner.updateMarker (index, [v] (MarkerDef& d) { d.vamp = v; }); };
 
             addAndMakeVisible (go);
-            go.setTooltip ("Go here: at the end of the current section if the backing track is playing, otherwise where Play starts");
+            go.setTooltip (isScene ? "Go to this scene now" : "Go here: at the end of the current section if the backing track is playing, otherwise where Play starts");
             go.onClick = [this] { owner.goToMarker (index); };
 
             addAndMakeVisible (actions);
             actions.setButtonText (m.actions.empty() ? "Actions..." : String ((int) m.actions.size()) + (m.actions.size() == 1 ? " action..." : " actions..."));
-            actions.setTooltip ("What happens when the track enters this section: a keyboard's program, a part muted, an effect bypassed, a cue to the lights");
+            actions.setTooltip (isScene ? "What happens on going to this scene: a keyboard's program, a part muted, an effect bypassed, a cue to the lights"
+                                        : "What happens when the track enters this section: a keyboard's program, a part muted, an effect bypassed, a cue to the lights");
             actions.onClick = [this] { owner.editActions (index); };
 
             addAndMakeVisible (remove);
-            remove.setTooltip ("Remove this section marker (the music is untouched)");
+            remove.setTooltip (isScene ? "Remove this scene" : "Remove this section marker (the music is untouched)");
             remove.onClick = [this] { owner.removeMarker (index); };
+
+            if (isScene)
+            {
+                time.setVisible (false);
+                vamp.setVisible (false);
+                addAndMakeVisible (capture);
+                capture.setTooltip ("This scene's programs become what is loaded on every keyboard now; its other actions stay");
+                capture.onClick = [this] { owner.captureScene (index); };
+                addAndMakeVisible (up);
+                up.setTooltip ("Move this scene up");
+                up.onClick = [this] { owner.moveScene (index, index - 1); };
+            }
         }
         static String formatTime (double s)
         {
@@ -1687,15 +1728,24 @@ private:
             remove.setBounds (r.removeFromRight (28));   r.removeFromRight (6);
             go.setBounds (r.removeFromRight (44));       r.removeFromRight (6);
             actions.setBounds (r.removeFromRight (96));  r.removeFromRight (6);
-            vamp.setBounds (r.removeFromRight (70));     r.removeFromRight (6);
-            time.setBounds (r.removeFromRight (90));     r.removeFromRight (6);
+            if (isScene)
+            {
+                capture.setBounds (r.removeFromRight (76));  r.removeFromRight (6);
+                up.setBounds (r.removeFromRight (28));       r.removeFromRight (6);
+            }
+            else
+            {
+                vamp.setBounds (r.removeFromRight (70));     r.removeFromRight (6);
+                time.setBounds (r.removeFromRight (90));     r.removeFromRight (6);
+            }
             name.setBounds (r);
         }
         TracksComponent& owner;
         int index;
+        bool isScene = false;
         Label name, time;
         ToggleButton vamp { "Vamp" };
-        TextButton go { "Go" }, actions, remove { "X" };
+        TextButton go { "Go" }, actions, remove { "X" }, capture { "Capture" }, up { "^" };
     };
 
     void editActions (int markerIndex)
@@ -1727,8 +1777,26 @@ private:
         MessageManager::callAsync ([this] { rebuild(); });
     }
 
+    void captureScene (int index)
+    {
+        engine.captureScene (songIndex, index);
+        MessageManager::callAsync ([this] { rebuild(); });
+    }
+
+    void moveScene (int from, int to)
+    {
+        engine.moveScene (songIndex, from, to);
+        MessageManager::callAsync ([this] { rebuild(); });
+    }
+
     void goToMarker (int index)
     {
+        if (scenes)
+        {
+            if (engine.currentSongIndex() != songIndex) engine.selectSong (songIndex);
+            engine.selectScene (index);
+            return;
+        }
         if (engine.getTrackSong() != songIndex) return;
         const auto m = markers();
         if (index < 0 || index >= (int) m.size()) return;
@@ -1914,6 +1982,7 @@ private:
     std::vector<std::unique_ptr<Row>> rows;
     std::vector<std::unique_ptr<SectionRow>> sectionRows;
     Label sectionsHeader { {}, "SECTIONS" };
+    bool scenes = false;
     std::unique_ptr<TrackTimeline> timeline;
     Label timelineHint;
     static constexpr const char* kTimelineHint = "Click the timeline to set where Play starts. Double-click to start a section there; drag a flag to move it; right-click it for more.";

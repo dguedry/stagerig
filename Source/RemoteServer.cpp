@@ -338,13 +338,14 @@ function showTransport(t) {
   transportUi.button.classList.toggle("running", !!t.running);
   if (transportUi.clickBtn) transportUi.clickBtn.classList.toggle("on", !!t.click);
   const sec = (t.sections || [])[t.section];
-  const status = !t.ready ? ("Loading " + Math.round((t.loading || 0) * 100) + "%")
+  const status = t.scenes ? (sec ? sec.name + " · " + (t.section + 1) + "/" + t.sections.length : t.name)
+    : !t.ready ? ("Loading " + Math.round((t.loading || 0) * 100) + "%")
     : t.countIn ? "Counting in…"
     : ((t.sections || []).length > 1 && sec ? sec.name + (t.vamping ? " — repeating (vamp)" : "") : t.name) + " · "
       + (t.metronome ? "click " + mmss(t.pos) : mmss(t.pos) + " / " + mmss(t.len))
       + (t.queued >= 0 && t.sections[t.queued] ? " · next: " + t.sections[t.queued].name : "");
   transportUi.text.innerHTML = '<small></small><span></span>';
-  transportUi.text.querySelector("small").textContent = "BACKING TRACK";
+  transportUi.text.querySelector("small").textContent = t.scenes ? "SCENES" : "BACKING TRACK";
   transportUi.text.querySelector("span").textContent = status;
 
   /* Section buttons, redrawn only when something about them changes: a tap
@@ -359,8 +360,8 @@ function showTransport(t) {
   transportUi.key = key;
   const host = transportUi.sections;
   host.innerHTML = "";
-  if (transportUi.caption) transportUi.caption.style.display = list.length < 2 ? "none" : "";
-  if (list.length < 2) return;
+  if (transportUi.caption) transportUi.caption.style.display = list.length < (t.scenes ? 1 : 2) ? "none" : "";
+  if (list.length < (t.scenes ? 1 : 2)) return;
   if (t.vamping) {
     const go = document.createElement("button"); go.className = "go"; go.textContent = "End vamp ▸";
     go.onclick = async () => { try { showTransport(await api("/api/transport?do=next", { method: "POST" })); } catch (e) { if (!e.gate) show(e.message); } };
@@ -476,7 +477,7 @@ async function pollTransport() {
   try { showTransport(await api("/api/transport")); } catch (e) { /* the next poll is half a second away */ }
 }
 function syncTransportPolling() {
-  const want = token && lastState && lastState.track && document.visibilityState === "visible";
+  const want = token && lastState && (lastState.track || lastState.scenes) && document.visibilityState === "visible";
   if (want && !transportTimer) { transportTimer = setInterval(pollTransport, 500); pollTransport(); }
   if (!want && transportTimer) { clearInterval(transportTimer); transportTimer = null; }
 }
@@ -497,12 +498,14 @@ function renderSets(s) {
 
   const wrap = document.createElement("div"); wrap.className = "setwrap";
 
-  if (s.track) {
+  if (s.track || s.scenes) {
     const bar = document.createElement("div"); bar.className = "transport";
     const b = document.createElement("button"); b.textContent = "Play";
-    const t = document.createElement("div"); t.className = "tt"; t.textContent = "Backing track";
+    const t = document.createElement("div"); t.className = "tt"; t.textContent = s.scenes ? "Scenes" : "Backing track";
     const cap = document.createElement("div"); cap.className = "empty"; cap.style.padding = "0 4px 6px"; cap.style.fontSize = "12px";
-    cap.textContent = "Tap a section to go there when this one ends. ↻ repeats until you end the vamp.";
+    cap.textContent = s.scenes ? "Tap a scene and the keyboards change at once."
+                               : "Tap a section to go there when this one ends. ↻ repeats until you end the vamp.";
+    if (s.scenes) b.style.display = "none";
     b.onclick = async () => {
       try { showTransport(await api("/api/transport?do=toggle", { method: "POST" })); }
       catch (e) { if (!e.gate) show(e.message); }
@@ -516,6 +519,7 @@ function renderSets(s) {
       try { showTransport(await api("/api/transport?do=click", { method: "POST" })); }
       catch (e) { if (!e.gate) show(e.message); }
     };
+    if (s.scenes) click.style.display = "none";
     bar.appendChild(b); bar.appendChild(t); bar.appendChild(click); bar.appendChild(parts);
     wrap.appendChild(bar);
     const secs = document.createElement("div"); secs.className = "sections";
@@ -1725,6 +1729,8 @@ String RemoteServer::stateJson() const
     root->setProperty ("revision", revision.load());
     // Whether the song in play has a backing track; the page polls /api/transport for where it is.
     root->setProperty ("track", engine.hasTrack());
+    // Or scenes: a song played by hand, its sections stepped from the stand.
+    root->setProperty ("scenes", ! engine.hasTrack() && engine.songHasScenes (engine.currentSongIndex()));
     root->setProperty ("tempo", engine.getTempoBpm());
     {
         // The names a song's key is picked from on the tablet, the same words as on the laptop.
@@ -1871,8 +1877,32 @@ const std::vector<RemoteServer::FilePart>& RemoteServer::partsOf (const File& f)
 String RemoteServer::transportJson() const
 {
     DynamicObject::Ptr o (new DynamicObject());
-    const int song = engine.getTrackSong();
     const auto& songs = engine.getSongs();
+    if (! engine.hasTrack() && engine.songHasScenes (engine.currentSongIndex()))
+    {
+        // Scenes stand in for sections: the one in play, and the list to tap.
+        const int sc = engine.currentSongIndex();
+        o->setProperty ("has", true);
+        o->setProperty ("scenes", true);
+        o->setProperty ("song", sc);
+        o->setProperty ("name", songs[(size_t) sc].name);
+        o->setProperty ("running", false);
+        o->setProperty ("ready", true);
+        o->setProperty ("section", engine.getScene());
+        o->setProperty ("queued", -1);
+        o->setProperty ("vamping", false);
+        Array<var> scenes;
+        for (const auto& m : songs[(size_t) sc].markers)
+        {
+            DynamicObject::Ptr sec (new DynamicObject());
+            sec->setProperty ("name", m.name);
+            sec->setProperty ("vamp", false);
+            scenes.add (var (sec.get()));
+        }
+        o->setProperty ("sections", scenes);
+        return JSON::toString (var (o.get()), true);
+    }
+    const int song = engine.getTrackSong();
     o->setProperty ("has", engine.hasTrack());
     o->setProperty ("song", song);
     o->setProperty ("name", song >= 0 && song < (int) songs.size() ? songs[(size_t) song].name : String());

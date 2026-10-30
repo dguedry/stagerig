@@ -389,8 +389,23 @@ public:
     bool isTrackVamping() const                     { return player != nullptr && player->isVamping(); }
     void queueTrackSection (int index);
     void releaseVamp();
-    /** One pedal: releases a vamp, or else queues the next section. */
+    /** One pedal: releases a vamp, or else queues the next section. For a song with scenes, the next scene. */
     void advanceTrack();
+
+    /** Scenes: a song played by hand -- no backing track, no click -- uses
+        its sections as scenes: verse, chorus, solo, each a list of actions
+        (every keyboard's program, a part, an effect, a cue) that happen at
+        once when the scene is chosen, from Next, the section footswitch or
+        the tablet. Entering the song enters its first scene. */
+    bool songHasScenes (int songIndex) const;
+    int  getScene() const                           { return currentScene; }     // the scene in play, or -1
+    int  getSceneCount() const;                                                  // of the song in play
+    void selectScene (int index);                                                // does its actions now
+    /** A new scene at the end, named, holding the programs loaded now; returns its index. */
+    int  addScene (int songIndex, const juce::String& name);
+    /** The scene's program actions become the programs loaded now (other actions kept). */
+    void captureScene (int songIndex, int sceneIndex);
+    void moveScene (int songIndex, int from, int to);
 
     int  getSectionCC() const                       { return setup.sectionCC; }
     void setSectionCC (int cc);
@@ -736,6 +751,7 @@ private:
     std::atomic<int> liveTranspose { 0 };
     /** The song last selected, whether from the set list or outside it: the one in play. -1 = none yet. */
     int songInPlay = -1;
+    int currentScene = -1;       // of the song in play, when it has scenes
     std::atomic<int> lateBlocks { 0 };
     std::atomic<int> lastBlockSamples { 0 };
     timespec blockDeadline {};

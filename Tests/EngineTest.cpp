@@ -3324,6 +3324,63 @@ int main()
                     engine.removeSong (outside);
                     CHECK (engine.currentSongIndex() == keyed);
                 }
+                {
+                    /* Scenes: a song with no track steps through its sections by
+                       hand, each firing its actions at once. Added scenes hold the
+                       programs loaded now; entering the song enters the first. */
+                    const int staged = engine.addSong ("Staged");
+                    CHECK (! engine.songHasScenes (staged));
+                    engine.selectProgram (0, 92);
+                    const int verse = engine.addScene (staged, "Verse");
+                    engine.selectProgram (0, 93);
+                    const int chorus = engine.addScene (staged, "Chorus");
+                    engine.selectProgram (0, 94);
+                    const int solo = engine.addScene (staged, {});
+                    CHECK (verse == 0 && chorus == 1 && solo == 2 && engine.songHasScenes (staged));
+                    const auto& sg = engine.getSongs()[(size_t) staged];
+                    CHECK (sg.markers.size() == 3 && sg.markers[2].name == "Scene 3");
+                    CHECK (sg.markers[0].actions.size() >= 1 && sg.markers[0].actions[0].kind == ActionDef::Kind::program && sg.markers[0].actions[0].input == 0 && sg.markers[0].actions[0].program == 92);
+                    CHECK (sg.markers[1].actions[0].program == 93 && sg.markers[2].actions[0].program == 94);
+                    engine.selectSong (staged); settle();
+                    CHECK (engine.currentSongIndex() == staged && engine.getScene() == 0 && engine.getSceneCount() == 3);
+                    CHECK (engine.getSetup().inputs[0].currentProgram == 92);          // the first scene, on entering the song
+                    engine.advanceTrack(); settle();                                   // the Next button, the section pedal
+                    CHECK (engine.getScene() == 1 && engine.getSetup().inputs[0].currentProgram == 93);
+                    engine.queueTrackSection (2); settle();                            // the tablet's tap: at once, no track to wait for
+                    CHECK (engine.getScene() == 2 && engine.getSetup().inputs[0].currentProgram == 94);
+                    engine.advanceTrack(); settle();
+                    CHECK (engine.getScene() == 2);                                    // the last one stays
+                    engine.selectScene (0); settle();
+                    CHECK (engine.getScene() == 0 && engine.getSetup().inputs[0].currentProgram == 92);
+                    // Capture: the scene takes what is loaded now; other actions stay.
+                    {
+                        auto m = sg.markers;
+                        ActionDef cue; cue.kind = ActionDef::Kind::midi; cue.portName = "Lights"; cue.data1 = 5;
+                        m[1].actions.push_back (cue);
+                        engine.setSongMarkers (staged, m);
+                    }
+                    engine.selectProgram (0, 95);
+                    engine.captureScene (staged, 1);
+                    {
+                        // One program action per keyboard (the track input aside), then the cue, kept.
+                        int keyboards = 0;
+                        for (const auto& in : engine.getSetup().inputs) if (! in.isTrack() && in.currentProgram >= 0) ++keyboards;
+                        const auto& acts = sg.markers[1].actions;
+                        CHECK ((int) acts.size() == keyboards + 1 && acts[0].kind == ActionDef::Kind::program && acts[0].input == 0 && acts[0].program == 95
+                               && acts.back().kind == ActionDef::Kind::midi);
+                    }
+                    engine.moveScene (staged, 2, 0);
+                    CHECK (sg.markers[0].name == "Scene 3" && sg.markers[1].name == "Verse" && engine.getScene() == 1);   // the scene in play moved with it
+                    // A click makes it a timed song again: sections on the clock, no scenes.
+                    engine.setSongClick (staged, true, 4);
+                    CHECK (! engine.songHasScenes (staged));
+                    engine.setSongClick (staged, false, 4);
+                    CHECK (engine.songHasScenes (staged));
+                    std::printf ("     scenes: three by hand, entered, stepped, tapped, captured, moved\n");
+                    engine.selectSongInSet (0); settle();
+                    CHECK (engine.currentSongIndex() == keyed && engine.getSceneCount() == 0);
+                    engine.removeSong (staged);
+                }
                 CHECK (engine.effectiveEffectDef (rd).scaleRoot == 2 && engine.effectiveEffectDef (rd).scaleMode == 0);
                 renderAndWait();
                 engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));

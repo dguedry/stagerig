@@ -931,6 +931,21 @@ the band stays in time; while the track plays, clicking a section on the
 timeline does the same. While the track is stopped, Go sets where Play starts.
 Removing a section never touches the music.
 
+#### Scenes: sections for a song played by hand
+
+A song with no files and no click is on nobody's clock, so its sections are
+**scenes**: verse, chorus, solo, each a cue sheet that happens at once when
+you go to it. Under **Backing track...** such a song shows **SCENES** instead
+of the timeline: **+ Add scene** makes one holding the programs loaded on
+every keyboard right now, so building a song is "set the sounds for the
+verse, add a scene; set them for the chorus, add a scene". **Capture** on a
+scene does the same again later; **Actions...** adds parts, effects and
+cues to it; **Go** goes there; **^** moves it up. Entering the song enters
+its first scene. From there, **Next scene** on the songs panel, the section
+footswitch and the scene buttons on the tablet step through them, and each
+change lands the moment you ask for it. Give the song a click and its
+sections are back on the clock.
+
 ### Playing it
 
 Play begins where the sound begins: silence at the head of a file is never

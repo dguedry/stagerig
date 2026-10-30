@@ -56,7 +56,7 @@ other plugin.
 - **Built for low latency**: a native PipeWire/JACK client, 128-sample blocks
   by default, parallel plugin loading, and a late-block counter you can watch.
 - **Loop a passage** on a keyboard from a footswitch, in whole bars at the rig's tempo, and play over it.
-- **Sections carry a cue sheet**: entering the chorus can change a keyboard's program, mute a part, bypass an effect or cue the lights.
+- **Sections carry a cue sheet**: entering the chorus can change a keyboard's program, mute a part, bypass an effect or cue the lights. A song played by hand has **scenes** instead, stepped from a footswitch or the tablet.
 - **Built-in MIDI effects**: an arpeggiator, a chord, a scale, a run and a big band (each key plays the chord on that step of the key, voiced as you set it), following the song's key; a humanizer; and a phrase player that plays a short MIDI file from each key. Nothing to install.
 - **A pedal for a layer or an effect**: mappings can switch an instrument or an effect, or be its level; one knob can move several things.
 - **Backing tracks follow the song's tempo and key**: find the tempo in the audio, and the files stretch and transpose with the song.
