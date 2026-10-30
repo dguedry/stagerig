@@ -484,6 +484,8 @@ public:
     void setSlotVelocityRange (int inputIndex, int program, int slot, int low, int high);
     void setSlotVelocityCurve (int inputIndex, int program, int slot, float curve);   // -1..1
     void setSlotPan       (int inputIndex, int program, int slot, float pan);         // -1..1
+    /** The parameters on the Stage view's front panel for this instrument, by id; empty picks them by name. */
+    void setSlotPanelParams (int inputIndex, int program, int slot, const std::vector<juce::String>& ids);
     /** Velocity after a slot's curve: 0 leaves it, >0 lifts soft playing, <0 tames it. 1..127 in and out. */
     static int curveVelocity (int velocity, float curve);
     /** Left/right gains for a pan position: a balance law, unity in the centre. */

@@ -106,6 +106,10 @@ struct SlotDef
     float velocityCurve = 0.0f;       // -1..1: <0 softer, 0 linear, >0 louder for the same touch
     float pan = 0.0f;                 // -1 (left) .. 1 (right); a balance on the stereo output, unity at centre
     int outChannel = 0;               // 0 = keep incoming channel, 1..16 = force
+    /** The plugin parameters on the Stage view's front panel for this
+        instrument, by id, in order; empty means the ones a player reaches
+        for are picked by name (cutoff, resonance, attack, release...). */
+    std::vector<juce::String> panelParams;
     /** Which incoming channels this slot listens to, one bit per channel
         (bit 0 = channel 1); all of them by default. With the input on Omni,
         one program can then give each channel its own sound -- a bass on 2

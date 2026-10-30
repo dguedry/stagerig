@@ -11,6 +11,7 @@
 #include "ClapPluginFormat.h"
 #include "GmSynth.h"
 #include "MidiEditor.h"
+#include "StagePanel.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
 #include <map>
@@ -3412,6 +3413,22 @@ int main()
                     engine.selectSongInSet (0); settle();
                     CHECK (engine.currentSongIndex() == keyed && engine.getSceneCount() == 0);
                     engine.removeSong (staged);
+                }
+                {
+                    // The Stage view's front panel: the parameters it picks by name, and the ones chosen by hand saved with the instrument.
+                    ParamInfoList ps;
+                    auto add = [&ps] (const char* n, bool boolean = false, int steps = 0, int cc = -1)
+                    { ParamInfo p; p.index = (int) ps.size(); p.id = String (p.index); p.name = n; p.boolean = boolean; p.numSteps = steps; p.midiController = cc; ps.push_back (p); };
+                    add ("Master Volume"); add ("Osc 1 Wave", false, 8); add ("Filter Cutoff"); add ("Filter Resonance"); add ("Amp Attack"); add ("Amp Release");
+                    add ("Bypass"); add ("Mod Wheel", false, 0, 1); add ("Reverb Mix"); add ("Legato", true); add ("Osc Sync", false, 2);
+                    CHECK (StagePanel::pickPanelParams (ps, 4) == (std::vector<int> { 2, 3, 4, 5 }));
+                    CHECK (StagePanel::pickPanelParams (ps, 8) == (std::vector<int> { 2, 3, 4, 5, 8, 0, 1 }));     // then by order; no bypass, no CC stand-in, no switch
+                    CHECK (StagePanel::pickPanelParams ({}, 4).empty());
+                    engine.setSlotPanelParams (0, 92, 0, { "3", "2" });
+                    CHECK (engine.getSetup().inputs[0].programs[92].slots[0].panelParams == (std::vector<String> { "3", "2" }));
+                    engine.setSlotPanelParams (0, 92, 0, {});
+                    CHECK (engine.getSetup().inputs[0].programs[92].slots[0].panelParams.empty());
+                    std::printf ("     front panel: cutoff, resonance, attack, release picked first\n");
                 }
                 CHECK (engine.effectiveEffectDef (rd).scaleRoot == 2 && engine.effectiveEffectDef (rd).scaleMode == 0);
                 renderAndWait();

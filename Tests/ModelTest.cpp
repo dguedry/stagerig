@@ -50,6 +50,7 @@ int main()
         EffectDef phr; phr.kind = EffectDef::Kind::phrase; phr.phraseName = "lick"; phr.phraseBeats = 2.0f; phr.phraseRoot = 60; phr.phraseStop = true; phr.phraseLoop = true;
         phr.phraseNotes = { { 0.0f, 0.5f, 60, 100 }, { 0.5f, 0.25f, 62, 90 }, { 1.0f, 1.0f, 64, 110 } };
         gm.midiEffects = { arpB, ch, sc, run, band, hum, phr };
+        gm.panelParams = { "cutoff", "7" };
         upper.programs[9].slots.push_back (gm);
     }
 
@@ -227,6 +228,7 @@ int main()
                && std::abs (fx[3].runBeats - 2.0f) < 1e-6f && fx[3].runDegree == 2 && fx[3].runDown == 1 && fx[3].runToKey == 1 && ! fx[3].runHoldLast && fx[3].displayName() == "Run");
         CHECK (fx[4].kind == EffectDef::Kind::bigBand && fx[4].scaleRoot == 5 && fx[4].followSongKey && fx[4].displayName() == "Big band" && fx[4].bandChords.size() == 12
                && fx[4].bandChords[1].empty() && fx[4].bandChords[7] == (std::vector<int> { -12, 0, 4, 10, 14 }) && fx[4].bandChords[0] == (std::vector<int> { 0, 4, 7, 9 }));
+        CHECK (loaded.inputs[0].programs[9].slots[0].panelParams == (std::vector<juce::String> { "cutoff", "7" }));
         CHECK (fx[5].kind == EffectDef::Kind::humanize && fx[5].humanTimingMs == 25 && fx[5].humanVelocity == 0 && fx[5].displayName() == "Humanize");
         CHECK (fx[6].kind == EffectDef::Kind::phrase && fx[6].phraseName == "lick" && std::abs (fx[6].phraseBeats - 2.0f) < 1e-6f && fx[6].phraseRoot == 60 && fx[6].phraseStop && fx[6].phraseLoop
                && fx[6].phraseNotes.size() == 3 && std::abs (fx[6].phraseNotes[1].beat - 0.5f) < 1e-6f && std::abs (fx[6].phraseNotes[1].length - 0.25f) < 1e-6f

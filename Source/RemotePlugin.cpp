@@ -340,7 +340,7 @@ bool RemotePlugin::pollParameterValue (int index, float& value)
     return true;
 }
 
-bool RemotePlugin::setParameterValue (int index, float value)
+bool RemotePlugin::setParameterValue (int index, float value, int timeoutMs)
 {
     if (paramValues != nullptr && index >= 0 && index < (int) params.size())
         paramValues[(size_t) index].store (value);
@@ -348,7 +348,7 @@ bool RemotePlugin::setParameterValue (int index, float value)
     MemoryOutputStream out;
     out.writeInt (index);
     out.writeFloat (value);
-    return request (ipc::Msg::setParameterValue, out.getMemoryBlock(), kControlTimeoutMs);
+    return request (ipc::Msg::setParameterValue, out.getMemoryBlock(), timeoutMs < 0 ? kControlTimeoutMs : timeoutMs);
 }
 
 bool RemotePlugin::getState (MemoryBlock& state, int timeoutMs)

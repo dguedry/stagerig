@@ -2724,11 +2724,13 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
 
     // Stage display: the active program per input, big enough to read from a stand.
     stagePanel = std::make_unique<StagePanel> (engine);
+    stagePanel->onEdited = [this] { markDirty(); };
+    stagePanel->onHeightChanged = [this] { resized(); };
     addChildComponent (stagePanel.get());
     addAndMakeVisible (stageBtn);
     stageBtn.setClickingTogglesState (true);
     stageBtn.setColour (TextButton::buttonOnColourId, accentDim);
-    stageBtn.setTooltip ("Show the current program of each input in large type, for reading while you play");
+    stageBtn.setTooltip ("The performance view: each input's program in large type, with a front panel of knobs for its sound -- level, pan, and the parameters a player reaches for");
     stageBtn.onClick = [this]
     {
         const bool show = stageBtn.getToggleState();
@@ -2980,7 +2982,7 @@ void MainComponent::resized()
     }
     if (stagePanel != nullptr && stagePanel->isVisible())
     {
-        stagePanel->setBounds (r.removeFromTop (StagePanel::preferredHeight).reduced (8, 0));
+        stagePanel->setBounds (r.removeFromTop (stagePanel->preferredHeight()).reduced (8, 0));
         r.removeFromTop (8);
     }
 

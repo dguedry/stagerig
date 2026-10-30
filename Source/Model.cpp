@@ -215,6 +215,7 @@ var SlotDef::toVar() const
     o->setProperty ("highVelocity", highVelocity);
     o->setProperty ("velocityCurve", velocityCurve);
     o->setProperty ("pan", pan);
+    if (! panelParams.empty()) { Array<var> ids; for (const auto& id : panelParams) ids.add (id); o->setProperty ("panel", var (ids)); }
     o->setProperty ("outChannel", outChannel);
     if (! hearsAll())
     {
@@ -286,6 +287,8 @@ SlotDef SlotDef::fromVar (const var& v)
     s.velocityCurve = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "velocityCurve", 0.0f));
     s.pan           = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "pan", 0.0f));
     s.outChannel = prop<int>   (v, "outChannel", 0);
+    if (auto* ids = obj (v) != nullptr ? obj (v)->getProperty ("panel").getArray() : nullptr)
+        for (const auto& id : *ids) if (s.panelParams.size() < 16) s.panelParams.push_back (id.toString());
     if (auto* chans = obj (v) != nullptr ? obj (v)->getProperty ("listensTo").getArray() : nullptr)
     {
         s.listensTo = 0;

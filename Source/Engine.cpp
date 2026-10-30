@@ -2893,6 +2893,15 @@ void Engine::removeSlot (int inputIndex, int program, int slotIndex)
                 rt->slots[(size_t) slotIndex]->expr;                                           \
     }
 
+void Engine::setSlotPanelParams (int inputIndex, int program, int slotIndex, const std::vector<String>& ids)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size()) return;
+    def.slots[(size_t) slotIndex].panelParams = ids;
+    notifyContent (inputIndex, program);
+}
+
 PERF_SLOT_SETTER (setSlotEnabled,    enabled,    enabled.store (v))
 PERF_SLOT_SETTER (setSlotGainDb,     gainDb,     gain.store (Decibels::decibelsToGain (v, -60.0f)))
 PERF_SLOT_SETTER (setSlotTranspose,  transpose,  transpose.store (v))

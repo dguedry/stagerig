@@ -991,13 +991,25 @@ track's beat -- set the song's tempo to the track's.
 
 ## Reading the stage display
 
-**Stage** in the toolbar puts a large readout at the top of the window: for each
-input, the program number and the program's name, big enough to read from a
-stand while you play. When you pick programs by number on the keyboard, this is
-your confirmation that the right sound loaded. A program still loading is marked
-*...loading*, which explains a keyboard that is briefly silent, and an empty
-program is greyed. An audio input shows its level meter under the program
-name.
+**Stage** in the toolbar is the performance view, at the top of the window:
+for each input, the program number and the program's name, big enough to
+read from a stand while you play. When you pick programs by number on the
+keyboard, this is your confirmation that the right sound loaded. A program
+still loading is marked *...loading*, which explains a keyboard that is
+briefly silent, and an empty program is greyed. An audio input shows its
+level meter under the program name.
+
+Under the readout sits a **front panel** for the program's instrument: a row
+of knobs, as on a workstation, so the sound is shaped without opening its
+window. **Level** and **Pan** are the instrument's own (double-click puts
+them back to 0 dB and centre), and after them the plugin's parameters a
+player reaches for -- cutoff, resonance, attack, decay, sustain, release,
+reverb, chorus, drive -- found by name among what the plugin offers, as many
+as the width allows. Right-click a knob to make it any parameter of the
+plugin instead, or to go back to the ones picked by name; the choice is
+saved with the instrument. A program with several instruments shows a
+button for each above the knobs. Moving a knob moves the parameter in the
+plugin at once; a parameter moved in the plugin's own window moves the knob.
 
 ## The tablet
 

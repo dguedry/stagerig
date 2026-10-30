@@ -82,8 +82,10 @@ public:
         thread, where a plugin that has stopped answering must cost a frame
         rather than freeze the window for the usual ten-second timeout. */
     bool pollParameterValue (int index, float& value);
-    /** Non-realtime set (UI / tests). */
-    bool setParameterValue (int index, float value);
+    /** Non-realtime set (UI / tests). A knob being turned passes a short
+        timeout, so a plugin that has stopped answering costs a moment, not
+        the usual ten seconds; -1 is the usual. */
+    bool setParameterValue (int index, float value, int timeoutMs = -1);
 
     // State / editor --------------------------------------------------------------------
     /** `timeoutMs` < 0 means the usual 30 s. A quit passes something short:
