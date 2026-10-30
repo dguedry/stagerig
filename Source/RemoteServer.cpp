@@ -5,6 +5,7 @@
 #include "MappingSuggestions.h"
 #include "PluginView.h"
 #include "Charts.h"
+#include "MidiFx.h"
 #include <thread>
 #include <fcntl.h>
 #include "BinaryData.h"
@@ -156,10 +157,30 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
           font-size:16px; border-radius:12px; border:1px solid #3a3d47;
           background:var(--panel); color:#fff; }
   .find:focus { outline:none; border-color:var(--accent); }
+  .findrow { display:flex; gap:8px; align-items:stretch; margin-bottom:12px; }
+  .findrow .find { margin:0; flex:1; }
+  .findrow .editmode { flex:0 0 auto; background:var(--row); color:var(--dim); border:1px solid #3a3d47;
+                       border-radius:12px; padding:0 18px; font-size:15px; font-weight:700; }
+  .findrow .editmode.on { background:var(--accent); color:#06121f; border-color:var(--accent); }
+  .setpick button.new { border:1px dashed #3a3d47; background:none; }
+  .editbar { display:flex; gap:8px; margin-bottom:12px; }
+  .editbar button { flex:1; background:var(--row); color:#fff; border:0; border-radius:12px; padding:12px; font-size:15px; font-weight:700; }
+  .song .ctl { display:flex; gap:6px; flex:0 0 auto; align-self:center; }
+  .song .ctl span { padding:10px 14px; border-radius:10px; background:#2b2d35; color:#d7dbe2; font-size:15px; font-weight:700; }
+  .song .ctl span.off { opacity:.3; }
+  .song.on .ctl span { background:#06121f; color:#fff; }
   .otherhead { color:var(--dim); font-size:11px; font-weight:800; letter-spacing:.1em;
                margin:18px 0 8px; }
   .parts { font-size:13px; color:var(--dim); margin-top:4px; }
   .notes { font-size:14px; color:#d8a657; margin-top:4px; font-style:italic; }
+  .notes .key { font-style:normal; font-weight:700; padding:3px 9px; border-radius:8px; background:#d8a65722;
+                border:1px solid #d8a65766; cursor:pointer; }
+  .song.on .notes .key { background:#06121f1a; border-color:#06121f66; }
+  .sheet .keys { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; }
+  .sheet .scales { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin-top:6px; }
+  .sheet .keys button, .sheet .scales button { padding:12px 6px; text-align:center; font-size:15px; }
+  .sheet .keys button.none { grid-column: span 2; }
+  .sheet .keys button.on, .sheet .scales button.on { background:var(--accent); color:#06121f; }
   .song .chart { margin-left:10px; padding:8px 14px; border-radius:10px; background:#2b2d35; color:#d7dbe2;
                  font-size:14px; font-weight:600; flex:0 0 auto; }
   .song.on .chart { background:#06121f; color:#fff; }
@@ -283,6 +304,7 @@ function show(msg, ms) {
 }
 
 let lastState = null;
+let editMode = false;        // the Set list tab in its editing dress: build and reorder set lists from the stand
 const filters = {};          // input index -> chosen group, "" for all
 
 /* Which tab is showing. Remembered per device: someone building a set works in
@@ -401,6 +423,55 @@ function showParts() {
   refresh();
 }
 
+/* The song's key, picked with a thumb: a root, a scale, or none. Each tap
+   is saved at once and the sheet redraws from the state that comes back. */
+let keySheet = null;
+function showKeyPicker(songIndex) {
+  if (keySheet) { keySheet.back.remove(); keySheet = null; }
+  const back = document.createElement("div"); back.className = "sheet";
+  const card = document.createElement("div"); card.className = "card";
+  const t = document.createElement("div"); t.className = "sheet-title";
+  card.appendChild(t);
+  const roots = document.createElement("div"); roots.className = "keys";
+  const scales = document.createElement("div"); scales.className = "scales";
+  card.appendChild(roots); card.appendChild(scales);
+  const cancel = document.createElement("button"); cancel.className = "cancel"; cancel.textContent = "Done";
+  const close = () => { back.remove(); keySheet = null; };
+  cancel.onclick = close;
+  card.appendChild(cancel);
+  back.appendChild(card);
+  back.onclick = e => { if (e.target === back) close(); };
+  document.body.appendChild(back);
+
+  const set = async (root, mode) => {
+    try { await api("/api/songkey?song=" + songIndex + "&root=" + root + "&mode=" + mode, { method: "POST" }); await refresh(true); }
+    catch (e) { if (!e.gate) show(e.message); }
+  };
+  const draw = () => {
+    const s = lastState; const sg = s && s.songs && s.songs[songIndex];
+    if (!sg) { close(); return; }
+    const root = sg.key ? sg.keyRoot : -1, mode = sg.key ? sg.keyMode : 0;
+    t.textContent = "Key of " + (sg.name || "this song") + (sg.key ? " \u2014 " + sg.key : " \u2014 none");
+    roots.innerHTML = ""; scales.innerHTML = "";
+    (s.roots || []).forEach((name, i) => {
+      const b = document.createElement("button"); b.textContent = name; if (i === root) b.className = "on";
+      b.onclick = () => set(i, mode);
+      roots.appendChild(b);
+    });
+    const none = document.createElement("button"); none.textContent = "None"; none.className = "none" + (root < 0 ? " on" : "");
+    none.title = "Each Scale and Run keeps its own key; a chart is shown as written";
+    none.onclick = () => set(-1, mode);
+    roots.appendChild(none);
+    (s.scales || []).forEach((name, i) => {
+      const b = document.createElement("button"); b.textContent = name; if (root >= 0 && i === mode) b.className = "on";
+      b.onclick = () => set(root >= 0 ? root : 0, i);
+      scales.appendChild(b);
+    });
+  };
+  keySheet = { back, draw };
+  draw();
+}
+
 async function pollTransport() {
   try { showTransport(await api("/api/transport")); } catch (e) { /* the next poll is half a second away */ }
 }
@@ -460,15 +531,27 @@ function renderSets(s) {
      and a set list you cannot find a song in is the one case where you need to.
      Kept across redraws, because the page repaints every second and a filter
      that cleared itself while you were reading would be worse than none. */
-  if (songs.length > 1) {
-    const box = document.createElement("input");
-    box.className = "find"; box.type = "search";
-    box.placeholder = "Find a song";
-    box.value = songFilter;
-    box.oninput = () => { songFilter = box.value; renderSets(lastState); };
-    wrap.appendChild(box);
-    /* Put the caret back where it was: this runs inside a full redraw. */
-    if (songFilter) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+  {
+    const row = document.createElement("div"); row.className = "findrow";
+    if (songs.length > 1) {
+      const box = document.createElement("input");
+      box.className = "find"; box.type = "search";
+      box.placeholder = editMode ? "Find a song to add" : "Find a song";
+      box.value = songFilter;
+      box.oninput = () => { songFilter = box.value; renderSets(lastState); };
+      row.appendChild(box);
+      /* Put the caret back where it was: this runs inside a full redraw. */
+      if (songFilter) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+    }
+    /* Editing the set lists from the stand: add, take out, reorder, make and
+       name them. A mode rather than buttons on every row, so a row tapped in
+       the heat of a gig only ever starts a song. */
+    const ed = document.createElement("button"); ed.className = "editmode" + (editMode ? " on" : "");
+    ed.textContent = editMode ? "Done" : "Edit";
+    ed.title = editMode ? "Back to playing" : "Build or change set lists";
+    ed.onclick = () => { editMode = !editMode; renderSets(lastState); };
+    row.appendChild(ed);
+    wrap.appendChild(row);
   }
 
   const matches = (sg) => {
@@ -483,27 +566,50 @@ function renderSets(s) {
       || (x.input || "").toLowerCase().includes(q));
   };
 
-  // Which set list, when there is more than one -- or when none is chosen yet.
-  if (sets.length > 1 || !sets[s.currentSet]) {
+  const post = async (path) => {
+    try { await api(path, { method: "POST" }); await refresh(true); }
+    catch (e) { if (!e.gate) show(e.message); }
+  };
+  const setEdit = (q) => post("/api/setedit?" + q);
+
+  /* Which set list: a row of them when there is more than one, or none is
+     chosen yet, or the lists are being edited. Editing lives here too: a new
+     list, and for the one chosen a rename, a copy and a delete. */
+  if (editMode || sets.length > 1 || !sets[s.currentSet]) {
     const pick = document.createElement("div"); pick.className = "setpick";
     sets.forEach((st, i) => {
       const b = document.createElement("button");
       b.textContent = st.name || ("Set list " + (i + 1));
       if (i === s.currentSet) b.className = "on";
-      b.onclick = async () => {
-        try { await api("/api/setlist?index=" + i, { method: "POST" }); await refresh(true); }
-        catch (e) { if (!e.gate) show(e.message); }
-      };
+      b.onclick = () => post("/api/setlist?index=" + i);
       pick.appendChild(b);
     });
+    if (editMode) {
+      const nb = document.createElement("button"); nb.className = "new"; nb.textContent = "+ New set list";
+      nb.onclick = () => { const name = prompt("Name for the new set list", "Set list " + (sets.length + 1)); if (name !== null) setEdit("do=new&name=" + encodeURIComponent(name.trim())); };
+      pick.appendChild(nb);
+    }
     wrap.appendChild(pick);
   }
+  if (editMode && sets[s.currentSet]) {
+    const cur = sets[s.currentSet], i = s.currentSet, curName = cur.name || ("Set list " + (i + 1));
+    const bar = document.createElement("div"); bar.className = "editbar";
+    const mk = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; bar.appendChild(b); };
+    mk("Rename", () => { const name = prompt("Name for this set list", curName); if (name !== null && name.trim()) setEdit("do=rename&index=" + i + "&name=" + encodeURIComponent(name.trim())); });
+    mk("Duplicate", () => { const name = prompt("Name for the copy", curName + " copy"); if (name !== null) setEdit("do=duplicate&index=" + i + "&name=" + encodeURIComponent(name.trim())); });
+    mk("Delete", () => { if (confirm("Delete the set list \u201c" + curName + "\u201d? The songs themselves are kept.")) setEdit("do=delete&index=" + i); });
+    wrap.appendChild(bar);
+  }
+
+  const cur = sets[s.currentSet];
 
   /* One row, used for the set and for the songs outside it. `pos` is the
      position within the set, or -1 for a song that is not in it. */
   const songRow = (sg, songIndex, pos) => {
     const b = document.createElement("button");
-    const playing = pos >= 0 && pos === s.currentSong;
+    /* The song in play lights up wherever it is: at its position in the set,
+       or among the songs outside it when it was tapped there. */
+    const playing = songIndex === s.playingSong && (pos < 0 || pos === s.currentSong);
     b.className = "song" + (playing ? " on" : "");
 
     if (pos >= 0) {
@@ -526,13 +632,42 @@ function renderSets(s) {
                                       + (x.name ? " " + x.name : "")).join("  \u00b7  ");
       body.appendChild(pl);
     }
-    if (playing && sg.notes) {
+    /* The key, and the stage notes. The key is a chip: tap it to change the
+       song's key from the stand -- the Scale and Run effects and the chart
+       follow at once -- without picking the song again. */
+    if (playing) {
       const nt = document.createElement("div"); nt.className = "notes";
-      nt.textContent = sg.notes;
+      const k = document.createElement("span"); k.className = "key";
+      k.textContent = sg.key ? sg.key : "Set the key";
+      k.title = "The song's key: the Scale and Run effects play in it, a chord chart is shown in it";
+      k.onclick = (ev) => { ev.stopPropagation(); showKeyPicker(songIndex); };
+      nt.appendChild(k);
+      if (sg.notes) nt.appendChild(document.createTextNode("  \u00b7  " + sg.notes));
       body.appendChild(nt);
     }
 
     b.appendChild(body);
+    if (editMode) {
+      /* Up, down and out for a song in the set; Add for one outside it. Each
+         is one call, saved at once, so there is nothing to confirm or lose. */
+      const ctl = document.createElement("span"); ctl.className = "ctl";
+      const mk = (label, title, q, off) => {
+        const c = document.createElement("span"); c.textContent = label; c.title = title;
+        if (off) c.className = "off"; else c.onclick = (ev) => { ev.stopPropagation(); setEdit(q); };
+        ctl.appendChild(c);
+      };
+      const i = s.currentSet;
+      if (pos >= 0) {
+        mk("\u25b2", "Earlier", "do=move&index=" + i + "&pos=" + pos + "&delta=-1", pos === 0);
+        mk("\u25bc", "Later", "do=move&index=" + i + "&pos=" + pos + "&delta=1", pos >= cur.songs.length - 1);
+        mk("\u2715", "Take out of the set list (the song is kept)", "do=remove&index=" + i + "&pos=" + pos, false);
+      } else {
+        mk("+ Add", "Put it on the end of the set list", "do=add&index=" + i + "&song=" + songIndex, !sets[i]);
+      }
+      b.appendChild(ctl);
+      b.onclick = null;
+      return b;
+    }
     if (sg.tempo) {
       const bpm = document.createElement("span"); bpm.className = "bpm";
       bpm.textContent = Math.round(sg.tempo) + " bpm";
@@ -561,10 +696,9 @@ function renderSets(s) {
     return b;
   };
 
-  const cur = sets[s.currentSet];
   if (!cur) {
     const e = document.createElement("div"); e.className = "empty";
-    e.textContent = "Choose a set list above.";
+    e.textContent = editMode ? "Make a set list above, or choose one." : "Choose a set list above.";
     wrap.appendChild(e); host.appendChild(wrap); return;
   }
 
@@ -596,24 +730,29 @@ function renderSets(s) {
   const last = cur.songs.length - 1;
   step.appendChild(mk("← PREV SONG", -1, s.currentSong <= 0));
   step.appendChild(mk("NEXT SONG →", 1, s.currentSong >= last));
-  wrap.appendChild(step);
+  if (!editMode) wrap.appendChild(step);
 
   /* Everything not in this set, underneath. A song you have captured but not
      put in a set is still a song you may want to play -- and before this it
      was invisible from the stand, which looked like the app had lost it. */
   const inSet = new Set(cur.songs);
   const others = songs.map((sg, i) => [sg, i])
-                      .filter(([sg, i]) => !inSet.has(i) && matches(sg));
+                      .filter(([sg, i]) => !inSet.has(i) && matches(sg))
+                      .sort((a, b) => (a[0].name || "").localeCompare(b[0].name || "", undefined, { sensitivity: "base" }));
   if (others.length) {
     const h = document.createElement("div"); h.className = "otherhead";
-    h.textContent = "SONGS NOT IN THIS SET LIST";
+    h.textContent = editMode ? "SONGS TO ADD  (" + others.length + ", A TO Z)" : "SONGS NOT IN THIS SET LIST";
     wrap.appendChild(h);
     others.forEach(([sg, i]) => wrap.appendChild(songRow(sg, i, -1)));
   }
 
   const where = document.createElement("div"); where.className = "empty";
   where.style.padding = "12px 4px 0";
-  where.textContent = s.currentSong >= 0
+  const outside = s.playingSong >= 0 && !inSet.has(s.playingSong) && songs[s.playingSong];
+  where.textContent = outside
+      ? "Playing \u201c" + (songs[s.playingSong].name || "Untitled") + "\u201d, outside the set list"
+        + (s.currentSong >= 0 ? " \u2014 Next goes on from song " + (s.currentSong + 2) : "")
+      : s.currentSong >= 0
       ? "Song " + (s.currentSong + 1) + " of " + cur.songs.length
       : cur.songs.length + (cur.songs.length === 1 ? " song" : " songs") + " in this set list — tap one to start";
   wrap.appendChild(where);
@@ -860,7 +999,7 @@ async function loadSlots(i) {
 async function refresh(force) {
   try {
     const s = await api("/api/state");
-    if (force || s.revision !== rev) { rev = s.revision; render(s); }
+    if (force || s.revision !== rev) { rev = s.revision; render(s); if (keySheet) keySheet.draw(); }
     syncLevelPolling();
     syncTransportPolling();
     if (transportUi) pollTransport();
@@ -992,8 +1131,9 @@ document.getElementById("follow").onclick = () => {
   document.getElementById("follow").className = follow ? "on" : "";
 };
 
-/* Which song the set is on, as an index into state.songs. */
+/* The song in play, as an index into state.songs: the one the rig says, or the set's position. */
 function playingSong(s) {
+  if (s.playingSong >= 0) return s.playingSong;
   const st = (s.sets || [])[s.currentSet];
   if (!st || s.currentSong < 0 || s.currentSong >= st.songs.length) return -1;
   return st.songs[s.currentSong];
@@ -1586,6 +1726,14 @@ String RemoteServer::stateJson() const
     // Whether the song in play has a backing track; the page polls /api/transport for where it is.
     root->setProperty ("track", engine.hasTrack());
     root->setProperty ("tempo", engine.getTempoBpm());
+    {
+        // The names a song's key is picked from on the tablet, the same words as on the laptop.
+        Array<var> roots, scales;
+        for (int i = 0; i < 12; ++i) roots.add (MidiFx::noteNames[i]);
+        for (int i = 0; i < MidiFx::numScaleModes(); ++i) scales.add (MidiFx::scaleModes[i]);
+        root->setProperty ("roots", roots);
+        root->setProperty ("scales", scales);
+    }
     Array<var> inputs;
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
     {
@@ -1634,6 +1782,12 @@ String RemoteServer::stateJson() const
             so->setProperty ("name", sg.name);
             if (sg.tempoBpm > 0.0)     so->setProperty ("tempo", sg.tempoBpm);
             if (sg.notes.isNotEmpty()) so->setProperty ("notes", sg.notes);
+            if (sg.hasKey())
+            {
+                so->setProperty ("key", MidiFx::keyName (sg.keyRoot, sg.keyMode));
+                so->setProperty ("keyRoot", sg.keyRoot);
+                so->setProperty ("keyMode", sg.keyMode);
+            }
 
             /* Charts, by index: the page asks for /chart/<song>/<n>, never for
                a file name, so nothing a tablet sends can name a path. A PDF
@@ -1690,6 +1844,7 @@ String RemoteServer::stateJson() const
         root->setProperty ("sets", setArr);
         root->setProperty ("currentSet", engine.getCurrentSet());
         root->setProperty ("currentSong", engine.getCurrentSongInSet());
+        root->setProperty ("playingSong", engine.currentSongIndex());        // the song in play, in or outside the set list
     }
     return JSON::toString (var (root.get()), true);
 }
@@ -2220,6 +2375,60 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     /* Songs and sets. Each one nudges the revision so every other tablet
        redraws on its next poll rather than showing a stale set list. */
+    if (path.startsWith ("/api/setedit"))
+    {
+        /* POST ...?do=new&name=        a set list, made current, to fill
+                 do=duplicate&index=&name=   a copy, made current
+                 do=rename&index=&name=
+                 do=delete&index=
+                 do=add&index=&song=      the song on the end
+                 do=remove&index=&pos=
+                 do=move&index=&pos=&delta=
+           Set lists built from the stand, each step saved at once. */
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
+        String what, name;
+        int index = -1, song = -1, pos = -1, delta = 0;
+        for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
+        {
+            const auto key = kv.upToFirstOccurrenceOf ("=", false, false);
+            const auto value = URL::removeEscapeChars (kv.fromFirstOccurrenceOf ("=", false, false).replace ("+", " "));
+            if (key == "do")         what = value;
+            else if (key == "name")  name = value.trim();
+            else if (key == "index") index = value.getIntValue();
+            else if (key == "song")  song = value.getIntValue();
+            else if (key == "pos")   pos = value.getIntValue();
+            else if (key == "delta") delta = value.getIntValue();
+        }
+        MessageManager::callAsync ([this, what, name, index, song, pos, delta]
+        {
+            if (what == "new")            engine.selectSet (engine.addSet (name));
+            else if (what == "duplicate") { if (const int n = engine.duplicateSet (index, name); n >= 0) engine.selectSet (n); }
+            else if (what == "rename")    engine.setSetName (index, name);
+            else if (what == "delete")    engine.removeSet (index);
+            else if (what == "add")       engine.addSongToSet (index, song);
+            else if (what == "remove")    engine.removeFromSet (index, pos);
+            else if (what == "move")      engine.moveInSet (index, pos, delta);
+        });
+        ++revision;
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/songkey"))
+    {
+        // POST ...?song=<index>&root=<0..11, -1 for none>&mode=<scale>: the song's key, changed from the stand.
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
+        auto number = [&path] (const char* key, int fallback)
+        {
+            for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
+                if (kv.startsWith (String (key) + "=")) return kv.fromFirstOccurrenceOf ("=", false, false).getIntValue();
+            return fallback;
+        };
+        const int song = number ("song", -1), root = number ("root", -1), mode = number ("mode", 0);
+        MessageManager::callAsync ([this, song, root, mode] { engine.setSongKey (song, root, mode); });
+        ++revision;
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
     if (path.startsWith ("/api/song"))
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
@@ -2531,6 +2740,14 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
             sendResponse (sock, "404 Not Found", "text/plain", "No such chart.");
             return;
         }
+        // A chord chart that names its key is shown in the song's, when the song has one.
+        if (page == 0 && chartKindFor (file) == "chordpro")
+            if (const auto& sg = engine.getSongs()[(size_t) song]; sg.hasKey())
+            {
+                sendResponse (sock, "200 OK", chartContentTypeFor (file),
+                              transposeChordPro (file.loadFileAsString(), sg.keyRoot, MidiFx::keyPrefersFlats (sg.keyRoot, sg.keyMode)));
+                return;
+            }
         MemoryBlock data;
         if (! file.loadFileAsData (data)) { sendResponse (sock, "500 Internal Server Error", "text/plain", "Could not read the chart."); return; }
         sendBytes (sock, "200 OK", chartContentTypeFor (file), static_cast<const char*> (data.getData()), (int) data.getSize());

@@ -1,5 +1,6 @@
 #include "ChartViewer.h"
 #include "Charts.h"
+#include "MidiFx.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <memory>
 #include <vector>
@@ -28,9 +29,16 @@ namespace
 //==============================================================================
 // ChartTextView
 //==============================================================================
-void ChartTextView::setText (const String& text, bool chordPro)
+void ChartTextView::setText (const String& given, bool chordPro, int keyRoot, bool flats)
 {
     lines.clear();
+    String text = given;
+    if (chordPro && keyRoot >= 0)
+        if (const int from = chordProKeyRoot (given); from >= 0 && from != keyRoot)
+        {
+            text = transposeChordPro (given, keyRoot, flats);
+            lines.push_back ({ Line::comment, "(chords in " + noteNameFor (keyRoot, flats) + ", the song's key; written in " + noteNameFor (from, flats) + ")" });
+        }
     for (auto raw : StringArray::fromLines (text))
     {
         const String line = raw.trimEnd();
@@ -230,9 +238,9 @@ namespace
                 addAndMakeVisible (viewport);
                 viewport.setViewedComponent (&textView, false);
                 viewport.setScrollBarsShown (true, true);
-                textView.setText (editor.getText(), kind == "chordpro");
+                showText();
                 status.setText (kind == "chordpro" ? "Chords go in square brackets before the syllable they fall on: [C]Some[G]where. "
-                                                     "{title: ...}, {subtitle: ...} and {comment: ...} are shown; other directives are not."
+                                                     "{title: ...}, {subtitle: ...} and {comment: ...} are shown; {key: G} lets the song's key move the chords."
                                                    : "Plain text, shown as typed in a fixed-width face. Ctrl+S saves.", dontSendNotification);
                 layoutText();
             }
@@ -319,8 +327,17 @@ namespace
         {
             dirty = true;
             saveBtn.setEnabled (true);
-            textView.setText (editor.getText(), kind == "chordpro");
+            showText();
             layoutText();
+        }
+
+        /** The page as the stand shows it: in the song's key when the song has one and the chart names its own. */
+        void showText()
+        {
+            const auto& songs = engine.getSongs();
+            const bool hasKey = songIndex < (int) songs.size() && songs[(size_t) songIndex].hasKey();
+            const auto& sg = songs[(size_t) jmax (0, jmin (songIndex, (int) songs.size() - 1))];
+            textView.setText (editor.getText(), kind == "chordpro", hasKey ? sg.keyRoot : -1, hasKey && MidiFx::keyPrefersFlats (sg.keyRoot, sg.keyMode));
         }
 
         void timerCallback() override

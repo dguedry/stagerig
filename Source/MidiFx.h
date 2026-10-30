@@ -33,6 +33,12 @@ public:
     static const char* const chordTypes[];    // "Major", "Minor", ...
     static const char* const scaleModes[];    // "Major", "Natural minor", ...
     static const char* const noteNames[];     // "C", "C#", ...
+    /** "D major", "A natural minor": a key by its root and scale. */
+    static juce::String keyName (int root, int mode);
+    /** Whether the scale is a minor one (its chords are named from the relative major). */
+    static bool keyIsMinor (int mode);
+    /** Whether chord names in this key are spelt with flats: F, Bb, Eb, Ab, Db, Gb and their minors. */
+    static bool keyPrefersFlats (int root, int mode);
     static int numArpRates();
     static int numArpModes();
     static int numChordTypes();

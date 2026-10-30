@@ -352,7 +352,9 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   the nearest note on it, so a wrong note is never wrong; **Run** turns each
   key into a scale run, as a string section plays one: press the third and
   the notes climb the scale from it, in time, and the last one sits there
-  while the key is held. Its settings are the key and scale; **Length** (an
+  while the key is held. A tap plays the whole run too: let go early and it
+  still lands, the last note lifting a step later. Its settings are the key
+  and scale; **Length** (an
   octave, two octaves, or any count of notes); **Takes**, how long the whole
   run lasts at the song's tempo, from a quarter of a beat to a bar, with the
   last note landing exactly at the end, so *an octave in a beat* is two
@@ -360,7 +362,10 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   scale, so pressing C can run from E; and whether it runs **up** or
   **down**, or **to the key** (begins below and lands on the note you
   pressed). A chord pressed is a run in every voice, harmonised in the
-  scale. Each shows its settings in words on its row.
+  scale. Scale and Run **follow the song's key** when the song has one (set
+  with **Edit...** on the song), so one chain serves every song; picking a
+  key on the row gives the effect its own instead. Each shows its settings
+  in words on its row.
 - **Send to a MIDI device too** -- the instrument's notes go out of a MIDI port
   as well, so a hardware synth doubles the plugin, or a lighting controller
   follows the keys.
@@ -586,8 +591,8 @@ editing program 002 changes every song that uses it: one place to fix a sound.
 An input the song does not name is left alone, which is what you want for a
 keyboard you are not using in that number.
 
-- **Edit...** opens the song: **Name**, **Stage notes**, **Tempo** and
-  **Transpose**, and **Save**.
+- **Edit...** opens the song: **Name**, **Stage notes**, **Tempo**,
+  **Transpose**, **Key** and **Scale**, and **Save**.
 - **Stage notes** are free text shown under the song on the tablet while it is
   playing -- the key, a count-in, "watch the horn stabs": whatever you would
   write on a paper set list.
@@ -596,6 +601,18 @@ keyboard you are not using in that number.
 - **Transpose** shifts every keyboard by that many semitones while the song is
   in play -- down a step for the singer. The backing track's parts are not
   shifted. Selecting the song applies it.
+- **Key** and **Scale** are the song's key -- D major, A natural minor.
+  Selecting the song puts every **Scale** and **Run** effect that follows the
+  song's key (they all do unless you pick a key on the row) into it, moved
+  with the transpose, since the notes they hear are. A chord chart that names
+  its key (`{key: G}`) is shown with its chords moved to the song's key. The
+  tablet shows the key under the playing song; **tap it** to change the key
+  from the stand -- a root, a scale, or none -- and the effects and the chart
+  follow at once. *None* leaves every effect on its own key and every chart
+  as written.
+- **Find a song** above the list narrows it as you type -- by name, by stage
+  notes, or by what it loads ("kontakt", "002") -- for a list that has grown
+  past scrolling. Escape clears it; the selection follows the song.
 - **-** deletes the selected song, and takes it out of every set list that
   used it.
 - **^ v** beside the songs list reorder it. Set lists keep playing their own
@@ -613,6 +630,9 @@ list...**, **Rename this set list...**, **Move up**, **Move down** and
 With a song selected, **Add to set list >** puts it at the end; **^ v** beside
 the set list order it, and **< Remove** takes it out of the set list without
 deleting the song.
+
+All of this can be done from the tablet too: **Edit** beside its find box
+(see *Set list* under *The tablet*).
 
 A song can appear in more than one set list, and more than once in the same one
 -- encores happen.
@@ -647,7 +667,10 @@ chart -- and the tablet shows it. Press **Chart... ▸ Attach a file...** under
 the songs list, or drop a file onto a song. PDF, PNG, JPEG, GIF and WebP are
 accepted, plain text (`.txt`) is shown as it is in a monospace face, and a
 ChordPro file (`.cho`, `.crd`, `.chordpro`) has its chords set above the
-words. A song may have several; they appear as tabs. **Chart... ▸ Remove
+words. A ChordPro chart that names its key (`{key: G}`) is shown in the
+song's key when the song has one (**Edit...** on the song): the chords are
+moved, the words are not, and the file is left as written, so one chart
+serves the song in any key. A song may have several; they appear as tabs. **Chart... ▸ Remove
 <name>** takes one off the song.
 
 The file is copied, not referred to: it goes into a folder beside the setup
@@ -970,9 +993,21 @@ compact. Tap any song to jump to it, or use **← PREV SONG** and **NEXT SONG
 the active one.
 
 Songs that are not in the current set list are listed underneath, under
-**SONGS NOT IN THIS SET LIST** -- a song you have captured but not yet ordered
+**SONGS NOT IN THIS SET LIST**, A to Z. Tap one and it plays -- it lights up
+there, with its key and notes -- while the set keeps its place, so the
+footswitches go on from where they were. It is a song you have captured but not yet ordered
 is still one you may want to play. Tapping one loads it without changing the
 set list or where the footswitches step from.
+
+**Edit**, beside the find box, is set lists from the stand. The row of set
+lists gains **+ New set list**; the chosen one gets **Rename**, **Duplicate**
+(last gig's set with three changes) and **Delete** (the songs are kept).
+Every song in the set shows **▲ ▼ ✕** to move it or take it out, and every
+song below shows **+ Add** to put it on the end -- type in the find box to
+reach one in a long list. Each tap is saved at once and every other tablet
+follows. A row tapped in this mode never starts a song; **Done** goes back to
+playing. The song being played keeps its place when the list changes around
+it.
 
 The **Find a song** box matches the name, the stage notes, and the programs --
 so "piano" or "002" finds a song you cannot quite name.

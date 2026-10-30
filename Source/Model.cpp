@@ -84,6 +84,7 @@ var EffectDef::toVar() const
                 if (runToKey) o->setProperty ("toKey", true);
                 if (! runHoldLast) o->setProperty ("holdLast", false);
             }
+            if (! followSongKey) o->setProperty ("ownKey", true);
         }
         o->setProperty ("bypassed", bypassed);
         return var (o);
@@ -119,6 +120,7 @@ EffectDef EffectDef::fromVar (const var& v)
         e.runDown    = prop<bool> (v, "down", false) ? 1 : 0;
         e.runToKey   = prop<bool> (v, "toKey", false) ? 1 : 0;
         e.runHoldLast = prop<bool> (v, "holdLast", true);
+        e.followSongKey = ! prop<bool> (v, "ownKey", false);
         e.arpRate    = jlimit (0, 4, prop<int> (v, "rate", 2));
         e.arpMode    = jlimit (0, 4, prop<int> (v, "mode", 0));
         e.arpOctaves = jlimit (1, 4, prop<int> (v, "octaves", 1));
@@ -652,6 +654,7 @@ var SongDef::toVar() const
     if (startSeconds > 0.0) o->setProperty ("start", startSeconds);
     if (trackBpm > 0.0)     o->setProperty ("trackBpm", trackBpm);
     if (transposeTrack)     o->setProperty ("transposeTrack", true);
+    if (keyRoot >= 0)       { o->setProperty ("key", keyRoot); o->setProperty ("keyMode", keyMode); }
     if (! markers.empty())
     {
         juce::Array<juce::var> arr;
@@ -692,6 +695,8 @@ SongDef SongDef::fromVar (const var& v)
         s.startSeconds  = jmax (0.0, (double) o->getProperty ("start"));
         s.trackBpm      = jmax (0.0, (double) o->getProperty ("trackBpm"));
         s.transposeTrack = (bool) o->getProperty ("transposeTrack");
+        s.keyRoot       = o->hasProperty ("key") ? jlimit (-1, 11, (int) o->getProperty ("key")) : -1;
+        s.keyMode       = jmax (0, (int) o->getProperty ("keyMode"));
     }
     return s;
 }

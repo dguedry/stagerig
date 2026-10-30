@@ -44,4 +44,20 @@ bool prerenderPdfPages (const juce::File& pdf, juce::String& error);
 /** The same on a background thread, because a thick score takes seconds. */
 void prerenderPdfPagesAsync (const juce::File& pdf);
 
+/** A note by pitch class (0 = C .. 11 = B), spelt with flats or sharps. */
+juce::String noteNameFor (int pitchClass, bool flats);
+
+/** The pitch class a note name starts with ("Bb", "F#m7" -> 10, 6), or -1 if it is not one. */
+int pitchClassOf (const juce::String& name);
+
+/** The key a ChordPro chart says it is in ({key: G}, {key: Am}): its root, or -1 when it does not say. */
+int chordProKeyRoot (const juce::String& text);
+
+/** A chord name moved by `semitones` -- its root and any slash bass, the rest of the name kept -- spelt with flats or sharps. "N.C." and the like come back as they are. */
+juce::String transposeChordName (const juce::String& chord, int semitones, bool flats);
+
+/** The chart with every [chord] moved from the key it names to `toRoot`, and its {key:} line following.
+    Unchanged when it names no key, or is in that key already. The words are never touched. */
+juce::String transposeChordPro (const juce::String& text, int toRoot, bool flats);
+
 } // namespace perf

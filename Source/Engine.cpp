@@ -437,6 +437,7 @@ void Engine::loadSetup (Setup newSetup)
     }
     teardownRuntimes();
     setup = std::move (newSetup);
+    songInPlay = -1;                        // the set's position says which song, until one is selected
     // A setup with an audio input needs the device's inputs; a keyboard rig does not pay for them.
     for (auto& in : setup.inputs)
         if (in.isAudio()) { ensureAudioInputsOpen(); break; }
@@ -1237,6 +1238,8 @@ void Engine::removeSong (int songIndex)
     }
     if (setup.currentSet >= 0 && setup.currentSongInSet >= (int) setup.sets[(size_t) setup.currentSet].songs.size())
         setup.currentSongInSet = -1;
+    if (songInPlay == songIndex)     songInPlay = -1;
+    else if (songInPlay > songIndex) --songInPlay;
 
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
@@ -1258,6 +1261,8 @@ int Engine::moveSong (int songIndex, int delta)
             if (i == songIndex)   i = to;
             else if (i == to)     i = songIndex;
         }
+    if (songInPlay == songIndex)  songInPlay = to;
+    else if (songInPlay == to)    songInPlay = songIndex;
 
     listeners.call ([] (Listener& l) { l.setupChanged(); });
     return to;
@@ -1359,7 +1364,59 @@ void Engine::setTranspose (int semitones)
 {
     const int st = jlimit (-24, 24, semitones);
     if (liveTranspose.exchange (st) == st) return;
+    applySongKey();                 // the notes the effects hear moved, so the key they play in moves with them
     listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSongKey (int songIndex, int root, int mode)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& s = setup.songs[(size_t) songIndex];
+    s.keyRoot = jlimit (-1, 11, root);
+    s.keyMode = jlimit (0, MidiFx::numScaleModes() - 1, mode);
+    if (songIndex == currentSongIndex()) applySongKey();
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+bool Engine::keyInPlay (int& root, int& mode) const
+{
+    const int song = currentSongIndex();
+    if (song < 0 || ! setup.songs[(size_t) song].hasKey()) return false;
+    const auto& s = setup.songs[(size_t) song];
+    root = ((s.keyRoot + liveTranspose.load()) % 12 + 12) % 12;
+    mode = s.keyMode;
+    return true;
+}
+
+EffectDef Engine::effectiveEffectDef (const EffectDef& d) const
+{
+    if (! d.followSongKey || (d.kind != EffectDef::Kind::scale && d.kind != EffectDef::Kind::run)) return d;
+    int root, mode;
+    if (! keyInPlay (root, mode)) return d;
+    EffectDef e = d;
+    e.scaleRoot = root;
+    e.scaleMode = mode;
+    return e;
+}
+
+void Engine::applySongKey()
+{
+    /* Every one loaded, in every program, not just the ones in play: a
+       preloaded program should not come in on the last song's key. */
+    for (size_t i = 0; i < runtimes.size() && i < setup.inputs.size(); ++i)
+        for (auto& [p, rt] : runtimes[i]->loaded)
+        {
+            if (p < 0 || p >= (int) setup.inputs[i].programs.size()) continue;
+            const auto& pd = setup.inputs[i].programs[(size_t) p];
+            for (size_t s = 0; s < rt->slots.size() && s < pd.slots.size(); ++s)
+            {
+                const auto& defs = pd.slots[s].midiEffects;
+                auto& fxs = rt->slots[s]->midiEffects;
+                for (size_t e = 0; e < fxs.size() && e < defs.size(); ++e)
+                    if (fxs[e]->builtIn != nullptr && defs[e].isBuiltIn())
+                        fxs[e]->builtIn->configure (effectiveEffectDef (defs[e]));
+            }
+        }
 }
 
 void Engine::setSongTranspose (int songIndex, int semitones)
@@ -1373,6 +1430,8 @@ void Engine::setSongTranspose (int songIndex, int semitones)
 
 int Engine::currentSongIndex() const
 {
+    // A song tapped outside the set list is the song in play as much as one stepped to.
+    if (songInPlay >= 0 && songInPlay < (int) setup.songs.size()) return songInPlay;
     if (setup.currentSet < 0 || setup.currentSet >= (int) setup.sets.size()) return -1;
     const auto& songs = setup.sets[(size_t) setup.currentSet].songs;
     if (setup.currentSongInSet < 0 || setup.currentSongInSet >= (int) songs.size()) return -1;
@@ -1383,6 +1442,7 @@ int Engine::currentSongIndex() const
 void Engine::selectSong (int songIndex)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    songInPlay = songIndex;
 
     const auto& s = setup.songs[(size_t) songIndex];
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
@@ -1398,6 +1458,7 @@ void Engine::selectSong (int songIndex)
         resetTapTempo();
     }
     setTranspose (s.transpose);
+    applySongKey();                 // the song's key, for the effects that follow it
     beatsPerBarAtomic.store (jmax (1, s.beatsPerBar));
     // Its backing track is made ready, not started: starting is always on purpose.
     armTrack (songIndex);
@@ -2084,6 +2145,52 @@ void Engine::setSetSongs (int setIndex, const std::vector<int>& songIndices)
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
+void Engine::addSongToSet (int setIndex, int songIndex)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size() || songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.sets[(size_t) setIndex].songs.push_back (songIndex);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::removeFromSet (int setIndex, int position)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size()) return;
+    auto& songs = setup.sets[(size_t) setIndex].songs;
+    if (position < 0 || position >= (int) songs.size()) return;
+    songs.erase (songs.begin() + position);
+    if (setup.currentSet == setIndex)
+    {
+        if (setup.currentSongInSet == position)     setup.currentSongInSet = -1;
+        else if (setup.currentSongInSet > position) --setup.currentSongInSet;
+    }
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::moveInSet (int setIndex, int position, int delta)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size()) return;
+    auto& songs = setup.sets[(size_t) setIndex].songs;
+    const int to = position + delta;
+    if (position < 0 || position >= (int) songs.size() || to < 0 || to >= (int) songs.size() || to == position) return;
+    std::swap (songs[(size_t) position], songs[(size_t) to]);
+    if (setup.currentSet == setIndex)
+    {
+        if (setup.currentSongInSet == position)  setup.currentSongInSet = to;
+        else if (setup.currentSongInSet == to)   setup.currentSongInSet = position;
+    }
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+int Engine::duplicateSet (int setIndex, const String& name)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size()) return -1;
+    SetDef copy = setup.sets[(size_t) setIndex];
+    copy.name = name.isNotEmpty() ? name : copy.name + " copy";
+    setup.sets.push_back (std::move (copy));
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+    return (int) setup.sets.size() - 1;
+}
+
 void Engine::selectSet (int setIndex)
 {
     if (setIndex < -1 || setIndex >= (int) setup.sets.size()) return;
@@ -2345,7 +2452,7 @@ std::unique_ptr<Engine::EffectRuntime> Engine::buildEffect (int inputIndex, int 
     }
     if (def.isBuiltIn())
     {
-        fx->builtIn = MidiFx::create (def);
+        fx->builtIn = MidiFx::create (effectiveEffectDef (def));
         return fx;
     }
     queueLoad (*fx, def.plugin, def.state);
@@ -3155,8 +3262,9 @@ void Engine::setBuiltInMidiEffect (int inputIndex, int program, int slotIndex, i
     ed.arpRate = settings.arpRate; ed.arpMode = settings.arpMode; ed.arpOctaves = settings.arpOctaves; ed.arpGate = settings.arpGate; ed.arpLatch = settings.arpLatch;
     ed.chordType = settings.chordType; ed.scaleRoot = settings.scaleRoot; ed.scaleMode = settings.scaleMode;
     ed.runNotes = settings.runNotes; ed.runBeats = settings.runBeats; ed.runDegree = settings.runDegree; ed.runDown = settings.runDown; ed.runToKey = settings.runToKey; ed.runHoldLast = settings.runHoldLast;
+    ed.followSongKey = settings.followSongKey;
     if (auto* fx = static_cast<EffectRuntime*> (getNode (inputIndex, program, ProgramDef::midiChainOf (slotIndex), effect)))
-        if (fx->builtIn != nullptr) fx->builtIn->configure (ed);
+        if (fx->builtIn != nullptr) fx->builtIn->configure (effectiveEffectDef (ed));
     notifyContent (inputIndex, program);
 }
 

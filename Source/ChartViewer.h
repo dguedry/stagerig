@@ -19,7 +19,8 @@ void showChartViewer (Engine&, int songIndex, int chartIndex);
 class ChartTextView : public juce::Component
 {
 public:
-    void setText (const juce::String& text, bool chordPro);
+    /** With a key (0..11) the chords of a ChordPro chart that names its own key are shown moved to it, and a line says so. */
+    void setText (const juce::String& text, bool chordPro, int keyRoot = -1, bool flats = false);
     void setScale (float);                       // 1 = 15 px text
     float getScale() const { return scale; }
     int preferredHeight() const;

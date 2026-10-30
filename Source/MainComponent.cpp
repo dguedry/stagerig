@@ -763,7 +763,9 @@ private:
             icon.setAlpha (def.bypassed ? 0.45f : 1.0f);
             if (def.isBuiltIn())
             {
-                name.setText (def.displayName() + "  [" + MidiFx::describe (def) + "]", dontSendNotification);
+                int kr, km;
+                const bool inSongKey = def.followSongKey && (def.kind == EffectDef::Kind::scale || def.kind == EffectDef::Kind::run) && chain.engine.keyInPlay (kr, km);
+                name.setText (def.displayName() + "  [" + MidiFx::describe (chain.engine.effectiveEffectDef (def)) + (inSongKey ? ", the song's key" : "") + "]", dontSendNotification);
                 name.setTooltip (def.kind == EffectDef::Kind::arpeggio ? "Plays the notes you hold one at a time, in time with the rig's tempo"
                                : def.kind == EffectDef::Kind::chord    ? "Every note you play becomes this chord"
                                : def.kind == EffectDef::Kind::run      ? "Each key you press starts a run up (or down) the scale from it, in time; the last note holds while the key does. A chord is a run in each voice."
@@ -884,10 +886,13 @@ private:
         else
         {
             PopupMenu root, mode;
-            for (int i = 0; i < 12; ++i) root.addItem (700 + i, MidiFx::noteNames[i], true, def.scaleRoot == i);
-            for (int i = 0; i < MidiFx::numScaleModes(); ++i) mode.addItem (800 + i, MidiFx::scaleModes[i], true, def.scaleMode == i);
-            m.addSubMenu ("Key", root);
-            m.addSubMenu ("Scale", mode);
+            int kr, km;
+            const bool songHasKey = engine.keyInPlay (kr, km);
+            for (int i = 0; i < 12; ++i) root.addItem (700 + i, MidiFx::noteNames[i], true, ! def.followSongKey && def.scaleRoot == i);
+            for (int i = 0; i < MidiFx::numScaleModes(); ++i) mode.addItem (800 + i, MidiFx::scaleModes[i], true, ! def.followSongKey && def.scaleMode == i);
+            m.addItem (1400, "Follow the song's key" + (songHasKey ? "  (" + MidiFx::keyName (kr, km) + " now)" : String ("  (this song has none, so its own key is used)")), true, def.followSongKey);
+            m.addSubMenu ("Key  (its own; picking one stops it following the song)", root);
+            m.addSubMenu ("Scale  (its own)", mode);
             if (def.kind == EffectDef::Kind::run)
             {
                 PopupMenu notes, takes, starts;
@@ -921,8 +926,9 @@ private:
             else if (r >= 400 && r < 500) d.arpGate = r - 400;
             else if (r == 500)            d.arpLatch = ! d.arpLatch;
             else if (r >= 600 && r < 700) d.chordType = r - 600;
-            else if (r >= 700 && r < 800) d.scaleRoot = r - 700;
-            else if (r >= 800 && r < 900) d.scaleMode = r - 800;
+            else if (r >= 700 && r < 800) { d.scaleRoot = r - 700; d.followSongKey = false; }
+            else if (r >= 800 && r < 900) { d.scaleMode = r - 800; d.followSongKey = false; }
+            else if (r == 1400)           d.followSongKey = ! d.followSongKey;
             else if (r >= 900 && r < 1000) d.runNotes = r - 900;
             else if (r >= 1000 && r < 1100) { const float options[] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f }; d.runBeats = options[jlimit (0, 4, r - 1000)]; }
             else if (r >= 1300 && r < 1400) d.runDegree = r - 1300;

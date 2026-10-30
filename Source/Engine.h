@@ -257,6 +257,16 @@ public:
     void setSongNotes (int songIndex, const juce::String&);
     void setSongTempo (int songIndex, double bpm);     // 0 = leave the tempo alone
     void setSongTranspose (int songIndex, int semitones);
+    /** The song's key: its root (0 = C .. 11 = B, -1 = none) and scale (an index
+        into MidiFx::scaleModes). The Scale and Run effects that follow the song's
+        key take it up when the song is selected -- now, if it is the song in play
+        -- and a chord chart that names its key is shown in it. */
+    void setSongKey (int songIndex, int root, int mode);
+    /** The key the effects are in for the song in play: its key moved by the
+        live transpose, as the notes they hear are. False when it has none. */
+    bool keyInPlay (int& root, int& mode) const;
+    /** `d` as the engine runs it: a Scale or Run that follows the song's key is in the key in play. */
+    EffectDef effectiveEffectDef (const EffectDef& d) const;
     /** The keyboards' notes shifted by this many semitones on the way in: the
         song's setting, or a change made on the night. The backing track and
         the audio inputs are not shifted. A note held across a change is let
@@ -293,6 +303,15 @@ public:
     int moveSet (int setIndex, int delta);
     void setSetName (int setIndex, const juce::String&);
     void setSetSongs (int setIndex, const std::vector<int>& songIndices);
+    /** Set-list editing a step at a time, as from the stand: a song put on the
+        end, one taken out, one moved a step. The position being played follows
+        the song it was on; taking that song out leaves no position (the song
+        itself keeps playing). */
+    void addSongToSet (int setIndex, int songIndex);
+    void removeFromSet (int setIndex, int position);
+    void moveInSet (int setIndex, int position, int delta);
+    /** A copy of a set list under a new name -- last gig's set with three changes. Returns its index, or -1. */
+    int duplicateSet (int setIndex, const juce::String& name);
 
     /** Which set is being played and how far into it. -1 = none. */
     int getCurrentSet() const        { return setup.currentSet; }
@@ -715,6 +734,8 @@ private:
     std::atomic<bool> tapLearnArmed { false };
     std::atomic<bool> panicRequested { false };
     std::atomic<int> liveTranspose { 0 };
+    /** The song last selected, whether from the set list or outside it: the one in play. -1 = none yet. */
+    int songInPlay = -1;
     std::atomic<int> lateBlocks { 0 };
     std::atomic<int> lastBlockSamples { 0 };
     timespec blockDeadline {};
@@ -736,6 +757,8 @@ private:
 
     // External instruments
     MidiOuts midiOuts;
+    /** Every loaded Scale and Run that follows the song's key is told the key in play. */
+    void applySongKey();
     Recorder recorder;
     std::unique_ptr<ableton::Link> link;
     std::atomic<int> linkPeers { 0 };

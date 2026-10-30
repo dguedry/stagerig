@@ -44,6 +44,7 @@ struct EffectDef
     int runDown = 0;                  // 0 = up, 1 = down
     int runToKey = 0;                 // 0 = starts on the key, 1 = lands on the key
     bool runHoldLast = true;          // the last note sounds for as long as the key is held
+    bool followSongKey = true;        // scale and run: in the song's key when the song has one, else their own
 
     bool isSend() const               { return kind == Kind::midiSend; }
     bool isBuiltIn() const            { return kind == Kind::arpeggio || kind == Kind::chord || kind == Kind::scale || kind == Kind::run; }
@@ -455,6 +456,14 @@ struct SongDef
     /** The song's transpose also moves the files' pitch (and the MIDI files'
         notes, drums aside), so one setting takes the whole band down a step. */
     bool transposeTrack = false;
+    /** The song's key: its root (0 = C .. 11 = B, or -1 for none) and its
+        scale (an index into MidiFx::scaleModes). The Scale and Run effects
+        that follow the song's key play in it, moved with the transpose as
+        the notes they hear are; a chord chart that names its own key is
+        shown in it. */
+    int keyRoot = -1;
+    int keyMode = 0;
+    bool hasKey() const { return keyRoot >= 0; }
     /** Sections of the backing track, by where each starts. */
     std::vector<MarkerDef> markers;
 

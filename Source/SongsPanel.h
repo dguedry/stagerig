@@ -87,6 +87,12 @@ private:
 
     /** The song a row of the set list refers to, or -1. */
     int songAtSetPosition (int position) const;
+    /** The songs list shows the songs that match the find box: these, by row. */
+    std::vector<int> shownSongs;
+    int songAtRow (int row) const        { return row >= 0 && row < (int) shownSongs.size() ? shownSongs[(size_t) row] : -1; }
+    int rowOfSong (int songIndex) const;
+    bool songMatches (const SongDef&, const juce::String& query) const;
+    juce::TextEditor findBox;
 
     Engine& engine;
 

@@ -4,6 +4,7 @@
 #include "TempoDetect.h"
 #include "Stretch.h"
 #include "MidiFx.h"
+#include "Charts.h"
 #include <ableton/Link.hpp>
 #include "PluginIcons.h"
 #include "MappingSuggestions.h"
@@ -1488,6 +1489,34 @@ int main()
             CHECK (engine.moveSong (last, 1) == last);
             CHECK (namesInSet() == before);
 
+            // Edited a step at a time, as from the stand: the position being played follows its song.
+            {
+                const int a = engine.addSong ("Edit a"), b = engine.addSong ("Edit b"), c = engine.addSong ("Edit c");
+                const int es = engine.addSet ("Edited");
+                engine.addSongToSet (es, a); engine.addSongToSet (es, b); engine.addSongToSet (es, c);
+                engine.addSongToSet (es, 9999);                                           // no such song: ignored
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a, b, c }));
+                engine.selectSet (es);
+                engine.selectSongInSet (1);                                               // playing b
+                engine.moveInSet (es, 1, 1);                                              // b moves last
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a, c, b }) && engine.getCurrentSongInSet() == 2);
+                engine.moveInSet (es, 0, 1);                                              // a and c swap around the playing one
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ c, a, b }) && engine.getCurrentSongInSet() == 2);
+                engine.removeFromSet (es, 0);                                             // one before it goes: the position moves up
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a, b }) && engine.getCurrentSongInSet() == 1);
+                const int copy = engine.duplicateSet (es, "Edited again");
+                CHECK (copy >= 0 && engine.getSets()[(size_t) copy].name == "Edited again" && engine.getSets()[(size_t) copy].songs == std::vector<int> ({ a, b }));
+                const int copy2 = engine.duplicateSet (es, "");
+                CHECK (engine.getSets()[(size_t) copy2].name == "Edited copy");
+                engine.removeFromSet (es, 1);                                             // the one playing goes: no position, the song plays on
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a }) && engine.getCurrentSongInSet() == -1 && engine.currentSongIndex() == b);
+                engine.moveInSet (es, 0, 1);                                              // off the end: nothing
+                CHECK (engine.getSets()[(size_t) es].songs == std::vector<int> ({ a }));
+                engine.removeSet (copy2); engine.removeSet (copy); engine.removeSet (es);
+                engine.removeSong (c); engine.removeSong (b); engine.removeSong (a);
+                engine.selectSet (st);
+            }
+
             // Sets reorder too, and keep playing the one you were playing.
             engine.addSet ("Second");
             engine.selectSet (st);
@@ -1965,14 +1994,15 @@ int main()
         // Run, as on the rig: C phrygian, two octaves up from the key in a beat at 90, 128-sample blocks.
         // Every note the run starts must be let go, whether the key is held past the run or released mid-way.
         {
-            auto runAndCount = [&] (double releaseAfterSeconds, int& stuck, StringArray& played)
+            auto runAndCount = [&] (double releaseAfterSeconds, bool holdLast, int& stuck, StringArray& played, double& lastOffSeconds)
             {
                 /* Counted in the order the plugin hears them: a note-off that
                    comes before its note-on (the old build stepped the run at
                    sample 0, ahead of the key that started it) leaves that
                    note sounding, and counts as stuck here too. */
-                EffectDef d; d.kind = EffectDef::Kind::run; d.scaleRoot = 0; d.scaleMode = 6; d.runNotes = 15; d.runBeats = 1.0f; d.runDown = 0; d.runToKey = 0;
+                EffectDef d; d.kind = EffectDef::Kind::run; d.scaleRoot = 0; d.scaleMode = 6; d.runNotes = 15; d.runBeats = 1.0f; d.runDown = 0; d.runToKey = 0; d.runHoldLast = holdLast;
                 auto fx = MidiFx::create (d);
+                lastOffSeconds = -1.0;
                 int held[128] = {};
                 MidiBuffer in, out;
                 in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 37);
@@ -1988,25 +2018,30 @@ int main()
                     {
                         const auto msg = m.getMessage();
                         if (msg.isNoteOn()) { ++held[msg.getNoteNumber()]; played.add (String (msg.getNoteNumber())); }
-                        else if (msg.isNoteOff() && held[msg.getNoteNumber()] > 0) --held[msg.getNoteNumber()];
+                        else if (msg.isNoteOff() && held[msg.getNoteNumber()] > 0) { --held[msg.getNoteNumber()]; lastOffSeconds = (b * 128 + m.samplePosition) / 48000.0; }
                         else if (msg.isNoteOff()) held[msg.getNoteNumber()] = 1000;   // let go before it began: it will never be let go
                     }
                 }
                 stuck = 0;
                 for (int n = 0; n < 128; ++n) if (held[n] != 0) ++stuck;
             };
-            int stuck = -1; StringArray played;
-            runAndCount (2.0, stuck, played);
-            std::printf ("     rig run (key held 2 s): %s -> %d note(s) left sounding\n", played.joinIntoString (" ").toRawUTF8(), stuck);
-            CHECK (played.size() == 15 && stuck == 0);
+            // The run takes a beat at 90: 0.667 s, a step of 0.048 s. The last note lifts with the key, or a step after landing.
+            int stuck = -1; StringArray played; double lastOff = 0.0;
+            runAndCount (2.0, true, stuck, played, lastOff);
+            std::printf ("     rig run (key held 2 s): %s -> %d note(s) left sounding, last lifted at %.3f s\n", played.joinIntoString (" ").toRawUTF8(), stuck, lastOff);
+            CHECK (played.size() == 15 && stuck == 0 && lastOff > 1.9);
             played.clear();
-            runAndCount (0.2, stuck, played);
-            std::printf ("     rig run (key let go at 0.2 s): %d notes played, %d left sounding\n", played.size(), stuck);
-            CHECK (stuck == 0);
+            runAndCount (2.0, false, stuck, played, lastOff);
+            std::printf ("     rig run (key held 2 s, not holding the last): %d notes played, %d left sounding, last lifted at %.3f s\n", played.size(), stuck, lastOff);
+            CHECK (played.size() == 15 && stuck == 0 && lastOff > 0.65 && lastOff < 0.8);
             played.clear();
-            runAndCount (0.01, stuck, played);
-            std::printf ("     rig run (key let go at once): %d notes played, %d left sounding\n", played.size(), stuck);
-            CHECK (stuck == 0);
+            runAndCount (0.2, true, stuck, played, lastOff);
+            std::printf ("     rig run (key let go at 0.2 s): %d notes played, %d left sounding, last lifted at %.3f s\n", played.size(), stuck, lastOff);
+            CHECK (played.size() == 15 && stuck == 0 && lastOff > 0.65 && lastOff < 0.8);       // a tap plays the whole run
+            played.clear();
+            runAndCount (0.01, true, stuck, played, lastOff);
+            std::printf ("     rig run (key let go at once): %d notes played, %d left sounding, last lifted at %.3f s\n", played.size(), stuck, lastOff);
+            CHECK (played.size() == 15 && stuck == 0 && lastOff > 0.65 && lastOff < 0.8);
         }
         // Arpeggiator: C and E held, eighths at 120 (a step every 0.25 s): four notes a second, alternating.
         {
@@ -2933,6 +2968,123 @@ int main()
                 engine.removeSlot (0, 91, 0);
                 CHECK (engine.getPlugin (0, 91, midiChain, 0) == nullptr);
                 engine.clearProgram (0, 91);
+            }
+            // --- a built-in run before the sound, as on a rig: the last note holds while the key is held ---
+            {
+                engine.clearProgram (0, 92);
+                engine.selectProgram (0, 92); settle();
+                CHECK (engine.addExternalSlot (0, 92, port));
+                CHECK (engine.addBuiltInMidiEffect (0, 92, 0, EffectDef::Kind::run));
+                EffectDef rd; rd.kind = EffectDef::Kind::run; rd.scaleRoot = 0; rd.scaleMode = 0; rd.runNotes = 15; rd.runBeats = 1.0f; rd.runHoldLast = true;
+                engine.setBuiltInMidiEffect (0, 92, 0, 0, rd);
+                const bool linkWasOn = engine.isLinkEnabled();
+                engine.setLinkEnabled (false);
+                engine.setTempoBpm (90.0);
+                renderAndWait();
+                catcher.take();
+                const double sr = engine.getSampleRate();
+                /* Rendered at the pace of real time: the port's sender orders
+                   what it is handed by the clock, as a device needs, so blocks
+                   rendered in a burst would reach it out of order. */
+                auto renderSeconds = [&] (double seconds)
+                {
+                    AudioBuffer<float> b (2, kBlock);
+                    const double t0 = Time::getMillisecondCounterHiRes(), blockMs = 1000.0 * kBlock / sr;
+                    for (int i = 0, n = (int) (seconds * sr / kBlock); i < n; ++i)
+                    {
+                        b.clear();
+                        engine.renderBlockForTesting (b.getArrayOfWritePointers(), 2, kBlock);
+                        while (Time::getMillisecondCounterHiRes() < t0 + (i + 1) * blockMs) Thread::sleep (1);
+                    }
+                    Thread::sleep (200);
+                    return catcher.take();
+                };
+                engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));
+                auto held = renderSeconds (2.0);                              // the key stays down well past the beat
+                int ons = 0, lastOn = -1; String order;
+                for (auto& m : held) { if (m.isNoteOn()) { ++ons; lastOn = m.getNoteNumber(); order << m.getNoteNumber() << " "; } else if (m.isNoteOff()) order << "-" << m.getNoteNumber() << " "; }
+                const bool lastLetGo = has (held, [lastOn] (const MidiMessage& m) { return m.isNoteOff() && m.getNoteNumber() == lastOn; });
+                std::printf ("     run to the sound, key held: %s\n", order.toRawUTF8());
+                CHECK (ons == 15 && lastOn == 84 && ! lastLetGo);
+                engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+                auto released = renderAndWait();
+                CHECK (has (released, [] (const MidiMessage& m) { return m.isNoteOff() && m.getNoteNumber() == 84; }));
+
+                /* The song's key: a run that follows it plays in it. C pressed in
+                   D major starts from B, the scale note below; with the keyboards
+                   down a tone the key moves too (C major), and the C arrives as
+                   Bb, so the run starts from A. Its own key again when the song
+                   has none. */
+                auto noteOn = [] (int n, int ch) { return [n, ch] (const MidiMessage& m) { return m.isNoteOn() && m.getNoteNumber() == n && m.getChannel() == ch; }; };
+                const int keyed = engine.addSong ("Keyed");
+                engine.setSongProgram (keyed, 0, 92);
+                engine.setSongKey (keyed, 2, 0);
+                const int keySet = engine.addSet ("Keys");
+                engine.setSetSongs (keySet, { keyed });
+                engine.selectSet (keySet);
+                engine.selectSongInSet (0); settle();
+                CHECK (engine.currentSongIndex() == keyed);
+                int kr = -1, km = -1;
+                CHECK (engine.keyInPlay (kr, km) && kr == 2 && km == 0);
+                {
+                    // A song tapped outside the set list is the song in play, key and all; the set keeps its place.
+                    const int outside = engine.addSong ("Outside the set");
+                    engine.setSongKey (outside, 9, 1);
+                    engine.selectSong (outside);
+                    CHECK (engine.currentSongIndex() == outside && engine.getCurrentSongInSet() == 0);
+                    CHECK (engine.keyInPlay (kr, km) && kr == 9 && km == 1);
+                    engine.selectSongInSet (0);
+                    CHECK (engine.currentSongIndex() == keyed && engine.keyInPlay (kr, km) && kr == 2);
+                    engine.removeSong (outside);
+                    CHECK (engine.currentSongIndex() == keyed);
+                }
+                CHECK (engine.effectiveEffectDef (rd).scaleRoot == 2 && engine.effectiveEffectDef (rd).scaleMode == 0);
+                renderAndWait();
+                engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));
+                auto inD = renderSeconds (0.3);
+                engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+                renderSeconds (0.2);
+                String firstNotes;
+                for (auto& m : inD) if (m.isNoteOn()) firstNotes << m.getNoteNumber() << " ";
+                std::printf ("     run in the song's key (D major) from C: %s\n", firstNotes.toRawUTF8());
+                CHECK (has (inD, noteOn (59, 1)) && has (inD, noteOn (61, 1)) && ! has (inD, noteOn (60, 1)));
+                engine.setTranspose (-2);
+                CHECK (engine.keyInPlay (kr, km) && kr == 0 && engine.effectiveEffectDef (rd).scaleRoot == 0);
+                engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 90));
+                auto shifted = renderSeconds (0.3);
+                engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+                renderSeconds (0.2);
+                CHECK (has (shifted, noteOn (57, 1)) && has (shifted, noteOn (59, 1)));
+                engine.setTranspose (0);
+                EffectDef own = rd; own.followSongKey = false; own.scaleRoot = 7;
+                CHECK (engine.effectiveEffectDef (own).scaleRoot == 7);
+                engine.setSongKey (keyed, -1, 0);
+                CHECK (! engine.keyInPlay (kr, km) && engine.effectiveEffectDef (rd).scaleRoot == rd.scaleRoot);
+                engine.removeSet (keySet);
+                engine.removeSong (keyed);
+
+                engine.clearProgram (0, 92);
+                engine.setLinkEnabled (linkWasOn);
+            }
+
+            // --- a chord chart moved to the song's key: the chords, never the words -------------------
+            {
+                CHECK (transposeChordName ("Am7", 2, false) == "Bm7");
+                CHECK (transposeChordName ("F#m/C#", 3, true) == "Am/E");
+                CHECK (transposeChordName ("Bb", 2, false) == "C" && transposeChordName ("E", 1, true) == "F");
+                CHECK (transposeChordName ("N.C.", 5, false) == "N.C." && transposeChordName ("|", 5, false) == "|");
+                CHECK (transposeChordName ("D/F#", 7, true) == "A/C#" && transposeChordName ("Bb7", 1, false) == "B7" && transposeChordName ("Ab", 1, false) == "A");   // sharp stays sharp, flat stays flat
+                CHECK (noteNameFor (10, true) == "Bb" && noteNameFor (10, false) == "A#" && pitchClassOf ("Ebmaj7") == 3 && pitchClassOf ("x") == -1);
+                const String cho = "{title: X}\n{key: G}\n[G]Hel[D/F#]lo [Em7]there\nno chords here [Bm]\n";
+                CHECK (chordProKeyRoot (cho) == 7 && chordProKeyRoot ("{title: Y}\n[C]x") == -1 && chordProKeyRoot ("{key: Am}") == 9);
+                const String inBb = transposeChordPro (cho, 10, true);
+                std::printf ("     chart in Bb:\n%s", inBb.toRawUTF8());
+                CHECK (inBb == "{title: X}\n{key: Bb}\n[Bb]Hel[F/A]lo [Gm7]there\nno chords here [Dm]\n");
+                CHECK (transposeChordPro (cho, 7, true) == cho);                                  // already in G
+                CHECK (transposeChordPro ("[C]no key named", 2, false) == "[C]no key named");    // nowhere to move from
+                CHECK (transposeChordPro ("{key: Am}\n[Am]x [E7]y", 11, false) == "{key: Bm}\n[Bm]x [F#7]y");
+                CHECK (MidiFx::keyPrefersFlats (10, 0) && MidiFx::keyPrefersFlats (7, 1) && ! MidiFx::keyPrefersFlats (7, 0) && ! MidiFx::keyPrefersFlats (9, 1));
+                CHECK (MidiFx::keyName (2, 1) == "D natural minor" && MidiFx::keyIsMinor (1) && ! MidiFx::keyIsMinor (0));
             }
             // --- a MIDI file part to a MIDI device: an instrument in the track's program listens to the file's channel ---
             {
