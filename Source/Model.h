@@ -58,7 +58,7 @@ struct EffectDef
     std::vector<PhraseNote> phraseNotes;   // the file's notes, from beat 0, in order
     juce::String phraseName;          // the file it came from
     float phraseBeats = 0.0f;         // how long the phrase is, in whole beats
-    int phraseRoot = -1;              // the file's note the key pressed stands for; -1 = the first note in the file
+    int phraseRoot = -1;              // the file's note the key pressed stands for; -1 = the first note in the file; -2 = fixed (drums: every key plays it as written)
     bool phraseStop = false;          // letting go of the key stops the phrase (else a tap plays the whole of it)
     bool phraseLoop = false;          // repeats while the key is held
 

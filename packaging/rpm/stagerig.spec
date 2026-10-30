@@ -127,6 +127,7 @@ xvfb-run -a ctest --test-dir %{__cmake_builddir} --output-on-failure
 %{_datadir}/icons/hicolor/*/apps/stagerig.*
 %{_mandir}/man1/StageRig.1*
 %{_mandir}/man1/stagerig-plugin-host.1*
+%{_datadir}/stagerig/
 
 %changelog
 * Sun Oct 18 2026 Donnie Guedry <dguedry@gmail.com> - 0.1.57-1

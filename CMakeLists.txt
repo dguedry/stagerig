@@ -248,6 +248,8 @@ install(TARGETS StageRig StageRigPluginHost RUNTIME DESTINATION bin)
 install(FILES Resources/io.github.dguedry.StageRig.desktop DESTINATION share/applications)
 install(FILES Resources/io.github.dguedry.StageRig.metainfo.xml DESTINATION share/metainfo)
 install(FILES docs/StageRig.1 docs/stagerig-plugin-host.1 DESTINATION share/man/man1)
+# The built-in phrases for the Phrase effect (StageRig finds them in share/stagerig beside its bin).
+install(DIRECTORY Resources/phrases/ DESTINATION share/stagerig/phrases FILES_MATCHING PATTERN "*.mid")
 install(FILES Resources/stagerig.svg DESTINATION share/icons/hicolor/scalable/apps)
 foreach(size 16 24 32 48 64 128 256 512)
     install(FILES Resources/stagerig-${size}.png DESTINATION share/icons/hicolor/${size}x${size}/apps RENAME stagerig.png)

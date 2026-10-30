@@ -91,6 +91,7 @@ var EffectDef::toVar() const
             if (phraseName.isNotEmpty()) o->setProperty ("name", phraseName);
             o->setProperty ("beats", phraseBeats);
             if (phraseRoot >= 0) o->setProperty ("root", phraseRoot);
+            if (phraseRoot == -2) o->setProperty ("fixed", true);
             if (phraseStop) o->setProperty ("stop", true);
             if (phraseLoop) o->setProperty ("loop", true);
             Array<var> notes;
@@ -156,7 +157,7 @@ EffectDef EffectDef::fromVar (const var& v)
         {
             e.phraseName = propStr (v, "name");
             e.phraseBeats = jlimit (0.0f, 1024.0f, (float) prop<double> (v, "beats", 0.0));
-            e.phraseRoot = jlimit (-1, 127, prop<int> (v, "root", -1));
+            e.phraseRoot = prop<bool> (v, "fixed", false) ? -2 : jlimit (-1, 127, prop<int> (v, "root", -1));
             e.phraseStop = prop<bool> (v, "stop", false);
             e.phraseLoop = prop<bool> (v, "loop", false);
             if (auto* notes = v.getProperty ("notes", var()).getArray())

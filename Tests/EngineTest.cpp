@@ -2200,6 +2200,38 @@ int main()
                 }
                 CHECK (ons == 6 && offs == 6);
             }
+            // Fixed pitch (drums): every key plays it as written, at the key's velocity.
+            {
+                d.phraseRoot = -2;
+                auto fx = MidiFx::create (d);
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, 40, (uint8) 100), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                int note = -1; for (const auto m : out) if (m.getMessage().isNoteOn()) note = m.getMessage().getNoteNumber();
+                CHECK (note == 60);
+                CHECK (MidiFx::describe (d).contains ("as written whatever the key"));
+            }
+            // The built-in library: found from the build tree, every file reads, each folder has some.
+            {
+                const auto folder = MidiFx::phraseLibraryFolder();
+                CHECK (folder.isDirectory());
+                int files = 0, groups = 0;
+                for (const auto& g : folder.findChildFiles (File::findDirectories, false))
+                {
+                    ++groups;
+                    for (const auto& f : g.findChildFiles (File::findFiles, false, "*.mid"))
+                    {
+                        EffectDef lib; lib.kind = EffectDef::Kind::phrase;
+                        String err;
+                        const bool ok = MidiFx::importPhrase (f, lib, err);
+                        if (! ok) std::printf ("       %s: %s\n", f.getFileName().toRawUTF8(), err.toRawUTF8());
+                        CHECK (ok && ! lib.phraseNotes.empty() && lib.phraseBeats >= 1.0f && lib.phraseBeats <= 4.0f);
+                        ++files;
+                    }
+                }
+                std::printf ("     built-in phrases: %d in %d folders at %s\n", files, groups, folder.getFullPathName().toRawUTF8());
+                CHECK (groups == 3 && files >= 30);
+            }
             // Nothing loaded: the keys pass straight through.
             {
                 EffectDef empty; empty.kind = EffectDef::Kind::phrase;

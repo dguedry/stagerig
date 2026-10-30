@@ -56,6 +56,9 @@ public:
     /** Phrase: reads a MIDI file's notes into `def` (every track, from its first note, at the file's beat), naming it after the file.
         False, with a reason, when it cannot be read or has no notes. Up to 512 notes. */
     static bool importPhrase (const juce::File& file, EffectDef& def, juce::String& error);
+    /** The folder of built-in phrases (Licks, Comping, Drums, each a folder of MIDI files): installed beside the
+        program, in share/stagerig/phrases, or in the source tree. A non-existent file when there is none. */
+    static juce::File phraseLibraryFolder();
     static int numArpRates();
     static int numArpModes();
     static int numChordTypes();

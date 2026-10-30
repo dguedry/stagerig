@@ -389,11 +389,20 @@ transpose, curve and channels decide which notes enter at all. Left to right:
   first note), and the setup keeps them, so the file can go. The phrase
   **begins on the key pressed** -- its first note moves to the key, and the
   rest follow -- or plays **as written** with the key C4 leaving it as it
-  is and the others moving it. It runs at the rig's tempo and at the key's
-  velocity (a key at 100 plays the file as recorded). A tap plays the whole
-  of it; **Stop when the key is let go** cuts it instead, and **Repeat while
-  the key is held** rounds again until the key lifts. Each shows its settings
-  in words on its row.
+  is and the others moving it, or **fixed**, every key playing it as
+  written (drums). It runs at the rig's tempo and at the key's velocity (a
+  key at 100 plays the file as recorded). A tap plays the whole of it;
+  **Stop when the key is let go** cuts it instead, and **Repeat while the
+  key is held** rounds again until the key lifts. **Built-in phrases**
+  under **Settings...** has a few dozen to start from: **Licks** (trills,
+  turns, a gliss, a blues lick, a horn stab, bass walks), **Comping** (stabs
+  and rhythms on a chord, so one key plays a shuffle on the 7th) and
+  **Drums** (rock, shuffle, swing, bossa, funk, a fill), the drums with the
+  pitch fixed and repeating while the key is held. Licks and comping are
+  written in C, so C4 plays them as they are and every other key moves
+  them. They are MIDI files in `share/stagerig/phrases`; add your own to
+  the folder and they are in the menu. Each shows its settings in words on
+  its row.
 - **Send to a MIDI device too** -- the instrument's notes go out of a MIDI port
   as well, so a hardware synth doubles the plugin, or a lighting controller
   follows the keys.

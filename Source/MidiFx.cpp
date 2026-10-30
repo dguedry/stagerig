@@ -758,6 +758,7 @@ namespace
             }
             t.beats = d.phraseBeats > 0.0f ? d.phraseBeats : std::ceil (end);
             t.root = d.phraseRoot >= 0 ? d.phraseRoot : t.count > 0 ? t.note[0] : 60;
+            t.fixed = d.phraseRoot == -2;                                   // drums: every key plays it as written
             active.store (1 - active.load());
             stop.store (d.phraseStop);
             loop.store (d.phraseLoop);
@@ -782,7 +783,7 @@ namespace
                     if (v == nullptr) continue;
                     if (v->key >= 0) release (out, *v, meta.samplePosition);
                     v->key = m.getNoteNumber(); v->channel = ch; v->velocity = (int) m.getVelocity();
-                    v->transpose = v->key - t.root; v->elapsed = -(double) meta.samplePosition; v->keyUp = false;
+                    v->transpose = t.fixed ? 0 : v->key - t.root; v->elapsed = -(double) meta.samplePosition; v->keyUp = false;
                     v->onDone.reset(); v->offDone.reset();
                     if (t.count == 0) { out.addEvent (m, meta.samplePosition); v->key = -1; }       // nothing loaded: the key itself
                 }
@@ -852,7 +853,7 @@ namespace
 
     private:
         static constexpr int kMaxNotes = 512, kVoices = 16, kMaxSounding = 32;
-        struct Table { int count = 0; float beat[kMaxNotes], length[kMaxNotes]; int note[kMaxNotes], velocity[kMaxNotes]; float beats = 0.0f; int root = 60; };
+        struct Table { int count = 0; float beat[kMaxNotes], length[kMaxNotes]; int note[kMaxNotes], velocity[kMaxNotes]; float beats = 0.0f; int root = 60; bool fixed = false; };
         struct Voice
         {
             int key = -1, channel = 1, velocity = 100, transpose = 0;
@@ -969,7 +970,7 @@ String MidiFx::describe (const EffectDef& d)
             const float b = d.phraseBeats;
             const String beats = std::abs (b - 1.0f) < 0.01f ? "a beat" : std::abs (b - 4.0f) < 0.01f ? "a bar" : std::abs (b - std::round (b)) < 0.01f ? String ((int) std::round (b)) + " beats" : String (b, 2) + " beats";
             return d.phraseName + ": " + String (n) + (n == 1 ? " note" : " notes") + " over " + beats
-                   + (d.phraseRoot < 0 ? ", starting on the key" : ", as written from " + MidiMessage::getMidiNoteName (d.phraseRoot, true, true, 3))
+                   + (d.phraseRoot == -2 ? ", as written whatever the key" : d.phraseRoot < 0 ? ", starting on the key" : ", as written from " + MidiMessage::getMidiNoteName (d.phraseRoot, true, true, 3))
                    + (d.phraseLoop ? ", repeating" : "") + (d.phraseStop ? ", stops with the key" : "");
         }
         default: return {};
@@ -1011,6 +1012,20 @@ bool MidiFx::importPhrase (const File& file, EffectDef& def, String& error)
     def.phraseBeats = jmax (1.0f, std::ceil (end - 0.001f));
     def.phraseName = file.getFileNameWithoutExtension();
     return true;
+}
+
+File MidiFx::phraseLibraryFolder()
+{
+    const File exe = File::getSpecialLocation (File::currentExecutableFile);
+    std::vector<File> candidates;
+    candidates.push_back (exe.getParentDirectory().getParentDirectory().getChildFile ("share/stagerig/phrases"));   // bin/../share
+    candidates.push_back (File ("/usr/local/share/stagerig/phrases"));
+    candidates.push_back (File ("/usr/share/stagerig/phrases"));
+    File dir = exe.getParentDirectory();
+    for (int up = 0; up < 6; ++up, dir = dir.getParentDirectory())                              // the source tree, from a build folder
+        candidates.push_back (dir.getChildFile ("Resources/phrases"));
+    for (const auto& c : candidates) if (c.isDirectory()) return c;
+    return {};
 }
 
 } // namespace perf

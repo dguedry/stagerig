@@ -899,12 +899,35 @@ private:
         }
         else if (def.kind == EffectDef::Kind::phrase)
         {
-            PopupMenu root;
+            PopupMenu root, library;
             m.addItem (1800, def.phraseNotes.empty() ? "Load a MIDI file..." : "Load another MIDI file...  (now " + def.phraseName + ")");
-            root.addItem (1900, "Begins on the key pressed  (the file's first note moves to it)", true, def.phraseRoot < 0);
+            /* The built-in ones, a submenu per folder: licks and comping written
+               in C, drums with the pitch fixed. The list is read when the menu
+               opens, so a file dropped into the folder is there next time. */
+            libraryFiles.clear();
+            if (const auto folder = MidiFx::phraseLibraryFolder(); folder.isDirectory())
+            {
+                auto groups = folder.findChildFiles (File::findDirectories, false);
+                groups.sort();
+                for (const auto& g : groups)
+                {
+                    PopupMenu one;
+                    auto files = g.findChildFiles (File::findFiles, false, "*.mid");
+                    files.sort();
+                    for (const auto& f : files)
+                    {
+                        one.addItem (2100 + (int) libraryFiles.size(), f.getFileNameWithoutExtension(), true, def.phraseName == f.getFileNameWithoutExtension());
+                        libraryFiles.push_back (f);
+                    }
+                    library.addSubMenu (g.getFileName(), one);
+                }
+            }
+            m.addSubMenu ("Built-in phrases", library, ! libraryFiles.empty());
+            root.addItem (1900, "Begins on the key pressed  (the file's first note moves to it)", true, def.phraseRoot == -1);
             root.addItem (1901, "As written  (the key C4 plays it as it is; others move it)", true, def.phraseRoot == 60);
             root.addItem (1902, "As written from C3", true, def.phraseRoot == 48);
             root.addItem (1903, "As written from C5", true, def.phraseRoot == 72);
+            root.addItem (1904, "Fixed  (drums: every key plays it as written)", true, def.phraseRoot == -2);
             m.addSubMenu ("Pitch", root, ! def.phraseNotes.empty());
             m.addItem (2000, "Stop when the key is let go  (else a tap plays the whole phrase)", ! def.phraseNotes.empty(), def.phraseStop);
             m.addItem (2001, "Repeat while the key is held", ! def.phraseNotes.empty(), def.phraseLoop);
@@ -966,7 +989,16 @@ private:
             else if (r >= 1600 && r < 1700) d.humanTimingMs = r - 1600;
             else if (r >= 1700 && r < 1800) d.humanVelocity = r - 1700;
             else if (r == 1800) { loadPhraseFile (index, def); return; }
-            else if (r >= 1900 && r <= 1903) { const int roots[] = { -1, 60, 48, 72 }; d.phraseRoot = roots[r - 1900]; }
+            else if (r >= 1900 && r <= 1904) { const int roots[] = { -1, 60, 48, 72, -2 }; d.phraseRoot = roots[r - 1900]; }
+            else if (r >= 2100 && r < 2100 + (int) libraryFiles.size())
+            {
+                const auto f = libraryFiles[(size_t) (r - 2100)];
+                String error;
+                if (! MidiFx::importPhrase (f, d, error)) { owner.showStatus (error); return; }
+                const bool drums = f.getParentDirectory().getFileName() == "Drums";
+                d.phraseRoot = drums ? -2 : 60;                 // written in C: C4 plays it as it is; drums stay put
+                if (drums) d.phraseLoop = true;                 // a groove goes round while the key is held
+            }
             else if (r == 2000) d.phraseStop = ! d.phraseStop;
             else if (r == 2001) d.phraseLoop = ! d.phraseLoop;
             engine.setBuiltInMidiEffect (a.first, a.second, s, index, d);
@@ -1131,6 +1163,7 @@ private:
     TextButton addBtn { "+ Add effect..." };
     std::vector<std::unique_ptr<Row>> rows;
     std::unique_ptr<FileChooser> chooser;
+    std::vector<File> libraryFiles;      // the built-in phrases, as the Settings menu last listed them
 
     friend struct Row;
 };
