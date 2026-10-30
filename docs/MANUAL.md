@@ -1011,6 +1011,13 @@ saved with the instrument. A program with several instruments shows a
 button for each above the knobs. Moving a knob moves the parameter in the
 plugin at once; a parameter moved in the plugin's own window moves the knob.
 
+**Perform** in the toolbar is the Stage view with the editing panes out of
+the way: the inputs, programs, instruments and mappings go, and the window
+is the readout -- the program in letters a foot high -- with the knobs under
+it and the set list beside it when **Songs** is on. For the laptop on a
+stand behind you, read from the keys. Everything is still there under the
+toolbar; **Perform** again brings the panes back.
+
 ## The tablet
 
 **Tablet** in the toolbar starts a small web app on your network. Nothing is
@@ -1071,7 +1078,15 @@ song below shows **+ Add** to put it on the end -- type in the find box to
 reach one in a long list. Each tap is saved at once and every other tablet
 follows. A row tapped in this mode never starts a song; **Done** goes back to
 playing. The song being played keeps its place when the list changes around
-it.
+it. In the same mode a song played by hand gains **+ Add scene** and
+**Capture this scene** on its scene row, so a song is built from the keys
+at rehearsal: set the sounds, add a scene, set them again, add another.
+
+The computer decides whether the stand may edit at all: **Allow editing from
+the tablet** in the Tablet window, on by default. Off, the tablet still
+picks songs, programs, keys and scenes, but **Edit** is gone and set lists
+and scenes cannot be changed -- for a gig where the tablet sits unlocked on
+a stand and an elbow should not rearrange the night.
 
 The **Find a song** box matches the name, the stage notes, and the programs --
 so "piano" or "002" finds a song you cannot quite name.
@@ -1099,6 +1114,14 @@ The current program for each input is highlighted, and the big number at the top
 of each block is what a keyboard would send as a Program Change. Tapping a
 program switches to it immediately, and the page follows along if you change
 programs at the laptop instead.
+
+Under each keyboard's program list sits its **front panel**: the same knobs
+the Stage view shows on the computer, as sliders a thumb can work. For each
+instrument of the current program, **Level** and **Pan**, then the plugin's
+cutoff, resonance, envelope and effects, picked by name or chosen on the
+computer (right-click a knob there). A slider moved on the stand moves the
+parameter at once; a parameter moved anywhere else moves the slider once a
+second, unless a thumb is on it.
 
 ### Showing a plugin's own window
 

@@ -1,4 +1,5 @@
 #include "RemoteServer.h"
+#include "PanelParams.h"
 #include "MidiEditor.h"
 #include "GmMixer.h"
 #include "GmSynth.h"
@@ -97,6 +98,13 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   button.p .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700; font-size:13px; }
   button.p.on { background:var(--accent); color:#06121f; }
   button.p.on .n { color:#06121f; }
+  .knobs { padding:4px 12px 10px; }
+  .kslot { margin-top:8px; }
+  .kname { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin:0 0 4px; }
+  .knob { display:grid; grid-template-columns:96px 1fr 64px; align-items:center; gap:10px; padding:4px 0; }
+  .knob .kn { color:#fff; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .knob .kv { color:var(--dim); font-size:13px; text-align:right; font-variant-numeric:tabular-nums; }
+  .knob input[type=range] { width:100%; height:34px; margin:0; accent-color:var(--accent); touch-action:pan-y; }
   /* Group filters. Only drawn when the setup actually uses groups, so someone
      who has not touched the feature sees exactly what they saw before. */
   /* Tempo lives in the header beside PANIC: it is worth a glance and a tap, not
@@ -351,7 +359,7 @@ function showTransport(t) {
   /* Section buttons, redrawn only when something about them changes: a tap
      queues that section; during a vamp, "Go on" lets it play through. */
   const list = t.sections || [];
-  const key = JSON.stringify([list.map(x => x.name + x.vamp), t.section, t.queued, t.vamping, t.running]);
+  const key = JSON.stringify([list.map(x => x.name + x.vamp), t.section, t.queued, t.vamping, t.running, t.scenes && editMode]);
   transportUi.parts = t.parts || [];
   transportUi.partsBtn.style.display = transportUi.parts.length ? "" : "none";
   if (partsSheet) partsSheet.refresh();
@@ -361,6 +369,18 @@ function showTransport(t) {
   const host = transportUi.sections;
   host.innerHTML = "";
   if (transportUi.caption) transportUi.caption.style.display = list.length < (t.scenes ? 1 : 2) ? "none" : "";
+  if (t.scenes && editMode && lastState && lastState.canEdit !== false) {
+    /* Building a song from the stand: set the sounds, add a scene; set them
+       again, add another. Capture refreshes the scene in play. */
+    const add = document.createElement("button"); add.className = "go"; add.textContent = "+ Add scene";
+    add.onclick = async () => { try { showTransport(await api("/api/scene?do=add", { method: "POST" })); await refresh(true); } catch (e) { if (!e.gate) show(e.message); } };
+    host.appendChild(add);
+    if (list.length) {
+      const cap = document.createElement("button"); cap.className = "go"; cap.textContent = "Capture this scene";
+      cap.onclick = async () => { try { showTransport(await api("/api/scene?do=capture", { method: "POST" })); show("Scene captured: it now holds what is loaded.", 2000); } catch (e) { if (!e.gate) show(e.message); } };
+      host.appendChild(cap);
+    }
+  }
   if (list.length < (t.scenes ? 1 : 2)) return;
   if (t.vamping) {
     const go = document.createElement("button"); go.className = "go"; go.textContent = "End vamp ▸";
@@ -550,10 +570,12 @@ function renderSets(s) {
     /* Editing the set lists from the stand: add, take out, reorder, make and
        name them. A mode rather than buttons on every row, so a row tapped in
        the heat of a gig only ever starts a song. */
+    if (s.canEdit === false) editMode = false;                 // the computer keeps the stand from editing
     const ed = document.createElement("button"); ed.className = "editmode" + (editMode ? " on" : "");
     ed.textContent = editMode ? "Done" : "Edit";
-    ed.title = editMode ? "Back to playing" : "Build or change set lists";
-    ed.onclick = () => { editMode = !editMode; renderSets(lastState); };
+    ed.title = editMode ? "Back to playing" : "Build or change set lists and scenes";
+    ed.onclick = () => { editMode = !editMode; renderSets(lastState); if (transportUi) pollTransport(); };
+    if (s.canEdit === false) ed.style.display = "none";
     row.appendChild(ed);
     wrap.appendChild(row);
   }
@@ -888,12 +910,76 @@ function render(s) {
     });
     wrap.appendChild(grid);
 
+    const knobs = document.createElement("div"); knobs.className = "knobs"; knobs.dataset.input = i;
+    wrap.appendChild(knobs);
     root.appendChild(wrap);
     loadSlots(i);
+    loadPanel(i);
   });
 
   renderSets(s);
   syncTabs();
+}
+
+/* The front panel, as the Stage view on the computer shows it: each
+   instrument's level and pan, then the plugin's cutoff, resonance, envelope
+   and effects. Horizontal sliders, because a thumb on glass is not a finger
+   on a knob. Values follow the plugin once a second unless a thumb is on
+   them; a move is sent as it happens, a few times a second at most. */
+const knobTouch = {};
+async function loadPanel(i) {
+  const host = document.querySelector('.knobs[data-input="' + i + '"]');
+  if (!host) return;
+  let data;
+  try { data = await api("/api/panel?input=" + i); } catch (e) { if (e.gate) throw e; return; }
+  const slots = data.slots || [];
+  const key = JSON.stringify(slots.map(sl => [sl.slot, sl.name, sl.knobs.map(k => k.id + k.name)]));
+  if (host.dataset.key !== key) {
+    host.dataset.key = key;
+    host.innerHTML = "";
+    slots.forEach(sl => {
+      if (!sl.knobs.length) return;
+      const sec = document.createElement("div"); sec.className = "kslot";
+      const title = document.createElement("div"); title.className = "kname"; title.textContent = sl.name;
+      sec.appendChild(title);
+      sl.knobs.forEach(k => {
+        const row = document.createElement("label"); row.className = "knob";
+        row.innerHTML = '<span class="kn"></span><input type="range" min="0" max="1000"><span class="kv"></span>';
+        row.querySelector(".kn").textContent = k.name;
+        const r = row.querySelector("input");
+        r.dataset.id = k.id; r.dataset.slot = sl.slot;
+        const tkey = i + "/" + sl.slot + "/" + k.id;
+        let timer = null, pending = null;
+        const send = () => {
+          const v = pending; pending = null; timer = null;
+          api("/api/knob?input=" + i + "&slot=" + sl.slot + "&id=" + encodeURIComponent(k.id) + "&value=" + v, { method: "POST" }).catch(e => { if (!e.gate) show(e.message); });
+        };
+        r.oninput = () => {
+          pending = (r.value / 1000).toFixed(3);
+          row.querySelector(".kv").textContent = k.id === "level" ? dbText(r.value / 1000) : k.id === "pan" ? panText(r.value / 1000) : Math.round(r.value / 10) + "%";
+          if (!timer) timer = setTimeout(send, 60);
+        };
+        r.onpointerdown = () => { knobTouch[tkey] = true; };
+        r.onpointerup = r.onpointercancel = () => { setTimeout(() => { delete knobTouch[tkey]; }, 300); };
+        sec.appendChild(row);
+      });
+      host.appendChild(sec);
+    });
+  }
+  slots.forEach(sl => sl.knobs.forEach(k => {
+    const tkey = i + "/" + sl.slot + "/" + k.id;
+    if (knobTouch[tkey]) return;
+    const r = host.querySelector('input[data-slot="' + sl.slot + '"][data-id="' + k.id + '"]');
+    if (!r) return;
+    r.value = Math.round(k.value * 1000);
+    r.parentElement.querySelector(".kv").textContent = k.text;
+  }));
+}
+const dbText = v => { const db = -60 + v * 72; return db <= -59.9 ? "off" : (db >= 0 ? "+" : "") + db.toFixed(1) + " dB"; };
+const panText = v => { const p = Math.round((v * 2 - 1) * 50); return p === 0 ? "C" : p < 0 ? "L " + (-p) : "R " + p; };
+function pollPanels() {
+  if (tab !== "programs" || document.visibilityState !== "visible" || !lastState) return;
+  lastState.inputs.forEach((inp, i) => { if (!inp.track) loadPanel(i); });
 }
 
 // ---- controls ---------------------------------------------------------------
@@ -1007,6 +1093,7 @@ async function refresh(force) {
     syncLevelPolling();
     syncTransportPolling();
     if (transportUi) pollTransport();
+    pollPanels();
   } catch (e) {
     if (e.gate) askForCode("That code did not match the one in the Tablet control window on the computer. Try again.");
     else show(e.message);
@@ -1731,6 +1818,8 @@ String RemoteServer::stateJson() const
     root->setProperty ("track", engine.hasTrack());
     // Or scenes: a song played by hand, its sections stepped from the stand.
     root->setProperty ("scenes", ! engine.hasTrack() && engine.songHasScenes (engine.currentSongIndex()));
+    // Whether the stand may build set lists and scenes (Tablet window on the computer).
+    root->setProperty ("canEdit", settings.getBoolValue ("remoteEditing", true));
     root->setProperty ("tempo", engine.getTempoBpm());
     {
         // The names a song's key is picked from on the tablet, the same words as on the laptop.
@@ -1872,6 +1961,59 @@ const std::vector<RemoteServer::FilePart>& RemoteServer::partsOf (const File& f)
             }
     if (partCache.size() > 64) partCache.clear();
     return partCache[key] = std::move (parts);
+}
+
+String RemoteServer::panelJson (int input) const
+{
+    /* The front panel of an input's current program, as the Stage view shows
+       it: each instrument's level and pan, then the plugin's parameters a
+       player reaches for (or the ones chosen on the computer), with their
+       values as the plugin last reported them -- no round trip here. */
+    DynamicObject::Ptr o (new DynamicObject());
+    const auto& inputs = engine.getSetup().inputs;
+    if (input < 0 || input >= (int) inputs.size()) return JSON::toString (var (o.get()), true);
+    const auto& in = inputs[(size_t) input];
+    const int program = in.currentProgram;
+    const auto& prog = in.programs[(size_t) program];
+    o->setProperty ("input", input);
+    o->setProperty ("program", program);
+    Array<var> slots;
+    for (int si = 0; si < (int) prog.slots.size(); ++si)
+    {
+        const auto& sd = prog.slots[(size_t) si];
+        DynamicObject::Ptr so (new DynamicObject());
+        so->setProperty ("slot", si);
+        so->setProperty ("name", sd.kind == SlotDef::Kind::plugin ? sd.plugin.name : sd.kind == SlotDef::Kind::gm ? String ("General MIDI")
+                                 : sd.kind == SlotDef::Kind::external ? String ("MIDI device") : sd.targetInputName);
+        Array<var> knobs;
+        auto knob = [&knobs] (const String& id, const String& name, double value, const String& text)
+        {
+            DynamicObject::Ptr k (new DynamicObject());
+            k->setProperty ("id", id); k->setProperty ("name", name); k->setProperty ("value", value); k->setProperty ("text", text);
+            knobs.add (var (k.get()));
+        };
+        knob ("level", "Level", (sd.gainDb + 60.0) / 72.0, sd.gainDb <= -59.9f ? String ("off") : (sd.gainDb >= 0.0f ? "+" : "") + String (sd.gainDb, 1) + " dB");
+        const int pan = roundToInt (sd.pan * 50.0f);
+        knob ("pan", "Pan", (sd.pan + 1.0) / 2.0, pan == 0 ? String ("C") : pan < 0 ? "L " + String (-pan) : "R " + String (pan));
+        if (sd.kind == SlotDef::Kind::plugin && engine.isPluginAlive (input, program, si))
+            if (auto* plugin = engine.getPlugin (input, program, si))
+            {
+                const auto& params = plugin->getParameters();
+                std::vector<int> picked;
+                if (sd.panelParams.empty()) picked = pickPanelParams (params, 6);
+                else for (const auto& id : sd.panelParams) if (const int idx = plugin->findParameterIndex (id); idx >= 0 && picked.size() < 8) picked.push_back (idx);
+                for (int idx : picked)
+                    if (idx >= 0 && idx < (int) params.size())
+                    {
+                        const float v = plugin->getCachedParameterValue (idx);
+                        knob ("p:" + String (idx), params[(size_t) idx].name, v, String (roundToInt (v * 100.0f)) + "%");
+                    }
+            }
+        so->setProperty ("knobs", knobs);
+        slots.add (var (so.get()));
+    }
+    o->setProperty ("slots", slots);
+    return JSON::toString (var (o.get()), true);
 }
 
 String RemoteServer::transportJson() const
@@ -2416,6 +2558,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                  do=move&index=&pos=&delta=
            Set lists built from the stand, each step saved at once. */
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
+        if (! settings.getBoolValue ("remoteEditing", true)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
         String what, name;
         int index = -1, song = -1, pos = -1, delta = 0;
         for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
@@ -2466,6 +2609,65 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         MessageManager::callAsync ([this, song] { engine.selectSong (song); });
         ++revision;
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/panel"))
+    {
+        // GET ...?input=  the knobs of that input's current program, with their values now.
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
+        const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        String body;
+        if (produceOnMessageThread ([this, input] { return panelJson (input); }, body, 2000))
+            sendResponse (sock, "200 OK", "application/json", body);
+        else
+            sendBusy (sock, sendResponse);
+        return;
+    }
+    if (path.startsWith ("/api/knob"))
+    {
+        /* POST ...?input=&slot=&id=&value=   a knob turned on the stand: level, pan, or p:<index> a plugin parameter, value 0..1.
+           The parameter is set with a short timeout, like the Stage view's knobs: a plugin that has stopped answering costs a moment. */
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
+        auto field = [&path] (const char* name) { return path.fromFirstOccurrenceOf (String (name) + "=", false, false).upToFirstOccurrenceOf ("&", false, false); };
+        const int input = field ("input").getIntValue(), slot = field ("slot").getIntValue();
+        const String id = URL::removeEscapeChars (field ("id"));
+        const double value = jlimit (0.0, 1.0, field ("value").getDoubleValue());
+        MessageManager::callAsync ([this, input, slot, id, value]
+        {
+            const auto& inputs = engine.getSetup().inputs;
+            if (input < 0 || input >= (int) inputs.size()) return;
+            const int program = inputs[(size_t) input].currentProgram;
+            if (id == "level")    engine.setSlotGainDb (input, program, slot, (float) (-60.0 + value * 72.0));
+            else if (id == "pan") engine.setSlotPan (input, program, slot, (float) (value * 2.0 - 1.0));
+            else if (id.startsWith ("p:") && engine.isPluginAlive (input, program, slot))
+                if (auto* plugin = engine.getPlugin (input, program, slot))
+                    plugin->setParameterValue (id.substring (2).getIntValue(), (float) value, 100);
+        });
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/scene"))
+    {
+        /* POST ...?do=add        a new scene on the song in play, holding what is loaded now
+                 do=capture     the scene in play takes what is loaded now
+           Only while the computer allows editing from the tablet. */
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
+        if (! settings.getBoolValue ("remoteEditing", true)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
+        const auto what = path.fromFirstOccurrenceOf ("do=", false, false).upToFirstOccurrenceOf ("&", false, false);
+        String body;
+        if (produceOnMessageThread ([this, what]
+            {
+                const int song = engine.currentSongIndex();
+                if (what == "add") engine.addScene (song, {});
+                else if (what == "capture") engine.captureScene (song, engine.getScene());
+                return transportJson();
+            }, body, 3000))
+        {
+            ++revision;
+            sendResponse (sock, "200 OK", "application/json", body);
+        }
+        else
+            sendBusy (sock, sendResponse);
         return;
     }
     if (path.startsWith ("/api/transport"))

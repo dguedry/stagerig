@@ -2741,6 +2741,20 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     stageBtn.setToggleState (settings.getBoolValue ("showStage", false), dontSendNotification);
     stagePanel->setVisible (stageBtn.getToggleState());
 
+    /* Perform: the editing panes go, and the performance view takes the
+       window -- the program in letters a foot high, the knobs under it, the
+       set list beside it. For the laptop on a stand behind the player. */
+    addAndMakeVisible (performBtn);
+    performBtn.setClickingTogglesState (true);
+    performBtn.setColour (TextButton::buttonOnColourId, accentDim);
+    performBtn.setTooltip ("Perform: hide the editing panes and give the window to the performance view and the set list, big enough to read from the stand");
+    performBtn.onClick = [this]
+    {
+        settings.setValue ("perform", performBtn.getToggleState());
+        resized();
+    };
+    performBtn.setToggleState (settings.getBoolValue ("perform", false), dontSendNotification);
+
     /* Songs and sets. Hidden by default and remembered, like Stage: it is the
        panel you want while building a set and while playing one, and in the way
        the rest of the time. */
@@ -2958,13 +2972,14 @@ void MainComponent::resized()
     toolbar.removeFromLeft (10);
     remoteBtn.setBounds (toolbar.removeFromLeft (66));      toolbar.removeFromLeft (8);
     helpBtn.setBounds (toolbar.removeFromLeft (52));        toolbar.removeFromLeft (8);
-    audioBtn.setBounds (toolbar.removeFromLeft (74));       toolbar.removeFromLeft (4);
-    pluginsBtn.setBounds (toolbar.removeFromLeft (74));     toolbar.removeFromLeft (4);
-    optionsBtn.setBounds (toolbar.removeFromLeft (70));     toolbar.removeFromLeft (8);
-    panicBtn.setBounds (toolbar.removeFromRight (80));      toolbar.removeFromRight (6);
-    keyboardBtn.setBounds (toolbar.removeFromRight (78));   toolbar.removeFromRight (4);
-    stageBtn.setBounds (toolbar.removeFromRight (72));      toolbar.removeFromRight (4);
-    songsBtn.setBounds (toolbar.removeFromRight (72));      toolbar.removeFromRight (4);
+    audioBtn.setBounds (toolbar.removeFromLeft (68));       toolbar.removeFromLeft (4);
+    pluginsBtn.setBounds (toolbar.removeFromLeft (70));     toolbar.removeFromLeft (4);
+    optionsBtn.setBounds (toolbar.removeFromLeft (66));     toolbar.removeFromLeft (8);
+    panicBtn.setBounds (toolbar.removeFromRight (76));      toolbar.removeFromRight (6);
+    keyboardBtn.setBounds (toolbar.removeFromRight (74));   toolbar.removeFromRight (4);
+    stageBtn.setBounds (toolbar.removeFromRight (60));      toolbar.removeFromRight (4);
+    performBtn.setBounds (toolbar.removeFromRight (70));    toolbar.removeFromRight (4);
+    songsBtn.setBounds (toolbar.removeFromRight (60));      toolbar.removeFromRight (4);
     tailSlider.setBounds (toolbar.removeFromRight (60));    toolbar.removeFromRight (2);
     tailLabel.setBounds (toolbar.removeFromRight (26));     toolbar.removeFromRight (8);
     tapButton.setBounds (toolbar.removeFromRight (42));     toolbar.removeFromRight (2);
@@ -2980,6 +2995,25 @@ void MainComponent::resized()
         keyboardPanel->setBounds (r.removeFromBottom (KeyboardPanel::preferredHeight).reduced (8, 0));
         r.removeFromBottom (8);
     }
+    const bool perform = performBtn.getToggleState();
+    for (auto* c : std::initializer_list<Component*> { inputsPanel.get(), programsPanel.get(), slotsPanel.get(), mappingsPanel.get(), &inputsDivider, &programsDivider })
+        if (c != nullptr) c->setVisible (! perform);
+    if (perform)
+    {
+        // The set list on the left if it is shown, the performance view on everything else.
+        if (stagePanel != nullptr) stagePanel->setVisible (true);
+        r.reduce (8, 0);
+        const bool songsOn = songsPanel != nullptr && songsPanel->isVisible();
+        songsDivider.setVisible (songsOn);
+        if (songsOn)
+        {
+            songsPanel->setBounds (r.removeFromLeft (jlimit (SongsPanel::minimumWidth, 900, songsWidth)));
+            songsDivider.setBounds (r.removeFromLeft (8));
+        }
+        if (stagePanel != nullptr) stagePanel->setBounds (r);
+        return;
+    }
+    if (stagePanel != nullptr) stagePanel->setVisible (stageBtn.getToggleState());
     if (stagePanel != nullptr && stagePanel->isVisible())
     {
         stagePanel->setBounds (r.removeFromTop (stagePanel->preferredHeight()).reduced (8, 0));
@@ -3727,6 +3761,25 @@ void MainComponent::showRemote()
         };
         content->addAndMakeVisible (hotspotBtn);
         content->setSize (520, 344);
+    }
+    {
+        /* What the tablet may change: the show, always; the set lists and
+           scenes only when allowed, so a gig cannot be rearranged by an elbow
+           on a tablet left unlocked on a stand. */
+        auto* editBtn = new ToggleButton ("Allow editing from the tablet  (set lists, scenes)");
+        editBtn->setBounds (18, content->getHeight() + 6, 484, 24);
+        editBtn->setToggleState (settings.getBoolValue ("remoteEditing", true), dontSendNotification);
+        editBtn->setColour (ToggleButton::textColourId, Colours::white);
+        editBtn->setColour (ToggleButton::tickColourId, Colour (0xff5aa9ff));
+        editBtn->setTooltip ("Off: the tablet still picks songs, programs, keys and scenes, but cannot build or change set lists or scenes");
+        editBtn->onClick = [this, b = Component::SafePointer<ToggleButton> (editBtn)]
+        {
+            if (b == nullptr) return;
+            settings.setValue ("remoteEditing", b->getToggleState());
+            settings.saveIfNeeded();
+        };
+        content->addAndMakeVisible (editBtn);
+        content->setSize (520, content->getHeight() + 36);
     }
 
     DialogWindow::LaunchOptions o;

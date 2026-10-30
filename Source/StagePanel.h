@@ -2,6 +2,7 @@
 
 #include "Engine.h"
 #include "LevelMeter.h"
+#include "PanelParams.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 
@@ -32,30 +33,8 @@ public:
     std::function<void()> onEdited;                 // a knob moved: the setup has changed
     std::function<void()> onHeightChanged;          // the panel appeared or went: lay the window out again
 
-    /** The parameters a front panel shows when nobody chose: the ones a
-        player reaches for, found by name in a sensible order, then the first
-        continuous ones to make up the number. Switches and the MIDI-controller
-        stand-ins a VST3 publishes are left out. */
-    static std::vector<int> pickPanelParams (const ParamInfoList& params, int max)
-    {
-        static const char* const wanted[] = { "cutoff", "filter freq", "frequency", "resonance", "attack", "decay", "sustain", "release",
-                                              "reverb", "delay", "chorus", "drive", "tone", "bright", "mix", "vibrato", "tremolo", "rate", "depth" };
-        std::vector<int> picked;
-        auto usable = [] (const ParamInfo& p) { return p.automatable && ! p.boolean && p.numSteps != 2 && p.midiController < 0 && ! p.name.containsIgnoreCase ("bypass"); };
-        auto taken = [&picked] (int i) { return std::find (picked.begin(), picked.end(), i) != picked.end(); };
-        for (const char* w : wanted)
-        {
-            if ((int) picked.size() >= max) break;
-            for (const auto& p : params)
-                if (usable (p) && ! taken (p.index) && p.name.containsIgnoreCase (w)) { picked.push_back (p.index); break; }
-        }
-        for (const auto& p : params)
-        {
-            if ((int) picked.size() >= max) break;
-            if (usable (p) && ! taken (p.index)) picked.push_back (p.index);
-        }
-        return picked;
-    }
+    /** The parameters shown when nobody chose: see PanelParams.h. */
+    static std::vector<int> pickPanelParams (const ParamInfoList& params, int max) { return perf::pickPanelParams (params, max); }
 
     void paint (juce::Graphics& g) override
     {
@@ -64,7 +43,8 @@ public:
         g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
         for (const auto& [i, column] : columns())
         {
-            auto cell = column.withHeight (readoutHeight).reduced (6, 8);
+            // The readout takes whatever height the knobs leave: in Perform mode, most of the window.
+            auto cell = column.withHeight (readoutArea()).reduced (6, 8);
             const auto& def = inputs[i];
             const int program = def.currentProgram;
             const auto& prog = def.programs[(size_t) program];
@@ -82,8 +62,10 @@ public:
             g.setColour (juce::Colour (0xff9aa0ab));
             g.drawText (def.name.toUpperCase(), cell.removeFromTop (16), juce::Justification::centredLeft, true);
 
-            auto numberArea = cell.removeFromLeft (juce::jmin (108, cell.getWidth() / 3));
-            g.setFont (juce::FontOptions ((float) juce::jmin (54, numberArea.getHeight()), juce::Font::bold));
+            // The number's size: as tall as the cell allows, and no wider than two fifths of it, three digits and all.
+            const int big = juce::jmin (cell.getHeight() - 4, 190, (int) (cell.getWidth() * 0.22f));
+            auto numberArea = cell.removeFromLeft (juce::jmin (cell.getWidth() / 2, (int) (big * 1.95f)));
+            g.setFont (juce::FontOptions ((float) big, juce::Font::bold));
             g.setColour (empty ? juce::Colour (0xff4a4d57) : juce::Colour (0xff5aa9ff));
             g.drawText (juce::String (program).paddedLeft ('0', 3), numberArea, juce::Justification::centredLeft, false);
 
@@ -93,13 +75,13 @@ public:
 
             juce::String name = prog.name.isNotEmpty() ? prog.name : empty ? (def.isAudio() ? "straight through" : "empty program") : "(unnamed)";
             if (loading) name += "  ...loading";
-            g.setFont (juce::FontOptions ((float) juce::jmin (34, cell.getHeight() - 4), juce::Font::bold));
+            g.setFont (juce::FontOptions ((float) juce::jmin (big * 2 / 3, cell.getHeight() - 4), juce::Font::bold));
             g.setColour (empty ? juce::Colour (0xff6b7079) : (loading ? juce::Colour (0xffd8a657) : juce::Colours::white));
-            g.drawFittedText (name, cell, juce::Justification::centredLeft, 2, 0.6f);
+            g.drawFittedText (name, cell, juce::Justification::centredLeft, big > 60 ? 3 : 2, 0.6f);
         }
     }
 
-    void resized() override { layoutPanels(); }
+    void resized() override { layoutPanels(); repaint(); }
 
 private:
     //==========================================================================
@@ -174,7 +156,7 @@ private:
             for (auto& b : slotButtons) { b->setBounds (top.removeFromLeft (juce::jmin (120, top.getWidth() / juce::jmax (1, (int) slotButtons.size())))); top.removeFromLeft (4); }
             if (slotButtons.empty()) slotLabel.setBounds (top);
             r.removeFromTop (2);
-            const int each = knobs.empty() ? 0 : juce::jmin (84, r.getWidth() / (int) knobs.size());
+            const int each = knobs.empty() ? 0 : juce::jmin (120, r.getWidth() / (int) knobs.size());
             for (auto& k : knobs) k->setBounds (r.removeFromLeft (each));
         }
         StagePanel& owner;
@@ -186,6 +168,8 @@ private:
         std::vector<std::unique_ptr<juce::TextButton>> slotButtons;
         juce::Label slotLabel;
     };
+
+    int readoutArea() const                         { return juce::jmax (readoutHeight, getHeight() - (anyPanel ? panelHeight : 0)); }
 
     std::vector<std::pair<size_t, juce::Rectangle<int>>> columns() const
     {
@@ -218,7 +202,7 @@ private:
         {
             bool placed = false;
             for (const auto& [i, column] : cols)
-                if ((int) i == p->input) { p->setBounds (column.withTop (readoutHeight).withHeight (panelHeight)); placed = true; }
+                if ((int) i == p->input) { p->setBounds (column.withTop (readoutArea()).withHeight (panelHeight)); placed = true; }
             p->setVisible (placed && anyPanel);
         }
         for (auto& p : panels) p->resized();

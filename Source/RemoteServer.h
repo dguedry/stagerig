@@ -64,6 +64,7 @@ private:
     juce::String levelsJson() const;
     /** The backing track of the song in play: whether there is one, running, where. */
     juce::String transportJson() const;
+    juce::String panelJson (int input) const;      // the knobs of an input's current program
     /** The armed song's MIDI-file parts, read once per file (by path and date). */
     struct FilePart { int channel = 1; juce::String name; int program = 0; };
     mutable std::map<juce::String, std::vector<FilePart>> partCache;
