@@ -75,6 +75,7 @@ private:
 
     void showAudioSettings();
     void showOutputs();
+    void showShowCheck();
     void printProgramMap();
     void chooseGmSoundfont();
     std::unique_ptr<juce::FileChooser> gmChooser;
@@ -103,6 +104,7 @@ private:
     juce::TextButton keyboardBtn { "Keyboard" };
     juce::TextButton stageBtn { "Stage" };
     juce::TextButton performBtn { "Perform" };
+    juce::String lastLivePosition;                        // what the settings last heard of where the show is
     bool newerFile = false, overwriteWarned = false;     // the open file was saved by a newer StageRig
     juce::TextButton songsBtn { "Songs" };
     juce::TextButton remoteBtn { "Tablet" };

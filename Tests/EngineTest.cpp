@@ -958,9 +958,10 @@ int main()
                 CHECK (! victim->isAlive());
                 CHECK (victim->getHostPid() == -1);
                 CHECK (::kill (frozen, 0) != 0 && errno == ESRCH);     // killed and reaped, not a zombie
+                const int restartsBefore = engine.getAutoRestartCount();
                 pump (300);
-                CHECK (! engine.isPluginAlive (0, 40, 0));
-                engine.reloadPlugin (0, 40, 0);
+                CHECK (engine.getAutoRestartCount() == restartsBefore + 1);   // on its way back by itself
+                engine.reloadPlugin (0, 40, 0);                              // a Reload pressed meanwhile is harmless
                 settle();
                 victim = engine.getPlugin (0, 40, 0);
                 CHECK (victim != nullptr && victim->isAlive());
@@ -1017,19 +1018,20 @@ int main()
             for (auto& pidText : pids)
                 if (pidText.trim().isNotEmpty()) ::kill ((pid_t) pidText.getIntValue(), SIGKILL);
 
+            /* The crash is noticed and the plugin is started again by
+               itself -- no Reload pressed. `victim` is the old process's
+               client, freed by the restart: not touched from here. */
+            const int restartsBefore = engine.getAutoRestartCount();
             pump (300);
-            CHECK (! victim->isAlive());
-            CHECK (! engine.isPluginAlive (0, 40, 0));
-            CHECK (engine.getPluginLoadError (0, 40, 0).isNotEmpty());
-            std::printf ("     after crash: %s\n", engine.getPluginLoadError (0, 40, 0).toRawUTF8());
+            CHECK (engine.getAutoRestartCount() > restartsBefore);   // on its way back, or back already
 
             // The engine keeps rendering (silence from the dead slot) instead of hanging.
             CHECK (render (engine, 5) < 1e-4f);
 
-            // Reload brings a fresh process and sound comes back.
-            engine.reloadPlugin (0, 40, 0);
             settle();
             CHECK (engine.isPluginAlive (0, 40, 0));
+            CHECK (engine.getAutoRestartCount() >= 1);
+            std::printf ("     after crash: restarted by itself (%d automatic restarts so far)\n", engine.getAutoRestartCount());
             engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
             const float back = render (engine, 20);
             std::printf ("     rms after reload of crashed plugin: %f\n", back);
@@ -1038,6 +1040,63 @@ int main()
             render (engine, 10);
         }
         engine.clearProgram (0, 40);
+
+        /* A host stuck inside the plugin's processing -- alive, never dying,
+           silent for the rest of the night -- is noticed by the watchdog and
+           restarted. Stopped with SIGSTOP while a block is in flight. Then a
+           plugin that keeps dying is left off after the per-minute limit
+           instead of restarting for ever. A fresh program, so the earlier
+           deaths do not count against it. */
+        engine.selectProgram (0, 41);
+        settle();
+        CHECK (engine.addSlot (0, 41, synth, err));
+        settle();
+        if (auto* stuck = engine.getPlugin (0, 41, 0); stuck != nullptr && stuck->isAlive())
+        {
+            const auto frozen = stuck->getHostPid();
+            const int before = engine.getAutoRestartCount();
+            ::kill (frozen, SIGSTOP);
+            render (engine, 3);                               // a block goes in and never comes back
+            const auto t0 = Time::getMillisecondCounterHiRes();
+            while (engine.getAutoRestartCount() == before && Time::getMillisecondCounterHiRes() - t0 < Engine::stalledPluginMs + 4000)
+            {
+                render (engine, 1);
+                pump (100);
+            }
+            const auto ms = Time::getMillisecondCounterHiRes() - t0;
+            std::printf ("     stuck host: restarted after %.0f ms\n", ms);
+            CHECK (engine.getAutoRestartCount() == before + 1);
+            CHECK (ms >= Engine::stalledPluginMs - 1000);
+            CHECK (::kill (frozen, 0) != 0 && errno == ESRCH);
+            settle();
+            CHECK (engine.isPluginAlive (0, 41, 0));
+            CHECK (engine.getPlugin (0, 41, 0) != nullptr && engine.getPlugin (0, 41, 0)->getHostPid() != frozen);
+            engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+            CHECK (render (engine, 20) > 0.01f);
+            engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+            render (engine, 10);
+
+            // Two more deaths use up the minute's restarts; the next is left off.
+            for (int k = 0; k < Engine::maxAutoRestartsPerMinute; ++k)
+            {
+                auto* p = engine.getPlugin (0, 41, 0);
+                if (p == nullptr || ! p->isAlive()) break;
+                ::kill (p->getHostPid(), SIGKILL);
+                pump (300);
+                settle();
+            }
+            std::printf ("     after %d deaths in a minute: %s\n", Engine::maxAutoRestartsPerMinute + 1,
+                         engine.isPluginAlive (0, 41, 0) ? "still restarting (wrong)" : "left off");
+            CHECK (! engine.isPluginAlive (0, 41, 0));
+            CHECK (! engine.hasPendingLoads());
+            engine.reloadPlugin (0, 41, 0);                   // Reload by hand still works
+            settle();
+            CHECK (engine.isPluginAlive (0, 41, 0));
+        }
+        else CHECK (false);
+        engine.clearProgram (0, 41);
+        engine.selectProgram (0, 0);
+        settle();
         settle();
     }
 
@@ -1818,6 +1877,54 @@ int main()
         CHECK (engine.getInputLevel (ai).clipped);
         tone.clear();
         for (int b = 0; b < 48; ++b) { outBuf.clear(); engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock); }
+
+        /* The safety guard: nothing over the ceiling, and nothing that is not
+           a number, leaves for the PA -- and below the ceiling it does
+           nothing at all. Four times full scale, with a NaN and an infinity
+           in it, as a broken plugin or a feedback squeal might send. */
+        {
+            engine.setProgramInputGainDb (ai, 0, 0.0f);
+            const int limitedBefore = engine.getGuardLimitedBlocks(), silencedBefore = engine.getGuardSilencedBlocks();
+            for (int i = 0; i < kBlock; ++i) tone.setSample (0, i, i % 2 ? 4.0f : -4.0f);
+            tone.setSample (0, 10, std::numeric_limits<float>::quiet_NaN());
+            tone.setSample (0, 11, std::numeric_limits<float>::infinity());
+            float worst = 0.0f;
+            bool finite = true;
+            for (int b = 0; b < 4; ++b)
+            {
+                outBuf.clear();
+                engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock);
+                for (int c = 0; c < 2; ++c)
+                    for (int i = 0; i < kBlock; ++i)
+                    {
+                        const float v = outBuf.getSample (c, i);
+                        if (! std::isfinite (v)) finite = false;
+                        else worst = jmax (worst, std::abs (v));
+                    }
+            }
+            std::printf ("     safety guard: 4x full scale with NaN and inf in, peak %.3f out, all finite %d\n", worst, (int) finite);
+            CHECK (finite);
+            CHECK (worst <= Engine::safetyCeiling + 1e-5f);
+            CHECK (worst > 0.9f);                                   // turned down, not shut off
+            CHECK (engine.getGuardLimitedBlocks() > limitedBefore);
+            CHECK (engine.getGuardSilencedBlocks() > silencedBefore);
+
+            tone.clear();
+            for (int b = 0; b < 48000 / kBlock; ++b)             // a second of silence: the guard lets go
+            { outBuf.clear(); engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock); }
+            const int limitedNow = engine.getGuardLimitedBlocks();
+            const float clean = feed (4);
+            std::printf ("     after the guard let go: %.4f rms (tone 0.354, untouched)\n", clean);
+            CHECK (std::abs (clean - 0.3536f) < 0.006f);
+            CHECK (engine.getGuardLimitedBlocks() == limitedNow);
+            engine.setProgramInputGainDb (ai, 0, -6.0f);
+            // Leave the meter as the checks below expect it: full scale, then half a second of silence.
+            for (int i = 0; i < kBlock; ++i) tone.setSample (0, i, i % 2 ? 1.0f : -1.0f);
+            outBuf.clear();
+            engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock);
+            tone.clear();
+            for (int b = 0; b < 48; ++b) { outBuf.clear(); engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock); }
+        }
         std::printf ("     after half a second of silence: %.3f\n", engine.getInputLevel (ai).left);
         CHECK (engine.getInputLevel (ai).left < 0.4f && engine.getInputLevel (ai).left > 0.2f);   // 20 dB/s: about -10 dB in 0.5 s
 
@@ -3477,6 +3584,46 @@ int main()
                     engine.selectSongInSet (0); settle();
                     CHECK (engine.currentSongIndex() == keyed && engine.getSceneCount() == 0);
                     engine.removeSong (staged);
+                }
+                {
+                    /* Where the show is: written, read back, and returned to,
+                       as a StageRig restarted after a crash does. */
+                    engine.selectSongInSet (0); settle();
+                    const auto before = engine.getLivePosition();
+                    CHECK (Engine::LivePosition::fromString (before.toString()) == before);
+                    CHECK (Engine::LivePosition::fromString ("nonsense").set == -1);
+                    auto moved = before;
+                    moved.programs[0] = before.programs[0] == 5 ? 6 : 5;
+                    moved.tempoBpm = 133.0;
+                    engine.selectProgram (0, 7); engine.setTempoBpm (90.0); settle();
+                    engine.restoreLivePosition (moved); settle();
+                    CHECK (engine.getSetup().inputs[0].currentProgram == moved.programs[0]);
+                    CHECK (std::abs (engine.getSetup().tempoBpm - 133.0) < 0.01);
+                    CHECK (engine.getCurrentSet() == before.set && engine.getCurrentSongInSet() == before.songInSet);
+                    CHECK (engine.currentSongIndex() == before.song);
+                    engine.restoreLivePosition (before); settle();
+                    CHECK (engine.getLivePosition() == before);
+
+                    /* The pre-show check. Headless, so no audio interface: that
+                       is the first thing it says. A song in the set whose
+                       track file has gone is named; put back, it is not. */
+                    auto has = [&engine] (Engine::CheckItem::Level l, const String& part)
+                    {
+                        for (auto& i : engine.showCheck()) if (i.level == l && i.text.contains (part)) return true;
+                        return false;
+                    };
+                    const auto first = engine.showCheck();
+                    CHECK (! first.empty() && first.front().level == Engine::CheckItem::problem);
+                    CHECK (has (Engine::CheckItem::problem, "No audio interface"));
+                    CHECK (has (Engine::CheckItem::good, "plugin"));
+                    const int song = engine.currentSongIndex();
+                    StemDef gone; gone.file = "not-there-at-all.wav";
+                    engine.addSongStem (song, gone);
+                    CHECK (has (Engine::CheckItem::problem, "not-there-at-all.wav is missing"));
+                    engine.removeSongStem (song, (int) engine.getSetup().songs[(size_t) song].stems.size() - 1);
+                    CHECK (! has (Engine::CheckItem::problem, "not-there-at-all.wav"));
+                    for (auto& i : engine.showCheck())
+                        std::printf ("       check: %s %s\n", i.level == Engine::CheckItem::problem ? "[fix]" : i.level == Engine::CheckItem::warning ? "[look]" : "[ok] ", i.text.toRawUTF8());
                 }
                 {
                     // The Stage view's front panel: the parameters it picks by name, and the ones chosen by hand saved with the instrument.

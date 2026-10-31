@@ -2639,6 +2639,8 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     {
         const auto& setup = engine.getSetup();
         PopupMenu m;
+        m.addItem (11, "Pre-show check...  (everything that can go wrong, before the first song)");
+        m.addSeparator();
         m.addItem (1, "Preload all programs (instant changes; uses more memory)", true, setup.preloadAllPrograms);
         m.addItem (2, "Let held notes ring through a program change", true, setup.holdAcrossChange);
         m.addItem (6, "Show songs and set lists", true, songsPanel != nullptr && songsPanel->isVisible());
@@ -2705,6 +2707,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
                 case 5: showOutputs(); break;
                 case 6: setSongsPanelShown (songsPanel == nullptr || ! songsPanel->isVisible()); break;
                 case 7: chooseGmSoundfont(); break;
+                case 11: showShowCheck(); break;
                 default: break;
             }
         });
@@ -2911,6 +2914,22 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     else if (last.existsAsFile())               loadSetupFile (last);
     else if (getAutosaveFile().existsAsFile())  loadSetupFile (getAutosaveFile());
     else                                        refreshAll();
+
+    /* Started again by the watchman after a crash (see Main.cpp): back to the
+       song, scene and programs the show was on, which the timer below keeps
+       in the settings as they change. The track is armed, not started --
+       the band decides when it comes back in. */
+    if (const char* rec = std::getenv ("STAGERIG_RECOVERED"); rec != nullptr && *rec != 0)
+    {
+        const auto pos = Engine::LivePosition::fromString (settings.getValue ("livePosition"));
+        engine.restoreLivePosition (pos);
+        const auto& songs = engine.getSetup().songs;
+        showStatus ("StageRig stopped and restarted itself" + (pos.song >= 0 && pos.song < (int) songs.size()
+                        ? ". Back on " + songs[(size_t) pos.song].name + "; the plugins are loading."
+                        : String (". The plugins are loading.")));
+        refreshAll();
+    }
+    lastLivePosition = engine.getLivePosition().toString();
 
     /* Restore tablet control if it was on when we last quit. Someone who set up a
        tablet on a stand expects it to still work after a restart, and discovering
@@ -3124,6 +3143,16 @@ void MainComponent::toggleRecording()
 void MainComponent::timerCallback()
 {
     PluginView::dropDeadSessions();      // a mirrored window that was closed ends its session
+
+    /* Where the show is, kept as it changes: a StageRig restarted after a
+       crash comes back exactly here. A few numbers, written only when one
+       moves -- a song, a scene, a program, the tempo. */
+    if (const auto live = engine.getLivePosition().toString(); live != lastLivePosition)
+    {
+        lastLivePosition = live;
+        settings.setValue ("livePosition", live);
+        settings.saveIfNeeded();
+    }
 
     const auto now = Time::getMillisecondCounterHiRes();
     if (keyboardPanel != nullptr && keyboardPanel->isVisible()) keyboardPanel->refreshLabel();   // input name/channel may have been edited
@@ -3456,6 +3485,131 @@ void MainComponent::saveOnQuit()
 }
 
 //==============================================================================
+namespace
+{
+    /** The pre-show check: a line per finding, worst first, with a dot that
+        says how much it matters, and a button to look again after fixing. */
+    class ShowCheckView : public Component
+    {
+    public:
+        explicit ShowCheckView (std::function<std::vector<Engine::CheckItem>()> run) : runCheck (std::move (run))
+        {
+            addAndMakeVisible (viewport);
+            viewport.setViewedComponent (&list, false);
+            viewport.setScrollBarsShown (true, false);
+            addAndMakeVisible (againBtn);
+            againBtn.onClick = [this] { refresh(); };
+            addAndMakeVisible (summary);
+            summary.setFont (FontOptions (17.0f, Font::bold));
+            refresh();
+        }
+
+        void refresh()
+        {
+            items = runCheck();
+            int problems = 0, warnings = 0;
+            for (auto& i : items) { problems += i.level == Engine::CheckItem::problem; warnings += i.level == Engine::CheckItem::warning; }
+            summary.setText (problems > 0 ? String (problems) + (problems == 1 ? " thing to fix" : " things to fix") + " before the show"
+                             : warnings > 0 ? "Ready, with " + String (warnings) + (warnings == 1 ? " thing" : " things") + " to look at"
+                             : "Ready to play", dontSendNotification);
+            summary.setColour (Label::textColourId, problems > 0 ? Colour (0xffe05a5a) : warnings > 0 ? Colours::orange : Colour (0xff5ac77a));
+            list.items = items;
+            resized();
+            list.repaint();
+        }
+
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (12);
+            auto top = r.removeFromTop (32);
+            againBtn.setBounds (top.removeFromRight (120).reduced (0, 2));
+            summary.setBounds (top);
+            r.removeFromTop (8);
+            viewport.setBounds (r);
+            list.setSize (jmax (100, r.getWidth() - viewport.getScrollBarThickness()), list.heightFor (jmax (100, r.getWidth() - viewport.getScrollBarThickness())));
+        }
+
+    private:
+        struct List : public Component
+        {
+            std::vector<Engine::CheckItem> items;
+            static constexpr float fontSize = 15.0f;
+
+            static float rowHeight (const String& text, int width)
+            {
+                AttributedString a;
+                a.append (text, FontOptions (fontSize), Colours::white);
+                TextLayout t;
+                t.createLayout (a, (float) (width - 34));
+                return jmax (22.0f, t.getHeight() + 10.0f);
+            }
+            int heightFor (int width) const
+            {
+                float h = 0;
+                for (auto& i : items) h += rowHeight (i.text, width);
+                return (int) h + 4;
+            }
+            void paint (Graphics& g) override
+            {
+                float y = 0;
+                for (auto& i : items)
+                {
+                    const float h = rowHeight (i.text, getWidth());
+                    g.setColour (i.level == Engine::CheckItem::problem ? Colour (0xffe05a5a)
+                                 : i.level == Engine::CheckItem::warning ? Colours::orange : Colour (0xff5ac77a));
+                    g.fillEllipse (6.0f, y + 9.0f, 10.0f, 10.0f);
+                    AttributedString a;
+                    a.append (i.text, FontOptions (fontSize), i.level == Engine::CheckItem::good ? textDim : Colours::white);
+                    TextLayout t;
+                    t.createLayout (a, (float) (getWidth() - 34));
+                    t.draw (g, { 28.0f, y + 5.0f, (float) getWidth() - 34.0f, h });
+                    y += h;
+                }
+            }
+        };
+
+        std::function<std::vector<Engine::CheckItem>()> runCheck;
+        std::vector<Engine::CheckItem> items;
+        Label summary;
+        TextButton againBtn { "Check again" };
+        Viewport viewport;
+        List list;
+    };
+}
+
+void MainComponent::showShowCheck()
+{
+    /* The engine knows the rig; the window adds what only it knows: the
+       file, and the tablet. Captured by value or weakly, so a check left
+       open never reaches into a window that has gone. */
+    auto run = [self = SafePointer<MainComponent> (this), &eng = engine]
+    {
+        auto items = eng.showCheck();
+        if (self != nullptr)
+        {
+            using L = Engine::CheckItem;
+            if (self->currentFile == File())
+                items.push_back ({ L::warning, "This setup has never been saved to a file of its own. Use Save As... so it can be brought to another computer." });
+            else if (self->dirty)
+                items.push_back ({ L::warning, "There are unsaved changes. Save, so a restart comes back to this." });
+            if (self->remote != nullptr && self->remote->isRunning())
+                items.push_back ({ L::good, "Tablet control is on" });
+            std::stable_sort (items.begin(), items.end(), [] (const L& a, const L& b) { return a.level > b.level; });
+        }
+        return items;
+    };
+    auto* content = new ShowCheckView (run);
+    content->setSize (720, 520);
+    DialogWindow::LaunchOptions o;
+    o.content.setOwned (content);
+    o.dialogTitle = "Pre-show check";
+    o.dialogBackgroundColour = bgPanel;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = true;
+    o.launchAsync();
+}
+
 void MainComponent::showOutputs()
 {
     auto* content = new OutputsComponent (engine, *this);

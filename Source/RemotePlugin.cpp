@@ -595,6 +595,35 @@ void RemotePlugin::markDead (const String& why)
     if (listener != nullptr) listener->remoteDied (*this);
 }
 
+bool RemotePlugin::killIfStalled (int stalledMs)
+{
+    if (shm == nullptr || ! alive.load()) return false;
+    const auto now = Time::getMillisecondCounter();
+    const auto done = shm->completedSeq.load (std::memory_order_acquire);
+    const auto asked = shm->requestSeq.load (std::memory_order_acquire);
+    bool answering;
+    {
+        /* Busy with a request -- a preset, a state, an editor -- is not stuck:
+           many plugins hold their audio while they load, and each request
+           has its own timeout for a host that never answers. */
+        const std::lock_guard<std::mutex> l (pendingMutex);
+        answering = ! pending.empty();
+    }
+    if (! watchStarted || answering || asked == done || done != watchSeq)
+    {
+        // Idle, or still finishing blocks: nothing stuck.
+        watchStarted = true;
+        watchSeq = done;
+        watchSinceMs = now;
+        return false;
+    }
+    if (now - watchSinceMs < (juce::uint32) stalledMs) return false;
+
+    killHost();
+    markDead ("plugin stopped processing audio");
+    return true;
+}
+
 //==============================================================================
 // Real-time
 //==============================================================================

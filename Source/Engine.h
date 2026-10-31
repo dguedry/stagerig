@@ -591,6 +591,61 @@ public:
     double getCpuUsage() const                      { return deviceManager.getCpuUsage(); }
     /** Blocks in which at least one plugin process missed its deadline. */
     int getLateBlockCount() const                   { return lateBlocks.load(); }
+
+    //==============================================================================
+    // Staying up
+    /** The last thing between the rig and the PA: every device output is
+        checked as it leaves. A sample that is not a number (a plugin gone
+        wrong) becomes silence, and anything over the ceiling is turned down
+        to it, instantly, recovering over a tenth of a second -- so a
+        feedback squeal, a mis-set gain or a broken plugin reaches the
+        audience and the in-ears no louder than full scale. Below the
+        ceiling it does nothing at all. Always on. */
+    static constexpr float safetyCeiling = 0.97f;    // -0.26 dBFS
+    /** Blocks in which the guard turned something down, and in which it
+        silenced samples that were not numbers, since StageRig started. */
+    int getGuardLimitedBlocks() const               { return guardLimited.load(); }
+    int getGuardSilencedBlocks() const              { return guardSilenced.load(); }
+
+    /** A plugin that crashes, or stops processing audio (see
+        RemotePlugin::killIfStalled), is started again by itself, with its
+        saved state, on the program it was in -- up to this many times in a
+        minute; one that keeps dying is left off and says so. */
+    static constexpr int maxAutoRestartsPerMinute = 3;
+    static constexpr int stalledPluginMs = 5000;           // no audio from its host this long: stuck
+    static constexpr int stalledPluginEditorOpenMs = 20000; // more patience while its window is open
+    /** Plugins restarted by themselves since StageRig started. */
+    int getAutoRestartCount() const                 { return autoRestarts; }
+
+    /** Where the show is: the set, the song, the scene, every input's
+        program and the tempo. Kept by the window as it changes, so a
+        StageRig restarted after a crash comes back exactly there. */
+    struct LivePosition
+    {
+        int set = -1, songInSet = -1, song = -1, scene = -1;
+        std::vector<int> programs;
+        double tempoBpm = 0.0;
+        juce::String toString() const;
+        static LivePosition fromString (const juce::String&);
+        bool operator== (const LivePosition& o) const
+        { return set == o.set && songInSet == o.songInSet && song == o.song && scene == o.scene && programs == o.programs && tempoBpm == o.tempoBpm; }
+    };
+    LivePosition getLivePosition() const;
+    /** Back to it, as far as the setup still allows; the track is armed, not started. */
+    void restoreLivePosition (const LivePosition&);
+
+    /** The pre-show check: everything that can be known before the first
+        song, in the order a player would fix it. */
+    struct CheckItem
+    {
+        enum Level { good, warning, problem };
+        Level level = good;
+        juce::String text;
+    };
+    std::vector<CheckItem> showCheck() const;
+    /** Blocks late in the last minute: what the rig is doing now, not
+        while the plugins were loading. */
+    int getRecentLateBlocks() const;
     /** Samples per block actually delivered by the device (PipeWire's JACK
         client reports its default 1024 via jack_get_buffer_size even while
         the graph runs a smaller quantum; this is the real number). 0 until
@@ -836,6 +891,13 @@ private:
     std::atomic<int> loadsInFlight { 0 };
     bool takeJob (LoadJob&);                      // called with loaderMutex held
     std::map<uint64_t, PluginNode*> nodeRegistry;   // message thread only
+    std::map<uint64_t, std::vector<juce::uint32>> restartTimes;   // message thread: each node's recent automatic restarts
+    int autoRestarts = 0;                                           // message thread
+    std::vector<std::pair<juce::uint32, int>> lateHistory;         // message thread: (time, late count) samples
+    void watchForStalls();
+    float guardGain[32];                                            // audio thread: the safety guard's gain per device channel
+    std::atomic<int> guardLimited { 0 }, guardSilenced { 0 };
+    void guardOutputs (float* const* out, int numOut, int numSamples);
 
     friend struct PluginNode;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Engine)

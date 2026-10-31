@@ -271,6 +271,8 @@ struct Engine::OutputRuntime
 //==============================================================================
 Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host (h), settings (s)
 {
+    std::fill (std::begin (guardGain), std::end (guardGain), 1.0f);
+
     /* Link is made now and switched on only if it was on last time. Its
        callbacks arrive on its own thread, so they only post events. */
     link = std::make_unique<ableton::Link> (setup.tempoBpm);
@@ -3881,9 +3883,28 @@ void Engine::handleAsyncUpdate()
                 if (auto* node = getNode (e.input, e.a, e.b, e.c))
                     if (node->plugin != nullptr && ! node->plugin->isAlive())
                     {
+                        /* Started again at once, with its saved state, so the
+                           sound comes back without anyone leaving the keys.
+                           One that keeps dying is left off: a plugin that
+                           crashes on load would otherwise restart for ever. */
                         const auto name = node->plugin->getName();
-                        listeners.call ([&] (Listener& l) { l.statusMessage (name + " stopped (" + node->plugin->getLastError() + "). Use Reload on that plugin to restart it."); });
-                        notifyContent (e.input, e.a);
+                        const auto why = node->plugin->getLastError();
+                        const auto now = Time::getMillisecondCounter();
+                        auto& times = restartTimes[node->id];
+                        times.erase (std::remove_if (times.begin(), times.end(), [now] (uint32 t) { return now - t > 60000; }), times.end());
+                        if ((int) times.size() < maxAutoRestartsPerMinute)
+                        {
+                            times.push_back (now);
+                            ++autoRestarts;
+                            listeners.call ([&] (Listener& l) { l.statusMessage (name + " stopped (" + why + "). Restarting it..."); });
+                            reloadPlugin (e.input, e.a, e.b, e.c);
+                        }
+                        else
+                        {
+                            listeners.call ([&] (Listener& l) { l.statusMessage (name + " stopped again (" + why + "), " + String (maxAutoRestartsPerMinute)
+                                                                                 + " times in a minute, so it is left off. Use Reload on that plugin to try again."); });
+                            notifyContent (e.input, e.a);
+                        }
                     }
                 break;
         }
@@ -3897,6 +3918,15 @@ void Engine::timerCallback() { housekeeping(); }
 
 void Engine::housekeeping()
 {
+    watchForStalls();
+    {
+        // A minute of late-block counts, for the pre-show check.
+        const auto now = Time::getMillisecondCounter();
+        lateHistory.emplace_back (now, lateBlocks.load());
+        while (lateHistory.size() > 1 && now - lateHistory.front().first > 60000)
+            lateHistory.erase (lateHistory.begin());
+    }
+
     // A Play held for Link until the files were ready: place it on the next shared bar line now.
     if (player != nullptr && player->isHoldingStart() && player->isReady())
         player->releaseStart (linkStartDelay (linkStartBeats, linkStartBpb));
@@ -4310,6 +4340,31 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
         }
         panicNow = false;
     }
+    guardOutputs (out, numOut, numSamples);
+}
+
+void Engine::guardOutputs (float* const* out, int numOut, int numSamples)
+{
+    const float release = 1.0f - std::exp (-1.0f / (float) (0.1 * jmax (8000.0, sampleRate)));
+    bool limited = false, silenced = false;
+    for (int c = 0; c < jmin (numOut, 32); ++c)
+    {
+        float* d = out[c];
+        if (d == nullptr) continue;
+        float g = guardGain[c];
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float x = d[i];
+            if (! std::isfinite (x)) { x = 0.0f; silenced = true; }
+            if (g < 1.0f) g = g > 0.9999f ? 1.0f : g + (1.0f - g) * release;      // let go first...
+            const float a = std::abs (x);
+            if (a * g > safetyCeiling) { g = safetyCeiling / a; limited = true; } // ...then never over
+            d[i] = x * g;
+        }
+        guardGain[c] = g;
+    }
+    if (limited)  guardLimited.fetch_add (1, std::memory_order_relaxed);
+    if (silenced) guardSilenced.fetch_add (1, std::memory_order_relaxed);
 }
 
 void Engine::processInput (InputRuntime& in, const float* const* audioIn, int numIn,
@@ -4400,7 +4455,12 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
         // The meter: what arrives, before the program's trim.
         if (inL != nullptr)
         {
-            auto peakOf = [numSamples] (const float* p) { const auto mm = FloatVectorOperations::findMinAndMax (p, numSamples); return jmax (std::abs (mm.getStart()), std::abs (mm.getEnd())); };
+            auto peakOf = [numSamples] (const float* p)
+            {
+                const auto mm = FloatVectorOperations::findMinAndMax (p, numSamples);
+                const float peak = jmax (std::abs (mm.getStart()), std::abs (mm.getEnd()));
+                return std::isfinite (peak) ? peak : 1.0f;      // garbage reads as clipping, never sticks at infinity
+            };
             const float pl = peakOf (inL);
             const float pr = inR != nullptr ? peakOf (inR) : pl;
             const float fall = std::exp (-2.3026f * (float) numSamples / (float) jmax (1.0, sampleRate));   // 20 dB per second
@@ -4805,6 +4865,254 @@ void Engine::prepareGmMidi (SlotRuntime& slot, int numSamples)
         }
         out.addEvent (m, meta.samplePosition);
     }
+}
+
+
+//==============================================================================
+// Staying up
+//==============================================================================
+void Engine::watchForStalls()
+{
+    auto check = [this] (PluginNode& node)
+    {
+        if (node.plugin == nullptr || node.loading.load()) return;
+        node.plugin->killIfStalled (node.plugin->isEditorOpen() ? stalledPluginEditorOpenMs : stalledPluginMs);
+        // A kill is a death: the plugin's listener posts it, and the restart follows from there.
+    };
+    auto walk = [&] (ProgramRuntime& rt)
+    {
+        for (auto& sl : rt.slots)
+        {
+            check (*sl);
+            for (auto* ch : { &sl->midiEffects, &sl->effects }) for (auto& e : *ch) check (*e);
+        }
+        for (auto& e : rt.effects) check (*e);
+    };
+    for (auto& in : runtimes)
+        for (auto& [p, rt] : in->loaded) walk (*rt);
+    for (auto& o : outputs) walk (o->chain);
+}
+
+int Engine::getRecentLateBlocks() const
+{
+    if (lateHistory.empty()) return 0;
+    return lateBlocks.load() - lateHistory.front().second;
+}
+
+String Engine::LivePosition::toString() const
+{
+    StringArray progs;
+    for (int p : programs) progs.add (String (p));
+    return String (set) + ";" + String (songInSet) + ";" + String (song) + ";" + String (scene) + ";"
+         + progs.joinIntoString (",") + ";" + String (tempoBpm, 3);
+}
+
+Engine::LivePosition Engine::LivePosition::fromString (const String& text)
+{
+    LivePosition p;
+    const auto parts = StringArray::fromTokens (text, ";", "");
+    if (parts.size() < 6) return p;
+    p.set = parts[0].getIntValue();
+    p.songInSet = parts[1].getIntValue();
+    p.song = parts[2].getIntValue();
+    p.scene = parts[3].getIntValue();
+    for (auto& t : StringArray::fromTokens (parts[4], ",", ""))
+        if (t.isNotEmpty()) p.programs.push_back (t.getIntValue());
+    p.tempoBpm = parts[5].getDoubleValue();
+    return p;
+}
+
+Engine::LivePosition Engine::getLivePosition() const
+{
+    LivePosition p;
+    p.set = setup.currentSet;
+    p.songInSet = setup.currentSongInSet;
+    p.song = songInPlay;
+    p.scene = currentScene;
+    for (auto& in : setup.inputs) p.programs.push_back (in.currentProgram);
+    p.tempoBpm = setup.tempoBpm;
+    return p;
+}
+
+void Engine::restoreLivePosition (const LivePosition& p)
+{
+    /* The song first, as Next would choose it -- its programs, its tempo,
+       its track armed -- then the scene, then whatever each keyboard had
+       been moved to since, then the tempo as it was last tapped. */
+    if (p.set >= 0 && p.set < (int) setup.sets.size())
+    {
+        setup.currentSet = p.set;
+        const auto& st = setup.sets[(size_t) p.set];
+        setup.currentSongInSet = p.songInSet >= 0 && p.songInSet < (int) st.songs.size() ? p.songInSet : -1;
+    }
+    if (p.song >= 0 && p.song < (int) setup.songs.size())
+        selectSong (p.song, jmax (0, p.scene));
+    if (p.scene >= 0 && p.scene != currentScene && p.scene < getSceneCount())
+        selectScene (p.scene);
+    for (int i = 0; i < (int) p.programs.size() && i < (int) setup.inputs.size(); ++i)
+        if (validProgram (p.programs[(size_t) i]) && setup.inputs[(size_t) i].currentProgram != p.programs[(size_t) i])
+            selectProgram (i, p.programs[(size_t) i]);
+    if (p.tempoBpm > 0.0 && std::abs (p.tempoBpm - setup.tempoBpm) > 0.001)
+        setTempoBpm (p.tempoBpm);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+std::vector<Engine::CheckItem> Engine::showCheck() const
+{
+    std::vector<CheckItem> items;
+    auto add = [&items] (CheckItem::Level l, const String& t) { items.push_back ({ l, t }); };
+
+    // The audio interface, first: nothing else matters without it.
+    auto* dev = const_cast<AudioDeviceManager&> (deviceManager).getCurrentAudioDevice();
+    if (dev == nullptr)
+        add (CheckItem::problem, "No audio interface is open. Open Audio... and choose one.");
+    else
+    {
+        const int block = lastBlockSamples.load() > 0 ? lastBlockSamples.load() : dev->getCurrentBufferSizeSamples();
+        add (CheckItem::good, "Audio: " + dev->getName() + ", " + String (roundToInt (dev->getCurrentSampleRate())) + " Hz, "
+                              + String (block) + " samples (" + String (1000.0 * block / jmax (1.0, dev->getCurrentSampleRate()), 1) + " ms)");
+        if (! audioThreadRealtime.load())
+            add (CheckItem::problem, "The audio is not running at realtime priority, so a busy computer can break it up. "
+                                     "Add yourself to the audio group (or install the realtime limits) and log in again.");
+    }
+    for (auto& w : deviceWarnings())
+        if (audioThreadRealtime.load() || ! w.containsIgnoreCase ("realtime"))    // said once, above
+            add (CheckItem::warning, w);
+
+    if (const int late = getRecentLateBlocks(); late > 0)
+        add (CheckItem::warning, String (late) + (late == 1 ? " audio block was" : " audio blocks were") + " late in the last minute: "
+                                 "a plugin is not keeping up. Raise the buffer size in Audio..., or look for the plugin that is loading.");
+    if (const double cpu = getCpuUsage(); cpu > 0.7)
+        add (CheckItem::warning, "The audio is using " + String (roundToInt (cpu * 100.0)) + "% of its time. A heavy patch could tip it over.");
+
+    // The keyboards and the MIDI devices the rig sends to.
+    const auto available = MidiInput::getAvailableDevices();
+    auto present = [&available] (const String& id, const String& name)
+    {
+        for (auto& d : available) if (d.identifier == id || (name.isNotEmpty() && d.name == name)) return true;
+        return false;
+    };
+    int keyboardsOk = 0;
+    for (auto& in : setup.inputs)
+    {
+        if (in.isTrack() || in.midiDeviceIdentifier.isEmpty()) continue;
+        if (present (in.midiDeviceIdentifier, in.midiDeviceName)) ++keyboardsOk;
+        else add (CheckItem::problem, in.name + ": its MIDI device, " + (in.midiDeviceName.isNotEmpty() ? in.midiDeviceName : in.midiDeviceIdentifier)
+                                      + ", is not connected. Plug it in, then Options > Rescan MIDI devices.");
+    }
+    if (keyboardsOk > 0)
+        add (CheckItem::good, String (keyboardsOk) + (keyboardsOk == 1 ? " MIDI device" : " MIDI devices") + " connected");
+    const auto outs = MidiOutput::getAvailableDevices();
+    for (auto& c : setup.clockOut)
+    {
+        bool found = false;
+        for (auto& d : outs) if (d.identifier == c.identifier || d.name == c.name) found = true;
+        if (! found) add (CheckItem::warning, "MIDI clock goes to " + c.name + ", which is not connected.");
+    }
+
+    // Every plugin in the show: the ones loaded, and the files of the ones that are not.
+    int pluginsOk = 0, notLoaded = 0, loadingNow = 0;
+    StringArray missingFiles;
+    auto fileMissing = [] (const PluginDescription& d)
+    {
+        if (d.fileOrIdentifier.isEmpty() || ! File::isAbsolutePath (d.fileOrIdentifier)) return false;   // LV2 URIs and the like
+        return ! File (d.fileOrIdentifier).exists();
+    };
+    auto inspect = [&] (int input, int program, ProgramRuntime* rt, const ProgramDef& cdef, const String& where)
+    {
+        auto& def = const_cast<ProgramDef&> (cdef);
+        auto look = [&] (const PluginDescription& d, PluginNode* node, int slot, int effect)
+        {
+            if (d.name.isEmpty() && d.fileOrIdentifier.isEmpty()) return;     // a built-in, an external instrument
+            if (fileMissing (d)) { missingFiles.addIfNotAlreadyThere (d.name + " (" + where + ")"); return; }
+            if (rt == nullptr || node == nullptr) { ++notLoaded; return; }
+            if (node->loading.load()) { ++loadingNow; return; }
+            const auto err = getPluginLoadError (input, program, slot, effect);
+            if (err.isNotEmpty()) add (CheckItem::problem, d.name + " in " + where + ": " + err + ". Press Reload on it.");
+            else if (node->plugin != nullptr) ++pluginsOk;
+        };
+        for (int si = 0; si < (int) def.slots.size(); ++si)
+        {
+            const auto& sd = def.slots[(size_t) si];
+            PluginNode* sn = rt != nullptr && si < (int) rt->slots.size() ? rt->slots[(size_t) si].get() : nullptr;
+            look (sd.plugin, sn, si, -1);
+            for (int chainSlot : { si, ProgramDef::midiChainOf (si) })
+                if (auto* chain = defChainFor (def, chainSlot))
+                {
+                    auto* rchain = rt != nullptr ? runtimeChainFor (*rt, chainSlot) : nullptr;
+                    for (int ei = 0; ei < (int) chain->size(); ++ei)
+                        look ((*chain)[(size_t) ei].plugin, rchain != nullptr && ei < (int) rchain->size() ? (*rchain)[(size_t) ei].get() : nullptr, chainSlot, ei);
+                }
+        }
+        if (auto* chain = defChainFor (def, -1))
+        {
+            auto* rchain = rt != nullptr ? runtimeChainFor (*rt, -1) : nullptr;
+            for (int ei = 0; ei < (int) chain->size(); ++ei)
+                look ((*chain)[(size_t) ei].plugin, rchain != nullptr && ei < (int) rchain->size() ? (*rchain)[(size_t) ei].get() : nullptr, -1, ei);
+        }
+    };
+    for (int i = 0; i < (int) setup.inputs.size(); ++i)
+        for (int p = 0; p < InputDef::numPrograms; ++p)
+        {
+            const auto& def = setup.inputs[(size_t) i].programs[(size_t) p];
+            if (def.isEmpty()) continue;
+            inspect (i, p, getLoaded (i, p), def, setup.inputs[(size_t) i].name + " " + String (p + 1).paddedLeft ('0', 3)
+                                                   + (def.name.isNotEmpty() ? " " + def.name : String()));
+        }
+    for (int o = 0; o < (int) setup.outputs.size(); ++o)
+        inspect (outputAddress (o), 0, getLoaded (outputAddress (o), 0), setup.outputs[(size_t) o].chain, setup.outputs[(size_t) o].name + "'s master effects");
+
+    for (auto& m : missingFiles) add (CheckItem::problem, "Plugin not installed: " + m + ".");
+    if (pluginsOk > 0) add (CheckItem::good, String (pluginsOk) + (pluginsOk == 1 ? " plugin" : " plugins") + " running");
+    if (loadingNow > 0) add (CheckItem::warning, String (loadingNow) + (loadingNow == 1 ? " plugin is" : " plugins are") + " still loading. Check again in a moment.");
+    if (notLoaded > 0 && ! setup.preloadAllPrograms)
+        add (CheckItem::warning, String (notLoaded) + (notLoaded == 1 ? " plugin loads" : " plugins load") + " only when its program is first chosen, "
+                                 "which can take seconds on stage. Turn on Options > Preload all programs.");
+
+    // The songs about to be played: the set if one is chosen, else all of them.
+    std::vector<int> songs;
+    if (setup.currentSet >= 0 && setup.currentSet < (int) setup.sets.size()) songs = setup.sets[(size_t) setup.currentSet].songs;
+    else for (int i = 0; i < (int) setup.songs.size(); ++i) songs.push_back (i);
+    const auto folder = getChartsFolder();
+    int filesOk = 0;
+    for (int si : songs)
+    {
+        if (si < 0 || si >= (int) setup.songs.size()) continue;
+        const auto& song = setup.songs[(size_t) si];
+        for (auto& st : song.stems)
+            if (folder.getChildFile (st.file).existsAsFile()) ++filesOk;
+            else add (CheckItem::problem, song.name + ": its backing-track file " + st.file + " is missing.");
+        for (auto& c : song.charts)
+            if (folder.getChildFile (c.file).existsAsFile()) ++filesOk;
+            else add (CheckItem::warning, song.name + ": its chart " + c.displayName() + " is missing.");
+    }
+    if (filesOk > 0) add (CheckItem::good, String (filesOk) + " backing-track and chart files found");
+
+    // Tonight so far.
+    if (autoRestarts > 0)
+        add (CheckItem::warning, String (autoRestarts) + (autoRestarts == 1 ? " plugin has" : " plugins have") + " crashed and been restarted since StageRig started. "
+                                 "The status bar named it; consider a different plugin for that sound.");
+    if (const int g = guardSilenced.load(); g > 0)
+        add (CheckItem::warning, "A plugin sent out broken audio (not a number) " + String (g) + " times; the safety guard silenced it.");
+    if (const int g = guardLimited.load(); g > 0)
+        add (CheckItem::warning, "The safety guard turned the output down in " + String (g) + " audio blocks: something is reaching full scale. "
+                                 "Lower the master volume, or the loudest program.");
+
+   #if JUCE_LINUX
+    // On battery: a laptop that dies at the encore, or slows itself down to save power.
+    for (auto& ps : File ("/sys/class/power_supply").findChildFiles (File::findDirectories, false))
+        if (ps.getChildFile ("type").loadFileAsString().trim() == "Mains" && ps.getChildFile ("online").loadFileAsString().trim() == "0")
+            add (CheckItem::warning, "The computer is running on battery. Plug in the power supply.");
+   #endif
+
+    // Room for the recording, if there is one.
+    const auto recFolder = getRecordingsFolder();
+    const auto free = recFolder.getParentDirectory().getBytesFreeOnVolume();
+    if (free > 0 && free < (int64) 2 * 1024 * 1024 * 1024)
+        add (CheckItem::warning, "Only " + File::descriptionOfSizeInBytes (free) + " free on the disk: a recording of the gig would run out.");
+
+    std::stable_sort (items.begin(), items.end(), [] (const CheckItem& a, const CheckItem& b) { return a.level > b.level; });
+    return items;
 }
 
 } // namespace perf

@@ -9,6 +9,17 @@
 #include <cstdio>
 #include <csignal>
 #include <atomic>
+#if JUCE_LINUX || JUCE_BSD
+ #include <sys/wait.h>
+ #include <sys/prctl.h>
+ #include <unistd.h>
+ #include <ctime>
+ #include <cerrno>
+ #include <cstring>
+ #include <algorithm>
+ #include <string>
+ #include <vector>
+#endif
 
 namespace
 {
@@ -96,7 +107,24 @@ public:
         const bool takeover = settings->getBoolValue ("pipewireTakeover", true);
         if (takeover)
         {
-            previousClock = perf::LowLatency::readClock();
+            /* The clock as it was before StageRig pinned it, kept in the
+               settings until a clean quit puts it back. A copy started after
+               a crash finds it still there and keeps it: reading the clock
+               now would read StageRig's own setting, and the quit would then
+               "restore" the pin for good. */
+            if (settings->getBoolValue ("clockSaved", false))
+                previousClock = { settings->getValue ("clockForceQuantum"), settings->getValue ("clockForceRate"),
+                                  settings->getValue ("clockQuantum"), settings->getValue ("clockRate") };
+            else
+            {
+                previousClock = perf::LowLatency::readClock();
+                settings->setValue ("clockForceQuantum", previousClock.forceQuantum);
+                settings->setValue ("clockForceRate", previousClock.forceRate);
+                settings->setValue ("clockQuantum", previousClock.quantum);
+                settings->setValue ("clockRate", previousClock.rate);
+                settings->setValue ("clockSaved", true);
+                settings->saveIfNeeded();
+            }
             clockTakenOver = perf::LowLatency::forceClock (quantum, 48000);
         }
         std::fprintf (stderr, "[audio] pipewire-jack %s, requested quantum %d @ 48 kHz, clock takeover %s%s\n",
@@ -175,7 +203,11 @@ public:
         engine.reset();
         host.reset();
         if (clockTakenOver) perf::LowLatency::restoreClock (previousClock);
-        if (settings != nullptr) settings->saveIfNeeded();
+        if (settings != nullptr)
+        {
+            settings->removeValue ("clockSaved");
+            settings->saveIfNeeded();
+        }
         settings.reset();
     }
 
@@ -233,4 +265,89 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
 };
 
+#if JUCE_LINUX || JUCE_BSD
+namespace
+{
+    /* The watchman. StageRig runs as a child of this small process, which
+       does nothing but wait; if the child dies -- a crash, the kernel's
+       out-of-memory killer, anything but a quit -- it is started again at
+       once, and it comes back on the song, scene and programs it was on
+       (MainComponent reads STAGERIG_RECOVERED). Every plugin already runs
+       in its own process, so this is the one part left that could take the
+       show down, and now it cannot take it down for long.
+
+       Forked before JUCE starts, while the process has one thread. A quit
+       -- the window closed, Ctrl+C, a SIGTERM from the desktop -- ends the
+       child normally and the watchman with it. Five crashes inside two
+       minutes is a rig that cannot start; it stops trying and says so. */
+    volatile pid_t watchedChild = -1;
+    volatile sig_atomic_t watchQuit = 0;
+
+    void forwardToChild (int sig)
+    {
+        watchQuit = 1;
+        if (watchedChild > 0) ::kill (watchedChild, sig);
+    }
+
+    /** -1 in the process that goes on to be StageRig; otherwise the exit code
+        the watchman finishes with. */
+    int superviseLaunch (int argc, char* argv[])
+    {
+        if (const char* off = std::getenv ("STAGERIG_NO_SUPERVISOR"); off != nullptr && *off != 0 && *off != '0') return -1;
+        for (int i = 1; i < argc; ++i)
+            if (std::strcmp (argv[i], "--tempo") == 0) return -1;      // a one-shot command, not a show
+
+        std::signal (SIGTERM, forwardToChild);
+        std::signal (SIGINT,  forwardToChild);
+        std::signal (SIGHUP,  forwardToChild);
+
+        std::vector<std::time_t> crashes;
+        for (;;)
+        {
+            const pid_t pid = ::fork();
+            if (pid < 0) return -1;                      // cannot watch: just be StageRig
+            if (pid == 0)
+            {
+                ::prctl (PR_SET_NAME, "StageRig", 0, 0, 0);    // not the watchman's name, after a restart
+                std::signal (SIGTERM, SIG_DFL);
+                std::signal (SIGINT,  SIG_DFL);
+                std::signal (SIGHUP,  SIG_DFL);
+                return -1;
+            }
+            watchedChild = pid;
+            ::prctl (PR_SET_NAME, "stagerig-watch", 0, 0, 0);
+
+            int status = 0;
+            while (::waitpid (pid, &status, 0) < 0 && errno == EINTR) {}
+            watchedChild = -1;
+
+            if (watchQuit) return WIFEXITED (status) ? WEXITSTATUS (status) : 0;
+            if (WIFEXITED (status)) return WEXITSTATUS (status);       // it quit: so do we
+
+            const int sig = WIFSIGNALED (status) ? WTERMSIG (status) : 0;
+            const auto now = std::time (nullptr);
+            crashes.erase (std::remove_if (crashes.begin(), crashes.end(), [now] (std::time_t t) { return now - t > 120; }), crashes.end());
+            crashes.push_back (now);
+            if (crashes.size() >= 5)
+            {
+                std::fprintf (stderr, "[watch] StageRig has crashed %d times in two minutes (last: %s); not starting it again.\n",
+                              (int) crashes.size(), strsignal (sig));
+                return 1;
+            }
+            std::fprintf (stderr, "[watch] StageRig stopped (%s); starting it again where it was.\n", strsignal (sig));
+            ::setenv ("STAGERIG_RECOVERED", std::to_string (crashes.size()).c_str(), 1);
+        }
+    }
+}
+
+JUCE_CREATE_APPLICATION_DEFINE (StageRigApplication)
+
+int main (int argc, char* argv[])
+{
+    if (const int code = superviseLaunch (argc, argv); code >= 0) return code;
+    juce::JUCEApplicationBase::createInstance = &juce_CreateApplication;
+    return juce::JUCEApplicationBase::main (argc, (const char**) argv);
+}
+#else
 START_JUCE_APPLICATION (StageRigApplication)
+#endif

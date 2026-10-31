@@ -89,8 +89,6 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .sheet .part button { flex:none; padding:10px 14px; font-size:14px; background:var(--bg); }
   .sheet .part button.on { background:#a3282d; }
   .sheet .part.muted .who { opacity:.45; }
-  .transport button.parts { background:var(--row); color:#fff; font-weight:700; }
-  .transport button.click.on { background:var(--accent); color:#06121f; }
   .loading { color:#d8a657; font-size:14px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
   button.p { background:var(--row); color:#fff; border:0; border-radius:10px; padding:14px 12px; text-align:left;
@@ -127,21 +125,49 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   /* The set list. The current song is the thing you must be able to read at a
      glance from a stand, so it is the one that is big. */
   .setwrap { margin:10px 12px 22px; }
-  /* The backing track of the song in play: one big button, and where it is. */
-  .transport { display:flex; align-items:center; gap:12px; background:var(--panel); border-radius:12px;
-               padding:10px 12px; margin-bottom:12px; }
-  .transport button { flex:none; border:0; border-radius:10px; padding:12px 20px; font-size:16px; font-weight:800;
-                      background:var(--accent); color:#06121f; min-width:96px; }
-  .transport button.running { background:#a3282d; color:#fff; }
-  .sections { display:flex; flex-wrap:wrap; gap:8px; margin:-4px 0 12px; }
+  /* The backing track of the song in play. One word says what it is doing --
+     STOPPED, COUNT-IN, PLAYING, REPEATING -- in that state's colour, beside
+     the song's name; the big button says what a tap will do; the bar shows
+     where it is among its sections. Nothing moves while it plays: a button
+     that shifts under a finger mid-song is the wrong one pressed. */
+  .transport { background:var(--panel); border-radius:12px; padding:10px 12px; margin-bottom:10px;
+               border-left:6px solid #5b606b; }
+  .transport.playing  { border-left-color:#2fbf71; }
+  .transport.counting, .transport.vamping { border-left-color:#e0a030; }
+  .transport .trow { display:flex; align-items:center; gap:12px; }
+  .transport button { flex:none; border:0; border-radius:10px; padding:12px 18px; font-size:16px; font-weight:800;
+                      background:var(--row); color:#fff; }
+  .transport button.play { min-width:118px; padding:16px 18px; font-size:18px; background:#2fbf71; color:#06180d; }
+  .transport button.play.running { background:#c4363c; color:#fff; }
+  .transport button.play:disabled { opacity:.4; }
+  .transport button.vampgo { background:#e0a030; color:#1a1204; }
+  .transport button.click { font-weight:700; color:var(--dim); }
+  .transport button.click.on { color:#fff; box-shadow:inset 0 0 0 2px #2fbf71; }
+  .transport button.parts { font-weight:700; }
+  .transport .tt { flex:1; min-width:0; font-variant-numeric:tabular-nums; }
+  .transport .tstate { display:flex; align-items:baseline; gap:8px; white-space:nowrap; overflow:hidden; }
+  .transport .tstate b { font-size:12px; letter-spacing:.1em; color:#9aa0ab; flex:none; }
+  .transport.playing .tstate b { color:#2fbf71; }
+  .transport.counting .tstate b, .transport.vamping .tstate b { color:#e0a030; }
+  .transport .tsong { font-size:17px; font-weight:800; color:#fff; overflow:hidden; text-overflow:ellipsis; }
+  .transport .tpos { font-size:15px; color:var(--dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .transport .tpos em { font-style:normal; color:#e0a030; font-weight:700; }
+  .tbar { position:relative; height:8px; background:var(--row); border-radius:4px; margin-top:10px; overflow:hidden; }
+  .tbar .fill { position:absolute; left:0; top:0; bottom:0; background:#5b606b; }
+  .transport.playing .tbar .fill { background:#2fbf71; }
+  .transport.vamping .tbar .fill { background:#e0a030; }
+  .tbar .tick { position:absolute; top:0; bottom:0; width:2px; background:var(--panel); }
+  .tbar .tick.next { background:#e0a030; width:3px; }
+  .sections { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 6px; }
   .sections button { background:var(--row); color:#fff; border:2px solid transparent; border-radius:10px;
                      padding:10px 14px; font-size:15px; font-weight:700; }
-  .sections button.on { background:var(--accent); color:#06121f; }
-  .sections button.queued { border-color:var(--accent); }
-  .sections button.go { background:#8a5a12; }
-  .transport .tt small { display:block; font-size:10px; letter-spacing:.08em; font-weight:700; color:var(--dim); opacity:.8; }
-  .transport .tt { flex:1; min-width:0; font-size:15px; color:var(--dim); font-variant-numeric:tabular-nums;
-                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sections button.past { color:var(--dim); }
+  .sections button.cue { border-color:#fff; }
+  .sections button.on { background:#2fbf71; color:#06180d; }
+  .sections button.on.vamp { background:#e0a030; color:#1a1204; }
+  .sections button.queued { border-color:#e0a030; }
+  .sections button.go { background:var(--row); border-color:var(--accent); }
+  .sections-help { color:var(--dim); font-size:13px; padding:0 4px 12px; }
   .setpick { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
   .setpick button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
                     padding:10px 18px; font-size:13px; font-weight:700; }
@@ -342,33 +368,88 @@ let transportUi = null, transportTimer = null;
 const mmss = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
 function showTransport(t) {
   if (!transportUi || !t) return;
-  transportUi.button.textContent = t.running ? "Stop" : "Play";
-  transportUi.button.classList.toggle("running", !!t.running);
-  if (transportUi.clickBtn) transportUi.clickBtn.classList.toggle("on", !!t.click);
-  const sec = (t.sections || [])[t.section];
-  const status = t.scenes ? (sec ? sec.name + " · " + (t.section + 1) + "/" + t.sections.length : t.name)
-    : !t.ready ? ("Loading " + Math.round((t.loading || 0) * 100) + "%")
-    : t.countIn ? "Counting in…"
-    : ((t.sections || []).length > 1 && sec ? sec.name + (t.vamping ? " — repeating (vamp)" : "") : t.name) + " · "
-      + (t.metronome ? "click " + mmss(t.pos) : mmss(t.pos) + " / " + mmss(t.len))
-      + (t.queued >= 0 && t.sections[t.queued] ? " · next: " + t.sections[t.queued].name : "");
-  transportUi.text.innerHTML = '<small></small><span></span>';
-  transportUi.text.querySelector("small").textContent = t.scenes ? "SCENES" : "BACKING TRACK";
-  transportUi.text.querySelector("span").textContent = status;
+  const ui = transportUi, list = t.sections || [], sec = list[t.section];
 
-  /* Section buttons, redrawn only when something about them changes: a tap
-     queues that section; during a vamp, "Go on" lets it play through. */
-  const list = t.sections || [];
-  const key = JSON.stringify([list.map(x => x.name + x.vamp), t.section, t.queued, t.vamping, t.running, t.scenes && editMode]);
-  transportUi.parts = t.parts || [];
-  transportUi.partsBtn.style.display = transportUi.parts.length ? "" : "none";
+  /* One state, said once, in its colour. */
+  const state = t.scenes ? "scenes" : !t.ready ? "loading" : t.countIn ? "counting" : t.vamping ? "vamping" : t.running ? "playing" : "stopped";
+  ui.bar.className = "transport " + state;
+  ui.word.textContent = { scenes: "SCENES", loading: "LOADING", counting: "COUNT-IN", vamping: "REPEATING", playing: "PLAYING", stopped: "STOPPED" }[state];
+  ui.song.textContent = t.name || "";
+
+  /* The big button says what a tap does. For a song played by hand it
+     steps to the next scene, as the laptop's Next scene does. */
+  if (t.scenes) {
+    ui.button.textContent = "Next scene ▸";
+    ui.button.classList.remove("running");
+    ui.button.disabled = !(t.section + 1 < list.length);
+  } else {
+    ui.button.textContent = t.running ? "■ Stop" : "▶ Play";
+    ui.button.classList.toggle("running", !!t.running);
+    ui.button.disabled = !t.ready && !t.running;
+  }
+
+  /* Where it is. */
+  let pos;
+  if (t.scenes) pos = sec ? sec.name + " — scene " + (t.section + 1) + " of " + list.length : "No scene chosen yet";
+  else if (!t.ready) pos = "Getting the track ready… " + Math.round((t.loading || 0) * 100) + "%";
+  else if (t.countIn) pos = "Counting in — the track starts after the count";
+  else {
+    const where = list.length > 1 && sec ? sec.name + " · " : "";
+    pos = where + (t.metronome ? "click " + mmss(t.pos) : mmss(t.pos) + " / " + mmss(t.len));
+  }
+  ui.pos.textContent = pos;
+  if (!t.scenes && t.running && t.queued >= 0 && list[t.queued] && t.queued !== t.section) {
+    const em = document.createElement("em"); em.textContent = "  then " + list[t.queued].name;
+    ui.pos.appendChild(em);
+  }
+
+  /* The bar: how far through, and where each section begins. */
+  const showBar = !t.scenes && !t.metronome && t.len > 0;
+  ui.track.style.display = showBar ? "" : "none";
+  if (showBar) {
+    ui.fill.style.width = Math.min(100, 100 * (t.pos || 0) / t.len) + "%";
+    const tickKey = JSON.stringify([list.map(x => x.start), t.len, t.queued]);
+    if (tickKey !== ui.tickKey) {
+      ui.tickKey = tickKey;
+      ui.track.querySelectorAll(".tick").forEach(x => x.remove());
+      list.forEach((x, i) => {
+        if (!(x.start > 0)) return;
+        const k = document.createElement("div"); k.className = "tick" + (i === t.queued ? " next" : "");
+        k.style.left = (100 * x.start / t.len) + "%";
+        ui.track.appendChild(k);
+      });
+    }
+  }
+
+  /* A repeating section is let go from a button that is always in the same
+     place for a song that has one -- shown when it can be pressed. */
+  const hasVamp = !t.scenes && list.some(x => x.vamp);
+  ui.vampGo.style.display = hasVamp ? "" : "none";
+  ui.vampGo.style.visibility = t.vamping ? "visible" : "hidden";
+
+  if (ui.clickBtn) {
+    ui.clickBtn.style.display = t.scenes ? "none" : "";
+    ui.clickBtn.classList.toggle("on", !!t.click);
+    ui.clickBtn.textContent = t.click ? "Click: on" : "Click: off";
+  }
+  ui.parts = t.parts || [];
+  ui.partsBtn.style.display = ui.parts.length ? "" : "none";
   if (partsSheet) partsSheet.refresh();
 
-  if (key === transportUi.key) return;
-  transportUi.key = key;
-  const host = transportUi.sections;
+  /* What tapping a section will do, in words, for the state it is in. */
+  ui.caption.textContent = t.scenes ? "Tap a scene and the keyboards change at once."
+    : !t.running ? (sec ? "Play starts from " + sec.name + ". Tap another section to start there instead." : "")
+    : t.vamping ? (sec ? sec.name + " repeats until you tap End vamp." : "")
+    : "Tap a section to go there when this one ends.";
+  ui.caption.style.display = list.length < (t.scenes ? 1 : 2) || !ui.caption.textContent ? "none" : "";
+
+  /* Section buttons, in song order and never moved: redrawn only when
+     something about them changes. */
+  const key = JSON.stringify([list.map(x => x.name + x.vamp), t.section, t.queued, t.vamping, t.running, t.scenes && editMode]);
+  if (key === ui.key) return;
+  ui.key = key;
+  const host = ui.sections;
   host.innerHTML = "";
-  if (transportUi.caption) transportUi.caption.style.display = list.length < (t.scenes ? 1 : 2) ? "none" : "";
   if (t.scenes && editMode && lastState && lastState.canEdit !== false) {
     /* Building a song from the stand: set the sounds, add a scene; set them
        again, add another. Capture refreshes the scene in play. */
@@ -382,16 +463,13 @@ function showTransport(t) {
     }
   }
   if (list.length < (t.scenes ? 1 : 2)) return;
-  if (t.vamping) {
-    const go = document.createElement("button"); go.className = "go"; go.textContent = "End vamp ▸";
-    go.onclick = async () => { try { showTransport(await api("/api/transport?do=next", { method: "POST" })); } catch (e) { if (!e.gate) show(e.message); } };
-    host.appendChild(go);
-  }
   list.forEach((x, i) => {
     const b = document.createElement("button");
-    b.textContent = x.name + (x.vamp ? " ↻ vamp" : "") + (i === t.queued && i !== t.section ? " · next" : "");
-    if (i === t.section) b.className = "on";
-    else if (i === t.queued) b.className = "queued";
+    const here = i === t.section, next = i === t.queued && !here;
+    b.textContent = (x.vamp ? "↻ " : "") + x.name + (next ? " · next" : "");
+    if (t.scenes) b.className = here ? "on" : "";
+    else if (!t.running) b.className = here ? "cue" : "";
+    else b.className = here ? "on" + (x.vamp && t.vamping ? " vamp" : "") : next ? "queued" : i < t.section ? "past" : "";
     b.onclick = async () => {
       try { showTransport(await api("/api/transport?do=section&index=" + i, { method: "POST" })); }
       catch (e) { if (!e.gate) show(e.message); }
@@ -519,33 +597,47 @@ function renderSets(s) {
   const wrap = document.createElement("div"); wrap.className = "setwrap";
 
   if (s.track || s.scenes) {
-    const bar = document.createElement("div"); bar.className = "transport";
-    const b = document.createElement("button"); b.textContent = "Play";
-    const t = document.createElement("div"); t.className = "tt"; t.textContent = s.scenes ? "Scenes" : "Backing track";
-    const cap = document.createElement("div"); cap.className = "empty"; cap.style.padding = "0 4px 6px"; cap.style.fontSize = "12px";
-    cap.textContent = s.scenes ? "Tap a scene and the keyboards change at once."
-                               : "Tap a section to go there when this one ends. ↻ repeats until you end the vamp.";
-    if (s.scenes) b.style.display = "none";
+    const bar = document.createElement("div"); bar.className = "transport stopped";
+    const row = document.createElement("div"); row.className = "trow";
+    const b = document.createElement("button"); b.className = "play"; b.textContent = s.scenes ? "Next scene ▸" : "▶ Play";
     b.onclick = async () => {
-      try { showTransport(await api("/api/transport?do=toggle", { method: "POST" })); }
+      try { showTransport(await api(transportUi && transportUi.button.textContent.startsWith("Next") ? "/api/transport?do=next" : "/api/transport?do=toggle", { method: "POST" })); }
       catch (e) { if (!e.gate) show(e.message); }
     };
-    const parts = document.createElement("button"); parts.className = "parts"; parts.textContent = "Parts of the track";
-    parts.style.display = "none";
-    parts.onclick = showParts;
-    const click = document.createElement("button"); click.className = "parts click"; click.textContent = "Click";
+    const tt = document.createElement("div"); tt.className = "tt";
+    const st = document.createElement("div"); st.className = "tstate";
+    const word = document.createElement("b"); word.textContent = s.scenes ? "SCENES" : "STOPPED";
+    const song = document.createElement("span"); song.className = "tsong";
+    st.appendChild(word); st.appendChild(song);
+    const pos = document.createElement("div"); pos.className = "tpos";
+    tt.appendChild(st); tt.appendChild(pos);
+    const vampGo = document.createElement("button"); vampGo.className = "vampgo"; vampGo.textContent = "End vamp ▸";
+    vampGo.style.display = "none";
+    vampGo.onclick = async () => { try { showTransport(await api("/api/transport?do=next", { method: "POST" })); } catch (e) { if (!e.gate) show(e.message); } };
+    const click = document.createElement("button"); click.className = "click"; click.textContent = "Click: off";
     click.title = "The metronome in the in-ears, through the song";
     click.onclick = async () => {
       try { showTransport(await api("/api/transport?do=click", { method: "POST" })); }
       catch (e) { if (!e.gate) show(e.message); }
     };
     if (s.scenes) click.style.display = "none";
-    bar.appendChild(b); bar.appendChild(t); bar.appendChild(click); bar.appendChild(parts);
+    const parts = document.createElement("button"); parts.className = "parts"; parts.textContent = "Parts";
+    parts.title = "The backing track's MIDI parts: mute one to play it yourself";
+    parts.style.display = "none";
+    parts.onclick = showParts;
+    row.appendChild(b); row.appendChild(tt); row.appendChild(vampGo); row.appendChild(click); row.appendChild(parts);
+    bar.appendChild(row);
+    const track = document.createElement("div"); track.className = "tbar"; track.style.display = "none";
+    const fill = document.createElement("div"); fill.className = "fill";
+    track.appendChild(fill);
+    bar.appendChild(track);
     wrap.appendChild(bar);
     const secs = document.createElement("div"); secs.className = "sections";
     wrap.appendChild(secs);
+    const cap = document.createElement("div"); cap.className = "sections-help";
     wrap.appendChild(cap);
-    transportUi = { button: b, text: t, sections: secs, partsBtn: parts, clickBtn: click, parts: [], key: "", caption: cap };
+    transportUi = { bar, button: b, word, song, pos, track, fill, vampGo, sections: secs, partsBtn: parts, clickBtn: click,
+                    parts: [], key: "", tickKey: "", caption: cap };
   } else {
     transportUi = null;
   }
@@ -2079,6 +2171,7 @@ String RemoteServer::transportJson() const
         DynamicObject::Ptr sec (new DynamicObject());
         sec->setProperty ("name", engine.getTrackSectionName (i));
         sec->setProperty ("vamp", engine.isTrackSectionVamp (i));
+        sec->setProperty ("start", engine.getTrackSectionStart (i));
         sections.add (var (sec.get()));
     }
     o->setProperty ("sections", sections);

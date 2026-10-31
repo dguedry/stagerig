@@ -52,7 +52,12 @@ other plugin.
 - **MIDI learn** for any plugin parameter, with suggested mappings from
   parameter names and reusable per-plugin templates.
 - **Every plugin in its own process.** A plugin that crashes or hangs takes
-  only itself down; the rest of the rig plays on.
+  only itself down; the rest of the rig plays on, and the plugin is
+  restarted by itself with its state.
+- **Built to stay up.** A watchman restarts StageRig itself if it ever dies,
+  back on the same song and scene; a safety guard on every output stops
+  broken audio and anything over full scale; and a **pre-show check** lists
+  everything that could go wrong before the first song.
 - **Built for low latency**: a native PipeWire/JACK client, 128-sample blocks
   by default, parallel plugin loading, and a late-block counter you can watch.
 - **Loop a passage** on a keyboard from a footswitch, in whole bars at the rig's tempo, and play over it.
@@ -316,9 +321,12 @@ each one over a shared-memory block (audio, MIDI and parameter changes, one
 block at a time, with two semaphores) plus a socket for everything that is not
 real-time: loading, state, parameter lists, editor windows and notifications.
 
-- A plugin that crashes takes only its own process down. The instrument goes silent,
-  the UI marks it red, and its **Reload** button starts a fresh process with
-  the saved state.
+- A plugin that crashes takes only its own process down. The engine starts a
+  fresh process with the saved state at once, up to three times a minute;
+  past that the UI marks it red and its **Reload** button tries again.
+- A host stuck inside the plugin's processing, alive but never answering a
+  block, is killed after five seconds by a watchdog and restarted the same
+  way.
 - A plugin that hangs (a stuck editor, a bridge waiting on Wine) can't freeze
   StageRig: requests to it time out, and the audio thread waits for each
   process only until 85 % of the block period has passed. Late blocks are

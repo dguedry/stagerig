@@ -126,6 +126,14 @@ public:
     bool finishProcess (float* outL, float* outR, const timespec& deadline, juce::MidiBuffer* midiOut = nullptr);
     int getMissedBlocks() const                             { return missedBlocks.load(); }
 
+    /** The watchdog, from the message thread a few times a second. A host
+        that has sat on one audio block for `stalledMs` is stuck inside the
+        plugin's processing -- a deadlock, an endless loop -- and would stay
+        silent for the rest of the night without ever dying. It is put down
+        here, so it reads as dead and the engine restarts it. True when it
+        was. */
+    bool killIfStalled (int stalledMs);
+
     /** Asks the process to quit and reaps it (or kills it after a grace period). */
     /** Tells the host to quit and does not wait. Call on every plugin first,
         then shutdown() on each: they then all exit at once rather than one
@@ -187,6 +195,11 @@ private:
     uint32_t pendingParamCount = 0;
     ipc::ParamChange pendingParams[ipc::kMaxParamChanges];
     std::atomic<int> missedBlocks { 0 };
+
+    // The watchdog's memory: the last block seen finished, and since when. Message thread only.
+    uint64_t watchSeq = 0;
+    juce::uint32 watchSinceMs = 0;
+    bool watchStarted = false;          // the first look only starts the clock
 
     // Tempo: written by the message thread, read by the audio thread each block.
     std::atomic<double> tempoBpm { 120.0 };

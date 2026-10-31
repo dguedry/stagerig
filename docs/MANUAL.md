@@ -49,6 +49,7 @@ works inside, see the [README](../README.md).
 - [Audio settings and latency](#audio-settings-and-latency)
 - [Saving your setup](#saving-your-setup)
 - [Playing live](#playing-live)
+- [When something fails on stage](#when-something-fails-on-stage)
 - [How long loading takes](#how-long-loading-takes)
 - [Plugin formats](#plugin-formats)
 - [Good free plugins to start with](#good-free-plugins-to-start-with)
@@ -314,7 +315,7 @@ transpose, curve and channels decide which notes enter at all. Left to right:
 | **Checkbox** | Turns the instrument on. Off is silent but stays loaded. |
 | **Icon** | The plugin's own icon where it has one, otherwise a coloured badge with its initials. |
 | **Name** | Plugin name and format. Red means it failed to load; hover for the reason. |
-| **Window** | Opens the plugin's own window. Shows **Reload** instead if the plugin crashed; a MIDI device has **Device...** here, the General MIDI player **Sound...**. |
+| **Window** | Opens the plugin's own window. Shows **Reload** instead if the plugin crashed and was left off (see *When something fails on stage*); a MIDI device has **Device...** here, the General MIDI player **Sound...**. |
 | **X** | Removes the instrument, and asks first. |
 | **GAIN** | Level of this instrument, applied after its effects. Double-click for 0 dB. |
 | **PAN** | Stereo position, `centre`, `L 40`, `R 25`. Double-click for centre. |
@@ -985,8 +986,9 @@ there when the current section ends -- with **End vamp ▸** during a vamp, and
 a footswitch can do the same: **Footswitches... ▸ Next section of the track,
 or next scene / release vamp**. The panel shows the section you are in and
 the one queued (*Verse 1:12 / 3:40 > Chorus*). For a song played by hand the
-same button reads **Next scene** and the tablet's row is its scenes, which
-change the moment they are tapped (see *Scenes*).
+same button reads **Next scene**, as does the tablet's big button, and the
+tablet's row is its scenes, which change the moment they are tapped (see
+*Scenes*).
 
 Moving to another song stops the track that is playing. Without a backing
 track playing, plugins are told the music is always running, from bar one at
@@ -1098,12 +1100,25 @@ and always work.
 The **Find a song** box matches the name, the stage notes, and the programs --
 so "piano" or "002" finds a song you cannot quite name.
 
-With a song selected (its track ready but not started), the Play bar at the
-top carries **Play** / **Stop** and where the track is, under a **BACKING
-TRACK** caption, with the song's sections under it: tap a section to go there
-when the current one ends; a vamping section reads *↻ vamp*, and **End vamp
-▸** lets it through. **Click** turns the song's metronome on or off (see
-*Backing tracks*). **Parts of the track** lists the MIDI files' parts --
+With a song selected, the Play bar at the top says in one word what the
+track is doing -- **STOPPED**, **COUNT-IN**, **PLAYING**, or **REPEATING**
+during a vamp -- in that state's colour, beside the song's name and where it
+is (*Verse · 1:12 / 3:40*). The big button says what a tap will do: **▶ Play**
+or **■ Stop**. Under it a bar fills as the song plays, with a mark where each
+section starts. The song's sections are buttons below, in song order, and the
+line under them says what a tap does right now:
+
+- **Stopped**: the outlined section is where Play starts. Tap another to
+  start there instead.
+- **Playing**: the green section is the one playing. Tap another to go
+  there when this one ends; it is outlined in amber, marked *next*, and the
+  bar shows where it starts. Sections already played are dimmed.
+- **Repeating**: a vamp section (↻) turns amber while it repeats, and **End
+  vamp ▸** lets it through. That button keeps its place for a song with a
+  vamp, so nothing moves under your finger mid-song.
+
+**Click: on** / **Click: off** turns the song's metronome on or off (see
+*Backing tracks*). **Parts** lists the MIDI files' parts --
 *Piano: Acoustic Grand Piano · General MIDI*, *Strings: Upper: Big Strings*
 -- each with **Mute** (for the part you will play yourself tonight) and, when a
 plugin in the song's own program plays it, **GUI** to open that plugin's
@@ -1414,7 +1429,25 @@ A setup file is plain text, so a copy is a backup.
 
 ## Playing live
 
-A short checklist:
+**Options ▸ Pre-show check...** looks at everything that can be known before
+the first song and lists it, worst first, with a red dot for what must be
+fixed, amber for what to look at, and green for what is fine:
+
+- the audio interface, its buffer, and whether the audio runs at realtime
+  priority;
+- audio blocks that were late in the last minute, and how busy the audio is;
+- every keyboard's MIDI device, and the devices sent MIDI clock;
+- every plugin in the setup: running, still loading, failed, or not
+  installed on this computer -- and how many would load only when first
+  chosen if preloading is off;
+- the backing-track files and charts of the songs in the set;
+- what has happened tonight: plugins that crashed and were restarted, and
+  how often the safety guard stepped in;
+- the power supply (a laptop on battery), the disk space a recording needs,
+  unsaved changes, and the tablet.
+
+Fix the red ones, press **Check again**, and play. Then the rest of the
+checklist:
 
 - Turn on **Options ▸ Preload all programs** and give StageRig time to load
   everything before the first song. The status bar stops showing loading
@@ -1426,6 +1459,39 @@ A short checklist:
 - Learn where **PANIC** is.
 - Keep one input per keyboard in your setup, with program numbers matching the
   patch numbers on your keyboard, so you never touch the computer.
+
+## When something fails on stage
+
+StageRig is built so that no one failure stops the sound.
+
+- **A plugin crashes.** Each plugin runs in its own process, so a crash
+  takes only that plugin. It is started again by itself, with its saved
+  state, on the program it was in. The status bar names it
+  (*Diva stopped (...). Restarting it...*), and nothing else stops. One that
+  crashes three times in a minute is left off rather than restarted for
+  ever; **Reload** on it tries again.
+- **A plugin hangs.** A plugin stuck inside its audio processing never
+  crashes; it just goes silent. After five seconds without audio from it
+  (twenty while its window is open) it is stopped and restarted the same
+  way.
+- **A plugin sends out garbage.** Every output passes a safety guard on its
+  way to the interface. A sample that is not a number becomes silence, and
+  anything louder than full scale is turned down to just under it at once,
+  then let go over a tenth of a second. Below full scale it does nothing, so
+  it never colours the sound. It is always on, for the PA and the in-ears
+  alike.
+- **StageRig itself stops.** StageRig runs under a small watchman process.
+  If StageRig dies -- a crash, or the system running out of memory -- it is
+  started again at once and comes back on the song, scene and programs it
+  was on, with the tempo as it was. The backing track is ready but not
+  started; press Play when the band comes back in. The status bar says it
+  happened. A quit is a quit: closing the window, Ctrl+C or the desktop
+  logging out ends both. Five crashes in two minutes means something is
+  wrong with the setup or the computer, and the watchman stops trying.
+
+The last line of defence is a second computer: the same setup on a second
+laptop, through the same audio interface or a second one, ready to take
+over. Save the setup to both before the show.
 
 ## How long loading takes
 
@@ -1521,7 +1587,9 @@ switching the plugin off; scan again once the install has finished.
 
 | What you see | What it means | What to do |
 |---|---|---|
-| An instrument's row is red, with **Reload** instead of **Window** | That plugin crashed. Only that plugin is affected. | Press **Reload**; it restarts with the saved state. |
+| *... stopped (...). Restarting it...* in the status bar | A plugin crashed or hung. Only that plugin is affected, and it is coming back by itself. | Nothing. If one keeps doing it, use a different plugin for that sound. |
+| An instrument's row is red, with **Reload** instead of **Window** | That plugin crashed three times in a minute and was left off. | Press **Reload** to try again. |
+| *StageRig stopped and restarted itself* | StageRig crashed and the watchman started it again, on the same song. | Press Play if a backing track was running. Note what you were doing and report it. |
 | A plugin shows *Deactivated* in the Plugins window | It hung or crashed twice while being scanned, or you removed it. | Select it and press **Remove selected** to give it another chance. |
 | A plugin puts up a dialog every time it is looked at (no licence, a demo that nags) | It is loaded whenever its folder is scanned. | Select it in **Plugins...** and press **Remove selected**: it is switched off and left alone by later scans, until you switch it back on the same way. |
 | *late N* climbing while playing | Plugins are not keeping up with the buffer. | Raise the buffer size in **Audio...**, or check realtime scheduling. |
