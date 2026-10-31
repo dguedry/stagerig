@@ -136,7 +136,7 @@ whichever section answers what you typed.
 
 | Area | What it does |
 |---|---|
-| **Toolbar** (top) | **New**, **Open...**, **Save**, **Save As...**, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options**, the tempo and **Tap**, **Tail** with its seconds box, the **Songs**, **Stage** and **Keyboard** toggles, **PANIC**. |
+| **Toolbar** (top) | **New**, **Open...**, **Save**, **Save As...**, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options**, the tempo and **Tap**, **Tail** with its seconds box, the **Songs**, **Perform**, **Stage** and **Keyboard** toggles, **PANIC**. |
 | **Songs** (far left, on by default) | Every song on top, the running order of the chosen set list below, and the backing track's **Play**. |
 | **Inputs** (left) | Your keyboards, audio inputs, and the Backing track. Select one to edit its programs; its name, device, channel and Program Change settings are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, the group box, **Copy**, **Paste** and **Clear** are below. |
@@ -691,8 +691,10 @@ CC n** unlearns one. They work whatever is loaded and whatever input they
 arrive on, and they say where you are ("2/8 Green Onions") in the status bar,
 because a pedal gives no feedback of its own. Stepping stops at the end rather
 than wrapping round to the first number. The same window learns pedals for
-**Backing track: start / stop**, **Backing track: next section / release
-vamp** and **Tap tempo**.
+**Backing track: start / stop**, **Next section of the track, or next scene
+/ release vamp** and **Tap tempo**. The section pedal is the one a player
+lives on: it steps the backing track's sections, releases a vamp, and for a
+song played by hand steps its scenes.
 
 On the tablet, the Set list tab is the same thing from the stand -- see *The
 tablet*.
@@ -979,9 +981,11 @@ short fade:
 vamp go on (it reads **End vamp** then); otherwise it queues the next section.
 The tablet shows the sections as buttons under its Play bar -- tap one to go
 there when the current section ends -- with **End vamp ▸** during a vamp, and
-a footswitch can do the same: **Footswitches... ▸ Backing track: next section
-/ release vamp**. The panel shows the section you are in and the one queued
-(*Verse 1:12 / 3:40 > Chorus*).
+a footswitch can do the same: **Footswitches... ▸ Next section of the track,
+or next scene / release vamp**. The panel shows the section you are in and
+the one queued (*Verse 1:12 / 3:40 > Chorus*). For a song played by hand the
+same button reads **Next scene** and the tablet's row is its scenes, which
+change the moment they are tapped (see *Scenes*).
 
 Moving to another song stops the track that is playing. Without a backing
 track playing, plugins are told the music is always running, from bar one at
