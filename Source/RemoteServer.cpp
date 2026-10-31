@@ -624,6 +624,11 @@ function renderSets(s) {
     mk("Rename", () => { const name = prompt("Name for this set list", curName); if (name !== null && name.trim()) setEdit("do=rename&index=" + i + "&name=" + encodeURIComponent(name.trim())); });
     mk("Duplicate", () => { const name = prompt("Name for the copy", curName + " copy"); if (name !== null) setEdit("do=duplicate&index=" + i + "&name=" + encodeURIComponent(name.trim())); });
     mk("Delete", () => { if (confirm("Delete the set list \u201c" + curName + "\u201d? The songs themselves are kept.")) setEdit("do=delete&index=" + i); });
+    if (s.canAddScene && !s.scenes)
+      mk("+ First scene", async () => {           // a hand-played song with none yet: its first scene, holding what is loaded now
+        try { await api("/api/scene?do=add", { method: "POST" }); await refresh(true); show("Scene 1 added: it holds what is loaded now.", 2000); }
+        catch (e) { if (!e.gate) show(e.message); }
+      });
     wrap.appendChild(bar);
   }
 
@@ -926,17 +931,20 @@ function render(s) {
    and effects. Horizontal sliders, because a thumb on glass is not a finger
    on a knob. Values follow the plugin once a second unless a thumb is on
    them; a move is sent as it happens, a few times a second at most. */
-const knobTouch = {};
+const knobTouch = {}, panelBusy = {};
 async function loadPanel(i) {
   const host = document.querySelector('.knobs[data-input="' + i + '"]');
   if (!host) return;
+  if (panelBusy[i]) return;                       // the last one is still on its way: no pile-up behind a busy computer
+  panelBusy[i] = true;
   let data;
-  try { data = await api("/api/panel?input=" + i); } catch (e) { if (e.gate) throw e; return; }
+  try { data = await api("/api/panel?input=" + i); } catch (e) { return; } finally { panelBusy[i] = false; }
   const slots = data.slots || [];
   const key = JSON.stringify(slots.map(sl => [sl.slot, sl.name, sl.knobs.map(k => k.id + k.name)]));
   if (host.dataset.key !== key) {
     host.dataset.key = key;
     host.innerHTML = "";
+    for (const k in knobTouch) if (k.startsWith(i + "/")) delete knobTouch[k];     // a strip redrawn mid-drag never hears its pointerup
     slots.forEach(sl => {
       if (!sl.knobs.length) return;
       const sec = document.createElement("div"); sec.className = "kslot";
@@ -952,7 +960,7 @@ async function loadPanel(i) {
         let timer = null, pending = null;
         const send = () => {
           const v = pending; pending = null; timer = null;
-          api("/api/knob?input=" + i + "&slot=" + sl.slot + "&id=" + encodeURIComponent(k.id) + "&value=" + v, { method: "POST" }).catch(e => { if (!e.gate) show(e.message); });
+          api("/api/knob?input=" + i + "&program=" + data.program + "&slot=" + sl.slot + "&id=" + encodeURIComponent(k.id) + "&value=" + v, { method: "POST" }).catch(e => { if (!e.gate) show(e.message); });
         };
         r.oninput = () => {
           pending = (r.value / 1000).toFixed(3);
@@ -1820,6 +1828,12 @@ String RemoteServer::stateJson() const
     root->setProperty ("scenes", ! engine.hasTrack() && engine.songHasScenes (engine.currentSongIndex()));
     // Whether the stand may build set lists and scenes (Tablet window on the computer).
     root->setProperty ("canEdit", settings.getBoolValue ("remoteEditing", true));
+    {
+        // A song in play with no track and no click can have scenes added, its first included.
+        const int sp = engine.currentSongIndex();
+        const auto& sgs = engine.getSongs();
+        root->setProperty ("canAddScene", ! engine.hasTrack() && sp >= 0 && sp < (int) sgs.size() && sgs[(size_t) sp].stems.empty() && ! sgs[(size_t) sp].click);
+    }
     root->setProperty ("tempo", engine.getTempoBpm());
     {
         // The names a song's key is picked from on the tablet, the same words as on the laptop.
@@ -2558,7 +2572,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                  do=move&index=&pos=&delta=
            Set lists built from the stand, each step saved at once. */
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        if (! settings.getBoolValue ("remoteEditing", true)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
+        if (! settings.getBoolValue ("remoteEditing", true)) { sendResponse (sock, "409 Conflict", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
         String what, name;
         int index = -1, song = -1, pos = -1, delta = 0;
         for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
@@ -2630,13 +2644,17 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         auto field = [&path] (const char* name) { return path.fromFirstOccurrenceOf (String (name) + "=", false, false).upToFirstOccurrenceOf ("&", false, false); };
         const int input = field ("input").getIntValue(), slot = field ("slot").getIntValue();
+        const int forProgram = field ("program").isNotEmpty() ? field ("program").getIntValue() : -1;
         const String id = URL::removeEscapeChars (field ("id"));
         const double value = jlimit (0.0, 1.0, field ("value").getDoubleValue());
-        MessageManager::callAsync ([this, input, slot, id, value]
+        MessageManager::callAsync ([this, input, slot, id, value, forProgram]
         {
             const auto& inputs = engine.getSetup().inputs;
             if (input < 0 || input >= (int) inputs.size()) return;
             const int program = inputs[(size_t) input].currentProgram;
+            // A slider still moving as the program changed belongs to the old one: it must not turn a knob on the new.
+            if (forProgram >= 0 && forProgram != program) return;
+            if (onEdited) onEdited();
             if (id == "level")    engine.setSlotGainDb (input, program, slot, (float) (-60.0 + value * 72.0));
             else if (id == "pan") engine.setSlotPan (input, program, slot, (float) (value * 2.0 - 1.0));
             else if (id.startsWith ("p:") && engine.isPluginAlive (input, program, slot))
@@ -2652,7 +2670,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                  do=capture     the scene in play takes what is loaded now
            Only while the computer allows editing from the tablet. */
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        if (! settings.getBoolValue ("remoteEditing", true)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
+        if (! settings.getBoolValue ("remoteEditing", true)) { sendResponse (sock, "409 Conflict", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
         const auto what = path.fromFirstOccurrenceOf ("do=", false, false).upToFirstOccurrenceOf ("&", false, false);
         String body;
         if (produceOnMessageThread ([this, what]
@@ -2660,6 +2678,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                 const int song = engine.currentSongIndex();
                 if (what == "add") engine.addScene (song, {});
                 else if (what == "capture") engine.captureScene (song, engine.getScene());
+                if (onEdited) onEdited();
                 return transportJson();
             }, body, 3000))
         {
@@ -2788,7 +2807,9 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         if (post ("/api/bypass",     [this, programOf, in, slot, effect, on] { engine.setEffectBypassed (in, programOf (in), slot, effect, ! on); })) return;
         if (post ("/api/outgain",    [this, output, db] { engine.setOutputGainDb (output, db); })) return;
         if (post ("/api/transpose",  [this, st = (int) number ("st")] { engine.setTranspose (st); })) return;
-        if (post ("/api/savesong",   [this] { if (const int s = engine.currentSongIndex(); s >= 0) engine.captureSong (s); })) return;
+        if (path.startsWith ("/api/savesong") && ! settings.getBoolValue ("remoteEditing", true))
+        { sendResponse (sock, "409 Conflict", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
+        if (post ("/api/savesong",   [this] { if (const int s = engine.currentSongIndex(); s >= 0) { engine.captureSong (s); if (onEdited) onEdited(); } })) return;
     }
     if (path.startsWith ("/api/slots"))
     {

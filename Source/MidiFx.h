@@ -22,8 +22,11 @@ public:
     static std::unique_ptr<MidiFx> create (const EffectDef& def);
 
     virtual void configure (const EffectDef& def) = 0;
-    /** The track started, or a panic: let go of everything and start the count again. */
+    /** A panic: forget everything held and start the count again. The caller sends the notes-off. */
     virtual void reset() = 0;
+    /** The backing track started: bar one, beat one. Only the timing starts again --
+        what is held stays held, and lets go when its key does. */
+    virtual void restartTiming() {}
     /** This block's MIDI in, the effect's MIDI out; `bpm` is the rig's tempo now. */
     virtual void process (const juce::MidiBuffer& in, juce::MidiBuffer& out, int numSamples, double sampleRate, double bpm) = 0;
 

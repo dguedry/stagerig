@@ -52,6 +52,7 @@ namespace
         {
             numHeld = 0; numPressed = 0; sounding = -1; step = 0; samplesToStep = 0; samplesToOff = -1;
         }
+        void restartTiming() override { step = 0; samplesToStep = 0; }       // the pattern from its top, on the track's beat
 
         void process (const MidiBuffer& in, MidiBuffer& out, int numSamples, double sampleRate, double bpm) override
         {
@@ -472,7 +473,10 @@ namespace
                 }
                 else if (m.isAllNotesOff() || m.isAllSoundOff())
                 {
-                    reset();
+                    // That channel's notes are gone: forget them, and only them.
+                    const int ch = jlimit (1, 16, m.getChannel());
+                    for (auto& k : notes[ch - 1]) for (auto& n : k) n = kNone;
+                    for (auto& n : sounding[ch - 1]) n = 0;
                     out.addEvent (m, meta.samplePosition);
                 }
                 else
@@ -509,10 +513,10 @@ namespace
         { "9", { 0, 4, 7, 10, 14 } }, { "m9", { 0, 3, 7, 10, 14 } }, { "maj9", { 0, 4, 7, 11, 14 } }, { "6/9", { 0, 4, 7, 9, 14 } },
         { "7b9", { 0, 4, 7, 10, 13 } }, { "7#9", { 0, 4, 7, 10, 15 } }, { "13", { 0, 4, 7, 10, 21 } }, { "11", { 0, 7, 10, 14, 17 } },
         { "sus4", { 0, 5, 7 } }, { "sus2", { 0, 2, 7 } }, { "7sus4", { 0, 5, 7, 10 } }, { "mMaj7", { 0, 3, 7, 11 } },
-        { "add9", { 0, 4, 7, 14 } }, { "madd9", { 0, 3, 7, 14 } }, { "5", { 0, 7 } } };
+        { "add9", { 0, 4, 7, 14 } }, { "madd9", { 0, 3, 7, 14 } }, { "5", { 0, 7 } }, { "m6/9", { 0, 3, 7, 9, 14 } } };
 
     /** The pitch class a note or chord name starts with, and how long that root is; -1 when it is not one. */
-    int rootOf (const String& s, int& length)
+    int rootOf (const String& s, int& length, int* raw = nullptr)
     {
         length = 0;
         if (s.isEmpty()) return -1;
@@ -529,6 +533,7 @@ namespace
             else break;
             ++length;
         }
+        if (raw != nullptr) *raw = pc;                    // unwrapped: Cb is -1, B# is 12
         return (pc % 12 + 12) % 12;
     }
 
@@ -539,6 +544,8 @@ namespace
              .replace (String (CharPointer_UTF8 ("\xc2\xb0")), "dim").replace (String (CharPointer_UTF8 ("\xc3\xb8")), "m7b5").replace ("+", "aug")
              .replace ("min", "m").replace ("Maj", "maj").replace ("MAJ", "maj").replace ("-", "m").replace ("dom", "").replace ("69", "6/9");
         if (q.startsWith ("mmaj7")) return "mMaj7";
+        if (q == "M") return "";                          // CM is C major, not C minor
+        if (q == "M6") return "6";
         return q;
     }
 
@@ -582,20 +589,22 @@ bool MidiFx::parseBandChord (const String& text, int rowRoot, std::vector<int>& 
         if (pc < 0) return false;
         const auto rest = tokens[0].substring (len);
         const bool sixNine = rest.contains ("6/9") || rest.contains ("69");
-        const auto quality = normaliseQuality (sixNine ? "6/9" : rest.upToFirstOccurrenceOf ("/", false, false));
+        const bool minorSixNine = sixNine && rest.startsWith ("m") && ! rest.startsWithIgnoreCase ("maj");
+        const auto quality = sixNine ? String (minorSixNine ? "m6/9" : "6/9") : normaliseQuality (rest.upToFirstOccurrenceOf ("/", false, false));
         for (const auto& q : kQualities)
-            if (quality == q.name || quality.toLowerCase() == String (q.name).toLowerCase())
+            if (quality == q.name || (quality != "M" && quality.toLowerCase() == String (q.name).toLowerCase()))
             {
                 const int base = nearest (pc);
                 if (! sixNine && rest.contains ("/"))
                 {
-                    // A slash bass goes under the chord: C6/E puts the E below.
+                    // A slash bass goes under the chord, the nearest one below its root: C6/E puts the E below, F/C the C.
                     int bl;
                     const int bass = rootOf (rest.fromFirstOccurrenceOf ("/", false, false), bl);
                     if (bass < 0) return false;
-                    int b = ((bass - rowRoot) % 12 + 12) % 12 - 12 + base;                                  // the bass pitch class, in the octave under the root
-                    while (b + 12 <= base - 1) b += 12;
-                    offsets.push_back (b);
+                    const int bassPc = ((bass - rowRoot) % 12 + 12) % 12;
+                    int down = ((base - bassPc) % 12 + 12) % 12;
+                    if (down == 0) down = 12;
+                    offsets.push_back (base - down);
                 }
                 for (int n : q.notes) offsets.push_back (base + n);
                 return offsets.size() <= (size_t) maxBandNotes;
@@ -616,9 +625,10 @@ bool MidiFx::parseBandChord (const String& text, int rowRoot, std::vector<int>& 
     int len, prev = 0;
     for (int i = 0; i < tokens.size(); ++i)
     {
-        const int pc = rootOf (tokens[i], len);
+        int raw = 0;
+        const int pc = rootOf (tokens[i], len, &raw);
         const int oct = octaveOf (tokens[i], len);
-        if (oct != 99) prev = pc + 12 * (oct + 1) - (60 + rowRoot);                                        // placed: the key is 60 + its pitch class
+        if (oct != 99) prev = raw + 12 * (oct + 1) - (60 + rowRoot);                                       // placed: the key is 60 + its pitch class; Cb4 is B3
         else if (i == 0) prev = nearest (pc);
         else { int d = ((pc - rowRoot - prev) % 12 + 12) % 12; if (d == 0) d = 12; prev += d; }        // each the next one up
         if (prev < -36 || prev > 36) return false;
@@ -671,7 +681,9 @@ namespace
         {
             numPending = 0;
             for (auto& c : delayOf) for (auto& n : c) n = 0;
+            for (auto& c : lastAt) for (auto& n : c) n = 0;
         }
+        void restartTiming() override {}              // what is waiting still goes out: a delayed note-off must arrive
         void process (const MidiBuffer& in, MidiBuffer& out, int numSamples, double sampleRate, double) override
         {
             // What earlier blocks left for this one.
@@ -686,21 +698,26 @@ namespace
 
             const int maxDelay = (int) (sampleRate * timingMs.load() / 1000.0);
             const int vel = velocity.load();
+            blockStart = clock;
+            clock += numSamples;
             for (const auto meta : in)
             {
                 const auto m = meta.getMessage();
+                /* Each event of a pitch goes out no earlier than the last one
+                   of that pitch did: a second press of a note still waiting, or
+                   a chord effect's off-and-on retrigger, keeps its order. */
                 if (m.isNoteOn())
                 {
                     const int ch = jlimit (1, 16, m.getChannel()), note = m.getNoteNumber();
                     const int delay = maxDelay > 0 ? random.nextInt (maxDelay + 1) : 0;
                     delayOf[ch - 1][note] = delay;
                     const int v = vel > 0 ? jlimit (1, 127, (int) m.getVelocity() + random.nextInt (2 * vel + 1) - vel) : (int) m.getVelocity();
-                    schedule (out, MidiMessage::noteOn (ch, note, (uint8) v), meta.samplePosition + delay, numSamples);
+                    schedule (out, MidiMessage::noteOn (ch, note, (uint8) v), inOrder (ch, note, meta.samplePosition + delay), numSamples);
                 }
                 else if (m.isNoteOff())
                 {
                     const int ch = jlimit (1, 16, m.getChannel()), note = m.getNoteNumber();
-                    schedule (out, m, meta.samplePosition + delayOf[ch - 1][note], numSamples);
+                    schedule (out, m, inOrder (ch, note, meta.samplePosition + delayOf[ch - 1][note]), numSamples);
                     delayOf[ch - 1][note] = 0;
                 }
                 else if (m.isAllNotesOff() || m.isAllSoundOff())
@@ -726,10 +743,20 @@ namespace
             std::memcpy (p.data, m.getRawData(), (size_t) p.size);
             p.samplesLeft = at - numSamples;
         }
+        /** The block position for an event of this pitch: `at`, or later if one of the pitch is already due later. */
+        int inOrder (int ch, int note, int at)
+        {
+            juce::int64 when = blockStart + at;
+            when = jmax (when, lastAt[ch - 1][note]);
+            lastAt[ch - 1][note] = when;
+            return (int) (when - blockStart);
+        }
         std::atomic<int> timingMs { 12 }, velocity { 10 };
         Pending pending[kMaxPending];
         int numPending = 0;
         int delayOf[16][128];
+        juce::int64 lastAt[16][128] {};
+        juce::int64 clock = 0, blockStart = 0;          // samples since the effect began
         Random random;
     };
 
@@ -745,8 +772,12 @@ namespace
         void configure (const EffectDef& d) override
         {
             /* Two copies of the notes: the audio thread reads one while this
-               fills the other, then they swap. A voice half way through keeps
-               its place by index; at worst one note of the old phrase. */
+               fills the other, then they swap. Before writing, wait for the
+               audio thread to have taken up the last swap -- otherwise two
+               changes in one block would write the table being played. It
+               takes it up within a block; a program that is not playing never
+               will, so the wait is short and then gives up. */
+            for (int i = 0; i < 50 && reading.load() != active.load(); ++i) Thread::sleep (1);
             auto& t = tables[1 - active.load()];
             t.count = jmin (kMaxNotes, (int) d.phraseNotes.size());
             float end = 0.0f;
@@ -756,7 +787,7 @@ namespace
                 t.beat[i] = jmax (0.0f, n.beat); t.length[i] = jmax (1.0f / 32.0f, n.length); t.note[i] = jlimit (0, 127, n.note); t.velocity[i] = jlimit (1, 127, n.velocity);
                 end = jmax (end, t.beat[i] + t.length[i]);
             }
-            t.beats = d.phraseBeats > 0.0f ? d.phraseBeats : std::ceil (end);
+            t.beats = jmax (0.25f, d.phraseBeats > 0.0f ? d.phraseBeats : std::ceil (end));
             t.root = d.phraseRoot >= 0 ? d.phraseRoot : t.count > 0 ? t.note[0] : 60;
             t.fixed = d.phraseRoot == -2;                                   // drums: every key plays it as written
             active.store (1 - active.load());
@@ -765,12 +796,15 @@ namespace
         }
         void reset() override
         {
-            for (auto& v : voices) v.key = -1;
+            for (auto& v : voices) { v.key = -1; v.numSounding = 0; }
             for (auto& c : sounding) for (auto& n : c) n = 0;
+            for (auto& c : passed) for (auto& n : c) n = false;
         }
         void process (const MidiBuffer& in, MidiBuffer& out, int numSamples, double sampleRate, double bpm) override
         {
-            const auto& t = tables[active.load()];
+            const int which = active.load();
+            reading.store (which);
+            const auto& t = tables[which];
             const double spb = sampleRate * 60.0 / jmax (20.0, bpm);          // samples per beat, at the tempo now
             for (const auto meta : in)
             {
@@ -785,20 +819,35 @@ namespace
                     v->key = m.getNoteNumber(); v->channel = ch; v->velocity = (int) m.getVelocity();
                     v->transpose = t.fixed ? 0 : v->key - t.root; v->elapsed = -(double) meta.samplePosition; v->keyUp = false;
                     v->onDone.reset(); v->offDone.reset();
-                    if (t.count == 0) { out.addEvent (m, meta.samplePosition); v->key = -1; }       // nothing loaded: the key itself
+                    if (t.count == 0)                                                                 // nothing loaded: the key itself
+                    {
+                        out.addEvent (m, meta.samplePosition);
+                        passed[ch - 1][m.getNoteNumber()] = true;
+                        v->key = -1;
+                    }
                 }
                 else if (m.isNoteOff())
                 {
-                    if (auto* v = find (jlimit (1, 16, m.getChannel()), m.getNoteNumber()))
+                    const int ch = jlimit (1, 16, m.getChannel());
+                    if (passed[ch - 1][m.getNoteNumber()])
+                    {
+                        // Its note-on went straight through, whatever has been loaded since: so does its note-off.
+                        passed[ch - 1][m.getNoteNumber()] = false;
+                        out.addEvent (m, meta.samplePosition);
+                    }
+                    else if (auto* v = find (ch, m.getNoteNumber()))
                     {
                         if (stop.load()) { release (out, *v, meta.samplePosition); v->key = -1; }
                         else v->keyUp = true;
                     }
-                    else if (t.count == 0) out.addEvent (m, meta.samplePosition);
                 }
                 else if (m.isAllNotesOff() || m.isAllSoundOff())
                 {
-                    reset();
+                    // That channel's phrases stop and are forgotten; the others play on.
+                    const int ch = jlimit (1, 16, m.getChannel());
+                    for (auto& v : voices) if (v.key >= 0 && v.channel == ch) { v.key = -1; v.numSounding = 0; }
+                    for (auto& n : sounding[ch - 1]) n = 0;
+                    for (auto& n : passed[ch - 1]) n = false;
                     out.addEvent (m, meta.samplePosition);
                 }
                 else
@@ -817,23 +866,24 @@ namespace
                     for (int i = 0; i < t.count; ++i)
                     {
                         const double onAt = t.beat[i] * spb, offAt = (double) (t.beat[i] + t.length[i]) * spb;
-                        if (! v.onDone[(size_t) i] && onAt >= from && onAt < windowEnd)
+                        // Due by the end of this window: a tempo raised mid-phrase brings notes forward, never skips them.
+                        if (! v.onDone[(size_t) i] && onAt < windowEnd)
                         {
                             v.onDone[(size_t) i] = true;
                             const int note = t.note[i] + v.transpose;
                             if (note >= 0 && note <= 127 && v.numSounding < kMaxSounding)
                             {
-                                const int at = jlimit (0, numSamples - 1, offset + (int) (onAt - from));
+                                const int at = jlimit (0, numSamples - 1, offset + jmax (0, (int) (onAt - from)));
                                 if (sounding[v.channel - 1][note] > 0) out.addEvent (MidiMessage::noteOff (v.channel, note), at);   // another voice has it: retrigger
                                 ++sounding[v.channel - 1][note];
                                 v.soundingNote[v.numSounding] = (uint8) note; v.soundingIndex[v.numSounding++] = (int16) i;
                                 out.addEvent (MidiMessage::noteOn (v.channel, note, (uint8) jlimit (1, 127, t.velocity[i] * v.velocity / 100)), at);
                             }
                         }
-                        if (v.onDone[(size_t) i] && ! v.offDone[(size_t) i] && offAt >= from && offAt < windowEnd)
+                        if (v.onDone[(size_t) i] && ! v.offDone[(size_t) i] && offAt < windowEnd)
                         {
                             v.offDone[(size_t) i] = true;
-                            endNote (out, v, i, jlimit (0, numSamples - 1, offset + (int) (offAt - from)));
+                            endNote (out, v, i, jlimit (0, numSamples - 1, offset + jmax (0, (int) (offAt - from))));
                         }
                     }
                     if (to < lengthSamples) { v.elapsed = to; break; }
@@ -863,7 +913,8 @@ namespace
             uint8 soundingNote[kMaxSounding]; int16 soundingIndex[kMaxSounding]; int numSounding = 0;
         };
         Table tables[2];
-        std::atomic<int> active { 0 };
+        std::atomic<int> active { 0 }, reading { 0 };    // the table to play, and the one the audio thread last took up
+        bool passed[16][128] {};                          // keys that went straight through while nothing was loaded
         std::atomic<bool> stop { false }, loop { false };
         Voice voices[kVoices];
         uint8 sounding[16][128];

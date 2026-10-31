@@ -153,8 +153,9 @@ private:
         {
             auto r = getLocalBounds().reduced (6, 2);
             auto top = r.removeFromTop (18);
-            for (auto& b : slotButtons) { b->setBounds (top.removeFromLeft (juce::jmin (120, top.getWidth() / juce::jmax (1, (int) slotButtons.size())))); top.removeFromLeft (4); }
-            if (slotButtons.empty()) slotLabel.setBounds (top);
+            const int bw = juce::jmin (120, top.getWidth() / juce::jmax (1, (int) slotButtons.size()) - 4);    // each the same width
+            for (auto& b : slotButtons) { b->setBounds (top.removeFromLeft (bw)); top.removeFromLeft (4); }
+            slotLabel.setBounds (top);
             r.removeFromTop (2);
             const int each = knobs.empty() ? 0 : juce::jmin (120, r.getWidth() / (int) knobs.size());
             for (auto& k : knobs) k->setBounds (r.removeFromLeft (each));
@@ -216,7 +217,7 @@ private:
         const auto& def = inputs[(size_t) p.input];
         const int program = def.currentProgram;
         const auto& prog = def.programs[(size_t) program];
-        if (prog.slots.empty()) { p.key = {}; p.knobs.clear(); p.slotButtons.clear(); p.params.clear(); p.plugin = nullptr; p.program = program; return; }
+        if (prog.slots.empty()) { p.key = {}; p.knobs.clear(); p.slotButtons.clear(); p.params.clear(); p.plugin = nullptr; p.program = program; p.slotLabel.setVisible (false); return; }
         if (p.program != program) p.slot = 0;
         p.program = program;
         p.slot = juce::jlimit (0, (int) prog.slots.size() - 1, p.slot);
@@ -231,6 +232,7 @@ private:
             p.key = key;
             p.plugin = plugin;
             p.knobs.clear(); p.slotButtons.clear(); p.params.clear();
+            p.slotLabel.setVisible (false);
             // Which instrument, when the program has more than one.
             if (prog.slots.size() > 1)
                 for (int s = 0; s < (int) prog.slots.size(); ++s)
@@ -240,7 +242,17 @@ private:
                     b->setToggleState (s == p.slot, juce::dontSendNotification);
                     b->setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2f5f9a));
                     b->setTooltip ("Show this instrument's knobs");
-                    b->onClick = [this, &p, s] { p.slot = s; p.key = {}; refreshPanel (p); layoutPanels(); };
+                    /* Later, not now: rebuilding the panel deletes this button,
+                       and with it the very function that is running. */
+                    b->onClick = [this, in = p.input, s]
+                    {
+                        juce::MessageManager::callAsync ([self = juce::Component::SafePointer<StagePanel> (this), in, s]
+                        {
+                            if (self == nullptr) return;
+                            for (auto& q : self->panels) if (q->input == in) { q->slot = s; q->key = {}; self->refreshPanel (*q); }
+                            self->layoutPanels();
+                        });
+                    };
                     p.addAndMakeVisible (*b);
                     p.slotButtons.push_back (std::move (b));
                 }
@@ -275,7 +287,7 @@ private:
                     auto knob = std::make_unique<Knob>();
                     knob->name.setText (index < (int) params.size() ? params[(size_t) index].name : juce::String (index), juce::dontSendNotification);
                     knob->format = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
-                    knob->onMove = [plugin, index] (double v) { plugin->setParameterValue (index, (float) v, 100); };
+                    knob->onMove = [this, plugin, index] (double v) { plugin->setParameterValue (index, (float) v, 100); if (onEdited) onEdited(); };
                     knob->slider.onRightClick = [this, &p, k] { chooseParam (p, (int) k); };
                     knob->slider.setTooltip ("Right-click to choose which parameter this knob is");
                     p.knobs.push_back (std::move (knob));

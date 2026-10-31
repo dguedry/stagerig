@@ -294,7 +294,7 @@ public:
 
     /** Selects every input's program for this song and applies its tempo.
         Inputs the song leaves at -1 are not touched. */
-    void selectSong (int songIndex);
+    void selectSong (int songIndex, int scene = 0);     // scene: for a song played by hand, the one to open on
 
     int addSet (const juce::String& name);
     void removeSet (int setIndex);

@@ -335,7 +335,8 @@ void SongsPanel::refreshTransport()
     const int song = engine.getTrackSong();
     const auto& songs = engine.getSongs();
     const bool has = engine.hasTrack() && song >= 0 && song < (int) songs.size();
-    const bool scenes = ! has && engine.songHasScenes (song);
+    const int sceneSong = engine.currentSongIndex();
+    const bool scenes = ! has && engine.getSceneCount() > 0 && sceneSong >= 0 && sceneSong < (int) songs.size();
 
     playBtn.setEnabled (has);
     playBtn.setButtonText (engine.isTrackRunning() ? "Stop" : "Play");
@@ -347,8 +348,10 @@ void SongsPanel::refreshTransport()
 
     String text;
     if (scenes)
-        text = songs[(size_t) song].name + "  --  scene " + String (engine.getScene() + 1) + "/" + String (engine.getSceneCount()) + ": "
-             + songs[(size_t) song].markers[(size_t) jlimit (0, engine.getSceneCount() - 1, engine.getScene())].name;
+        text = songs[(size_t) sceneSong].name + "  --  "
+             + (engine.getScene() >= 0 && engine.getScene() < engine.getSceneCount()
+                  ? "scene " + String (engine.getScene() + 1) + "/" + String (engine.getSceneCount()) + ": " + songs[(size_t) sceneSong].markers[(size_t) engine.getScene()].name
+                  : String (engine.getSceneCount()) + " scenes: Next scene starts them");
     else if (! has)
         text = "No backing track (Backing track... under the songs)";
     else if (! engine.isTrackReady())
@@ -1146,7 +1149,7 @@ public:
         {
             if (! scenes) { timeline->markHere(); return; }
             engine.addScene (songIndex, {});
-            MessageManager::callAsync ([this] { rebuild(); });
+            MessageManager::callAsync ([self = SafePointer<TracksComponent> (this)] { if (self != nullptr) self->rebuild(); });
         };
         addAndMakeVisible (zoomOutBtn);
         addAndMakeVisible (zoomInBtn);
@@ -1774,27 +1777,27 @@ private:
         if (index < 0 || index >= (int) m.size()) return;
         m.erase (m.begin() + index);
         engine.setSongMarkers (songIndex, m);
-        MessageManager::callAsync ([this] { rebuild(); });
+        MessageManager::callAsync ([self = SafePointer<TracksComponent> (this)] { if (self != nullptr) self->rebuild(); });
     }
 
     void captureScene (int index)
     {
         engine.captureScene (songIndex, index);
-        MessageManager::callAsync ([this] { rebuild(); });
+        MessageManager::callAsync ([self = SafePointer<TracksComponent> (this)] { if (self != nullptr) self->rebuild(); });
     }
 
     void moveScene (int from, int to)
     {
         engine.moveScene (songIndex, from, to);
-        MessageManager::callAsync ([this] { rebuild(); });
+        MessageManager::callAsync ([self = SafePointer<TracksComponent> (this)] { if (self != nullptr) self->rebuild(); });
     }
 
     void goToMarker (int index)
     {
         if (scenes)
         {
-            if (engine.currentSongIndex() != songIndex) engine.selectSong (songIndex);
-            engine.selectScene (index);
+            if (engine.currentSongIndex() != songIndex) engine.selectSong (songIndex, index);   // straight to that scene
+            else engine.selectScene (index);
             return;
         }
         if (engine.getTrackSong() != songIndex) return;

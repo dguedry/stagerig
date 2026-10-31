@@ -1033,10 +1033,13 @@ private:
             w->addTextEditor ("c" + String (r), notes, String (MidiFx::bandDegrees[r]) + "  (" + MidiFx::bandChordNotes (rowRoot, { 0 }, flats, false) + ")"
                                                             + (name.isNotEmpty() && name != notes ? "   " + name : String()));
             w->getTextEditor ("c" + String (r))->setTextToShowWhenEmpty ("the key alone", textDim);
+            w->getTextEditor ("c" + String (r))->getProperties().set ("shown", notes);
         }
         w->addButton ("Save", 1, KeyPress (KeyPress::returnKey));
         w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
-        w->enterModalState (true, ModalCallbackFunction::create ([this, w, a, s, index, def, major] (int r)
+        /* The engine and the window, not this row: a program change while the
+           dialog is open rebuilds the rows and deletes this one. */
+        w->enterModalState (true, ModalCallbackFunction::create ([&engine = engine, &owner = owner, w, a, s, index, def, major] (int r)
         {
             std::unique_ptr<AlertWindow> owned (w);
             if (r == 0) return;
@@ -1047,6 +1050,8 @@ private:
             {
                 std::vector<int> offsets;
                 const auto text = w->getTextEditorContents ("c" + String (i)).trim();
+                // A row left as shown keeps exactly what it had: reading "C5" back could make a lone C a power chord.
+                if (text == w->getTextEditor ("c" + String (i))->getProperties()["shown"].toString()) continue;
                 if (MidiFx::parseBandChord (text, (major + i) % 12, offsets)) d.bandChords[(size_t) i] = offsets;
                 else bad.add (String (MidiFx::bandDegrees[i]) + " (\"" + text + "\")");
             }
@@ -1061,7 +1066,7 @@ private:
         const auto a = address();
         const int s = ProgramDef::slotOfChain (slot);
         chooser = std::make_unique<FileChooser> ("A MIDI file for the phrase", File::getSpecialLocation (File::userHomeDirectory), "*.mid;*.midi;*.MID");
-        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this, a, s, index, def] (const FileChooser& fc)
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [&engine = engine, &owner = owner, a, s, index, def] (const FileChooser& fc)
         {
             const auto f = fc.getResult();
             if (f == File()) return;
@@ -3566,7 +3571,11 @@ void MainComponent::startHotspot()
    interruption, not a help. */
 bool MainComponent::startRemote()
 {
-    if (remote == nullptr) remote = std::make_unique<RemoteServer> (engine, settings);
+    if (remote == nullptr)
+    {
+        remote = std::make_unique<RemoteServer> (engine, settings);
+        remote->onEdited = [this] { markDirty(); };       // a knob or a scene changed on the stand: unsaved, and the autosave takes it
+    }
     const int port = settings.getIntValue ("remotePort", 7777);
 
     if (! remote->start (port))
@@ -3777,6 +3786,7 @@ void MainComponent::showRemote()
             if (b == nullptr) return;
             settings.setValue ("remoteEditing", b->getToggleState());
             settings.saveIfNeeded();
+            if (remote != nullptr) remote->touch();       // every tablet redraws with Edit shown or gone
         };
         content->addAndMakeVisible (editBtn);
         content->setSize (520, content->getHeight() + 36);

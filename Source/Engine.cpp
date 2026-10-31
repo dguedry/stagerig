@@ -926,8 +926,21 @@ void Engine::removeInput (int inputIndex)
     setup.inputs.erase (setup.inputs.begin() + inputIndex);
     // Songs hold one program per input, by index: the entry for this input goes, the rest shift.
     for (auto& song : setup.songs)
+    {
         if ((size_t) inputIndex < song.programs.size())
             song.programs.erase (song.programs.begin() + inputIndex);
+        /* Section and scene actions name inputs by index too: those for this
+           input go, and those for later inputs follow it down -- else a scene
+           would put the wrong keyboard on a program. */
+        for (auto& m : song.markers)
+        {
+            auto& acts = m.actions;
+            acts.erase (std::remove_if (acts.begin(), acts.end(), [inputIndex] (const ActionDef& a)
+                { return (a.kind == ActionDef::Kind::program || a.kind == ActionDef::Kind::effect) && a.input == inputIndex; }), acts.end());
+            for (auto& a : acts)
+                if ((a.kind == ActionDef::Kind::program || a.kind == ActionDef::Kind::effect) && a.input > inputIndex) --a.input;
+        }
+    }
     // Slots that played this input's sounds, or a later input's, follow the renumbering.
     for (auto& other : setup.inputs)
         for (auto& prog : other.programs)
@@ -1239,8 +1252,11 @@ void Engine::removeSong (int songIndex)
     }
     if (setup.currentSet >= 0 && setup.currentSongInSet >= (int) setup.sets[(size_t) setup.currentSet].songs.size())
         setup.currentSongInSet = -1;
-    if (songInPlay == songIndex)     songInPlay = -1;
+    if (songInPlay == songIndex)     { songInPlay = -1; currentScene = -1; }
     else if (songInPlay > songIndex) --songInPlay;
+    // The armed track's song follows the renumbering too.
+    if (trackSong == songIndex)      trackSong = -1;
+    else if (trackSong > songIndex)  --trackSong;
 
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
@@ -1264,6 +1280,8 @@ int Engine::moveSong (int songIndex, int delta)
         }
     if (songInPlay == songIndex)  songInPlay = to;
     else if (songInPlay == to)    songInPlay = songIndex;
+    if (trackSong == songIndex)   trackSong = to;
+    else if (trackSong == to)     trackSong = songIndex;
 
     listeners.call ([] (Listener& l) { l.setupChanged(); });
     return to;
@@ -1440,14 +1458,24 @@ int Engine::currentSongIndex() const
     return s >= 0 && s < (int) setup.songs.size() ? s : -1;
 }
 
-void Engine::selectSong (int songIndex)
+void Engine::selectSong (int songIndex, int scene)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
     songInPlay = songIndex;
+    currentScene = -1;
 
     const auto& s = setup.songs[(size_t) songIndex];
+    /* A song with scenes opens on one: the inputs that scene puts on a
+       program are left for it, so no keyboard loads the song's program only
+       to drop it a moment later. */
+    const bool scenes = songHasScenes (songIndex);
+    if (scenes) scene = jlimit (0, (int) s.markers.size() - 1, scene);
+    std::vector<bool> sceneSets (setup.inputs.size(), false);
+    if (scenes)
+        for (const auto& a : s.markers[(size_t) scene].actions)
+            if (a.kind == ActionDef::Kind::program && a.input >= 0 && a.input < (int) sceneSets.size()) sceneSets[(size_t) a.input] = true;
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
-        if (const int p = s.programFor (i); p >= 0)
+        if (const int p = s.programFor (i); p >= 0 && ! sceneSets[(size_t) i])
             selectProgram (i, p);
 
     // Tempo after the programs: a plugin that has just loaded is told the tempo
@@ -1463,9 +1491,8 @@ void Engine::selectSong (int songIndex)
     beatsPerBarAtomic.store (jmax (1, s.beatsPerBar));
     // Its backing track is made ready, not started: starting is always on purpose.
     armTrack (songIndex);
-    // A song played by hand opens on its first scene.
-    currentScene = -1;
-    if (songHasScenes (songIndex)) selectScene (0);
+    // A song played by hand opens on a scene: the first, unless asked for another.
+    if (scenes) selectScene (scene);
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
@@ -1481,17 +1508,22 @@ bool Engine::songHasScenes (int songIndex) const
 
 int Engine::getSceneCount() const
 {
-    return songHasScenes (songInPlay) ? (int) setup.songs[(size_t) songInPlay].markers.size() : 0;
+    const int song = currentSongIndex();
+    return songHasScenes (song) ? (int) setup.songs[(size_t) song].markers.size() : 0;
 }
 
 void Engine::selectScene (int index)
 {
-    if (! songHasScenes (songInPlay)) return;
-    const auto& song = setup.songs[(size_t) songInPlay];
+    /* The song in play: the one last selected, or straight after a load the
+       one the set list is on, which becomes the one in play. */
+    const int songIndex = currentSongIndex();
+    if (! songHasScenes (songIndex)) return;
+    songInPlay = songIndex;
+    const auto& song = setup.songs[(size_t) songIndex];
     if (index < 0 || index >= (int) song.markers.size()) return;
     currentScene = index;
     const auto actions = song.markers[(size_t) index].actions;      // a copy: an action may edit the setup
-    for (const auto& a : actions) performAction (songInPlay, a);
+    for (const auto& a : actions) performAction (songIndex, a);
     listeners.call ([] (Listener& l) { l.transportChanged(); });
 }
 
@@ -1505,7 +1537,7 @@ int Engine::addScene (int songIndex, const String& name)
     const int index = (int) s.markers.size() - 1;
     captureScene (songIndex, index);
     if (songIndex == songInPlay && currentScene < 0) currentScene = index;
-    listeners.call ([] (Listener& l) { l.transportChanged(); });
+    listeners.call ([] (Listener& l) { l.transportChanged(); l.setupChanged(); });
     return index;
 }
 
@@ -1526,7 +1558,7 @@ void Engine::captureScene (int songIndex, int sceneIndex)
         if (a.program >= 0) programs.push_back (a);
     }
     actions.insert (actions.begin(), programs.begin(), programs.end());
-    listeners.call ([] (Listener& l) { l.transportChanged(); });
+    listeners.call ([] (Listener& l) { l.transportChanged(); l.setupChanged(); });
 }
 
 void Engine::moveScene (int songIndex, int from, int to)
@@ -1543,7 +1575,7 @@ void Engine::moveScene (int songIndex, int from, int to)
         else if (from < currentScene && to >= currentScene) --currentScene;
         else if (from > currentScene && to <= currentScene) ++currentScene;
     }
-    listeners.call ([] (Listener& l) { l.transportChanged(); });
+    listeners.call ([] (Listener& l) { l.transportChanged(); l.setupChanged(); });
 }
 
 //==============================================================================
@@ -1813,8 +1845,19 @@ void Engine::setSongTransposeTrack (int songIndex, bool on)
 void Engine::setSongMarkers (int songIndex, const std::vector<MarkerDef>& markers)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    if (songIndex == songInPlay && currentScene >= 0)
+    {
+        /* The scene in play stays the scene in play when others are added or
+           removed around it: found again by name and place. Gone, nothing is. */
+        const auto& old = setup.songs[(size_t) songIndex].markers;
+        int found = -1;
+        if (currentScene < (int) old.size())
+            for (int i = 0; i < (int) markers.size() && found < 0; ++i)
+                if (markers[(size_t) i].name == old[(size_t) currentScene].name && std::abs (markers[(size_t) i].seconds - old[(size_t) currentScene].seconds) < 1e-6)
+                    found = i;
+        currentScene = found;
+    }
     setup.songs[(size_t) songIndex].markers = markers;
-    if (songIndex == songInPlay) currentScene = jlimit (-1, (int) markers.size() - 1, currentScene);
     if (songIndex == trackSong && player != nullptr)
     {
         const ScopedLock sl (lock);
@@ -1842,7 +1885,7 @@ void Engine::advanceTrack()
 {
     if (! hasTrack())
     {
-        if (songHasScenes (songInPlay) && currentScene + 1 < getSceneCount()) selectScene (currentScene + 1);
+        if (currentScene + 1 < getSceneCount()) selectScene (currentScene + 1);
         return;
     }
     if (player == nullptr) return;
@@ -2170,7 +2213,7 @@ void Engine::resetPluginPositions()
                 for (auto* ch : { &s->midiEffects, &s->effects }) for (auto& e : *ch)
                 {
                     if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
-                    if (e->builtIn != nullptr) e->builtIn->reset();
+                    if (e->builtIn != nullptr) e->builtIn->restartTiming();      // not reset(): held notes must still get their note-offs
                 }
             }
             for (auto& e : rt->effects) if (e->plugin != nullptr) e->plugin->resetMusicalPosition();
@@ -3729,11 +3772,11 @@ void Engine::handleAsyncUpdate()
                                    : q >= 0 ? "Next: " + getTrackSectionName (q) : String ("No section after this one");
                     listeners.call ([msg] (Listener& l) { l.statusMessage (msg); });
                 }
-                else if (songHasScenes (songInPlay))
+                else if (getSceneCount() > 0)
                 {
                     const bool last = currentScene + 1 >= getSceneCount();
                     advanceTrack();
-                    const auto msg = last ? String ("Last scene") : setup.songs[(size_t) songInPlay].markers[(size_t) currentScene].name + "  (" + String (currentScene + 1) + "/" + String (getSceneCount()) + ")";
+                    const auto msg = last ? String ("Last scene") : setup.songs[(size_t) currentSongIndex()].markers[(size_t) currentScene].name + "  (" + String (currentScene + 1) + "/" + String (getSceneCount()) + ")";
                     listeners.call ([msg] (Listener& l) { l.statusMessage (msg); });
                 }
                 break;

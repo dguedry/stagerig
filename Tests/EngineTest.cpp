@@ -1978,6 +1978,18 @@ int main()
             CHECK (chordFor (71) == (std::vector<int> { 71, 74, 77, 81 }));     // Bm7b5
             CHECK (chordFor (61) == (std::vector<int> { 61, 64, 67, 70 }));     // C# dim7, the passing chord
             std::printf ("     big band in C: C6, Dm7, G7, Bm7b5, C#dim7 as expected\n");
+            // The backing track starting mid-chord restarts timing only: the held chord still lets go with its key.
+            {
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 90), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                fx->restartTiming();
+                in.clear(); out.clear();
+                in.addEvent (MidiMessage::noteOff (1, 60), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                int offs = 0; for (const auto m : out) if (m.getMessage().isNoteOff()) ++offs;
+                CHECK (offs == 4);
+            }
 
             // Shared notes: C6 and Am7 share C, E and G. Hold C, add A, let go of C: the band is still playing.
             {
@@ -2051,6 +2063,14 @@ int main()
                 CHECK (MidiFx::parseBandChord (written, written[0] == 'D' ? 2 : 0, o) && MidiFx::parseBandChord (MidiFx::bandChordNotes (written[0] == 'D' ? 2 : 0, o, false), written[0] == 'D' ? 2 : 0, back) && back == o);
             }
             std::printf ("     voicings with octaves read back as written\n");
+            // Review fixes: a slash bass under a chord off its own row, CM is major, a minor 6/9, Cb4 below C4.
+            CHECK (MidiFx::parseBandChord ("F/C", 0, o) && o == (std::vector<int> { 0, 5, 9, 12 }));
+            CHECK (MidiFx::parseBandChord ("Am7/C", 0, o) && o.front() == -12 + 0 + 0 && o[1] == -3);
+            CHECK (MidiFx::parseBandChord ("CM", 0, o) && o == (std::vector<int> { 0, 4, 7 }));
+            CHECK (MidiFx::parseBandChord ("CM6", 0, o) && o == (std::vector<int> { 0, 4, 7, 9 }));
+            CHECK (MidiFx::parseBandChord ("Cm6/9", 0, o) && o == (std::vector<int> { 0, 3, 7, 9, 14 }));
+            CHECK (MidiFx::parseBandChord ("Cb4 Eb4", 0, o) && o == (std::vector<int> { -1, 3 }));
+            CHECK (MidiFx::parseBandChord ("B#3", 0, o) && o == (std::vector<int> { 0 }));
             CHECK (MidiFx::bandMajorRoot (9, 1) == 0 && MidiFx::bandMajorRoot (2, 3) == 0 && MidiFx::bandMajorRoot (7, 4) == 0 && MidiFx::bandMajorRoot (0, 0) == 0);
             EffectDef dd; dd.kind = EffectDef::Kind::bigBand; dd.scaleRoot = 0; dd.scaleMode = 0;
             CHECK (MidiFx::describe (dd) == "C major: C6 Dm7 Em7 F6 G7 Am7 Bm7b5");
@@ -2105,6 +2125,25 @@ int main()
             }
             std::printf ("     humanize: 60 notes, latest %d ms late (window 25), velocity spread %d (band 10), %d offs before their on\n", maxDelay * 1000 / 48000, velSpread, lateOffs);
             CHECK (maxDelay > window / 4 && velSpread > 2 && lateOffs == 0);        // it does something, and nothing impossible
+            // The same pitch pressed twice while the first is still waiting: nothing passes anything, nothing is left on.
+            {
+                auto h = MidiFx::create (d);
+                std::vector<std::pair<int, bool>> seen;      // (time, on)
+                int b = 0;
+                for (int round = 0; round < 40; ++round)
+                {
+                    MidiBuffer in, out;
+                    if (round == 0) { in.addEvent (MidiMessage::noteOn (1, 64, (uint8) 80), 0); in.addEvent (MidiMessage::noteOn (1, 64, (uint8) 80), 10);
+                                      in.addEvent (MidiMessage::noteOff (1, 64), 20); in.addEvent (MidiMessage::noteOff (1, 64), 30); }
+                    h->process (in, out, 256, 48000.0, 120.0);
+                    for (const auto m : out) if (m.getMessage().isNoteOnOrOff()) seen.push_back ({ b * 256 + m.samplePosition, m.getMessage().isNoteOn() });
+                    ++b;
+                }
+                int depth = 0; bool ordered = true;
+                for (auto& e : seen) { depth += e.second ? 1 : -1; if (depth < 0) ordered = false; }
+                std::printf ("     humanize, one pitch twice: %d events, %s\n", (int) seen.size(), ordered && depth == 0 ? "in order, all let go" : "OUT OF ORDER");
+                CHECK (seen.size() == 4 && ordered && depth == 0 && seen.back().second == false);
+            }
             // Switched to "on time, as played": straight through.
             d.humanTimingMs = 0; d.humanVelocity = 0; fx->configure (d);
             MidiBuffer in, out;
@@ -2232,6 +2271,20 @@ int main()
                 }
                 std::printf ("     built-in phrases: %d in %d folders at %s\n", files, groups, folder.getFullPathName().toRawUTF8());
                 CHECK (groups == 3 && files >= 30);
+            }
+            // A key that went straight through while nothing was loaded still gets its note-off after a file is loaded.
+            {
+                EffectDef empty; empty.kind = EffectDef::Kind::phrase;
+                auto fx = MidiFx::create (empty);
+                MidiBuffer in, out;
+                in.addEvent (MidiMessage::noteOn (1, 64, (uint8) 100), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                fx->configure (d);
+                in.clear(); out.clear();
+                in.addEvent (MidiMessage::noteOff (1, 64), 0);
+                fx->process (in, out, 64, 48000.0, 120.0);
+                int offs = 0; for (const auto m : out) if (m.getMessage().isNoteOff() && m.getMessage().getNoteNumber() == 64) ++offs;
+                CHECK (offs == 1);
             }
             // Nothing loaded: the keys pass straight through.
             {
@@ -3404,6 +3457,17 @@ int main()
                     }
                     engine.moveScene (staged, 2, 0);
                     CHECK (sg.markers[0].name == "Scene 3" && sg.markers[1].name == "Verse" && engine.getScene() == 1);   // the scene in play moved with it
+                    {
+                        // A scene removed before the one in play: it stays the one in play.
+                        auto m = sg.markers;
+                        m.erase (m.begin());
+                        engine.setSongMarkers (staged, m);
+                        CHECK (engine.getScene() == 0 && sg.markers[0].name == "Verse");
+                        // Going straight to a scene of another song fires that scene, not the first one's too.
+                        engine.selectSongInSet (0); settle();
+                        engine.selectSong (staged, 1); settle();
+                        CHECK (engine.getScene() == 1 && engine.getSetup().inputs[0].currentProgram == 95);
+                    }
                     // A click makes it a timed song again: sections on the clock, no scenes.
                     engine.setSongClick (staged, true, 4);
                     CHECK (! engine.songHasScenes (staged));

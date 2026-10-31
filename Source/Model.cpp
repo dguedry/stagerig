@@ -157,6 +157,7 @@ EffectDef EffectDef::fromVar (const var& v)
         {
             e.phraseName = propStr (v, "name");
             e.phraseBeats = jlimit (0.0f, 1024.0f, (float) prop<double> (v, "beats", 0.0));
+            if (e.phraseBeats > 0.0f) e.phraseBeats = jmax (0.25f, e.phraseBeats);      // a phrase shorter than that would loop hundreds of times a block
             e.phraseRoot = prop<bool> (v, "fixed", false) ? -2 : jlimit (-1, 127, prop<int> (v, "root", -1));
             e.phraseStop = prop<bool> (v, "stop", false);
             e.phraseLoop = prop<bool> (v, "loop", false);
