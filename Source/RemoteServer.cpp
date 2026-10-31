@@ -1108,7 +1108,7 @@ async function refresh(force) {
   }
 }
 document.getElementById("panic").onclick = async () => {
-  try { await api("/api/panic", { method: "POST" }); show("PANIC sent: every note stopped.", 2000); }
+  try { await api("/api/panic", { method: "POST" }); show("PANIC sent: every note stopped, and the backing track.", 2000); }
   catch (e) { if (!e.gate) show(e.message); }
 };
 if (token) refresh(true); else askForCode("");
@@ -2408,6 +2408,18 @@ self.addEventListener('fetch', e => {
 });
 )JS";
 
+bool RemoteServer::isEditingRoute (const String& path)
+{
+    /* Building the show: off when the computer says the stand may not edit.
+       Everything else -- songs, programs, keys, scenes chosen, knobs, the
+       track, tempo, panic -- is playing it, and always allowed. */
+    static const char* const editing[] = { "/api/setedit", "/api/scene?", "/api/savesong" };
+    const auto route = path.upToFirstOccurrenceOf ("&", false, false);
+    for (const char* e : editing)
+        if (route.startsWith (e) || route == String (e).trimCharactersAtEnd ("?")) return true;
+    return false;
+}
+
 void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
 {
     takeOver = false;
@@ -2417,6 +2429,11 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     const String request (CharPointer_UTF8 (buf), (size_t) got);
     const String line = request.upToFirstOccurrenceOf ("\r\n", false, false);
     const String path = line.fromFirstOccurrenceOf (" ", false, false).upToFirstOccurrenceOf (" ", false, false);
+    // The editing lock, in one place for every route that edits (isEditingRoute).
+    if (isEditingRoute (path) && authorised (path) && ! settings.getBoolValue ("remoteEditing", true))
+    {
+        sendResponse (sock, "409 Conflict", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return;
+    }
 
     if (path.startsWith ("/manifest.webmanifest")) { sendBytes (sock, "200 OK", "application/manifest+json", kManifest, (int) strlen (kManifest)); return; }
     if (path.startsWith ("/sw.js"))
@@ -2572,7 +2589,6 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                  do=move&index=&pos=&delta=
            Set lists built from the stand, each step saved at once. */
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        if (! settings.getBoolValue ("remoteEditing", true)) { sendResponse (sock, "409 Conflict", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
         String what, name;
         int index = -1, song = -1, pos = -1, delta = 0;
         for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
@@ -2670,7 +2686,6 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                  do=capture     the scene in play takes what is loaded now
            Only while the computer allows editing from the tablet. */
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        if (! settings.getBoolValue ("remoteEditing", true)) { sendResponse (sock, "409 Conflict", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
         const auto what = path.fromFirstOccurrenceOf ("do=", false, false).upToFirstOccurrenceOf ("&", false, false);
         String body;
         if (produceOnMessageThread ([this, what]
@@ -2807,8 +2822,6 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         if (post ("/api/bypass",     [this, programOf, in, slot, effect, on] { engine.setEffectBypassed (in, programOf (in), slot, effect, ! on); })) return;
         if (post ("/api/outgain",    [this, output, db] { engine.setOutputGainDb (output, db); })) return;
         if (post ("/api/transpose",  [this, st = (int) number ("st")] { engine.setTranspose (st); })) return;
-        if (path.startsWith ("/api/savesong") && ! settings.getBoolValue ("remoteEditing", true))
-        { sendResponse (sock, "409 Conflict", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return; }
         if (post ("/api/savesong",   [this] { if (const int s = engine.currentSongIndex(); s >= 0) { engine.captureSong (s); if (onEdited) onEdited(); } })) return;
     }
     if (path.startsWith ("/api/slots"))
@@ -3009,7 +3022,8 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     if (path.startsWith ("/api/panic"))
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        MessageManager::callAsync ([this] { engine.panic(); });
+        // Everything stops: every note, and the backing track -- a song stopped mid-way needs both at once.
+        MessageManager::callAsync ([this] { engine.panic(); engine.stopTrack(); });
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;
     }

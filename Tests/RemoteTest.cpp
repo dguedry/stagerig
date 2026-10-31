@@ -325,6 +325,16 @@ int main()
         tmp.deleteRecursively();
     }
 
+    // The editing lock's one list: building the show is locked, playing it never is.
+    {
+        using perf::RemoteServer;
+        for (const char* e : { "/api/setedit?do=new&name=x&t=c", "/api/scene?do=add&t=c", "/api/scene?do=capture", "/api/savesong?t=c" })
+            check (RemoteServer::isEditingRoute (e), String ("editing: ") + e);
+        for (const char* p : { "/api/select?input=0&program=3", "/api/transport?do=section&index=2", "/api/knob?input=0&slot=0&id=level&value=0.5",
+                               "/api/songkey?song=1&root=2&mode=0", "/api/song?index=1", "/api/panic", "/api/state", "/api/panel?input=0", "/api/setlist?index=1" })
+            check (! RemoteServer::isEditingRoute (p), String ("playing, never locked: ") + p);
+    }
+
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");
     return failures == 0 ? 0 : 1;
 }

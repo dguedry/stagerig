@@ -204,6 +204,10 @@ int main()
             CHECK (oldTable.songs[0].programFor (2) == 0);
         }
         // A file with no routing at all plays on the GM player, and a slot's old single channel is a set of one.
+        // The format version: written as this StageRig's, read back as the file says; old files are 1.
+        CHECK ((int) Setup().toVar().getProperty ("version", 0) == Setup::formatVersion && Setup::formatVersion >= 2);
+        CHECK (Setup::fromVar (juce::JSON::parse (R"({"format":"stagerig-setup"})")).loadedFormatVersion == 1);
+        CHECK (Setup::fromVar (juce::JSON::parse (R"({"format":"stagerig-setup","version":9})")).loadedFormatVersion == 9);
         const auto plain = Setup::fromVar (juce::JSON::parse (R"({"format":"stagerig-setup","inputs":[{"name":"Upper","channel":1,
             "programs":[{"index":0,"slots":[{"receiveChannel":4}]}]}],"songs":[{"name":"Plain","programs":[],"stems":[{"file":"c.mid","output":0}]}]})"));
         CHECK (plain.trackInput() == 1 && plain.inputs[1].programs[0].slots.size() == 1 && plain.inputs[1].programs[0].slots[0].isGm()

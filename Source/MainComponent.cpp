@@ -2619,7 +2619,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     saveAsBtn.onClick      = [this] { saveSetup (true); };
     audioBtn.onClick       = [this] { showAudioSettings(); };
     pluginsBtn.onClick     = [this] { showPluginManager(); };
-    panicBtn.onClick       = [this] { engine.panic(); showStatus ("Panic: all notes off"); };
+    panicBtn.onClick       = [this] { engine.panic(); engine.stopTrack(); showStatus ("Panic: all notes off, backing track stopped"); };
     panicBtn.setColour (TextButton::buttonColourId, Colours::darkred);
     newBtn.setTooltip ("Start a new, empty setup (inputs, programs, songs: everything)");
     openBtn.setTooltip ("Open a setup file (*.stagerig.json)");
@@ -3352,8 +3352,22 @@ void MainComponent::loadSetupFile (const File& f)
         refreshAll();
         return;
     }
+    const int madeBy = s.loadedFormatVersion;
     engine.loadSetup (std::move (s));
     setCurrentFile (f == getAutosaveFile() ? File() : f);
+    if (madeBy > Setup::formatVersion)
+    {
+        /* Made by a newer StageRig: whatever it has that this one does not
+           know is not loaded, and saving over the file would lose it. Say so
+           before anyone presses Save. */
+        AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Made by a newer StageRig",
+            f.getFileName() + " was saved by a newer version of StageRig. Anything in it this version does not know "
+            "-- a newer MIDI effect, a newer setting -- was not loaded, and saving over the file would lose it.\n\n"
+            "Update StageRig, or use Save As... to keep this version's copy separate.");
+        overwriteWarned = false;
+        newerFile = true;
+    }
+    else newerFile = false;
     dirty = false;
     lastAutosaveTime = Time::getMillisecondCounterHiRes();
 
@@ -3368,8 +3382,25 @@ void MainComponent::loadSetupFile (const File& f)
 
 bool MainComponent::writeSetupFile (const File& f, int captureBudgetMs)
 {
+    if (newerFile && f == currentFile && ! overwriteWarned && f != getAutosaveFile())
+    {
+        /* The first save over a newer version's file asks first: it would lose
+           what this version could not load. Yes saves; the question is not asked again. */
+        SafePointer<MainComponent> self (this);
+        AlertWindow::showOkCancelBox (MessageBoxIconType::WarningIcon, "Save over a newer StageRig's file?",
+            f.getFileName() + " was saved by a newer version of StageRig. Saving over it with this version loses anything "
+            "in it this version did not load.\n\nSave As... keeps both.", "Save over it", "Cancel", nullptr,
+            ModalCallbackFunction::create ([self, f, captureBudgetMs] (int r)
+            {
+                if (self == nullptr || r == 0) return;
+                self->overwriteWarned = true;
+                if (self->writeSetupFile (f, captureBudgetMs)) self->showStatus ("Saved " + f.getFileName());
+            }));
+        return false;
+    }
     auto r = engine.captureSetup (captureBudgetMs).saveToFile (f);
     if (r.failed()) { showStatus ("Save failed: " + r.getErrorMessage()); return false; }
+    if (f != getAutosaveFile()) newerFile = false;     // written by this version now: Save no longer asks
     dirty = false;
     lastAutosaveTime = Time::getMillisecondCounterHiRes();
     return true;
@@ -3419,7 +3450,8 @@ void MainComponent::saveOnQuit()
        Eight seconds covers every healthy host on a big rig; a plugin that
        cannot answer in that time keeps the state the model last had for it,
        which the autosave and the program changes have been keeping current. */
-    if (currentFile != File()) writeSetupFile (currentFile, 8000);
+    // A newer version's file is never written over unasked: quitting keeps the work in the autosave instead.
+    if (currentFile != File() && ! (newerFile && ! overwriteWarned)) writeSetupFile (currentFile, 8000);
     else                       writeSetupFile (getAutosaveFile(), 8000);
 }
 

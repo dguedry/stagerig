@@ -30,6 +30,10 @@ public:
     /** Called on the message thread when the stand has changed the setup (a knob, a scene),
         so the computer counts it as unsaved and the autosave picks it up. */
     std::function<void()> onEdited;
+    /** Whether a request changes how the show is built (set lists, scenes, what a song
+        loads) rather than playing it. The one list the editing lock is checked against:
+        a new route that edits goes here, and is locked with the rest. */
+    static bool isEditingRoute (const juce::String& path);
     /** Something the page shows changed outside the engine (the editing lock): it redraws. */
     void touch()                              { ++revision; }
     /** The Now page: every input's current program with its instruments

@@ -159,8 +159,9 @@ matters below.
 program change, so releases and reverbs fade instead of being cut. Set it in
 the box beside the word; four seconds is a good default.
 
-**PANIC** sends all-notes-off to every instrument and MIDI device. Use it if a
-note hangs.
+**PANIC** sends all-notes-off to every instrument and MIDI device, and stops
+the backing track. Use it if a note hangs, or when a song has to stop now --
+the tablet's PANIC does the same.
 
 The panes are separated by thin dividers (three dots in the gap). Drag one to
 give a pane more room, and the widths are remembered. A narrow window squeezes
@@ -1088,9 +1089,11 @@ at rehearsal: set the sounds, add a scene, set them again, add another.
 
 The computer decides whether the stand may edit at all: **Allow editing from
 the tablet** in the Tablet window, on by default. Off, the tablet still
-picks songs, programs, keys and scenes, but **Edit** is gone and set lists
-and scenes cannot be changed -- for a gig where the tablet sits unlocked on
-a stand and an elbow should not rearrange the night.
+picks songs, programs, keys and scenes, but **Edit** is gone and set lists,
+scenes and what a song loads cannot be changed -- for a gig where the tablet
+sits unlocked on a stand and an elbow should not rearrange the night. Knobs,
+the song's key, the track and tempo are playing the show, not building it,
+and always work.
 
 The **Find a song** box matches the name, the stage notes, and the programs --
 so "piano" or "002" finds a song you cannot quite name.
@@ -1529,6 +1532,7 @@ switching the plugin off; scan again once the install has finished.
 | The keyboard is silent after plugging it in | StageRig has not seen the device yet. | **Options ▸ Rescan MIDI devices**, then check the input's **MIDI device** and **Channel**. |
 | Program changes from the keyboard do nothing | They arrive on a channel the input is not watching, or **Respond to Program Change** is off. | Set **Arrive on** to *Any channel*; tick **Respond to Program Change**. |
 | A note hangs | A plugin missed a note-off. | Press **PANIC**. |
+| *Made by a newer StageRig* when opening a setup | The file was saved by a newer version. What this version does not know -- a newer effect, a newer setting -- was not loaded. | Update StageRig. Meanwhile **Save** asks before writing over the file, quitting keeps your changes in the autosave instead, and **Save As...** keeps a separate copy. |
 | The parameter list seems endless | A plugin that lists its MIDI controllers per channel. | Type in the search box; see *MIDI mappings*. |
 | An empty plugin window that will not respond | A plugin made only for a DAW's audio-editing extension. | Use the plugin's ordinary version. |
 | The tablet times out while the laptop's browser opens the page | The computer's firewall. | See *If the tablet cannot connect*. |

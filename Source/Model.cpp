@@ -794,7 +794,7 @@ var Setup::toVar() const
 {
     auto* o = new DynamicObject();
     o->setProperty ("format", "stagerig-setup");
-    o->setProperty ("version", 1);
+    o->setProperty ("version", formatVersion);
     o->setProperty ("preloadAllPrograms", preloadAllPrograms);
     o->setProperty ("releaseTailSeconds", releaseTailSeconds);
     o->setProperty ("holdAcrossChange", holdAcrossChange);
@@ -852,6 +852,7 @@ var Setup::toVar() const
 Setup Setup::fromVar (const var& v)
 {
     Setup s;
+    s.loadedFormatVersion = prop<int> (v, "version", 1);
     s.preloadAllPrograms = prop<bool> (v, "preloadAllPrograms", false);
     s.releaseTailSeconds = prop<double> (v, "releaseTailSeconds", 4.0);
     s.holdAcrossChange = prop<bool> (v, "holdAcrossChange", true);

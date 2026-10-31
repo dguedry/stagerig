@@ -517,6 +517,12 @@ struct SetDef
 //==============================================================================
 struct Setup
 {
+    /** The file format this StageRig writes. 2: built-in Big band, Humanize and
+        Phrase effects, scenes, front-panel knobs. A file with a higher number
+        was made by a newer StageRig and may hold things this one drops. */
+    static constexpr int formatVersion = 2;
+    int loadedFormatVersion = formatVersion;   // what the file said, when loaded
+
     std::vector<InputDef> inputs;
     /** Where the sound goes: at least one, "Main" on channels 1-2 by default. */
     std::vector<OutputDef> outputs = std::vector<OutputDef> (1);
