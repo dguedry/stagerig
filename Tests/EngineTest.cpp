@@ -25,6 +25,8 @@
  #define HAVE_PIDFD 1
 #endif
 
+#include "Surfaces.h"
+
 using namespace perf;
 using namespace juce;
 
@@ -3741,6 +3743,227 @@ int main()
             engine.setInputChannel (0, oldChannel);
             virt->stop();
         }
+    }
+
+
+    // ---- keyboards: knobs, buttons, a screen and lights ----------------------
+    {
+        struct FakeSurface : public ControlSurface
+        {
+            std::vector<SurfaceView> views;
+            std::vector<Touch> queued;
+            String getName() const override             { return "Fake"; }
+            String getKeysPortName() const override     { return "Fake keys"; }
+            bool isConnected() const override           { return true; }
+            bool hasScreen() const override             { return true; }
+            void show (const SurfaceView& v) override   { views.push_back (v); }
+            void takeTouches (std::vector<Touch>& out) override { out.insert (out.end(), queued.begin(), queued.end()); queued.clear(); }
+        };
+        ControlMapLibrary library (scratchDir.getChildFile ("Controller setups"));
+        SurfaceHub hub (engine, library, settings, /*lookForKeyboards*/ false);
+        auto owned = std::make_unique<FakeSurface>();
+        auto* fake = owned.get();
+        hub.addSurfaceForTesting (std::move (owned));
+        auto button = [] (const String& id, bool down) { ControlSurface::Touch t; t.type = ControlSurface::Touch::button; t.id = id; t.down = down; return t; };
+
+        const int keepProgram = engine.getSetup().inputs[0].currentProgram;
+        const int ch = jmax (1, engine.getSetup().inputs[0].channel);
+        String err;
+        for (int p : { 100, 101, 102, 103 }) engine.clearProgram (0, p);
+        engine.selectProgram (0, 103); settle();
+        CHECK (engine.addSlot (0, 103, synth, err)); settle();
+        CHECK (engine.addSlot (0, 103, synth, err)); settle();
+        engine.setSlotKeyRange (0, 103, 0, 0, 59);
+        engine.setSlotKeyRange (0, 103, 1, 60, 127);
+        engine.selectProgram (0, 100); settle();
+        CHECK (engine.addSlot (0, 100, synth, err)); settle();
+        engine.setProgramName (0, 100, "Lead");
+        for (int i = 0; i < 100 && ! engine.isPluginAlive (0, 100, 0); ++i) pump (20);
+
+        hub.tick();
+        CHECK (! fake->views.empty());
+        if (! fake->views.empty())
+        {
+            const auto v = fake->views.back();
+            std::printf ("     screen: %s | %s | %s | page %s (%d of %d) | knob 1 %s = %s\n", v.inputName.toRawUTF8(), v.programName.toRawUTF8(),
+                         v.instrument.toRawUTF8(), v.pageName.toRawUTF8(), v.page + 1, v.pageCount, v.knobNames[0].toRawUTF8(), v.knobValues[0].toRawUTF8());
+            CHECK (v.program == 100 && v.programName == "Lead" && v.instrument == synth.name);
+            CHECK (v.pageCount >= 1 && v.pageName == "Front panel" && v.knobNames[0].isNotEmpty() && v.knobValues[0].isNotEmpty());
+            // One instrument on every key: the whole keyboard in its colour, dimly.
+            CHECK (v.keyColours[0] != 0 && v.keyColours[0] == v.keyColours[127] && v.keyColours[60] == v.keyColours[0]);
+        }
+        const auto before = fake->views.size();
+        hub.tick();
+        CHECK (fake->views.size() == before);      // nothing changed: nothing sent
+
+        // A knob of the keyboard moves the parameter it shows.
+        const auto layout = hub.layoutFor (0, 100, 0);
+        CHECK (! layout.pages.empty() && layout.map == nullptr);
+        auto* plug = engine.getPlugin (0, 100, 0);
+        const int p0 = layout.pages.empty() ? -1 : layout.pages[0].knobs[0].paramIndex;
+        const int p1 = layout.pages.empty() ? -1 : layout.pages[0].knobs[1].paramIndex;
+        CHECK (p0 >= 0 && p1 >= 0 && plug != nullptr);
+        if (p0 >= 0 && p1 >= 0 && plug != nullptr)
+        {
+            CHECK (plug->setParameterValue (p0, 0.5f)); render (engine, 2); pump (50);
+            ControlSurface::Touch t; t.type = ControlSurface::Touch::knob; t.index = 0; t.amount = 0.1f;
+            fake->queued.push_back (t); fake->queued.push_back (t);
+            hub.tick(); render (engine, 2); pump (50);
+            float got = -1.0f; plug->fetchParameterValue (p0, got);
+            std::printf ("     knob 1 turned twice by a tenth from 0.5: %.3f\n", got);
+            CHECK (std::abs (got - 0.7f) < 0.02f);
+
+            // A knob taught on the input, sending where it is: CC 74 at the top puts knob 2 at the top.
+            SurfaceControls c; c.knobCC[1] = 74;
+            engine.setInputControls (0, c);
+            engine.injectMidi (0, MidiMessage::controllerEvent (ch, 74, 127)); pump (60);
+            hub.tick(); render (engine, 2); pump (50);
+            got = -1.0f; plug->fetchParameterValue (p1, got);
+            std::printf ("     knob 2 taught as CC 74, sent 127: %.3f\n", got);
+            CHECK (got > 0.98f);
+            // ... and endless: steps around 64.
+            c.knobsRelative = true;
+            engine.setInputControls (0, c);
+            for (int i = 0; i < 10; ++i) engine.injectMidi (0, MidiMessage::controllerEvent (ch, 74, 63));    // ten steps to the left
+            pump (60); hub.tick(); render (engine, 2); pump (50);
+            got = -1.0f; plug->fetchParameterValue (p1, got);
+            std::printf ("     ten steps to the left: %.3f\n", got);
+            CHECK (std::abs (got - 0.9f) < 0.02f);
+        }
+
+        // Buttons are taught by pressing them: a controller, and a keyboard's own button.
+        String taughtAs;
+        hub.learn (0, 100 + SurfaceControls::programUp, [&taughtAs] (const String& w) { taughtAs = w; });
+        CHECK (hub.isLearning());
+        engine.injectMidi (0, MidiMessage::controllerEvent (ch, 105, 127)); pump (60);
+        CHECK (taughtAs == "Controller 105" && ! hub.isLearning());
+        CHECK (engine.getSetup().inputs[0].controls.buttons[SurfaceControls::programUp] == "cc:105");
+        CHECK (engine.getSetup().inputs[0].controls.knobCC[1] == 74);       // the knob is still taught
+        hub.learn (0, 100 + SurfaceControls::programDown, [&taughtAs] (const String& w) { taughtAs = w; });
+        fake->queued.push_back (button ("fk:7", true));
+        hub.tick();
+        CHECK (engine.getSetup().inputs[0].controls.buttons[SurfaceControls::programDown] == "fk:7" && taughtAs == "fk:7");
+
+        // Next program passes over the empty ones; the release does nothing.
+        engine.injectMidi (0, MidiMessage::controllerEvent (ch, 105, 127)); pump (60);
+        engine.injectMidi (0, MidiMessage::controllerEvent (ch, 105, 0)); pump (60);
+        settle();
+        CHECK (engine.getSetup().inputs[0].currentProgram == 103);
+        for (int i = 0; i < 100 && ! (engine.isPluginAlive (0, 103, 0) && engine.isPluginAlive (0, 103, 1)); ++i) pump (20);
+        hub.tick();
+        CHECK (hub.getFocusSlot (0) == 0);
+        {
+            const auto v = fake->views.back();
+            // A split: each half in its instrument's colour.
+            CHECK (v.program == 103 && v.keyColours[30] != 0 && v.keyColours[90] != 0 && v.keyColours[30] != v.keyColours[90]);
+        }
+        hub.doAction (0, SurfaceControls::instrumentNext);
+        CHECK (hub.getFocusSlot (0) == 1);
+        hub.doAction (0, SurfaceControls::instrumentNext);
+        CHECK (hub.getFocusSlot (0) == 0);
+        const int pages = (int) hub.layoutFor (0, 103, 0).pages.size();
+        hub.doAction (0, SurfaceControls::pageUp);
+        CHECK (hub.getFocusPage (0) == (pages > 1 ? 1 : 0));
+        hub.doAction (0, SurfaceControls::pageDown); hub.doAction (0, SurfaceControls::pageDown);
+        CHECK (hub.getFocusPage (0) == 0);
+        // The keyboard's own button, taught as Previous program: back to 100.
+        fake->queued.push_back (button ("fk:7", true));
+        fake->queued.push_back (button ("fk:7", false));
+        hub.tick(); settle();
+        CHECK (engine.getSetup().inputs[0].currentProgram == 100);
+
+        // A controller setup: its page, its names, its keys.
+        if (plug != nullptr && p0 >= 0)
+        {
+            ControlMap m;
+            m.pluginName = synth.name; m.pluginManufacturer = synth.manufacturerName; m.name = "Bright lead";
+            ControlPage page; page.name = "Mine";
+            page.knobs.push_back ({ plug->getParameters()[(size_t) p0].id, plug->getParameters()[(size_t) p0].name, "Brightness" });
+            page.knobs.push_back ({ {}, plug->getParameters()[(size_t) p1].name, {} });     // found by its name
+            m.pages.push_back (page);
+            m.keys.push_back ({ 36, 40, 0xff3c3c, "Keyswitches" });
+            CHECK (library.save (m).wasOk());
+            hub.libraryChanged();
+            hub.tick();
+            auto v = fake->views.back();
+            std::printf ("     with a setup: %s | page %s | knob 1 %s, knob 2 %s\n", v.instrument.toRawUTF8(), v.pageName.toRawUTF8(), v.knobNames[0].toRawUTF8(), v.knobNames[1].toRawUTF8());
+            CHECK (v.instrument == synth.name + ": Bright lead" && v.pageName == "Mine" && v.pageCount == 1);
+            CHECK (v.knobNames[0] == "Brightness" && v.knobNames[1] == plug->getParameters()[(size_t) p1].name && v.knobNames[2].isEmpty());
+            CHECK (hub.layoutFor (0, 100, 0).pages[0].knobs[1].paramIndex == p1);
+            CHECK (v.keyColours[36] == 0xff3c3c && v.keyColours[40] == 0xff3c3c && v.keyColours[41] != 0xff3c3c && v.keyColours[35] != 0xff3c3c);
+            // The transpose moves the key that plays a keyswitch: the lights move with it.
+            engine.setTranspose (2);
+            hub.tick();
+            v = fake->views.back();
+            CHECK (v.keyColours[34] == 0xff3c3c && v.keyColours[38] == 0xff3c3c && v.keyColours[39] != 0xff3c3c);
+            engine.setTranspose (0);
+            // "-": no setup for this instrument, though there is one for the plugin.
+            engine.setSlotControlMap (0, 100, 0, "-");
+            hub.tick();
+            CHECK (fake->views.back().pageName == "Front panel");
+            engine.setSlotControlMap (0, 100, 0, {});
+            hub.tick();
+            CHECK (fake->views.back().pageName == "Mine");
+        }
+
+        // The Launchkey's messages, from Novation's guide.
+        {
+            const auto open = LaunchkeyMk4::openingMessages (false);
+            CHECK (open.size() >= 4 && open[0].getRawDataSize() == 3 && open[0].getRawData()[0] == 0x9f && open[0].getRawData()[1] == 0x0c && open[0].getRawData()[2] == 0x7f);
+            CHECK (LaunchkeyMk4::closingMessages()[0].getRawData()[2] == 0x00);
+            SurfaceView v; v.inputName = "Upper"; v.program = 7; v.programName = "Strings"; v.instrument = "Synth";
+            v.pageName = "Sound"; v.pageCount = 1; v.knobNames[0] = "Cutoff"; v.knobValues[0] = "50%";
+            const auto first = LaunchkeyMk4::screenMessages (v, nullptr, false);
+            bool allSysEx = ! first.empty(), titled = false;
+            for (const auto& m : first)
+            {
+                const auto* d = m.getRawData();
+                allSysEx = allSysEx && m.isSysEx() && d[1] == 0x00 && d[2] == 0x20 && d[3] == 0x29 && d[4] == 0x02 && d[5] == 0x14 && d[6] == 0x06;
+                if (d[7] == 0x20 && d[8] == 0x00) titled = String::fromUTF8 ((const char*) d + 9, m.getRawDataSize() - 10) == "Upper  007";
+            }
+            CHECK (allSysEx && titled);
+            auto moved = v; moved.knobValues[0] = "51%";
+            const auto next = LaunchkeyMk4::screenMessages (moved, &v, false);
+            CHECK (next.size() == 1 && next[0].getRawData()[7] == 0x15 && next[0].getRawData()[8] == 0x01);    // knob 1's value, and nothing else
+            CHECK (LaunchkeyMk4::screenMessages (v, nullptr, true)[0].getRawData()[5] == 0x13);               // a Mini
+            ControlSurface::Touch t;
+            CHECK (LaunchkeyMk4::parse (MidiMessage::controllerEvent (16, 0x16, 66), t) && t.type == ControlSurface::Touch::knob && t.index == 1 && std::abs (t.amount - 0.02f) < 1e-6f);
+            CHECK (LaunchkeyMk4::parse (MidiMessage::controllerEvent (15, 0x55, 127), t) && t.type == ControlSurface::Touch::knobTouch && t.index == 0 && t.down);
+            CHECK (LaunchkeyMk4::parse (MidiMessage::controllerEvent (16, 0x66, 127), t) && t.type == ControlSurface::Touch::button && t.id == "lk:102" && t.down);
+            CHECK (! LaunchkeyMk4::parse (MidiMessage::controllerEvent (16, 0x06, 50), t));        // a fader
+            CHECK (LaunchkeyMk4::parse (MidiMessage::noteOn (1, 40, (uint8) 100), t) && t.id == "lk:n40" && t.down);
+        }
+
+        // The Komplete Kontrol MK1's light guide and controls, as the keyboard showed them.
+        {
+            const auto* s88 = KompleteKontrolMk1::modelFor (0x1410);
+            CHECK (s88 != nullptr && s88->keys == 88 && s88->lowestNote == 21 && KompleteKontrolMk1::modelFor (0x1630) == nullptr);
+            std::array<uint32, 128> colours {};
+            colours[21] = 0xff0000; colours[108] = 0x0000ff; colours[60] = 0x808080;
+            const auto r = KompleteKontrolMk1::lightReport (colours, *s88);
+            CHECK (r.size() == 265 && r[0] == 0x82 && r[1] == 127 && r[2] == 0 && r[3] == 0);
+            CHECK (r[1 + 87 * 3 + 2] == 127 && r[1 + 39 * 3] == 64);
+            uint8 a[37] = {}, b[37] = {};
+            a[6] = (uint8) (990 & 0xff); a[7] = (uint8) (990 >> 8);
+            b[6] = 5; b[7] = 0;                          // knob 1 round past 999: fifteen steps on
+            b[0] = 0x08;                                 // button 3 pressed
+            b[3] = 0x01;                                 // knob 1 touched (bit 24)
+            std::vector<ControlSurface::Touch> found;
+            KompleteKontrolMk1::compareReports (a, b, 37, found);
+            bool press = false, touch = false, turn = false;
+            for (const auto& t : found)
+            {
+                press = press || (t.type == ControlSurface::Touch::button && t.id == "kk:b3" && t.down);
+                touch = touch || (t.type == ControlSurface::Touch::knobTouch && t.index == 0 && t.down);
+                turn  = turn  || (t.type == ControlSurface::Touch::knob && t.index == 0 && std::abs (t.amount - 0.015f) < 1e-6f);
+            }
+            CHECK (press && touch && turn && found.size() == 3);
+        }
+
+        engine.setInputControls (0, {});
+        engine.selectProgram (0, keepProgram); settle();
+        for (int p : { 100, 101, 102, 103 }) engine.clearProgram (0, p);
+        settle();
     }
 
     // CLAP has to be loadable by the synchronous API, because that is the one

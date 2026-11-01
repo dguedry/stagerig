@@ -72,6 +72,13 @@ public:
         virtual void statusMessage (const juce::String&) {}
         /** The backing track was armed, started, stopped or came to its end. */
         virtual void transportChanged() {}
+        /** A knob taught in the input's SurfaceControls moved: `value` is where it
+            is (0..127), or for relative knobs the steps it moved (+ right, - left). */
+        virtual void surfaceKnob (int inputIndex, int knob, int value, bool relative) { juce::ignoreUnused (inputIndex, knob, value, relative); }
+        /** A button taught as a controller in the input's SurfaceControls was pressed. */
+        virtual void surfaceButton (int inputIndex, int action) { juce::ignoreUnused (inputIndex, action); }
+        /** A controller moved on the input while armSurfaceLearn() waited for one. */
+        virtual void surfaceLearned (int inputIndex, int cc, int value) { juce::ignoreUnused (inputIndex, cc, value); }
     };
 
     /** @param startAudioDevice  pass false for headless tests; blocks are then rendered
@@ -229,6 +236,12 @@ public:
     void setInputProgramChangeChannel (int inputIndex, int channel);
     void setInputChannel (int inputIndex, int channel);
     void setInputRespondToProgramChange (int inputIndex, bool);
+    /** The keyboard's knobs and buttons (Model.h's SurfaceControls). */
+    void setInputControls (int inputIndex, const SurfaceControls&);
+    /** The next controller on that input is reported to surfaceLearned()
+        instead of playing; -1 stops waiting. */
+    void armSurfaceLearn (int inputIndex)          { surfaceLearnInput.store (inputIndex); }
+    int  getSurfaceLearnInput() const              { return surfaceLearnInput.load(); }
     /** Re-scans MIDI devices and re-opens the ones the setup refers to (hot-plug). */
     void refreshMidiDevices();
 
@@ -486,6 +499,8 @@ public:
     void setSlotPan       (int inputIndex, int program, int slot, float pan);         // -1..1
     /** The parameters on the Stage view's front panel for this instrument, by id; empty picks them by name. */
     void setSlotPanelParams (int inputIndex, int program, int slot, const std::vector<juce::String>& ids);
+    /** The controller setup the instrument uses, by name; empty for the plugin's first (ControlMaps.h). */
+    void setSlotControlMap (int inputIndex, int program, int slot, const juce::String& name);
     /** Velocity after a slot's curve: 0 leaves it, >0 lifts soft playing, <0 tames it. 1..127 in and out. */
     static int curveVelocity (int velocity, float curve);
     /** Left/right gains for a pan position: a balance law, unity in the centre. */
@@ -670,7 +685,7 @@ private:
         enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
                     songStep, songLearn, editorClosed, outputVolume, outputLearn,
                     transport, transportLearn, trackFinished, sectionPedal, sectionLearn, sectionEntered, mappedSwitch, looperLearn,
-                    linkTempo, linkStartStop };
+                    linkTempo, linkStartStop, surfaceKnob, surfaceButton, surfaceLearn };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -803,6 +818,7 @@ private:
     int blockSize = 512;
 
     std::atomic<bool> learnArmed { false };
+    std::atomic<int> surfaceLearnInput { -1 };
     std::atomic<bool> tapLearnArmed { false };
     std::atomic<bool> panicRequested { false };
     std::atomic<int> liveTranspose { 0 };

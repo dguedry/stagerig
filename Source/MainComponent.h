@@ -7,6 +7,7 @@
 #include "RemoteServer.h"
 #include "Hotspot.h"
 #include "HelpWindow.h"
+#include "Surfaces.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace perf
@@ -46,6 +47,8 @@ public:
     void loadSetupFile (const juce::File&);
     /** An instrument row was clicked: the on-screen keyboard plays that instrument. */
     void playInstrumentFromKeyboard (int slot);
+    /** The controller setup of an instrument of the program being edited: its knobs, screen and lights. */
+    void showKnobsFor (int slot);
 
 private:
     // Engine::Listener
@@ -134,6 +137,11 @@ private:
     int songsWidth = 230, inputsWidth = 260, programsWidth = 260;
     void savePaneWidths();
     std::unique_ptr<RemoteServer> remote;
+    // Keyboards' knobs, screens and lights, and the setups that say what they do.
+    std::unique_ptr<ControlMapLibrary> controlMaps;
+    std::unique_ptr<SurfaceHub> surfaceHub;
+    std::vector<juce::Component::SafePointer<juce::Component>> controllerWindows;   // closed before the hub goes
+    void showControllers();
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;
 

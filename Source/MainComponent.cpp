@@ -11,6 +11,7 @@
 #include "AudioSettingsComponent.h"
 #include "ProgramMap.h"
 #include "ParamPicker.h"
+#include "ControllerWindows.h"
 #include <optional>
 
 using namespace juce;
@@ -1428,6 +1429,9 @@ public:
             velCurve.updateText();     // the bar's text box was filled before the formatter existed
             velCurve.setTooltip ("Reshapes incoming velocities: louder makes soft playing come out stronger (for a stiff keyboard or a quiet library), softer does the opposite. Double-click for linear.");
             addAndMakeVisible (guiBtn);
+            addAndMakeVisible (knobsBtn);
+            knobsBtn.setTooltip ("What a keyboard's knobs, screen and lights do for this instrument: its controller setup, made here or imported");
+            knobsBtn.onClick = [this] { panel.owner.showKnobsFor (index); };
             addAndMakeVisible (removeBtn);
             removeBtn.setTooltip ("Remove this instrument from the program");
             addAndMakeVisible (midiChain);
@@ -1563,7 +1567,8 @@ public:
             }
             else if (inputSlot)
                 guiBtn.setVisible (false);
-            else
+            knobsBtn.setVisible (def.isPlugin());
+            if (def.isPlugin())
             {
                 guiBtn.setButtonText (loading ? "Loading" : loaded ? "Window" : "Reload");
                 guiBtn.setTooltip (loaded ? "Open the plugin's own window" : "The plugin stopped: load it again");
@@ -1606,6 +1611,7 @@ public:
             removeBtn.setBounds (top.removeFromRight (28));
             top.removeFromRight (4);
             guiBtn.setBounds (top.removeFromRight (64));
+            if (knobsBtn.isVisible()) { top.removeFromRight (4); knobsBtn.setBounds (top.removeFromRight (52)); }
             name.setBounds (top);
 
             r.removeFromTop (2);
@@ -1787,7 +1793,7 @@ public:
         Label gainCap, transposeCap, keysCap, chCap, inChCap, panCap, velCap, curveCap;
         ComboBox outCh;
         TextButton inCh { "All channels" };
-        TextButton guiBtn { "Window" }, removeBtn { "X" };
+        TextButton guiBtn { "Window" }, knobsBtn { "Knobs" }, removeBtn { "X" };
         EffectChainComponent midiChain, chain;
     };
 
@@ -2641,6 +2647,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         PopupMenu m;
         m.addItem (11, "Pre-show check...  (everything that can go wrong, before the first song)");
         m.addSeparator();
+        m.addItem (12, "Keyboards and knobs...  (a keyboard's knobs, buttons, screen and lights)");
         m.addItem (1, "Preload all programs (instant changes; uses more memory)", true, setup.preloadAllPrograms);
         m.addItem (2, "Let held notes ring through a program change", true, setup.holdAcrossChange);
         m.addItem (6, "Show songs and set lists", true, songsPanel != nullptr && songsPanel->isVisible());
@@ -2708,6 +2715,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
                 case 6: setSongsPanelShown (songsPanel == nullptr || ! songsPanel->isVisible()); break;
                 case 7: chooseGmSoundfont(); break;
                 case 11: showShowCheck(); break;
+                case 12: showControllers(); break;
                 default: break;
             }
         });
@@ -2908,6 +2916,18 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
 
     engine.addListener (this);
 
+    /* Keyboards' knobs, screens and lights. The setups are files beside the
+       settings, so they belong to the computer and every setup file uses them. */
+    controlMaps = std::make_unique<ControlMapLibrary> (settings.getFile().getParentDirectory().getChildFile ("Controller setups"));
+    surfaceHub = std::make_unique<SurfaceHub> (engine, *controlMaps, settings);
+    surfaceHub->onEdited = [this] { markDirty(); };
+    surfaceHub->onSurfacesChanged = [this]
+    {
+        StringArray names;
+        for (const auto& sf : surfaceHub->getSurfaces()) names.add (sf.name);
+        if (! names.isEmpty()) showStatus ("Keyboard found: " + names.joinIntoString (", ") + ". Its knobs follow the program in play.");
+    };
+
     // Open the requested setup, else restore the last one.
     File last (settings.getValue ("lastSetup"));
     if (initialSetup.existsAsFile())            loadSetupFile (initialSetup);
@@ -2961,7 +2981,25 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
 
 MainComponent::~MainComponent()
 {
+    // Their windows hold on to the hub: they go first. Then the keyboards are put back as they were, while the engine is still here.
+    for (auto& w : controllerWindows)
+        if (w != nullptr) delete w.getComponent();
+    surfaceHub.reset();
     engine.removeListener (this);
+}
+
+void MainComponent::showKnobsFor (int slot)
+{
+    if (surfaceHub == nullptr) return;
+    controllerWindows.erase (std::remove (controllerWindows.begin(), controllerWindows.end(), nullptr), controllerWindows.end());
+    controllerWindows.push_back (showControlMapEditor (engine, *surfaceHub, *controlMaps, selectedInput, getEditedProgram(), slot, [this] { markDirty(); }));
+}
+
+void MainComponent::showControllers()
+{
+    if (surfaceHub == nullptr) return;
+    controllerWindows.erase (std::remove (controllerWindows.begin(), controllerWindows.end(), nullptr), controllerWindows.end());
+    controllerWindows.push_back (perf::showControllers (engine, *surfaceHub, selectedInput, [this] { markDirty(); }));
 }
 
 int MainComponent::getEditedProgram() const

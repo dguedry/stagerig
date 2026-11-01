@@ -222,6 +222,10 @@ struct Engine::InputRuntime
     std::atomic<float> levelL { 0.0f }, levelR { 0.0f };     // the meter: pre-trim peaks, falling 20 dB/s
     std::atomic<uint32_t> clipMs { 0 };                      // when the input last touched full scale
     std::atomic<int> output { 0 };                           // which output it lands on
+    // The keyboard's taught knobs and buttons (SurfaceControls), read on the MIDI thread.
+    std::array<std::atomic<int>, SurfaceControls::numKnobs> knobCC {};
+    std::atomic<bool> knobsRelative { false };
+    std::array<std::atomic<int>, SurfaceControls::numActions> buttonCC {};
     MidiMessageCollector collector;
     MidiBuffer block;
     MidiBuffer trackMidi;          // the backing track's MIDI for this block, merged into `block`
@@ -696,6 +700,16 @@ void Engine::applyInputDef (InputRuntime& rt, const InputDef& def)
     rt.audioLeft.store (def.audioLeft);
     rt.audioRight.store (def.audioRight);
     rt.output.store (def.output);
+    for (int k = 0; k < SurfaceControls::numKnobs; ++k) rt.knobCC[(size_t) k].store (def.controls.knobCC[(size_t) k]);
+    rt.knobsRelative.store (def.controls.knobsRelative);
+    for (int a = 0; a < SurfaceControls::numActions; ++a) rt.buttonCC[(size_t) a].store (SurfaceControls::ccOf (def.controls.buttons[(size_t) a]));
+}
+
+void Engine::setInputControls (int inputIndex, const SurfaceControls& c)
+{
+    if (! validInput (inputIndex)) return;
+    setup.inputs[(size_t) inputIndex].controls = c;
+    applyInputDef (*runtimes[(size_t) inputIndex], setup.inputs[(size_t) inputIndex]);
 }
 
 ProgramDef* Engine::defFor (int inputIndex, int program)
@@ -2947,6 +2961,15 @@ void Engine::setSlotPanelParams (int inputIndex, int program, int slotIndex, con
     notifyContent (inputIndex, program);
 }
 
+void Engine::setSlotControlMap (int inputIndex, int program, int slotIndex, const String& name)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size()) return;
+    def.slots[(size_t) slotIndex].controlMap = name;
+    notifyContent (inputIndex, program);
+}
+
 PERF_SLOT_SETTER (setSlotEnabled,    enabled,    enabled.store (v))
 PERF_SLOT_SETTER (setSlotGainDb,     gainDb,     gain.store (Decibels::decibelsToGain (v, -60.0f)))
 PERF_SLOT_SETTER (setSlotTranspose,  transpose,  transpose.store (v))
@@ -3787,6 +3810,16 @@ void Engine::handleAsyncUpdate()
                 listeners.call ([] (Listener& l) { l.transportChanged(); });
                 break;
 
+            case Event::surfaceKnob:
+                listeners.call ([&e] (Listener& l) { l.surfaceKnob (e.input, e.a, e.b, e.c != 0); });
+                break;
+            case Event::surfaceButton:
+                listeners.call ([&e] (Listener& l) { l.surfaceButton (e.input, e.a); });
+                break;
+            case Event::surfaceLearn:
+                listeners.call ([&e] (Listener& l) { l.surfaceLearned (e.input, e.a, e.b); });
+                break;
+
             case Event::mappedSwitch:
             {
                 // a = program, b = slot (or chain address), c = effect (-1 = the instrument), d = on / off or a level in dB
@@ -4133,6 +4166,36 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
     }
 
     if (want != 0 && ch != want) return;
+
+    /* The keyboard's own knobs and buttons, as it was taught them: they work
+       the instrument (Surfaces.h), and never reach it as controllers. A
+       button's release is swallowed with its press. */
+    if (m.isController())
+    {
+        const int cc = m.getControllerNumber(), value = m.getControllerValue();
+        if (surfaceLearnInput.load (std::memory_order_relaxed) == i)
+        {
+            surfaceLearnInput.store (-1);
+            postEvent ({ Event::surfaceLearn, i, cc, value, 0, 0 });
+            return;
+        }
+        if (cc > 0)
+        {
+            for (int k = 0; k < SurfaceControls::numKnobs; ++k)
+                if (in.knobCC[(size_t) k].load (std::memory_order_relaxed) == cc)
+                {
+                    const bool relative = in.knobsRelative.load (std::memory_order_relaxed);
+                    postEvent ({ Event::surfaceKnob, i, k, relative ? value - 64 : value, relative ? 1 : 0, 0 });
+                    return;
+                }
+            for (int a = 0; a < SurfaceControls::numActions; ++a)
+                if (in.buttonCC[(size_t) a].load (std::memory_order_relaxed) == cc)
+                {
+                    if (value >= 64) postEvent ({ Event::surfaceButton, i, a, 0, 0, 0 });
+                    return;
+                }
+        }
+    }
 
     if (learnArmed.load())
     {

@@ -217,6 +217,7 @@ var SlotDef::toVar() const
     o->setProperty ("velocityCurve", velocityCurve);
     o->setProperty ("pan", pan);
     if (! panelParams.empty()) { Array<var> ids; for (const auto& id : panelParams) ids.add (id); o->setProperty ("panel", var (ids)); }
+    if (controlMap.isNotEmpty()) o->setProperty ("controlMap", controlMap);
     o->setProperty ("outChannel", outChannel);
     if (! hearsAll())
     {
@@ -290,6 +291,7 @@ SlotDef SlotDef::fromVar (const var& v)
     s.outChannel = prop<int>   (v, "outChannel", 0);
     if (auto* ids = obj (v) != nullptr ? obj (v)->getProperty ("panel").getArray() : nullptr)
         for (const auto& id : *ids) if (s.panelParams.size() < 16) s.panelParams.push_back (id.toString());
+    s.controlMap = propStr (v, "controlMap");
     if (auto* chans = obj (v) != nullptr ? obj (v)->getProperty ("listensTo").getArray() : nullptr)
     {
         s.listensTo = 0;
@@ -476,6 +478,7 @@ var InputDef::toVar() const
     o->setProperty ("respondToProgramChange", respondToProgramChange);
     o->setProperty ("programChangeChannel", programChangeChannel);
     o->setProperty ("currentProgram", currentProgram);
+    if (! controls.isEmpty()) o->setProperty ("controls", controls.toVar());
 
     // Only store non-empty programs to keep files small.
     Array<var> progs;
@@ -489,6 +492,33 @@ var InputDef::toVar() const
     }
     o->setProperty ("programs", progs);
     return var (o);
+}
+
+var SurfaceControls::toVar() const
+{
+    DynamicObject::Ptr o (new DynamicObject());
+    Array<var> knobs;
+    for (int cc : knobCC) knobs.add (cc);
+    o->setProperty ("knobs", var (knobs));
+    if (knobsRelative) o->setProperty ("relative", true);
+    static const char* const keys[] = { "programUp", "programDown", "pageUp", "pageDown", "instrumentNext" };
+    for (int a = 0; a < numActions; ++a)
+        if (buttons[(size_t) a].isNotEmpty()) o->setProperty (keys[a], buttons[(size_t) a]);
+    return var (o.get());
+}
+
+SurfaceControls SurfaceControls::fromVar (const var& v)
+{
+    SurfaceControls c;
+    if (obj (v) == nullptr) return c;
+    if (auto* knobs = obj (v)->getProperty ("knobs").getArray())
+        for (int k = 0; k < numKnobs && k < knobs->size(); ++k)
+            c.knobCC[(size_t) k] = jlimit (0, 127, (int) knobs->getReference (k));
+    c.knobsRelative = prop<bool> (v, "relative", false);
+    static const char* const keys[] = { "programUp", "programDown", "pageUp", "pageDown", "instrumentNext" };
+    for (int a = 0; a < numActions; ++a)
+        c.buttons[(size_t) a] = propStr (v, keys[a]);
+    return c;
 }
 
 InputDef InputDef::fromVar (const var& v)
@@ -506,6 +536,7 @@ InputDef InputDef::fromVar (const var& v)
     in.respondToProgramChange = prop<bool> (v, "respondToProgramChange", true);
     in.programChangeChannel   = juce::jlimit (-1, 16, prop<int> (v, "programChangeChannel", InputDef::pcChannelSameAsNotes));
     in.currentProgram         = jlimit (0, numPrograms - 1, prop<int> (v, "currentProgram", 0));
+    in.controls               = SurfaceControls::fromVar (obj (v) != nullptr ? obj (v)->getProperty ("controls") : var());
 
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("programs").getArray() : nullptr)
         for (auto& pv : *arr)

@@ -23,6 +23,7 @@ works inside, see the [README](../README.md).
 - [Splits and layers](#splits-and-layers)
 - [Effects](#effects)
 - [MIDI mappings: knobs and pedals](#midi-mappings-knobs-and-pedals)
+- [Keyboards: knobs, buttons, screens and lights](#keyboards-knobs-buttons-screens-and-lights)
 - [Outputs and master effects](#outputs-and-master-effects)
 - [Songs and set lists](#songs-and-set-lists)
   - [Making a song](#making-a-song)
@@ -316,6 +317,7 @@ transpose, curve and channels decide which notes enter at all. Left to right:
 | **Icon** | The plugin's own icon where it has one, otherwise a coloured badge with its initials. |
 | **Name** | Plugin name and format. Red means it failed to load; hover for the reason. |
 | **Window** | Opens the plugin's own window. Shows **Reload** instead if the plugin crashed and was left off (see *When something fails on stage*); a MIDI device has **Device...** here, the General MIDI player **Sound...**. |
+| **Knobs** | The instrument's controller setup: what a keyboard's knobs, screen and lights do for it (see *Keyboards: knobs, buttons, screens and lights*). Plugins only. |
 | **X** | Removes the instrument, and asks first. |
 | **GAIN** | Level of this instrument, applied after its effects. Double-click for 0 dB. |
 | **PAN** | Stereo position, `centre`, `L 40`, `R 25`. Double-click for centre. |
@@ -570,6 +572,76 @@ same as sending that controller to the plugin. For a knob the plugin does not
 list, use **Use last moved**, or Kontakt's own host automation (Automation ▸
 Host Automation, drag one of Kontakt's own host-automation slots onto the
 knob) and map to that `#NNN` parameter.
+
+## Keyboards: knobs, buttons, screens and lights
+
+A mapping (above) ties one controller to one parameter, in one program. This
+is the other way round: the keyboard's knobs follow whatever you are
+playing. Eight knobs turn the parameters of the instrument in play, a button
+steps to the next page of eight, another to the next instrument of the
+program, and two more step through the programs. A keyboard with a screen
+shows the program and what each knob is; one with lights shows which keys
+play what.
+
+**What the knobs turn.** Each instrument has pages of eight knobs. Without a
+controller setup (below), the first page is the instrument's front-panel
+knobs, the ones the Stage view shows, and the next pages are the rest of its
+parameters, eight at a time. With a setup, they are the setup's pages, with
+its names. In a program of several instruments, the knobs start on the one
+that has a setup, else the first; **Next instrument** moves them on.
+
+**Teaching a keyboard.** **Options ▸ Keyboards and knobs...** chooses an
+input and lists its eight knobs and five buttons (**Next program**,
+**Previous program**, **Next knob page**, **Previous knob page**, **Next
+instrument**). Press **Learn** and turn the knob, or press the button. Tick
+**The knobs are endless** for knobs that turn without stopping and send
+steps (around 64) rather than a position. What you teach is kept with the
+input, in the setup file. A taught knob or button no longer reaches the
+instruments as a controller. **Next program** passes over empty programs.
+
+**Controller setups.** The **Knobs** button on an instrument opens its
+setup:
+
+- **Setup** chooses which one the instrument uses. **None** means the front
+  panel's knobs, then every parameter. **New** makes one from the knobs as
+  they are now, for you to change.
+- **Name** is what it is for: the plugin's name for a setup of the whole
+  plugin, or the instrument inside it for a plugin that holds many. A Kontakt
+  has one setup per library, such as "Alicia's Keys", and each program
+  chooses the one it has loaded.
+- **Knob page**: each page has a name and eight knobs. For each knob, choose
+  the parameter, and give it a short name for the screen if the plugin's own
+  name is long. **+ Page** adds one.
+- **Keys**: runs of keys with a colour and a name, such as keyswitches, a
+  drum kit's pads, or the range a sampled instrument has. Notes are as the
+  plugin hears them (**C1**, **F#2**, or a number), so a setup stays right
+  whatever the instrument is transposed by.
+- **Save** writes it. Every program with that plugin can then use it.
+
+**Sharing a setup.** **Export...** writes the setup to a file
+(`*.stagerig-controls`). Anyone with the same plugin can bring it in with
+**Import...**. The file names the plugin's parameters as well as their ids,
+so it works on another computer. Your setups are files in the `Controller
+setups` folder beside StageRig's settings, and a file dropped in there is a
+setup.
+
+**The lights.** On a keyboard with a light guide, each instrument's keys are
+lit dimly in its own colour: a split shows as two colours, and keys that
+play nothing stay dark. A setup's runs of keys are lit at full strength on
+top. With the song or live transpose on, the lights move with it, so they
+always mark the keys to press.
+
+**Keyboards StageRig talks to.** Any keyboard can be taught as above. These
+are also driven directly, and are found when plugged in, also mid-show:
+
+| Keyboard | What it does | Notes |
+|---|---|---|
+| Novation Launchkey MK4 (and Mini MK4) | Its encoders turn the knobs without teaching. Its screen shows the input, program and page, and each knob's name and value as you turn it. Its buttons and pads can be taught. | Built from Novation's published programmer's guide. On by default. |
+| Native Instruments Komplete Kontrol S25/S49/S61/S88 MK1 | Its eight knobs turn the knobs without teaching, and its light guide shows the keys. Its buttons can be taught. | Linux only, and off until ticked in **Keyboards and knobs**. Worked out from the keyboard, not a published guide: a Komplete Kontrol has been seen to drop off USB while this was on and need a full power-down to come back (the keys kept playing). The lights assume the keyboard's own Octave and Transpose buttons are left alone; use StageRig's transpose instead. |
+
+The keys of every one of these are ordinary MIDI and play as any keyboard.
+Komplete Kontrol MK2 and MK3 keyboards, and others, can be taught as above.
+Their screens and lights are not driven yet.
 
 ## Outputs and master effects
 
@@ -1615,6 +1687,7 @@ switching the plugin off; scan again once the install has finished.
 | `~/.config/StageRig/StageRig.settings` | Window, audio device, scan folders, known plugins, tuning options. |
 | `~/.config/StageRig/autosave.stagerig.json` | The rolling autosave. |
 | `~/.config/StageRig/mapping-templates.json` | Your saved per-plugin mapping templates. |
+| `~/.config/StageRig/Controller setups/` | Your controller setups, one `*.stagerig-controls` file each: import and export them from an instrument's **Knobs** button. |
 | `~/.config/StageRig/icons/` | Cached plugin icons. |
 | `~/.config/StageRig/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |
 | your `*.stagerig.json` | Your setup. Keep it wherever you like. |

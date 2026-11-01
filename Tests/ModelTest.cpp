@@ -5,6 +5,7 @@
 #include <juce_events/juce_events.h>
 #include <cstdio>
 #include "ClapPluginFormat.h"
+#include "ControlMaps.h"
 
 using namespace perf;
 
@@ -544,6 +545,118 @@ int main()
         // The folder sits beside the setup, named after it.
         CHECK (chartsFolderFor (juce::File ("/x/MySetup.stagerig.json")).getFullPathName() == "/x/MySetup.stagerig.charts");
         CHECK (chartsFolderFor (juce::File()) == juce::File());
+    }
+
+    // ---- controller setups ------------------------------------------------
+    {
+        ControlMap m;
+        m.name = "Alicia's Keys"; m.pluginName = "Kontakt 8"; m.pluginManufacturer = "Native Instruments"; m.author = "Someone";
+        ControlPage sound; sound.name = "Sound";
+        sound.knobs.push_back ({ "1001", "Reverb", "Room" });
+        sound.knobs.push_back ({ {}, "Tone", {} });
+        m.pages.push_back (sound);
+        m.pages.push_back ({ "Empty", {} });
+        m.keys.push_back ({ 24, 35, 0xff8a00, "Articulations" });
+        m.keys.push_back ({ 108, 100, 0x00b4ff, {} });      // backwards: put right on load
+
+        ControlMap back; juce::String error;
+        CHECK (ControlMap::fromVar (juce::JSON::parse (juce::JSON::toString (m.toVar())), back, error));
+        CHECK (back.name == m.name && back.pluginName == "Kontakt 8" && back.pluginManufacturer == "Native Instruments" && back.author == "Someone");
+        CHECK (back.pages.size() == 2 && back.pages[0].name == "Sound" && back.pages[0].knobs.size() == 2);
+        CHECK (back.pages[0].knobs[0].paramId == "1001" && back.pages[0].knobs[0].paramName == "Reverb" && back.pages[0].knobs[0].label == "Room");
+        CHECK (back.pages[0].knobs[1].paramId.isEmpty() && back.pages[0].knobs[1].paramName == "Tone");
+        CHECK (back.keys.size() == 2 && back.keys[0].low == 24 && back.keys[0].high == 35 && back.keys[0].colour == 0xff8a00 && back.keys[0].label == "Articulations");
+        CHECK (back.keys[1].low == 100 && back.keys[1].high == 108);
+        CHECK (ControlMap::colourToText (0x00b4ff) == "#00b4ff" && ControlMap::colourFromText ("#FF8A00", 0) == 0xff8a00 && ControlMap::colourFromText ("red", 7) == 7);
+
+        // Not a setup, a newer one, one without a plugin: refused, with a reason.
+        CHECK (! ControlMap::fromVar (juce::JSON::parse ("{\"name\":\"x\"}"), back, error) && error.isNotEmpty());
+        CHECK (! ControlMap::fromVar (juce::JSON::parse ("{\"format\":\"stagerig-controller-setup\",\"version\":99,\"plugin\":\"A\"}"), back, error) && error.containsIgnoreCase ("newer"));
+        CHECK (! ControlMap::fromVar (juce::JSON::parse ("{\"format\":\"stagerig-controller-setup\",\"version\":1}"), back, error));
+        // Nine knobs on a page: the ninth is dropped. No name: the plugin's.
+        {
+            juce::String nine = "{\"format\":\"stagerig-controller-setup\",\"version\":1,\"plugin\":\"Synth\",\"pages\":[{\"name\":\"P\",\"knobs\":[";
+            for (int k = 0; k < 9; ++k) nine << (k ? "," : "") << "{\"param\":\"p" << k << "\"}";
+            nine << "]}]}";
+            CHECK (ControlMap::fromVar (juce::JSON::parse (nine), back, error) && back.pages[0].knobs.size() == 8 && back.name == "Synth");
+        }
+
+        // Which plugin it is for: the name, and the maker when both say.
+        juce::PluginDescription k8; k8.name = "Kontakt 8"; k8.manufacturerName = "Native Instruments";
+        juce::PluginDescription k8bare; k8bare.name = "kontakt 8";
+        juce::PluginDescription other; other.name = "Kontakt 8"; other.manufacturerName = "Someone Else";
+        CHECK (m.appliesTo (k8) && m.appliesTo (k8bare) && ! m.appliesTo (other));
+
+        // Note names, as StageRig writes them: middle C is C3.
+        CHECK (parseNoteName ("C3") == 60 && parseNoteName ("A-1") == 21 && parseNoteName ("A-2") == 9 && parseNoteName ("F#2") == 54 && parseNoteName ("Bb1") == 46);
+        CHECK (parseNoteName ("c-2") == 0 && parseNoteName ("G8") == 127 && parseNoteName ("61") == 61);
+        CHECK (parseNoteName ("") == -1 && parseNoteName ("H2") == -1 && parseNoteName ("C") == -1 && parseNoteName ("200") == -1 && parseNoteName ("G#8") == -1);
+
+        // The library: a folder of files.
+        juce::TemporaryFile tmpDir;
+        const auto dir = tmpDir.getFile();
+        dir.createDirectory();
+        {
+            ControlMapLibrary lib (dir);
+            CHECK (lib.size() == 0 && lib.find (k8, {}) == nullptr);
+            CHECK (lib.save (m).wasOk() && lib.size() == 1);
+            CHECK (lib.fileFor (m).getFileName() == juce::File::createLegalFileName ("Kontakt 8 - Alicia's Keys") + ".stagerig-controls");
+            ControlMap whole = m; whole.name = "Kontakt 8"; whole.keys.clear();
+            CHECK (lib.save (whole).wasOk() && lib.size() == 2);
+            CHECK (lib.fileFor (whole).getFileName() == "Kontakt 8.stagerig-controls");
+            CHECK (lib.forPlugin (k8).size() == 2 && lib.forPlugin (other).empty());
+            CHECK (lib.find (k8, "alicia's keys") != nullptr && lib.find (k8, "alicia's keys")->keys.size() == 2);
+            CHECK (lib.find (k8, "Nothing like it") == nullptr && lib.find (k8, "-") == nullptr);
+            CHECK (lib.find (k8, {}) != nullptr);          // no name: the first there is
+
+            // Saved again: replaced, not doubled.
+            ControlMap changed = m; changed.author = "Me";
+            CHECK (lib.save (changed).wasOk() && lib.size() == 2 && lib.find (k8, "Alicia's Keys")->author == "Me");
+
+            // A file that is not a setup sits in the folder unread.
+            dir.getChildFile ("junk.stagerig-controls").replaceWithText ("not json");
+            lib.reload();
+            CHECK (lib.size() == 2);
+
+            // Import: a copy into the folder; the same setup imported again replaces it.
+            ControlMap shared; shared.name = "Lead"; shared.pluginName = "Vital";
+            const auto sharedFile = dir.getSiblingFile ("from-a-friend.stagerig-controls");
+            CHECK (shared.saveToFile (sharedFile).wasOk());
+            ControlMap got;
+            CHECK (lib.importFile (sharedFile, &got).wasOk() && got.name == "Lead" && lib.size() == 3);
+            CHECK (lib.importFile (sharedFile).wasOk() && lib.size() == 3);
+            CHECK (lib.importFile (dir.getChildFile ("junk.stagerig-controls")).failed());
+            CHECK (lib.importFile (dir.getChildFile ("missing.stagerig-controls")).failed());
+            sharedFile.deleteFile();
+
+            CHECK (lib.remove (changed).wasOk() && lib.size() == 2 && lib.find (k8, "Alicia's Keys") == nullptr);
+            CHECK (lib.remove (changed).failed());
+
+            // Another library on the same folder sees what this one saved.
+            ControlMapLibrary again (dir);
+            CHECK (again.size() == 2);
+        }
+        dir.deleteRecursively();
+    }
+
+    // ---- an instrument's setup, an input's knobs and buttons --------------
+    {
+        SlotDef sd; sd.plugin.name = "Kontakt 8"; sd.controlMap = "Alicia's Keys";
+        CHECK (SlotDef::fromVar (sd.toVar()).controlMap == "Alicia's Keys");
+        SlotDef plain; plain.plugin.name = "x";
+        CHECK (! plain.toVar().getDynamicObject()->hasProperty ("controlMap"));
+
+        InputDef in; in.name = "Upper";
+        CHECK (in.controls.isEmpty() && ! in.toVar().getDynamicObject()->hasProperty ("controls"));
+        in.controls.knobCC = { 21, 22, 23, 24, 0, 0, 0, 28 };
+        in.controls.knobsRelative = true;
+        in.controls.buttons[SurfaceControls::programUp] = "cc:104";
+        in.controls.buttons[SurfaceControls::pageDown] = "kk:b12";
+        const auto back = InputDef::fromVar (juce::JSON::parse (juce::JSON::toString (in.toVar())));
+        CHECK (back.controls.knobCC == in.controls.knobCC && back.controls.knobsRelative);
+        CHECK (back.controls.buttons[SurfaceControls::programUp] == "cc:104" && back.controls.buttons[SurfaceControls::pageDown] == "kk:b12");
+        CHECK (back.controls.buttons[SurfaceControls::programDown].isEmpty() && ! back.controls.isEmpty());
+        CHECK (SurfaceControls::ccOf ("cc:104") == 104 && SurfaceControls::ccOf ("kk:b12") == 0 && SurfaceControls::ccOf ({}) == 0);
     }
 
     std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);

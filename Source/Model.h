@@ -110,6 +110,13 @@ struct SlotDef
         instrument, by id, in order; empty means the ones a player reaches
         for are picked by name (cutoff, resonance, attack, release...). */
     std::vector<juce::String> panelParams;
+    /** Which controller setup (ControlMaps.h) the keyboard's knobs, screen
+        and lights use for this instrument: one of those made for its plugin,
+        by name -- "Alicia's Keys" for a Kontakt that has that instrument
+        loaded. Empty means the first one there is for the plugin, and the
+        front panel's picks when there is none; "-" means none, even when
+        there is one. */
+    juce::String controlMap;
     /** Which incoming channels this slot listens to, one bit per channel
         (bit 0 = channel 1); all of them by default. With the input on Omni,
         one program can then give each channel its own sound -- a bass on 2
@@ -277,6 +284,44 @@ struct OutputDef
 };
 
 //==============================================================================
+/** What a keyboard's knobs and buttons do, beyond playing: eight knobs that
+    turn the instrument's parameters, and buttons that step through programs,
+    knob pages and instruments. Each control is taught by moving it. A knob
+    here is a MIDI controller on the input; a button is either a controller
+    ("cc:64") or a button of a keyboard StageRig talks to directly, such as
+    "kk:b12" on a Komplete Kontrol or "lk:104" on a Launchkey (Surfaces.h).
+    Kept with the input, since it belongs to the keyboard that is plugged in
+    there. */
+struct SurfaceControls
+{
+    static constexpr int numKnobs = 8;
+    std::array<int, numKnobs> knobCC {};   // 0 = not taught (CC 0 is bank select: never a knob)
+    /** The knobs send steps around 64 (65 = one to the right, 63 = one to
+        the left) rather than where they are: endless encoders. */
+    bool knobsRelative = false;
+
+    enum Action { programUp, programDown, pageUp, pageDown, instrumentNext, numActions };
+    static const char* actionName (int a)
+    {
+        static const char* const names[] = { "Next program", "Previous program", "Next knob page", "Previous knob page", "Next instrument" };
+        return a >= 0 && a < numActions ? names[a] : "";
+    }
+    std::array<juce::String, numActions> buttons;   // a control id, or empty
+
+    bool isEmpty() const
+    {
+        for (int cc : knobCC) if (cc > 0) return false;
+        for (const auto& b : buttons) if (b.isNotEmpty()) return false;
+        return ! knobsRelative;
+    }
+    /** The controller a button is, or 0 when it is not one ("cc:<n>"). */
+    static int ccOf (const juce::String& id)   { return id.startsWith ("cc:") ? juce::jlimit (0, 127, id.substring (3).getIntValue()) : 0; }
+
+    juce::var toVar() const;
+    static SurfaceControls fromVar (const juce::var&);
+};
+
+//==============================================================================
 /** A MIDI source such as "Upper" or "Lower" keyboard, or an audio input. */
 struct InputDef
 {
@@ -321,6 +366,8 @@ struct InputDef
     int programChangeChannel = pcChannelSameAsNotes;
     int currentProgram = 0;
     std::vector<ProgramDef> programs { (size_t) numPrograms };
+    /** The keyboard's knobs and buttons: see SurfaceControls. */
+    SurfaceControls controls;
 
     juce::var toVar() const;
     static InputDef fromVar (const juce::var&);
