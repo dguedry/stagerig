@@ -637,11 +637,13 @@ are also driven directly, and are found when plugged in, also mid-show:
 | Keyboard | What it does | Notes |
 |---|---|---|
 | Novation Launchkey MK4 (and Mini MK4) | Its encoders turn the knobs without teaching. Its screen shows the input, program and page, and each knob's name and value as you turn it. Its buttons and pads can be taught. | Built from Novation's published programmer's guide. On by default. |
+| Native Instruments Komplete Kontrol S MK2 and MK3, A-series, M-series | StageRig is the DAW and each program a track: the eight programs around the one in play are named across its screen, with the one in play selected. Its track buttons (and preset arrows) step to the next or previous program, past empty ones, and choosing a track plays that program. Its knobs turn the instrument's knobs, named and valued in the plugin view; in the mixer view each knob's name and value show beneath the program names. The page arrows turn the knob page. On an S MK3 the plugin view also lists the program's plugins, and choosing one there gives it the knobs. Its other buttons can be taught. | Speaks Native Instruments' DAW protocol, as REAPER's ReaKontrol does. On by default. An MK3 has the port itself. For an MK2, an A or an M the port comes from NI's Host Integration, so it works on Windows and macOS with NI's software installed; on Linux these can only be taught. Not yet tried on one of these keyboards: tell us how it goes. |
 | Native Instruments Komplete Kontrol S25/S49/S61/S88 MK1 | Its eight knobs turn the knobs without teaching, and its light guide shows the keys. Its buttons can be taught. | Linux only, and off until ticked in **Keyboards and knobs**. Worked out from the keyboard, not a published guide: a Komplete Kontrol has been seen to drop off USB while this was on and need a full power-down to come back (the keys kept playing). The lights assume the keyboard's own Octave and Transpose buttons are left alone; use StageRig's transpose instead. |
 
 The keys of every one of these are ordinary MIDI and play as any keyboard.
-Komplete Kontrol MK2 and MK3 keyboards, and others, can be taught as above.
-Their screens and lights are not driven yet.
+Other keyboards can be taught as above. The light guides of the Komplete
+Kontrol MK2 and MK3 are not driven yet, and neither are the MK1's small
+displays, for which no description of the protocol is published.
 
 ## Outputs and master effects
 

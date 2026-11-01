@@ -28,12 +28,27 @@ struct SurfaceView
     juce::String pageName;
     int page = 0, pageCount = 0;
     std::array<juce::String, numKnobs> knobNames, knobValues;
+    std::array<float, numKnobs> knobLevels;        // 0..1, or -1 for no parameter
     std::array<juce::uint32, 128> keyColours {};    // per note, 0xRRGGBB; 0 = dark
+
+    /** The eight programs around this one (bankFirst..bankFirst + 7), by
+        name, empty for an empty program; and whether there is a program
+        with something in it before and after this one. */
+    int bankFirst = 0;
+    std::array<juce::String, numKnobs> bankNames;
+    bool programBefore = false, programAfter = false;
+    /** The program's plugins by name, and which of them the knobs turn (-1: none). */
+    juce::StringArray pluginNames;
+    int focusPlugin = -1;
+
+    SurfaceView()                                   { knobLevels.fill (-1.0f); }
 
     bool sameText (const SurfaceView& o) const
     {
         return inputName == o.inputName && program == o.program && programName == o.programName && instrument == o.instrument
-            && pageName == o.pageName && page == o.page && pageCount == o.pageCount && knobNames == o.knobNames && knobValues == o.knobValues;
+            && pageName == o.pageName && page == o.page && pageCount == o.pageCount && knobNames == o.knobNames && knobValues == o.knobValues
+            && knobLevels == o.knobLevels && bankFirst == o.bankFirst && bankNames == o.bankNames && programBefore == o.programBefore
+            && programAfter == o.programAfter && pluginNames == o.pluginNames && focusPlugin == o.focusPlugin;
     }
     bool operator== (const SurfaceView& o) const   { return sameText (o) && keyColours == o.keyColours; }
     bool operator!= (const SurfaceView& o) const   { return ! (*this == o); }
@@ -61,11 +76,13 @@ public:
 
     struct Touch
     {
-        enum Type { knob, knobTouch, button } type = knob;
-        int index = 0;            // the knob
+        /* program: one of the eight around the one in play (SurfaceView::bankFirst + index);
+           instrument: the program's plugins counted in order; action: a SurfaceControls::Action. */
+        enum Type { knob, knobTouch, button, program, instrument, action } type = knob;
+        int index = 0;            // the knob, program, instrument or action
         float amount = 0.0f;      // knob: how far it turned, as a fraction of a parameter's range
         bool down = false;        // knobTouch, button
-        juce::String id;          // button: "kk:b12", "lk:104"
+        juce::String id;          // button: "kk:b12", "lk:104", "ni:16"
     };
     /** What was touched since the last call, in order. */
     virtual void takeTouches (std::vector<Touch>& out) = 0;
@@ -141,6 +158,8 @@ public:
     void setKompleteKontrolEnabled (bool);
     bool isLaunchkeyEnabled() const;
     void setLaunchkeyEnabled (bool);
+    bool isKontrolDawEnabled() const;
+    void setKontrolDawEnabled (bool);
     /** The input a keyboard works with: the one its keys play on, or the first keyboard input. */
     int inputFor (const ControlSurface&) const;
 
@@ -237,6 +256,60 @@ private:
     std::vector<Touch> touches;
     SurfaceView last;
     bool shownOnce = false;
+};
+
+//==============================================================================
+/** Native Instruments' keyboards that speak its DAW protocol -- Komplete
+    Kontrol S MK2 and MK3, A- and M-series -- through their DAW port, as
+    REAPER's ReaKontrol does. StageRig is the DAW, and a program is a track:
+    the eight programs around the one in play are named across the screen,
+    the track buttons step through them and pressing one plays it, and the
+    knobs turn the instrument's knobs, named and valued in the plugin view.
+    The MK3 has its DAW port itself; an MK2's, A's and M's is made by NI's
+    Host Integration on Windows and macOS. Other buttons report as
+    "ni:<command>", to be taught. */
+class KompleteKontrolDaw : public ControlSurface, private juce::MidiInputCallback
+{
+public:
+    struct Ports { juce::MidiDeviceInfo in, out; juce::String name, keysName; };
+    static std::vector<Ports> find();
+    /** "Komplete Kontrol S61 MK3" for a port's name, or empty when it is no DAW port of these. */
+    static juce::String modelFor (const juce::String& portName, juce::String& keysName);
+
+    explicit KompleteKontrolDaw (const Ports&);
+    ~KompleteKontrolDaw() override;
+    bool opened() const                             { return input != nullptr && output != nullptr; }
+    const juce::String& getOutputIdentifier() const { return ports.out.identifier; }
+    /** What the keyboard answered the hello with: 4 for an S MK3; 0 before it answers. */
+    int getProtocolVersion() const                  { return version.load(); }
+
+    juce::String getName() const override           { return ports.name; }
+    juce::String getKeysPortName() const override   { return ports.keysName; }
+    bool isConnected() const override;
+    bool hasScreen() const override                 { return true; }
+    void show (const SurfaceView&) override;
+    void takeTouches (std::vector<Touch>& out) override;
+
+    static juce::MidiMessage hello();
+    static juce::MidiMessage goodbye();
+    /** What tells the keyboard the screen is `now`, given it showed `before` (nullptr: nothing yet). */
+    static std::vector<juce::MidiMessage> screenMessages (const SurfaceView& now, const SurfaceView* before, int protocolVersion);
+    /** What a message from the DAW port means. The hello's answer sets `version` and is no touch. */
+    static bool parse (const juce::MidiMessage&, Touch& out, int& version);
+
+private:
+    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
+    void send (const std::vector<juce::MidiMessage>&);
+
+    Ports ports;
+    std::unique_ptr<juce::MidiInput> input;
+    std::unique_ptr<juce::MidiOutput> output;
+    std::atomic<int> version { 0 };
+    int shownForVersion = 0;
+    std::mutex touchMutex;
+    std::vector<Touch> touches;
+    SurfaceView last;
+    bool haveView = false, shownOnce = false;
 };
 
 //==============================================================================

@@ -531,6 +531,12 @@ public:
         found.setJustificationType (Justification::topLeft);
         addAndMakeVisible (launchkeyBtn);
         addAndMakeVisible (kontrolBtn);
+        addAndMakeVisible (kontrolDawBtn);
+        kontrolDawBtn.setButtonText ("Komplete Kontrol S MK2 and MK3, A and M: program names on its screen, its track buttons choose them");
+        kontrolDawBtn.setToggleState (hub.isKontrolDawEnabled(), dontSendNotification);
+        kontrolDawBtn.onClick = [this] { hub.setKontrolDawEnabled (kontrolDawBtn.getToggleState()); };
+        kontrolDawBtn.setTooltip ("Through the keyboard's DAW port, in Native Instruments' DAW protocol. An MK3 has the port itself; an MK2's, an A's "
+                                  "and an M's is made by NI's Host Integration, on Windows and macOS.");
         launchkeyBtn.setButtonText ("Novation Launchkey MK4: its screen shows the program and the knobs, its knobs turn them");
         kontrolBtn.setButtonText ("Komplete Kontrol S MK1: its light guide shows the instruments' keys (experimental, Linux)");
         launchkeyBtn.setToggleState (hub.isLaunchkeyEnabled(), dontSendNotification);
@@ -551,7 +557,7 @@ public:
 
         addAndMakeVisible (explain);
         explain.setColour (Label::textColourId, textDim);
-        explain.setText ("A Launchkey's and a Komplete Kontrol's own knobs work by themselves. For any other keyboard, teach its knobs here: "
+        explain.setText ("The knobs of the keyboards above work by themselves. For any other keyboard, teach its knobs here: "
                          "press Learn, then turn the knob. Buttons are taught the same way, on any keyboard.", dontSendNotification);
 
         for (int i = 0; i < numRows; ++i)
@@ -590,6 +596,7 @@ public:
         found.setBounds (r.removeFromTop (60));
         launchkeyBtn.setBounds (r.removeFromTop (24));
         kontrolBtn.setBounds (r.removeFromTop (24));
+        kontrolDawBtn.setBounds (r.removeFromTop (24));
         r.removeFromTop (14);
         inputCap.setBounds (r.removeFromTop (16));
         inputBox.setBounds (r.removeFromTop (26).removeFromLeft (260));
@@ -697,7 +704,7 @@ private:
     std::function<void()> changed;
     int learning = -1;
     Label foundCap, found, inputCap, explain;
-    ToggleButton launchkeyBtn, kontrolBtn, relativeBtn;
+    ToggleButton launchkeyBtn, kontrolBtn, kontrolDawBtn, relativeBtn;
     ComboBox inputBox;
     std::array<Row, (size_t) numRows> rows;
 };
@@ -715,7 +722,7 @@ Component* showControlMapEditor (Engine& engine, SurfaceHub& hub, ControlMapLibr
 
 Component* showControllers (Engine& engine, SurfaceHub& hub, int selectedInput, std::function<void()> changed)
 {
-    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Keyboards and knobs", 860, 470);
+    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Keyboards and knobs", 860, 494);
 }
 
 } // namespace perf

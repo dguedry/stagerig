@@ -1,6 +1,7 @@
 #include "Surfaces.h"
 #include "PanelParams.h"
 #include "RemotePlugin.h"
+#include <cstring>
 
 #if JUCE_LINUX || JUCE_BSD
  #include <cerrno>
@@ -168,10 +169,25 @@ SurfaceView SurfaceHub::viewFor (int input)
     v.inputName = in.name;
     v.program = program;
     v.programName = prog.name.isNotEmpty() ? prog.name : "Program " + String (program).paddedLeft ('0', 3);
+    v.bankFirst = program - program % SurfaceView::numKnobs;
+    for (int i = 0; i < SurfaceView::numKnobs; ++i)
+    {
+        const int p = v.bankFirst + i;
+        if (p < InputDef::numPrograms && ! in.programs[(size_t) p].isEmpty())
+            v.bankNames[(size_t) i] = in.programs[(size_t) p].name.isNotEmpty() ? in.programs[(size_t) p].name : "Program " + String (p).paddedLeft ('0', 3);
+    }
+    for (int p = 0; p < InputDef::numPrograms; ++p)
+        if (p != program && ! in.programs[(size_t) p].isEmpty()) (p < program ? v.programBefore : v.programAfter) = true;
 
     const int slot = getFocusSlot (input);
     v.page = getFocusPage (input);
     const auto& layout = currentLayout (input);
+    for (int s = 0; s < (int) prog.slots.size(); ++s)
+        if (prog.slots[(size_t) s].isPlugin())
+        {
+            if (s == slot) v.focusPlugin = v.pluginNames.size();
+            v.pluginNames.add (prog.slots[(size_t) s].plugin.name);
+        }
     if (slot >= 0)
     {
         const auto& sd = prog.slots[(size_t) slot];
@@ -193,6 +209,7 @@ SurfaceView SurfaceHub::viewFor (int input)
             {
                 const float value = plugin->getCachedParameterValue (knob.paramIndex);
                 const auto& p = plugin->getParameters()[(size_t) knob.paramIndex];
+                v.knobLevels[(size_t) k] = jlimit (0.0f, 1.0f, value);
                 v.knobValues[(size_t) k] = p.boolean || p.numSteps == 2 ? String (value >= 0.5f ? "On" : "Off")
                                                                         : String (roundToInt (value * 100.0f)) + "%";
             }
@@ -322,6 +339,7 @@ String SurfaceHub::describeControl (const String& id)
     if (id.startsWith ("kk:b"))  return "Komplete Kontrol button " + id.substring (4);
     if (id.startsWith ("lk:n"))  return "Launchkey pad " + id.substring (4);
     if (id.startsWith ("lk:"))   return "Launchkey button " + id.substring (3);
+    if (id.startsWith ("ni:"))   return "Komplete Kontrol button " + id.substring (3) + " (DAW)";
     return id;
 }
 
@@ -390,6 +408,29 @@ void SurfaceHub::handleTouch (ControlSurface& surface, const ControlSurface::Tou
                 if (buttons[(size_t) a] == t.id) { doAction (input, a); break; }
             break;
         }
+        case ControlSurface::Touch::action:
+            doAction (input, t.index);
+            break;
+        case ControlSurface::Touch::program:
+        {
+            const auto& in = engine.getSetup().inputs[(size_t) input];
+            const int p = in.currentProgram - in.currentProgram % SurfaceView::numKnobs + t.index;
+            if (t.index >= 0 && t.index < SurfaceView::numKnobs && p < InputDef::numPrograms && ! in.programs[(size_t) p].isEmpty() && p != in.currentProgram)
+                engine.selectProgram (input, p);
+            break;
+        }
+        case ControlSurface::Touch::instrument:
+        {
+            const auto& in = engine.getSetup().inputs[(size_t) input];
+            const auto& prog = in.programs[(size_t) in.currentProgram];
+            for (int s = 0, n = 0; s < (int) prog.slots.size(); ++s)
+                if (prog.slots[(size_t) s].isPlugin() && n++ == t.index)
+                {
+                    if (s != getFocusSlot (input)) { focus[input].slot = s; focus[input].page = 0; layouts.erase (input); }
+                    break;
+                }
+            break;
+        }
         case ControlSurface::Touch::knobTouch:
             break;
     }
@@ -411,6 +452,8 @@ bool SurfaceHub::isKompleteKontrolEnabled() const   { return settings.getBoolVal
 bool SurfaceHub::isLaunchkeyEnabled() const         { return settings.getBoolValue ("surfaceLaunchkey", true); }
 void SurfaceHub::setKompleteKontrolEnabled (bool on) { settings.setValue ("surfaceKompleteKontrol", on); lastSearch = 0; }
 void SurfaceHub::setLaunchkeyEnabled (bool on)       { settings.setValue ("surfaceLaunchkey", on); lastSearch = 0; }
+bool SurfaceHub::isKontrolDawEnabled() const         { return settings.getBoolValue ("surfaceKontrolDaw", true); }
+void SurfaceHub::setKontrolDawEnabled (bool on)      { settings.setValue ("surfaceKontrolDaw", on); lastSearch = 0; }
 
 std::vector<SurfaceHub::SurfaceInfo> SurfaceHub::getSurfaces() const
 {
@@ -433,7 +476,9 @@ void SurfaceHub::lookForKeyboards()
     {
         auto* kk = dynamic_cast<KompleteKontrolMk1*> (it->get());
         auto* lk = dynamic_cast<LaunchkeyMk4*> (it->get());
-        const bool off = (kk != nullptr && ! isKompleteKontrolEnabled()) || (lk != nullptr && ! isLaunchkeyEnabled());
+        auto* ni = dynamic_cast<KompleteKontrolDaw*> (it->get());
+        const bool off = (kk != nullptr && ! isKompleteKontrolEnabled()) || (lk != nullptr && ! isLaunchkeyEnabled())
+                      || (ni != nullptr && ! isKontrolDawEnabled());
         if (off || ! (*it)->isConnected())
         {
             shown.erase (it->get());
@@ -466,6 +511,18 @@ void SurfaceHub::lookForKeyboards()
             auto lk = std::make_unique<LaunchkeyMk4> (p);
             if (lk->opened()) { surfaces.push_back (std::move (lk)); changed = true; }
             else problems.add ("Could not open the Launchkey's DAW port, " + p.out.name + ".");
+        }
+
+    if (isKontrolDawEnabled())
+        for (const auto& p : KompleteKontrolDaw::find())
+        {
+            bool have = false;
+            for (const auto& s : surfaces)
+                if (auto* ni = dynamic_cast<KompleteKontrolDaw*> (s.get()); ni != nullptr && ni->getOutputIdentifier() == p.out.identifier) have = true;
+            if (have) continue;
+            auto ni = std::make_unique<KompleteKontrolDaw> (p);
+            if (ni->opened()) { surfaces.push_back (std::move (ni)); changed = true; }
+            else problems.add ("Could not open the " + p.name + "'s DAW port, " + p.out.name + ".");
         }
 
     if (changed && onSurfacesChanged) onSurfacesChanged();
@@ -695,6 +752,301 @@ void LaunchkeyMk4::show (const SurfaceView& v)
     if (shownOnce && v.sameText (last)) return;
     send (screenMessages (v, shownOnce ? &last : nullptr, ports.mini));
     last = v;
+    shownOnce = true;
+}
+
+//==============================================================================
+// Komplete Kontrol DAW protocol (S MK2/MK3, A, M)
+//==============================================================================
+namespace
+{
+    // From ReaKontrol (github.com/jcsteh/reaKontrol, src/niMidi.cpp).
+    constexpr uint8 niHeader[] = { 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00 };    // after F0
+    enum : uint8
+    {
+        niHello = 0x01, niGoodbye = 0x02,
+        niNavTracks = 0x30, niNavBanks = 0x31, niNavPreset = 0x36,
+        niTrackAvail = 0x40, niSelTrackParamsChanged = 0x41, niTrackSelected = 0x42, niTrackMuted = 0x43,
+        niTrackSoloed = 0x44, niTrackArmed = 0x45, niTrackVolumeText = 0x46, niTrackPanText = 0x47, niTrackName = 0x48,
+        niKnobVolume0 = 0x50, niKnobPan0 = 0x58, niChangeVolume = 0x64, niChangePan = 0x65,
+        niKnobParam0 = 0x70, niSelectPlugin = 0x70, niPluginNames = 0x71, niParamName = 0x72, niParamValueText = 0x73,
+        niParamPage = 0x74, niParamSection = 0x75, niPresetName = 0x76, niParamHighRes = 0x7f
+    };
+
+    /** The keyboard's screen takes plain ASCII. */
+    void addText (std::vector<uint8>& d, const String& text)
+    {
+        for (auto c : text.toStdString())
+        {
+            const auto u = (uint8) c;
+            d.push_back (u >= 0x20 && u <= 0x7e ? u : (uint8) '?');
+        }
+    }
+
+    MidiMessage niSysEx (uint8 command, int value, int index, const std::vector<uint8>& info = {})
+    {
+        std::vector<uint8> d (std::begin (niHeader), std::end (niHeader));
+        d.push_back (command);
+        d.push_back ((uint8) jlimit (0, 127, value));
+        d.push_back ((uint8) jlimit (0, 127, index));
+        d.insert (d.end(), info.begin(), info.end());
+        return MidiMessage::createSysExMessage (d.data(), (int) d.size());
+    }
+
+    MidiMessage niSysEx (uint8 command, int value, int index, const String& text)
+    {
+        std::vector<uint8> info;
+        addText (info, text);
+        return niSysEx (command, value, index, info);
+    }
+
+    MidiMessage niCc (uint8 command, int value)    { return MidiMessage::controllerEvent (16, command, jlimit (0, 127, value)); }
+    int signedValue (int v)                         { return v <= 63 ? v : v - 128; }
+    int lights (bool before, bool after)            { return (before ? 1 : 0) | (after ? 2 : 0); }
+}
+
+String KompleteKontrolDaw::modelFor (const String& portName, String& keysName)
+{
+    // The ports NI's Host Integration makes for an MK2, an A and an M.
+    if (portName.containsIgnoreCase ("Komplete Kontrol DAW"))   { keysName = "KOMPLETE KONTROL";   return "Komplete Kontrol (DAW)"; }
+    if (portName.containsIgnoreCase ("Komplete Kontrol A DAW")) { keysName = "KOMPLETE KONTROL A"; return "Komplete Kontrol A"; }
+    if (portName.containsIgnoreCase ("Komplete Kontrol M DAW")) { keysName = "KOMPLETE KONTROL M"; return "Komplete Kontrol M"; }
+    // An MK3's own second port: "KONTROL S61 MK3 - DAW", "MIDIIN2 (KONTROL S61 MK3)", "KONTROL S61 MK3 MIDI 2".
+    if (portName.containsIgnoreCase ("KONTROL") && portName.containsIgnoreCase ("MK3") && isDawPort (portName))
+    {
+        for (auto* size : { "S49", "S61", "S88" })
+            if (portName.containsIgnoreCase (size))
+            {
+                keysName = String (size) + " MK3";
+                return "Komplete Kontrol " + keysName;
+            }
+        keysName = "MK3";
+        return "Komplete Kontrol MK3";
+    }
+    return {};
+}
+
+std::vector<KompleteKontrolDaw::Ports> KompleteKontrolDaw::find()
+{
+    std::vector<Ports> found;
+    const auto outs = MidiOutput::getAvailableDevices();
+    for (const auto& in : MidiInput::getAvailableDevices())
+    {
+        String keys;
+        const auto name = modelFor (in.name, keys);
+        if (name.isEmpty()) continue;
+        /* Its output: the one named as it is (Windows says MIDIOUT2 where the
+           input says MIDIIN2), or else the first of the same keyboard not taken. */
+        const MidiDeviceInfo* pick = nullptr;
+        for (int pass = 0; pass < 2 && pick == nullptr; ++pass)
+            for (const auto& out : outs)
+            {
+                String outKeys;
+                bool taken = false;
+                for (const auto& f : found) taken = taken || f.out.identifier == out.identifier;
+                if (taken || modelFor (out.name, outKeys) != name) continue;
+                if (pass == 1 || out.name == in.name || out.name.replace ("MIDIOUT", "MIDIIN") == in.name) { pick = &out; break; }
+            }
+        if (pick != nullptr) found.push_back ({ in, *pick, name, keys });
+    }
+    return found;
+}
+
+KompleteKontrolDaw::KompleteKontrolDaw (const Ports& p) : ports (p)
+{
+    output = MidiOutput::openDevice (ports.out.identifier);
+    input = MidiInput::openDevice (ports.in.identifier, this);
+    if (! opened()) { input.reset(); output.reset(); return; }
+    input->start();
+    send ({ hello() });
+}
+
+KompleteKontrolDaw::~KompleteKontrolDaw()
+{
+    if (input != nullptr) input->stop();
+    if (output != nullptr) send ({ goodbye() });
+}
+
+bool KompleteKontrolDaw::isConnected() const
+{
+    if (! opened()) return false;
+    for (const auto& d : MidiOutput::getAvailableDevices())
+        if (d.identifier == ports.out.identifier) return true;
+    return false;
+}
+
+void KompleteKontrolDaw::send (const std::vector<MidiMessage>& messages)
+{
+    if (output == nullptr) return;
+    for (const auto& m : messages) output->sendMessageNow (m);
+}
+
+MidiMessage KompleteKontrolDaw::hello()     { return niCc (niHello, 4); }
+MidiMessage KompleteKontrolDaw::goodbye()   { return niCc (niGoodbye, 0); }
+
+std::vector<MidiMessage> KompleteKontrolDaw::screenMessages (const SurfaceView& now, const SurfaceView* before, int protocolVersion)
+{
+    std::vector<MidiMessage> m;
+    const bool fresh = before == nullptr;
+    const int selected = now.program - now.bankFirst;
+
+    // The programs, as tracks: their names across the screen, the one in play selected.
+    const bool programs = fresh || now.program != before->program || now.bankFirst != before->bankFirst || now.bankNames != before->bankNames
+                       || now.programName != before->programName;
+    if (programs)
+    {
+        for (int i = 0; i < SurfaceView::numKnobs; ++i)
+        {
+            const auto& name = now.bankNames[(size_t) i];
+            if (name.isEmpty() && i != selected) { m.push_back (niSysEx (niTrackAvail, 0, i)); continue; }
+            m.push_back (niSysEx (niTrackAvail, 1, i));
+            m.push_back (niSysEx (niTrackName, 0, i, name.isNotEmpty() ? name : now.programName));
+            m.push_back (niSysEx (niTrackSelected, i == selected ? 1 : 0, i));
+            m.push_back (niSysEx (niTrackMuted, 0, i));
+            m.push_back (niSysEx (niTrackSoloed, 0, i));
+            m.push_back (niSysEx (niTrackArmed, 0, i));
+        }
+        m.push_back (niSysEx (niTrackSelected, 1, selected));
+        m.push_back (niSysEx (niSelTrackParamsChanged, 0, 0));
+        m.push_back (niCc (niNavTracks, lights (now.programBefore, now.programAfter)));
+        m.push_back (niCc (niNavPreset, lights (now.programBefore, now.programAfter)));
+        m.push_back (niSysEx (niPresetName, 0, 0, now.programName));
+    }
+
+    // The instrument and its page of knobs.
+    const bool knobs = programs || now.instrument != before->instrument || now.page != before->page || now.pageCount != before->pageCount
+                    || now.pageName != before->pageName || now.knobNames != before->knobNames || now.pluginNames != before->pluginNames
+                    || now.focusPlugin != before->focusPlugin;
+    if (knobs)
+    {
+        if (protocolVersion >= 4 && ! now.pluginNames.isEmpty())
+        {
+            std::vector<uint8> names;
+            for (int i = 0; i < now.pluginNames.size(); ++i)
+            {
+                if (i > 0) names.push_back (0);
+                addText (names, now.pluginNames[i]);
+            }
+            m.push_back (niSysEx (niPluginNames, 0, 0, names));
+            if (now.focusPlugin >= 0) m.push_back (niSysEx (niSelectPlugin, 0, now.focusPlugin));
+        }
+        m.push_back (niSysEx (niParamPage, jmax (1, now.pageCount), now.page));
+        for (int k = 0; k < SurfaceView::numKnobs; ++k)
+        {
+            m.push_back (niSysEx (niParamName, 0, k, now.knobNames[(size_t) k]));
+            m.push_back (niSysEx (niParamSection, 0, k, now.knobNames[(size_t) k].isNotEmpty() ? now.pageName : String()));
+        }
+        m.push_back (niCc (niNavBanks, lights (now.page > 0, now.page + 1 < now.pageCount)));
+    }
+
+    // The knobs' values: in the plugin view, and beneath each track in the mixer, where the knobs turn them too.
+    for (int k = 0; k < SurfaceView::numKnobs; ++k)
+    {
+        const auto i = (size_t) k;
+        if (! knobs && now.knobValues[i] == before->knobValues[i] && now.knobLevels[i] == before->knobLevels[i]) continue;
+        const int level = now.knobLevels[i] >= 0.0f ? roundToInt (now.knobLevels[i] * 127.0f) : 0;
+        m.push_back (niCc ((uint8) (niKnobParam0 + k), level));
+        m.push_back (niSysEx (niParamValueText, 0, k, now.knobValues[i]));
+        m.push_back (niCc ((uint8) (niKnobVolume0 + k), level));
+        m.push_back (niSysEx (niTrackVolumeText, 0, k, now.knobNames[i].isNotEmpty() ? now.knobNames[i] + " " + now.knobValues[i] : String()));
+    }
+    return m;
+}
+
+bool KompleteKontrolDaw::parse (const MidiMessage& m, Touch& t, int& protocolVersion)
+{
+    if (m.isSysEx())
+    {
+        const auto* d = m.getSysExData();
+        const int n = m.getSysExDataSize();
+        constexpr int h = (int) sizeof (niHeader);
+        if (n < h + 3 || std::memcmp (d, niHeader, (size_t) h) != 0) return false;
+        const uint8 command = d[h], value = d[h + 1], index = d[h + 2];
+        if (command == niParamHighRes && n >= h + 5 && index < SurfaceView::numKnobs)
+        {
+            // A turn as fourteen bits, signed (an S MK3): a fraction of the range, as ReaKontrol takes it.
+            int change = d[h + 3] | (d[h + 4] << 7);
+            if (change > 8192) change -= 16384;
+            juce::ignoreUnused (value);
+            t = { Touch::knob, index, (float) change / 8191.0f, false, {} };
+            return true;
+        }
+        if (command == niSelectPlugin)
+        {
+            t = { Touch::instrument, index, 0.0f, true, {} };
+            return true;
+        }
+        return false;
+    }
+    if (! m.isController() || m.getChannel() != 16) return false;
+    const int command = m.getControllerNumber(), value = m.getControllerValue();
+    switch (command)
+    {
+        case niHello:       protocolVersion = value; return false;
+        case niGoodbye:     return false;
+        case niNavTracks:
+        case niNavPreset:   t = { Touch::action, signedValue (value) > 0 ? SurfaceControls::programUp : SurfaceControls::programDown, 0.0f, true, {} }; return true;
+        case niNavBanks:    t = { Touch::action, signedValue (value) > 0 ? SurfaceControls::pageUp : SurfaceControls::pageDown, 0.0f, true, {} }; return true;
+        case niTrackSelected:
+            if (value >= SurfaceView::numKnobs) return false;
+            t = { Touch::program, value, 0.0f, true, {} };
+            return true;
+        case niChangeVolume:
+        case niChangePan:   return false;
+        default: break;
+    }
+    const bool volume = command >= niKnobVolume0 && command < niKnobVolume0 + SurfaceView::numKnobs;
+    const bool param = command >= niKnobParam0 && command < niKnobParam0 + SurfaceView::numKnobs;
+    if (volume || param)
+    {
+        t = { Touch::knob, command - (volume ? niKnobVolume0 : niKnobParam0), (float) signedValue (value) / (127.0f * 8.0f), false, {} };
+        return true;
+    }
+    if (command >= niKnobPan0 && command < niKnobPan0 + SurfaceView::numKnobs) return false;
+    if (value == 0) return false;      // a button's release, where it sends one
+    t = { Touch::button, 0, 0.0f, true, "ni:" + String (command) };
+    return true;
+}
+
+void KompleteKontrolDaw::handleIncomingMidiMessage (MidiInput*, const MidiMessage& m)
+{
+    Touch t;
+    int v = version.load();
+    const bool touched = parse (m, t, v);
+    version = v;
+    if (! touched) return;
+    const std::lock_guard<std::mutex> l (touchMutex);
+    if (touches.size() < 1024) touches.push_back (t);
+}
+
+void KompleteKontrolDaw::takeTouches (std::vector<Touch>& out)
+{
+    {
+        const std::lock_guard<std::mutex> l (touchMutex);
+        out.insert (out.end(), touches.begin(), touches.end());
+        touches.clear();
+    }
+    // The keyboard answered the hello (or said it again, after Host Integration restarted): all of it, afresh.
+    const int v = version.load();
+    if (v != shownForVersion && haveView)
+    {
+        shownForVersion = v;
+        send (screenMessages (last, nullptr, v));
+        shownOnce = true;
+    }
+}
+
+void KompleteKontrolDaw::show (const SurfaceView& v)
+{
+    const bool had = haveView;
+    const auto before = last;
+    last = v;
+    haveView = true;
+    const int ver = version.load();
+    if (ver == 0) return;      // not yet answered: all of it goes when it does
+    if (shownOnce && had && v.sameText (before)) return;
+    send (screenMessages (v, shownOnce && had ? &before : nullptr, ver));
+    shownForVersion = ver;
     shownOnce = true;
 }
 

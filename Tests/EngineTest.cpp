@@ -1,5 +1,6 @@
 // Headless integration test: loads a real LV2 instrument, routes MIDI through the
 // engine and checks audio, program changes, mappings and learn.
+#include <cstring>
 #include "Engine.h"
 #include "TempoDetect.h"
 #include "Stretch.h"
@@ -3796,6 +3797,28 @@ int main()
         hub.tick();
         CHECK (fake->views.size() == before);      // nothing changed: nothing sent
 
+        // The programs around this one, for a keyboard that names them; choosing one, and an instrument, from it.
+        {
+            const auto v = fake->views.back();
+            CHECK (v.bankFirst == 96 && v.bankNames[4] == "Lead" && v.bankNames[7] == "Program 103" && v.bankNames[5].isEmpty());
+            CHECK (v.programAfter && v.pluginNames.size() == 1 && v.focusPlugin == 0 && v.knobLevels[0] >= 0.0f);
+            ControlSurface::Touch t;
+            t.type = ControlSurface::Touch::program; t.index = 7;
+            fake->queued.push_back (t);
+            hub.tick(); settle();
+            CHECK (engine.getSetup().inputs[0].currentProgram == 103);
+            t.type = ControlSurface::Touch::instrument; t.index = 1;
+            fake->queued.push_back (t);
+            hub.tick();
+            CHECK (hub.getFocusSlot (0) == 1 && fake->views.back().focusPlugin == 1 && fake->views.back().pluginNames.size() == 2);
+            t.type = ControlSurface::Touch::action; t.index = SurfaceControls::programDown;
+            fake->queued.push_back (t);
+            hub.tick(); settle();
+            CHECK (engine.getSetup().inputs[0].currentProgram == 100);     // past the empty 101 and 102
+            for (int i = 0; i < 100 && ! engine.isPluginAlive (0, 100, 0); ++i) pump (20);
+            hub.tick();
+        }
+
         // A knob of the keyboard moves the parameter it shows.
         const auto layout = hub.layoutFor (0, 100, 0);
         CHECK (! layout.pages.empty() && layout.map == nullptr);
@@ -3932,6 +3955,63 @@ int main()
             CHECK (LaunchkeyMk4::parse (MidiMessage::controllerEvent (16, 0x66, 127), t) && t.type == ControlSurface::Touch::button && t.id == "lk:102" && t.down);
             CHECK (! LaunchkeyMk4::parse (MidiMessage::controllerEvent (16, 0x06, 50), t));        // a fader
             CHECK (LaunchkeyMk4::parse (MidiMessage::noteOn (1, 40, (uint8) 100), t) && t.id == "lk:n40" && t.down);
+        }
+
+        // Native Instruments' DAW protocol (S MK2/MK3, A, M), as ReaKontrol speaks it.
+        {
+            String keys;
+            CHECK (KompleteKontrolDaw::modelFor ("Komplete Kontrol DAW - 1", keys) == "Komplete Kontrol (DAW)" && keys == "KOMPLETE KONTROL");
+            CHECK (KompleteKontrolDaw::modelFor ("Native Instruments - KONTROL S61 MK3 - DAW", keys) == "Komplete Kontrol S61 MK3" && keys == "S61 MK3");
+            CHECK (KompleteKontrolDaw::modelFor ("MIDIIN2 (KONTROL S49 MK3)", keys) == "Komplete Kontrol S49 MK3");
+            CHECK (KompleteKontrolDaw::modelFor ("KONTROL S88 MK3", keys).isEmpty());          // its keys, not its DAW port
+            CHECK (KompleteKontrolDaw::modelFor ("KOMPLETE KONTROL S88", keys).isEmpty());     // an MK1
+            const auto h = KompleteKontrolDaw::hello();
+            CHECK (h.getRawDataSize() == 3 && h.getRawData()[0] == 0xbf && h.getRawData()[1] == 0x01 && h.getRawData()[2] == 4);
+            CHECK (KompleteKontrolDaw::goodbye().getRawData()[1] == 0x02);
+
+            SurfaceView v; v.program = 9; v.programName = "Strings"; v.bankFirst = 8;
+            v.bankNames[0] = "Piano"; v.bankNames[1] = "Strings"; v.programBefore = true;
+            v.pluginNames.add ("Synth"); v.focusPlugin = 0; v.pageName = "Sound"; v.pageCount = 2;
+            v.knobNames[0] = "Cutoff"; v.knobValues[0] = "50%"; v.knobLevels[0] = 0.5f;
+            auto find = [] (const std::vector<MidiMessage>& ms, int command, int index) -> const MidiMessage*
+            {
+                for (const auto& m : ms)
+                    if (m.isSysEx() && m.getSysExDataSize() >= 12 && m.getSysExData()[9] == command && m.getSysExData()[11] == index) return &m;
+                return nullptr;
+            };
+            auto text = [] (const MidiMessage* m) { return m == nullptr ? String ("<none>") : String::fromUTF8 ((const char*) m->getSysExData() + 12, m->getSysExDataSize() - 12); };
+            const auto first = KompleteKontrolDaw::screenMessages (v, nullptr, 2);
+            const uint8 header[] = { 0xf0, 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00 };
+            CHECK (find (first, 0x48, 1) != nullptr && std::memcmp (find (first, 0x48, 1)->getRawData(), header, sizeof (header)) == 0);
+            CHECK (text (find (first, 0x48, 0)) == "Piano" && text (find (first, 0x48, 1)) == "Strings");       // the programs, by name
+            CHECK (find (first, 0x40, 2) != nullptr && find (first, 0x40, 2)->getSysExData()[10] == 0);          // an empty one: no track
+            const auto* sel = find (first, 0x42, 1);
+            CHECK (sel != nullptr && sel->getSysExData()[10] == 1);
+            CHECK (text (find (first, 0x76, 0)) == "Strings" && text (find (first, 0x72, 0)) == "Cutoff" && text (find (first, 0x73, 0)) == "50%");
+            CHECK (find (first, 0x71, 0) == nullptr);                                                            // plugin names: an S MK3's only
+            bool navTracks = false;
+            for (const auto& m : first)
+                if (m.isController() && m.getChannel() == 16 && m.getControllerNumber() == 0x30) navTracks = m.getControllerValue() == 1;   // previous only
+            CHECK (navTracks);
+            CHECK (find (KompleteKontrolDaw::screenMessages (v, nullptr, 4), 0x71, 0) != nullptr);
+            auto turned = v; turned.knobValues[0] = "51%"; turned.knobLevels[0] = 0.51f;
+            const auto next = KompleteKontrolDaw::screenMessages (turned, &v, 2);
+            CHECK (next.size() == 4 && find (next, 0x48, 0) == nullptr && text (find (next, 0x73, 0)) == "51%");   // the value, nothing more
+
+            ControlSurface::Touch t;
+            int version = 0;
+            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x01, 4), t, version) && version == 4);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x30, 127), t, version) && t.type == ControlSurface::Touch::action && t.index == SurfaceControls::programDown);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x30, 1), t, version) && t.index == SurfaceControls::programUp);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x31, 1), t, version) && t.index == SurfaceControls::pageUp);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x42, 3), t, version) && t.type == ControlSurface::Touch::program && t.index == 3);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x52, 125), t, version) && t.type == ControlSurface::Touch::knob && t.index == 2
+                   && std::abs (t.amount + 3.0f / 1016.0f) < 1e-6f);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x10, 1), t, version) && t.type == ControlSurface::Touch::button && t.id == "ni:16");
+            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (1, 0x30, 1), t, version));         // another channel: not the protocol
+            const uint8 hi[] = { 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00, 0x7f, 0x02, 0x05, 0x7f, 0x7f };   // knob 6, one step back
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::createSysExMessage (hi, (int) sizeof (hi)), t, version) && t.type == ControlSurface::Touch::knob
+                   && t.index == 5 && t.amount < 0.0f && t.amount > -0.001f);
         }
 
         // The Komplete Kontrol MK1's light guide and controls, as the keyboard showed them.
