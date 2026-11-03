@@ -2927,6 +2927,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         for (const auto& sf : surfaceHub->getSurfaces()) names.add (sf.name);
         if (! names.isEmpty()) showStatus ("Keyboard found: " + names.joinIntoString (", ") + ". Its knobs follow the program in play.");
     };
+    surfaceHub->onSurfaceProblem = [this] (const String& problem) { showStatus (problem); };
 
     // Open the requested setup, else restore the last one.
     File last (settings.getValue ("lastSetup"));

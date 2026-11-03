@@ -2,6 +2,7 @@
 #include "PanelParams.h"
 #include "RemotePlugin.h"
 #include <cstring>
+#include <chrono>
 
 #if JUCE_LINUX || JUCE_BSD
  #include <cerrno>
@@ -177,7 +178,12 @@ SurfaceView SurfaceHub::viewFor (int input)
             v.bankNames[(size_t) i] = in.programs[(size_t) p].name.isNotEmpty() ? in.programs[(size_t) p].name : "Program " + String (p).paddedLeft ('0', 3);
     }
     for (int p = 0; p < InputDef::numPrograms; ++p)
-        if (p != program && ! in.programs[(size_t) p].isEmpty()) (p < program ? v.programBefore : v.programAfter) = true;
+        if (p != program && ! in.programs[(size_t) p].isEmpty())
+        {
+            (p < program ? v.programBefore : v.programAfter) = true;
+            if (p < v.bankFirst) v.bankBefore = true;
+            if (p >= v.bankFirst + SurfaceView::numKnobs) v.bankAfter = true;
+        }
 
     const int slot = getFocusSlot (input);
     v.page = getFocusPage (input);
@@ -303,6 +309,23 @@ void SurfaceHub::doAction (int input, int action)
             const int step = action == SurfaceControls::programUp ? 1 : -1;
             for (int p = in.currentProgram + step; p >= 0 && p < InputDef::numPrograms; p += step)
                 if (! in.programs[(size_t) p].isEmpty()) { engine.selectProgram (input, p); break; }
+            break;
+        }
+        case SurfaceControls::programBankUp:
+        case SurfaceControls::programBankDown:
+        {
+            // The next eight with something in them, at the same place among them if that one has something, else the first that does.
+            constexpr int n = SurfaceView::numKnobs;
+            const int step = action == SurfaceControls::programBankUp ? n : -n;
+            const int place = in.currentProgram % n;
+            for (int first = in.currentProgram - place + step; first >= 0 && first < InputDef::numPrograms; first += step)
+            {
+                int p = -1;
+                if (first + place < InputDef::numPrograms && ! in.programs[(size_t) (first + place)].isEmpty()) p = first + place;
+                for (int i = 0; i < n && p < 0 && first + i < InputDef::numPrograms; ++i)
+                    if (! in.programs[(size_t) (first + i)].isEmpty()) p = first + i;
+                if (p >= 0) { engine.selectProgram (input, p); break; }
+            }
             break;
         }
         case SurfaceControls::pageUp:
@@ -455,6 +478,14 @@ void SurfaceHub::setLaunchkeyEnabled (bool on)       { settings.setValue ("surfa
 bool SurfaceHub::isKontrolDawEnabled() const         { return settings.getBoolValue ("surfaceKontrolDaw", true); }
 void SurfaceHub::setKontrolDawEnabled (bool on)      { settings.setValue ("surfaceKontrolDaw", on); lastSearch = 0; }
 
+StringArray SurfaceHub::getProblems() const
+{
+    auto all = problems;
+    for (const auto& s : surfaces)
+        if (const auto p = s->getProblem(); p.isNotEmpty()) all.add (p);
+    return all;
+}
+
 std::vector<SurfaceHub::SurfaceInfo> SurfaceHub::getSurfaces() const
 {
     std::vector<SurfaceInfo> list;
@@ -482,6 +513,7 @@ void SurfaceHub::lookForKeyboards()
         if (off || ! (*it)->isConnected())
         {
             shown.erase (it->get());
+            reportedProblems.erase (it->get());
             it = surfaces.erase (it);
             changed = true;
         }
@@ -563,6 +595,17 @@ void SurfaceHub::tick()
         {
             s->show (view);
             shown[s.get()] = view;
+        }
+    }
+
+    for (auto& s : surfaces)
+    {
+        const auto p = s->getProblem();
+        auto& said = reportedProblems[s.get()];
+        if (p != said)
+        {
+            said = p;
+            if (p.isNotEmpty() && onSurfaceProblem) onSurfaceProblem (p);
         }
     }
 
@@ -764,7 +807,7 @@ namespace
     constexpr uint8 niHeader[] = { 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00 };    // after F0
     enum : uint8
     {
-        niHello = 0x01, niGoodbye = 0x02,
+        niHello = 0x01, niGoodbye = 0x02, niBankMapping = 0x05,
         niNavTracks = 0x30, niNavBanks = 0x31, niNavPreset = 0x36,
         niTrackAvail = 0x40, niSelTrackParamsChanged = 0x41, niTrackSelected = 0x42, niTrackMuted = 0x43,
         niTrackSoloed = 0x44, niTrackArmed = 0x45, niTrackVolumeText = 0x46, niTrackPanText = 0x47, niTrackName = 0x48,
@@ -884,8 +927,9 @@ void KompleteKontrolDaw::send (const std::vector<MidiMessage>& messages)
 MidiMessage KompleteKontrolDaw::hello()     { return niCc (niHello, 4); }
 MidiMessage KompleteKontrolDaw::goodbye()   { return niCc (niGoodbye, 0); }
 
-std::vector<MidiMessage> KompleteKontrolDaw::screenMessages (const SurfaceView& now, const SurfaceView* before, int protocolVersion)
+std::vector<MidiMessage> KompleteKontrolDaw::screenMessages (const SurfaceView& now, const SurfaceView* before, const Heard& heard)
 {
+    const int protocolVersion = heard.version;
     std::vector<MidiMessage> m;
     const bool fresh = before == nullptr;
     const int selected = now.program - now.bankFirst;
@@ -936,8 +980,11 @@ std::vector<MidiMessage> KompleteKontrolDaw::screenMessages (const SurfaceView& 
             m.push_back (niSysEx (niParamName, 0, k, now.knobNames[(size_t) k]));
             m.push_back (niSysEx (niParamSection, 0, k, now.knobNames[(size_t) k].isNotEmpty() ? now.pageName : String()));
         }
-        m.push_back (niCc (niNavBanks, lights (now.page > 0, now.page + 1 < now.pageCount)));
     }
+    // The bank arrows: lit for where they go, whichever they are for.
+    if (programs || knobs)
+        m.push_back (niCc (niNavBanks, heard.banksForPrograms ? lights (now.bankBefore, now.bankAfter)
+                                                              : lights (now.page > 0, now.page + 1 < now.pageCount)));
 
     // The knobs' values: in the plugin view, and beneath each track in the mixer, where the knobs turn them too.
     for (int k = 0; k < SurfaceView::numKnobs; ++k)
@@ -953,7 +1000,7 @@ std::vector<MidiMessage> KompleteKontrolDaw::screenMessages (const SurfaceView& 
     return m;
 }
 
-bool KompleteKontrolDaw::parse (const MidiMessage& m, Touch& t, int& protocolVersion)
+bool KompleteKontrolDaw::parse (const MidiMessage& m, Touch& t, Heard& heard)
 {
     if (m.isSysEx())
     {
@@ -982,11 +1029,19 @@ bool KompleteKontrolDaw::parse (const MidiMessage& m, Touch& t, int& protocolVer
     const int command = m.getControllerNumber(), value = m.getControllerValue();
     switch (command)
     {
-        case niHello:       protocolVersion = value; return false;
+        case niHello:       heard.version = value; return false;
+        case niBankMapping: heard.banksForPrograms = value == 0; return false;     // 0: the mixer view
         case niGoodbye:     return false;
         case niNavTracks:
         case niNavPreset:   t = { Touch::action, signedValue (value) > 0 ? SurfaceControls::programUp : SurfaceControls::programDown, 0.0f, true, {} }; return true;
-        case niNavBanks:    t = { Touch::action, signedValue (value) > 0 ? SurfaceControls::pageUp : SurfaceControls::pageDown, 0.0f, true, {} }; return true;
+        case niNavBanks:
+        {
+            const bool up = signedValue (value) > 0;
+            const int action = heard.banksForPrograms ? (up ? SurfaceControls::programBankUp : SurfaceControls::programBankDown)
+                                                      : (up ? SurfaceControls::pageUp : SurfaceControls::pageDown);
+            t = { Touch::action, action, 0.0f, true, {} };
+            return true;
+        }
         case niTrackSelected:
             if (value >= SurfaceView::numKnobs) return false;
             t = { Touch::program, value, 0.0f, true, {} };
@@ -1011,9 +1066,10 @@ bool KompleteKontrolDaw::parse (const MidiMessage& m, Touch& t, int& protocolVer
 void KompleteKontrolDaw::handleIncomingMidiMessage (MidiInput*, const MidiMessage& m)
 {
     Touch t;
-    int v = version.load();
-    const bool touched = parse (m, t, v);
-    version = v;
+    Heard h { version.load(), banksForPrograms.load() };
+    const bool touched = parse (m, t, h);
+    version = h.version;
+    banksForPrograms = h.banksForPrograms;
     if (! touched) return;
     const std::lock_guard<std::mutex> l (touchMutex);
     if (touches.size() < 1024) touches.push_back (t);
@@ -1026,12 +1082,12 @@ void KompleteKontrolDaw::takeTouches (std::vector<Touch>& out)
         out.insert (out.end(), touches.begin(), touches.end());
         touches.clear();
     }
-    // The keyboard answered the hello (or said it again, after Host Integration restarted): all of it, afresh.
-    const int v = version.load();
-    if (v != shownForVersion && haveView)
+    // The keyboard answered the hello (or said it again, after Host Integration restarted), or changed view: all of it, afresh.
+    const Heard h { version.load(), banksForPrograms.load() };
+    if ((h.version != shownFor.version || h.banksForPrograms != shownFor.banksForPrograms) && haveView && h.version != 0)
     {
-        shownForVersion = v;
-        send (screenMessages (last, nullptr, v));
+        shownFor = h;
+        send (screenMessages (last, nullptr, h));
         shownOnce = true;
     }
 }
@@ -1042,11 +1098,11 @@ void KompleteKontrolDaw::show (const SurfaceView& v)
     const auto before = last;
     last = v;
     haveView = true;
-    const int ver = version.load();
-    if (ver == 0) return;      // not yet answered: all of it goes when it does
+    const Heard h { version.load(), banksForPrograms.load() };
+    if (h.version == 0) return;      // not yet answered: all of it goes when it does
     if (shownOnce && had && v.sameText (before)) return;
-    send (screenMessages (v, shownOnce && had ? &before : nullptr, ver));
-    shownForVersion = ver;
+    send (screenMessages (v, shownOnce && had ? &before : nullptr, h));
+    shownFor = h;
     shownOnce = true;
 }
 
@@ -1135,29 +1191,67 @@ KompleteKontrolMk1::KompleteKontrolMk1 (const Device& d, String& error) : device
     if (fd < 0)
     {
         error = "Could not open the Komplete Kontrol's lights and knobs (" + device.path + "): " + String (std::strerror (errno))
-              + (errno == EACCES ? ". This user is not allowed to use the device." : ".");
-        return;
-    }
-    const uint8 takeOver[] = { 0xa0, 0x00, 0x00 };      // the computer drives the light guide from now on
-    if (::write (fd, takeOver, sizeof (takeOver)) < 0)
-    {
-        error = "The Komplete Kontrol did not answer (" + String (std::strerror (errno)) + ").";
-        ::close (fd);
-        fd = -1;
+              + (errno == EACCES ? ". This user is not allowed to use the device: StageRig's packages install a rule for it, "
+                                   "and a keyboard plugged in before StageRig was installed needs plugging in again." : ".");
         return;
     }
     reader = std::thread ([this] { read(); });
+    writer = std::thread ([this] { write(); });
 }
 
 KompleteKontrolMk1::~KompleteKontrolMk1()
 {
-    stopping = true;
-    if (reader.joinable()) reader.join();
-    if (fd >= 0)
     {
-        const auto dark = lightReport ({}, *device.model);
-        [[maybe_unused]] auto n = ::write (fd, dark.data(), dark.size());
-        ::close (fd);
+        const std::lock_guard<std::mutex> l (writeMutex);
+        stopping = true;
+        // The keyboard's lights go dark as StageRig lets go, if it is still answering.
+        nextLights = lightReport ({}, *device.model);
+        lightsWaiting = litOnce;
+    }
+    writeWake.notify_all();
+    if (writer.joinable()) writer.join();
+    if (reader.joinable()) reader.join();
+    if (fd >= 0) ::close (fd);
+}
+
+String KompleteKontrolMk1::getProblem() const
+{
+    if (! stalled.load()) return {};
+    return getName() + " stopped answering (its lights and knobs; the keys still play). Unplug it for ten seconds and plug it "
+           "back in -- into a port on the computer itself, not a hub, if it keeps happening.";
+}
+
+void KompleteKontrolMk1::write()
+{
+    // Hand the light guide to the computer, then send each newest report.
+    const uint8 takeOver[] = { 0xa0, 0x00, 0x00 };
+    auto put = [this] (const uint8* data, size_t size)
+    {
+        for (int attempt = 0; attempt < 3; ++attempt)
+        {
+            if (::write (fd, data, size) >= 0) return true;
+            if (errno == ENODEV) { gone = true; return false; }
+            if (errno != EAGAIN && errno != EINTR) break;    // ETIMEDOUT, EPROTO, EPIPE: the keyboard did not take it
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        }
+        stalled = true;
+        return false;
+    };
+    if (! put (takeOver, sizeof (takeOver))) return;
+
+    for (;;)
+    {
+        std::vector<uint8> report;
+        bool last = false;
+        {
+            std::unique_lock<std::mutex> l (writeMutex);
+            writeWake.wait (l, [this] { return lightsWaiting || stopping.load(); });
+            if (! lightsWaiting) return;
+            report.swap (nextLights);
+            lightsWaiting = false;
+            last = stopping.load();
+        }
+        if (! put (report.data(), report.size()) || last) return;
     }
 }
 
@@ -1197,9 +1291,13 @@ void KompleteKontrolMk1::read()
 
 void KompleteKontrolMk1::show (const SurfaceView& v)
 {
-    if (fd < 0 || (litOnce && v.keyColours == lit)) return;
-    const auto report = lightReport (v.keyColours, *device.model);
-    if (::write (fd, report.data(), report.size()) < 0 && errno != EAGAIN) gone = true;
+    if (fd < 0 || stalled.load() || (litOnce && v.keyColours == lit)) return;
+    {
+        const std::lock_guard<std::mutex> l (writeMutex);
+        nextLights = lightReport (v.keyColours, *device.model);
+        lightsWaiting = true;
+    }
+    writeWake.notify_one();
     lit = v.keyColours;
     litOnce = true;
 }
@@ -1207,6 +1305,8 @@ void KompleteKontrolMk1::show (const SurfaceView& v)
 std::vector<KompleteKontrolMk1::Device> KompleteKontrolMk1::find()                     { return {}; }
 KompleteKontrolMk1::KompleteKontrolMk1 (const Device& d, String& error) : device (d)  { error = "The Komplete Kontrol's lights and knobs work on Linux only."; }
 KompleteKontrolMk1::~KompleteKontrolMk1()                                             {}
+String KompleteKontrolMk1::getProblem() const                                         { return {}; }
+void KompleteKontrolMk1::write()                                                      {}
 void KompleteKontrolMk1::read()                                                       {}
 void KompleteKontrolMk1::show (const SurfaceView&)                                    {}
 #endif

@@ -67,9 +67,68 @@ namespace
     };
 }
 
+/** STAGERIG_TEST_KONTROL_SECONDS=n: drives a real Komplete Kontrol MK1 for n
+    seconds instead of the tests -- the lights in moving colours, every knob,
+    touch and button printed as it comes, and unplugging and plugging in again
+    followed -- to try the driver on the keyboard itself. */
+static int probeKompleteKontrol (int seconds)
+{
+    std::unique_ptr<KompleteKontrolMk1> kk;
+    String said;
+    const auto end = Time::getMillisecondCounter() + (uint32) seconds * 1000;
+    uint32 nextLook = 0, nextColours = 0;
+    int phase = 0;
+    std::vector<ControlSurface::Touch> touches;
+    while (Time::getMillisecondCounter() < end)
+    {
+        const auto now = Time::getMillisecondCounter();
+        if (kk != nullptr && ! kk->isConnected()) { std::printf ("kontrol: gone\n"); kk.reset(); }
+        if (kk == nullptr && now >= nextLook)
+        {
+            nextLook = now + 1000;
+            for (const auto& d : KompleteKontrolMk1::find())
+            {
+                String error;
+                auto k = std::make_unique<KompleteKontrolMk1> (d, error);
+                if (k->opened()) { std::printf ("kontrol: opened %s at %s\n", k->getName().toRawUTF8(), d.path.toRawUTF8()); kk = std::move (k); nextColours = 0; break; }
+                if (error != said) std::printf ("kontrol: %s\n", error.toRawUTF8());
+                said = error;
+            }
+        }
+        if (kk != nullptr)
+        {
+            if (now >= nextColours)
+            {
+                // Every C red, the rest in a colour that changes every three seconds.
+                static const uint32 others[] = { 0x0000ff, 0x00ff00, 0xffff00, 0xff00ff };
+                SurfaceView v;
+                for (int n = 0; n < 128; ++n) v.keyColours[(size_t) n] = n % 12 == 0 ? 0xff0000 : others[phase % 4];
+                kk->show (v);
+                ++phase;
+                nextColours = now + 3000;
+            }
+            touches.clear();
+            kk->takeTouches (touches);
+            for (const auto& t : touches)
+            {
+                if (t.type == ControlSurface::Touch::knob)            std::printf ("kontrol: knob %d turned %+.3f\n", t.index + 1, t.amount);
+                else if (t.type == ControlSurface::Touch::knobTouch)  std::printf ("kontrol: knob %d %s\n", t.index + 1, t.down ? "touched" : "let go");
+                else                                                  std::printf ("kontrol: %s %s\n", SurfaceHub::describeControl (t.id).toRawUTF8(), t.down ? "pressed" : "released");
+            }
+            if (const auto p = kk->getProblem(); p != said && p.isNotEmpty()) { std::printf ("kontrol: PROBLEM %s\n", p.toRawUTF8()); said = p; }
+        }
+        std::fflush (stdout);
+        Thread::sleep (20);
+    }
+    std::printf ("kontrol: done\n");
+    return 0;
+}
+
 int main()
 {
     ScopedJuceInitialiser_GUI init;
+    if (const char* k = std::getenv ("STAGERIG_TEST_KONTROL_SECONDS"); k != nullptr && *k != 0)
+        return probeKompleteKontrol (String (k).getIntValue());
 
     // Own scratch folder: PluginHost keeps its crash list ("dead man's pedal") next to
     // the settings file, and a plain temp file would share /tmp with every other run,
@@ -3770,7 +3829,7 @@ int main()
         const int keepProgram = engine.getSetup().inputs[0].currentProgram;
         const int ch = jmax (1, engine.getSetup().inputs[0].channel);
         String err;
-        for (int p : { 100, 101, 102, 103 }) engine.clearProgram (0, p);
+        for (int p : { 100, 101, 102, 103, 110 }) engine.clearProgram (0, p);
         engine.selectProgram (0, 103); settle();
         CHECK (engine.addSlot (0, 103, synth, err)); settle();
         CHECK (engine.addSlot (0, 103, synth, err)); settle();
@@ -3815,6 +3874,27 @@ int main()
             fake->queued.push_back (t);
             hub.tick(); settle();
             CHECK (engine.getSetup().inputs[0].currentProgram == 100);     // past the empty 101 and 102
+
+            // Eight at a time: 108 is empty, so the first of 104..111 with something in it; and back among 96..103.
+            engine.selectProgram (0, 110); settle();
+            CHECK (engine.addSlot (0, 110, synth, err)); settle();
+            engine.selectProgram (0, 100); settle();
+            hub.tick();
+            CHECK (fake->views.back().bankAfter);
+            t.type = ControlSurface::Touch::action; t.index = SurfaceControls::programBankUp;
+            fake->queued.push_back (t);
+            hub.tick(); settle();
+            CHECK (engine.getSetup().inputs[0].currentProgram == 110);
+            hub.tick();
+            CHECK (fake->views.back().bankFirst == 104 && fake->views.back().bankBefore && ! fake->views.back().bankAfter);
+            hub.doAction (0, SurfaceControls::programBankUp); settle();
+            CHECK (engine.getSetup().inputs[0].currentProgram == 110);     // nothing further on
+            hub.doAction (0, SurfaceControls::programBankDown); settle();
+            {
+                const auto& in = engine.getSetup().inputs[0];
+                CHECK (in.currentProgram >= 96 && in.currentProgram < 104 && ! in.programs[(size_t) in.currentProgram].isEmpty());
+            }
+            engine.selectProgram (0, 100); settle();
             for (int i = 0; i < 100 && ! engine.isPluginAlive (0, 100, 0); ++i) pump (20);
             hub.tick();
         }
@@ -3970,7 +4050,7 @@ int main()
             CHECK (KompleteKontrolDaw::goodbye().getRawData()[1] == 0x02);
 
             SurfaceView v; v.program = 9; v.programName = "Strings"; v.bankFirst = 8;
-            v.bankNames[0] = "Piano"; v.bankNames[1] = "Strings"; v.programBefore = true;
+            v.bankNames[0] = "Piano"; v.bankNames[1] = "Strings"; v.programBefore = true; v.bankAfter = true;
             v.pluginNames.add ("Synth"); v.focusPlugin = 0; v.pageName = "Sound"; v.pageCount = 2;
             v.knobNames[0] = "Cutoff"; v.knobValues[0] = "50%"; v.knobLevels[0] = 0.5f;
             auto find = [] (const std::vector<MidiMessage>& ms, int command, int index) -> const MidiMessage*
@@ -3980,7 +4060,7 @@ int main()
                 return nullptr;
             };
             auto text = [] (const MidiMessage* m) { return m == nullptr ? String ("<none>") : String::fromUTF8 ((const char*) m->getSysExData() + 12, m->getSysExDataSize() - 12); };
-            const auto first = KompleteKontrolDaw::screenMessages (v, nullptr, 2);
+            const auto first = KompleteKontrolDaw::screenMessages (v, nullptr, { 2, true });
             const uint8 header[] = { 0xf0, 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00 };
             CHECK (find (first, 0x48, 1) != nullptr && std::memcmp (find (first, 0x48, 1)->getRawData(), header, sizeof (header)) == 0);
             CHECK (text (find (first, 0x48, 0)) == "Piano" && text (find (first, 0x48, 1)) == "Strings");       // the programs, by name
@@ -3993,24 +4073,40 @@ int main()
             for (const auto& m : first)
                 if (m.isController() && m.getChannel() == 16 && m.getControllerNumber() == 0x30) navTracks = m.getControllerValue() == 1;   // previous only
             CHECK (navTracks);
-            CHECK (find (KompleteKontrolDaw::screenMessages (v, nullptr, 4), 0x71, 0) != nullptr);
+            // The bank arrows: lit for the next eight programs in the mixer view, for the next knob page in the plugin view.
+            auto banksLit = [] (const std::vector<MidiMessage>& ms)
+            {
+                int lit = -1;
+                for (const auto& m : ms)
+                    if (m.isController() && m.getChannel() == 16 && m.getControllerNumber() == 0x31) lit = m.getControllerValue();
+                return lit;
+            };
+            CHECK (banksLit (first) == 2);
+            v.bankAfter = false;
+            CHECK (banksLit (KompleteKontrolDaw::screenMessages (v, nullptr, { 2, true })) == 0);
+            CHECK (banksLit (KompleteKontrolDaw::screenMessages (v, nullptr, { 2, false })) == 2);     // page 1 of 2
+            CHECK (find (KompleteKontrolDaw::screenMessages (v, nullptr, { 4, true }), 0x71, 0) != nullptr);
             auto turned = v; turned.knobValues[0] = "51%"; turned.knobLevels[0] = 0.51f;
-            const auto next = KompleteKontrolDaw::screenMessages (turned, &v, 2);
+            const auto next = KompleteKontrolDaw::screenMessages (turned, &v, { 2, true });
             CHECK (next.size() == 4 && find (next, 0x48, 0) == nullptr && text (find (next, 0x73, 0)) == "51%");   // the value, nothing more
 
             ControlSurface::Touch t;
-            int version = 0;
-            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x01, 4), t, version) && version == 4);
-            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x30, 127), t, version) && t.type == ControlSurface::Touch::action && t.index == SurfaceControls::programDown);
-            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x30, 1), t, version) && t.index == SurfaceControls::programUp);
-            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x31, 1), t, version) && t.index == SurfaceControls::pageUp);
-            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x42, 3), t, version) && t.type == ControlSurface::Touch::program && t.index == 3);
-            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x52, 125), t, version) && t.type == ControlSurface::Touch::knob && t.index == 2
+            KompleteKontrolDaw::Heard heard;
+            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x01, 4), t, heard) && heard.version == 4);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x30, 127), t, heard) && t.type == ControlSurface::Touch::action && t.index == SurfaceControls::programDown);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x30, 1), t, heard) && t.index == SurfaceControls::programUp);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x31, 1), t, heard) && t.index == SurfaceControls::programBankUp);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x31, 127), t, heard) && t.index == SurfaceControls::programBankDown);
+            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x05, 1), t, heard) && ! heard.banksForPrograms);   // the plugin view
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x31, 1), t, heard) && t.index == SurfaceControls::pageUp);
+            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x05, 0), t, heard) && heard.banksForPrograms);     // the mixer view
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x42, 3), t, heard) && t.type == ControlSurface::Touch::program && t.index == 3);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x52, 125), t, heard) && t.type == ControlSurface::Touch::knob && t.index == 2
                    && std::abs (t.amount + 3.0f / 1016.0f) < 1e-6f);
-            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x10, 1), t, version) && t.type == ControlSurface::Touch::button && t.id == "ni:16");
-            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (1, 0x30, 1), t, version));         // another channel: not the protocol
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x10, 1), t, heard) && t.type == ControlSurface::Touch::button && t.id == "ni:16");
+            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (1, 0x30, 1), t, heard));         // another channel: not the protocol
             const uint8 hi[] = { 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00, 0x7f, 0x02, 0x05, 0x7f, 0x7f };   // knob 6, one step back
-            CHECK (KompleteKontrolDaw::parse (MidiMessage::createSysExMessage (hi, (int) sizeof (hi)), t, version) && t.type == ControlSurface::Touch::knob
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::createSysExMessage (hi, (int) sizeof (hi)), t, heard) && t.type == ControlSurface::Touch::knob
                    && t.index == 5 && t.amount < 0.0f && t.amount > -0.001f);
         }
 
@@ -4042,7 +4138,7 @@ int main()
 
         engine.setInputControls (0, {});
         engine.selectProgram (0, keepProgram); settle();
-        for (int p : { 100, 101, 102, 103 }) engine.clearProgram (0, p);
+        for (int p : { 100, 101, 102, 103, 110 }) engine.clearProgram (0, p);
         settle();
     }
 

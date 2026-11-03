@@ -591,13 +591,16 @@ its names. In a program of several instruments, the knobs start on the one
 that has a setup, else the first; **Next instrument** moves them on.
 
 **Teaching a keyboard.** **Options ▸ Keyboards and knobs...** chooses an
-input and lists its eight knobs and five buttons (**Next program**,
+input and lists its eight knobs and seven buttons (**Next program**,
 **Previous program**, **Next knob page**, **Previous knob page**, **Next
-instrument**). Press **Learn** and turn the knob, or press the button. Tick
+instrument**, **Next 8 programs**, **Previous 8 programs**). Press **Learn** and turn the knob, or press the button. Tick
 **The knobs are endless** for knobs that turn without stopping and send
 steps (around 64) rather than a position. What you teach is kept with the
 input, in the setup file. A taught knob or button no longer reaches the
 instruments as a controller. **Next program** passes over empty programs.
+**Next 8 programs** goes to the next eight (8–15 after 0–7) that have
+anything in them, to the same place among them if that one has something,
+else to the first that does: for a long set list.
 
 **Controller setups.** The **Knobs** button on an instrument opens its
 setup:
@@ -637,8 +640,8 @@ are also driven directly, and are found when plugged in, also mid-show:
 | Keyboard | What it does | Notes |
 |---|---|---|
 | Novation Launchkey MK4 (and Mini MK4) | Its encoders turn the knobs without teaching. Its screen shows the input, program and page, and each knob's name and value as you turn it. Its buttons and pads can be taught. | Built from Novation's published programmer's guide. On by default. |
-| Native Instruments Komplete Kontrol S MK2 and MK3, A-series, M-series | StageRig is the DAW and each program a track: the eight programs around the one in play are named across its screen, with the one in play selected. Its track buttons (and preset arrows) step to the next or previous program, past empty ones, and choosing a track plays that program. Its knobs turn the instrument's knobs, named and valued in the plugin view; in the mixer view each knob's name and value show beneath the program names. The page arrows turn the knob page. On an S MK3 the plugin view also lists the program's plugins, and choosing one there gives it the knobs. Its other buttons can be taught. | Speaks Native Instruments' DAW protocol, as REAPER's ReaKontrol does. On by default. An MK3 has the port itself. For an MK2, an A or an M the port comes from NI's Host Integration, so it works on Windows and macOS with NI's software installed; on Linux these can only be taught. Not yet tried on one of these keyboards: tell us how it goes. |
-| Native Instruments Komplete Kontrol S25/S49/S61/S88 MK1 | Its eight knobs turn the knobs without teaching, and its light guide shows the keys. Its buttons can be taught. | Linux only, and off until ticked in **Keyboards and knobs**. Worked out from the keyboard, not a published guide: a Komplete Kontrol has been seen to drop off USB while this was on and need a full power-down to come back (the keys kept playing). The lights assume the keyboard's own Octave and Transpose buttons are left alone; use StageRig's transpose instead. |
+| Native Instruments Komplete Kontrol S MK2 and MK3, A-series, M-series | StageRig is the DAW and each program a track: the eight programs the one in play is among (0–7, 8–15 and so on) are named across its screen, with the one in play selected. Its track buttons (and preset arrows) step to the next or previous program, past empty ones, and choosing a track plays that program. In the mixer view its bank arrows go to the next or previous eight programs; in the plugin view they turn the knob page. Its knobs turn the instrument's knobs, named and valued in the plugin view; in the mixer view each knob's name and value show beneath the program names. On an S MK3 the plugin view also lists the program's plugins, and choosing one there gives it the knobs. Its other buttons can be taught. | Speaks Native Instruments' DAW protocol, as REAPER's ReaKontrol does. On by default. An MK3 has the port itself. For an MK2, an A or an M the port comes from NI's Host Integration, so it works on Windows and macOS with NI's software installed; on Linux these can only be taught. Not yet tried on one of these keyboards: tell us how it goes. |
+| Native Instruments Komplete Kontrol S25/S49/S61/S88 MK1 | Its eight knobs turn the knobs without teaching, and its light guide shows the keys. Its buttons can be taught. | Linux only, and off until ticked in **Keyboards and knobs**. Worked out from the keyboard, not a published guide. Tried on an S88: the lights, all eight knobs (turned and touched) and the buttons, and unplugging and plugging it back in, which StageRig picks up by itself. Its small displays go blank while StageRig drives it. Plug it into a port on the computer itself: through a hub (an internal one counts) it has been seen to fail to start, and a full power-down at its switch brings it back. If it stops answering, StageRig says so and the keys still play. StageRig's package lets you reach it; built from source, install `Resources/70-stagerig-komplete-kontrol.rules` in `/etc/udev/rules.d` and plug it in again. The lights assume the keyboard's own Octave and Transpose buttons are left alone; use StageRig's transpose instead. |
 
 The keys of every one of these are ordinary MIDI and play as any keyboard.
 Other keyboards can be taught as above. The light guides of the Komplete

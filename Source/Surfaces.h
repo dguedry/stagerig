@@ -4,6 +4,7 @@
 #include "Engine.h"
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
@@ -31,12 +32,13 @@ struct SurfaceView
     std::array<float, numKnobs> knobLevels;        // 0..1, or -1 for no parameter
     std::array<juce::uint32, 128> keyColours {};    // per note, 0xRRGGBB; 0 = dark
 
-    /** The eight programs around this one (bankFirst..bankFirst + 7), by
-        name, empty for an empty program; and whether there is a program
-        with something in it before and after this one. */
+    /** The eight programs this one is among (bankFirst..bankFirst + 7), by
+        name, empty for an empty program; whether there is a program with
+        something in it before and after this one; and before and after
+        these eight. */
     int bankFirst = 0;
     std::array<juce::String, numKnobs> bankNames;
-    bool programBefore = false, programAfter = false;
+    bool programBefore = false, programAfter = false, bankBefore = false, bankAfter = false;
     /** The program's plugins by name, and which of them the knobs turn (-1: none). */
     juce::StringArray pluginNames;
     int focusPlugin = -1;
@@ -48,7 +50,7 @@ struct SurfaceView
         return inputName == o.inputName && program == o.program && programName == o.programName && instrument == o.instrument
             && pageName == o.pageName && page == o.page && pageCount == o.pageCount && knobNames == o.knobNames && knobValues == o.knobValues
             && knobLevels == o.knobLevels && bankFirst == o.bankFirst && bankNames == o.bankNames && programBefore == o.programBefore
-            && programAfter == o.programAfter && pluginNames == o.pluginNames && focusPlugin == o.focusPlugin;
+            && programAfter == o.programAfter && bankBefore == o.bankBefore && bankAfter == o.bankAfter && pluginNames == o.pluginNames && focusPlugin == o.focusPlugin;
     }
     bool operator== (const SurfaceView& o) const   { return sameText (o) && keyColours == o.keyColours; }
     bool operator!= (const SurfaceView& o) const   { return ! (*this == o); }
@@ -73,6 +75,8 @@ public:
     virtual bool hasLights() const                 { return false; }
 
     virtual void show (const SurfaceView&) = 0;
+    /** Something wrong with it, in words, while it is plugged in ("stopped answering"); empty when all is well. */
+    virtual juce::String getProblem() const        { return {}; }
 
     struct Touch
     {
@@ -153,7 +157,7 @@ public:
     struct SurfaceInfo { juce::String name; int input = -1; bool screen = false, lights = false; };
     std::vector<SurfaceInfo> getSurfaces() const;
     /** Problems finding keyboards, in words (a device that could not be opened). */
-    juce::StringArray getProblems() const           { return problems; }
+    juce::StringArray getProblems() const;
     bool isKompleteKontrolEnabled() const;
     void setKompleteKontrolEnabled (bool);
     bool isLaunchkeyEnabled() const;
@@ -174,6 +178,8 @@ public:
     std::function<void()> onEdited;
     /** A keyboard came or went. */
     std::function<void()> onSurfacesChanged;
+    /** A keyboard that is plugged in went wrong, in words. */
+    std::function<void (const juce::String&)> onSurfaceProblem;
 
 private:
     void timerCallback() override                   { tick(); }
@@ -208,6 +214,7 @@ private:
     std::map<std::pair<int, int>, LastSet> lastSet;
     Learning learning;
     juce::StringArray problems;
+    std::map<ControlSurface*, juce::String> reportedProblems;
     juce::uint32 lastSearch = 0;
     bool editedSinceTick = false;
 };
@@ -282,6 +289,7 @@ public:
     const juce::String& getOutputIdentifier() const { return ports.out.identifier; }
     /** What the keyboard answered the hello with: 4 for an S MK3; 0 before it answers. */
     int getProtocolVersion() const                  { return version.load(); }
+    bool areBanksForPrograms() const                { return banksForPrograms.load(); }
 
     juce::String getName() const override           { return ports.name; }
     juce::String getKeysPortName() const override   { return ports.keysName; }
@@ -292,10 +300,17 @@ public:
 
     static juce::MidiMessage hello();
     static juce::MidiMessage goodbye();
+    /** What the keyboard has told StageRig about itself: which version of the
+        protocol it speaks (4 for an S MK3; 0 before it answers the hello), and
+        what its bank arrows are for, from the view on its screen -- the
+        programs eight at a time in the mixer view, as tracks are in a DAW,
+        and the knob pages in the plugin view. */
+    struct Heard { int version = 0; bool banksForPrograms = true; };
+
     /** What tells the keyboard the screen is `now`, given it showed `before` (nullptr: nothing yet). */
-    static std::vector<juce::MidiMessage> screenMessages (const SurfaceView& now, const SurfaceView* before, int protocolVersion);
-    /** What a message from the DAW port means. The hello's answer sets `version` and is no touch. */
-    static bool parse (const juce::MidiMessage&, Touch& out, int& version);
+    static std::vector<juce::MidiMessage> screenMessages (const SurfaceView& now, const SurfaceView* before, const Heard&);
+    /** What a message from the DAW port means. The hello's answer and the view's change set `heard` and are no touch. */
+    static bool parse (const juce::MidiMessage&, Touch& out, Heard& heard);
 
 private:
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
@@ -305,7 +320,8 @@ private:
     std::unique_ptr<juce::MidiInput> input;
     std::unique_ptr<juce::MidiOutput> output;
     std::atomic<int> version { 0 };
-    int shownForVersion = 0;
+    std::atomic<bool> banksForPrograms { true };
+    Heard shownFor;
     std::mutex touchMutex;
     std::vector<Touch> touches;
     SurfaceView last;
@@ -338,6 +354,7 @@ public:
     bool hasLights() const override                 { return true; }
     void show (const SurfaceView&) override;
     void takeTouches (std::vector<Touch>& out) override;
+    juce::String getProblem() const override;
 
     /** The light guide's report for these key colours. */
     static std::vector<juce::uint8> lightReport (const std::array<juce::uint32, 128>& keyColours, const Model&);
@@ -346,13 +363,26 @@ public:
 
 private:
     void read();
+    void write();
 
     Device device;
     int fd = -1;
     std::atomic<bool> gone { false }, stopping { false };
-    std::thread reader;
+    /** A write failed: the keyboard is plugged in but its control part no
+        longer answers. Nothing more is sent until it is plugged in again. */
+    std::atomic<bool> stalled { false };
+    std::thread reader, writer;
     std::mutex touchMutex;
     std::vector<Touch> touches;
+
+    /* Writing waits for the keyboard (the kernel gives up after five
+       seconds), so it is done on a thread of its own, never the message
+       thread: only the newest light report is kept, and one the keyboard
+       has not taken yet is replaced. */
+    std::mutex writeMutex;
+    std::condition_variable writeWake;
+    std::vector<juce::uint8> nextLights;
+    bool lightsWaiting = false;
     std::array<juce::uint32, 128> lit {};
     bool litOnce = false;
 };

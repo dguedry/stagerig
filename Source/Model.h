@@ -300,10 +300,10 @@ struct SurfaceControls
         the left) rather than where they are: endless encoders. */
     bool knobsRelative = false;
 
-    enum Action { programUp, programDown, pageUp, pageDown, instrumentNext, numActions };
+    enum Action { programUp, programDown, pageUp, pageDown, instrumentNext, programBankUp, programBankDown, numActions };
     static const char* actionName (int a)
     {
-        static const char* const names[] = { "Next program", "Previous program", "Next knob page", "Previous knob page", "Next instrument" };
+        static const char* const names[] = { "Next program", "Previous program", "Next knob page", "Previous knob page", "Next instrument", "Next 8 programs", "Previous 8 programs" };
         return a >= 0 && a < numActions ? names[a] : "";
     }
     std::array<juce::String, numActions> buttons;   // a control id, or empty

@@ -501,7 +501,7 @@ var SurfaceControls::toVar() const
     for (int cc : knobCC) knobs.add (cc);
     o->setProperty ("knobs", var (knobs));
     if (knobsRelative) o->setProperty ("relative", true);
-    static const char* const keys[] = { "programUp", "programDown", "pageUp", "pageDown", "instrumentNext" };
+    static const char* const keys[] = { "programUp", "programDown", "pageUp", "pageDown", "instrumentNext", "programBankUp", "programBankDown" };
     for (int a = 0; a < numActions; ++a)
         if (buttons[(size_t) a].isNotEmpty()) o->setProperty (keys[a], buttons[(size_t) a]);
     return var (o.get());
@@ -515,7 +515,7 @@ SurfaceControls SurfaceControls::fromVar (const var& v)
         for (int k = 0; k < numKnobs && k < knobs->size(); ++k)
             c.knobCC[(size_t) k] = jlimit (0, 127, (int) knobs->getReference (k));
     c.knobsRelative = prop<bool> (v, "relative", false);
-    static const char* const keys[] = { "programUp", "programDown", "pageUp", "pageDown", "instrumentNext" };
+    static const char* const keys[] = { "programUp", "programDown", "pageUp", "pageDown", "instrumentNext", "programBankUp", "programBankDown" };
     for (int a = 0; a < numActions; ++a)
         c.buttons[(size_t) a] = propStr (v, keys[a]);
     return c;

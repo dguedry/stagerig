@@ -1,0 +1,5 @@
+# Lets the person at the computer reach a Native Instruments Komplete Kontrol
+# S-series MK1's lights and knobs (its USB HID interface), which StageRig drives
+# when "Komplete Kontrol S MK1" is ticked in Options > Keyboards and knobs.
+# Its keys are ordinary MIDI and need no rule.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="17cc", ATTRS{idProduct}=="1340|1350|1360|1410", MODE="0660", TAG+="uaccess"

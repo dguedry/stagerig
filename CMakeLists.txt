@@ -251,6 +251,8 @@ install(TARGETS StageRig StageRigPluginHost RUNTIME DESTINATION bin)
 install(FILES Resources/io.github.dguedry.StageRig.desktop DESTINATION share/applications)
 install(FILES Resources/io.github.dguedry.StageRig.metainfo.xml DESTINATION share/metainfo)
 install(FILES docs/StageRig.1 docs/stagerig-plugin-host.1 DESTINATION share/man/man1)
+# Lets the logged-in user reach a Komplete Kontrol MK1's lights and knobs (hidraw).
+install(FILES Resources/70-stagerig-komplete-kontrol.rules DESTINATION lib/udev/rules.d)
 # The built-in phrases for the Phrase effect (StageRig finds them in share/stagerig beside its bin).
 install(DIRECTORY Resources/phrases/ DESTINATION share/stagerig/phrases FILES_MATCHING PATTERN "*.mid")
 install(FILES Resources/stagerig.svg DESTINATION share/icons/hicolor/scalable/apps)
@@ -291,7 +293,8 @@ set(CPACK_RPM_PACKAGE_SUGGESTS "pipewire-jack-audio-connection-kit, calf")
 # the icon and applications dirs belong to the filesystem/hicolor packages
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "/usr/share/applications" "/usr/share/icons" "/usr/share/icons/hicolor"
-    "/usr/share/icons/hicolor/scalable" "/usr/share/icons/hicolor/scalable/apps")
+    "/usr/share/icons/hicolor/scalable" "/usr/share/icons/hicolor/scalable/apps"
+    "/usr/lib/udev" "/usr/lib/udev/rules.d")
 foreach(size 16 24 32 48 64 128 256 512)
     list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
          "/usr/share/icons/hicolor/${size}x${size}" "/usr/share/icons/hicolor/${size}x${size}/apps")

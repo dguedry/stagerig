@@ -43,6 +43,7 @@ BuildRequires:  ladspa-devel
 BuildRequires:  desktop-file-utils
 BuildRequires:  appstream
 BuildRequires:  xorg-x11-server-Xvfb
+BuildRequires:  systemd-rpm-macros
 
 # JUCE 8.0.15 is needed and is not packaged in Fedora; its own dependencies
 # come with it, inside the JUCE modules.
@@ -128,6 +129,7 @@ xvfb-run -a ctest --test-dir %{__cmake_builddir} --output-on-failure
 %{_mandir}/man1/StageRig.1*
 %{_mandir}/man1/stagerig-plugin-host.1*
 %{_datadir}/stagerig/
+%{_udevrulesdir}/70-stagerig-komplete-kontrol.rules
 
 %changelog
 * Sun Oct 18 2026 Donnie Guedry <dguedry@gmail.com> - 0.1.57-1
