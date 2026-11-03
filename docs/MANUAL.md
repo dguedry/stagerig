@@ -317,7 +317,7 @@ transpose, curve and channels decide which notes enter at all. Left to right:
 | **Icon** | The plugin's own icon where it has one, otherwise a coloured badge with its initials. |
 | **Name** | Plugin name and format. Red means it failed to load; hover for the reason. |
 | **Window** | Opens the plugin's own window. Shows **Reload** instead if the plugin crashed and was left off (see *When something fails on stage*); a MIDI device has **Device...** here, the General MIDI player **Sound...**. |
-| **Knobs** | The instrument's controller setup: what a keyboard's knobs, screen and lights do for it (see *Keyboards: knobs, buttons, screens and lights*). Plugins only. |
+| **Keyboard** | What your keyboard's knobs turn on this plugin, and how its keys light: the plugin's controller setup, shared by every program with it (see *Keyboards: knobs, buttons, screens and lights*). Plugins only. |
 | **X** | Removes the instrument, and asks first. |
 | **GAIN** | Level of this instrument, applied after its effects. Double-click for 0 dB. |
 | **PAN** | Stereo position, `centre`, `L 40`, `R 25`. Double-click for centre. |
@@ -583,14 +583,34 @@ program, and two more step through the programs. A keyboard with a screen
 shows the program and what each knob is; one with lights shows which keys
 play what.
 
-**What the knobs turn.** Each instrument has pages of eight knobs. Without a
-controller setup (below), the first page is the instrument's front-panel
-knobs, the ones the Stage view shows, and the next pages are the rest of its
-parameters, eight at a time. With a setup, they are the setup's pages, with
-its names. In a program of several instruments, the knobs start on the one
-that has a setup, else the first; **Next instrument** moves them on.
+**Four kinds of knob, and what each is for:**
 
-**Teaching a keyboard.** **Options ▸ Keyboards and knobs...** chooses an
+| Where | What it says | For |
+|---|---|---|
+| **Options ▸ Your keyboards...** | Which knob and button on your keyboard is which | That keyboard, in every program |
+| An instrument's **Keyboard** button | What those knobs turn on the plugin, in pages | The plugin, in every program that has it |
+| **MIDI mappings** | One knob or pedal to one parameter | This program only |
+| The Stage view's front panel | The knobs on the screen | This instrument, in this program |
+
+**What the knobs turn.** Each instrument has pages of eight knobs. With a
+controller setup (below), they are the setup's pages, with its names.
+Without one, a plugin whose maker laid out its knobs for Native Instruments'
+keyboards ("NKS ready": Super 8, Spitfire's BBC Symphony Orchestra, Audio
+Modeling's SWAM instruments and many more) gets the maker's pages, read
+from its NKS presets wherever the plugin installed them. Anything else gets
+the instrument's front-panel knobs, the ones the Stage view shows, and then
+the rest of its parameters, eight at a time. In a program of several
+instruments, the knobs start on the one that has a setup, else one with
+the maker's pages, else the first; **Next instrument** moves them on.
+
+The maker's pages need no Native Instruments software and no Komplete
+Kontrol keyboard: any keyboard's knobs use them. StageRig looks for them
+when it starts (on Linux, inside the Wine prefixes the Windows plugins run
+in), so a plugin installed later has its pages from the next start. Where a
+knob in the presets cannot be found for certain among the plugin's
+parameters, it is left out rather than guessed.
+
+**Teaching a keyboard.** **Options ▸ Your keyboards...** chooses an
 input and lists its eight knobs and seven buttons (**Next program**,
 **Previous program**, **Next knob page**, **Previous knob page**, **Next
 instrument**, **Next 8 programs**, **Previous 8 programs**). Press **Learn** and turn the knob, or press the button. Tick
@@ -602,12 +622,14 @@ instruments as a controller. **Next program** passes over empty programs.
 anything in them, to the same place among them if that one has something,
 else to the first that does: for a long set list.
 
-**Controller setups.** The **Knobs** button on an instrument opens its
-setup:
+**Controller setups.** The **Keyboard** button on an instrument opens its
+setup. A setup belongs to the plugin, so every program with that plugin can
+use it; which setup an instrument uses is kept with its program.
 
-- **Setup** chooses which one the instrument uses. **None** means the front
-  panel's knobs, then every parameter. **New** makes one from the knobs as
-  they are now, for you to change.
+- **Setup** chooses which one the instrument uses. **None** means the
+  maker's pages, for a plugin that has them, or else the front panel's
+  knobs, then every parameter. **New** makes one from the knobs as they are
+  now (the maker's pages, where there are some), for you to change.
 - **Name** is what it is for: the plugin's name for a setup of the whole
   plugin, or the instrument inside it for a plugin that holds many. A Kontakt
   has one setup per library, such as "Alicia's Keys", and each program
@@ -641,7 +663,7 @@ are also driven directly, and are found when plugged in, also mid-show:
 |---|---|---|
 | Novation Launchkey MK4 (and Mini MK4) | Its encoders turn the knobs without teaching. Its screen shows the input, program and page, and each knob's name and value as you turn it. Its buttons and pads can be taught. | Built from Novation's published programmer's guide. On by default. |
 | Native Instruments Komplete Kontrol S MK2 and MK3, A-series, M-series | StageRig is the DAW and each program a track: the eight programs the one in play is among (0–7, 8–15 and so on) are named across its screen, with the one in play selected. Its track buttons (and preset arrows) step to the next or previous program, past empty ones, and choosing a track plays that program. In the mixer view its bank arrows go to the next or previous eight programs; in the plugin view they turn the knob page. Its knobs turn the instrument's knobs, named and valued in the plugin view; in the mixer view each knob's name and value show beneath the program names. On an S MK3 the plugin view also lists the program's plugins, and choosing one there gives it the knobs. Its other buttons can be taught. | Speaks Native Instruments' DAW protocol, as REAPER's ReaKontrol does. On by default. An MK3 has the port itself. For an MK2, an A or an M the port comes from NI's Host Integration, so it works on Windows and macOS with NI's software installed; on Linux these can only be taught. Not yet tried on one of these keyboards: tell us how it goes. |
-| Native Instruments Komplete Kontrol S25/S49/S61/S88 MK1 | Its eight knobs turn the knobs without teaching, and its light guide shows the keys. Its buttons can be taught. | Linux only, and off until ticked in **Keyboards and knobs**. Worked out from the keyboard, not a published guide. Tried on an S88: the lights, all eight knobs (turned and touched) and the buttons, and unplugging and plugging it back in, which StageRig picks up by itself. Its small displays go blank while StageRig drives it. Plug it into a port on the computer itself: through a hub (an internal one counts) it has been seen to fail to start, and a full power-down at its switch brings it back. If it stops answering, StageRig says so and the keys still play. StageRig's package lets you reach it; built from source, install `Resources/70-stagerig-komplete-kontrol.rules` in `/etc/udev/rules.d` and plug it in again. The lights assume the keyboard's own Octave and Transpose buttons are left alone; use StageRig's transpose instead. |
+| Native Instruments Komplete Kontrol S25/S49/S61/S88 MK1 | Its eight knobs turn the knobs without teaching, and its light guide shows the keys. Its buttons can be taught. | Linux only, and off until ticked in **Your keyboards**. Worked out from the keyboard, not a published guide. Tried on an S88: the lights, all eight knobs (turned and touched) and the buttons, and unplugging and plugging it back in, which StageRig picks up by itself. Its small displays go blank while StageRig drives it. Plug it into a port on the computer itself: through a hub (an internal one counts) it has been seen to fail to start, and a full power-down at its switch brings it back. If it stops answering, StageRig says so and the keys still play. StageRig's package lets you reach it; built from source, install `Resources/70-stagerig-komplete-kontrol.rules` in `/etc/udev/rules.d` and plug it in again. The lights assume the keyboard's own Octave and Transpose buttons are left alone; use StageRig's transpose instead. |
 
 The keys of every one of these are ordinary MIDI and play as any keyboard.
 Other keyboards can be taught as above. The light guides of the Komplete
@@ -1692,7 +1714,7 @@ switching the plugin off; scan again once the install has finished.
 | `~/.config/StageRig/StageRig.settings` | Window, audio device, scan folders, known plugins, tuning options. |
 | `~/.config/StageRig/autosave.stagerig.json` | The rolling autosave. |
 | `~/.config/StageRig/mapping-templates.json` | Your saved per-plugin mapping templates. |
-| `~/.config/StageRig/Controller setups/` | Your controller setups, one `*.stagerig-controls` file each: import and export them from an instrument's **Knobs** button. |
+| `~/.config/StageRig/Controller setups/` | Your controller setups, one `*.stagerig-controls` file each: import and export them from an instrument's **Keyboard** button. |
 | `~/.config/StageRig/icons/` | Cached plugin icons. |
 | `~/.config/StageRig/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |
 | your `*.stagerig.json` | Your setup. Keep it wherever you like. |

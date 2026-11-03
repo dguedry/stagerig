@@ -1430,7 +1430,8 @@ public:
             velCurve.setTooltip ("Reshapes incoming velocities: louder makes soft playing come out stronger (for a stiff keyboard or a quiet library), softer does the opposite. Double-click for linear.");
             addAndMakeVisible (guiBtn);
             addAndMakeVisible (knobsBtn);
-            knobsBtn.setTooltip ("What a keyboard's knobs, screen and lights do for this instrument: its controller setup, made here or imported");
+            knobsBtn.setTooltip ("What your keyboard's knobs turn on this plugin, in pages, and how its keys light: the plugin's controller setup, "
+                                 "shared by every program with it");
             knobsBtn.onClick = [this] { panel.owner.showKnobsFor (index); };
             addAndMakeVisible (removeBtn);
             removeBtn.setTooltip ("Remove this instrument from the program");
@@ -1611,7 +1612,7 @@ public:
             removeBtn.setBounds (top.removeFromRight (28));
             top.removeFromRight (4);
             guiBtn.setBounds (top.removeFromRight (64));
-            if (knobsBtn.isVisible()) { top.removeFromRight (4); knobsBtn.setBounds (top.removeFromRight (52)); }
+            if (knobsBtn.isVisible()) { top.removeFromRight (4); knobsBtn.setBounds (top.removeFromRight (70)); }
             name.setBounds (top);
 
             r.removeFromTop (2);
@@ -1793,7 +1794,7 @@ public:
         Label gainCap, transposeCap, keysCap, chCap, inChCap, panCap, velCap, curveCap;
         ComboBox outCh;
         TextButton inCh { "All channels" };
-        TextButton guiBtn { "Window" }, knobsBtn { "Knobs" }, removeBtn { "X" };
+        TextButton guiBtn { "Window" }, knobsBtn { "Keyboard" }, removeBtn { "X" };
         EffectChainComponent midiChain, chain;
     };
 
@@ -2581,7 +2582,7 @@ private:
 
     Engine& engine;
     MainComponent& owner;
-    Label header { {}, "MIDI MAPPINGS  (a knob or pedal on your keyboard moves a plugin parameter, in this program)" };
+    Label header { {}, "MIDI MAPPINGS  (this program only: one knob or pedal moves one plugin parameter)" };
     TableListBox table;
     ComboBox targetBox;
     ParamPicker paramBox;
@@ -2647,7 +2648,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         PopupMenu m;
         m.addItem (11, "Pre-show check...  (everything that can go wrong, before the first song)");
         m.addSeparator();
-        m.addItem (12, "Keyboards and knobs...  (a keyboard's knobs, buttons, screen and lights)");
+        m.addItem (12, "Your keyboards...  (which knob and button is which, in every program)");
         m.addItem (1, "Preload all programs (instant changes; uses more memory)", true, setup.preloadAllPrograms);
         m.addItem (2, "Let held notes ring through a program change", true, setup.holdAcrossChange);
         m.addItem (6, "Show songs and set lists", true, songsPanel != nullptr && songsPanel->isVisible());
@@ -2919,6 +2920,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     /* Keyboards' knobs, screens and lights. The setups are files beside the
        settings, so they belong to the computer and every setup file uses them. */
     controlMaps = std::make_unique<ControlMapLibrary> (settings.getFile().getParentDirectory().getChildFile ("Controller setups"));
+    controlMaps->startNksSearch (ControlMapLibrary::defaultNksFolders());
     surfaceHub = std::make_unique<SurfaceHub> (engine, *controlMaps, settings);
     surfaceHub->onEdited = [this] { markDirty(); };
     surfaceHub->onSurfacesChanged = [this]

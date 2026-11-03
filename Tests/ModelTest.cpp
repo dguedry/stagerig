@@ -639,6 +639,124 @@ int main()
         dir.deleteRecursively();
     }
 
+    // ---- NKS presets: a maker's knob pages -----------------------------------
+    {
+        // A little MessagePack, enough to write what an .nksf holds.
+        using Bytes = std::vector<juce::uint8>;
+        auto str = [] (const juce::String& t) { Bytes b; const auto u = t.toStdString(); b.push_back ((juce::uint8) (0xa0 | u.size())); b.insert (b.end(), u.begin(), u.end()); return b; };
+        auto num = [] (juce::int64 v) { Bytes b; if (v >= 0 && v < 128) b.push_back ((juce::uint8) v); else { b.push_back (0xce); for (int i = 3; i >= 0; --i) b.push_back ((juce::uint8) (v >> (8 * i))); } return b; };
+        auto map = [] (std::vector<std::pair<juce::String, Bytes>> kv)
+        {
+            Bytes b { (juce::uint8) (0x80 | kv.size()) };
+            for (auto& [k, v] : kv) { const auto u = k.toStdString(); b.push_back ((juce::uint8) (0xa0 | u.size())); b.insert (b.end(), u.begin(), u.end()); b.insert (b.end(), v.begin(), v.end()); }
+            return b;
+        };
+        auto arr = [] (std::vector<Bytes> items) { Bytes b { (juce::uint8) (0x90 | items.size()) }; for (auto& i : items) b.insert (b.end(), i.begin(), i.end()); return b; };
+        auto knob = [&] (const juce::String& section, juce::int64 id, const juce::String& name)
+        {
+            std::vector<std::pair<juce::String, Bytes>> kv { { "id", num (id) }, { "name", str (name) } };
+            if (section.isNotEmpty()) kv.push_back ({ "section", str (section) });
+            return map (kv);
+        };
+        auto riff = [] (std::vector<std::pair<const char*, Bytes>> chunks)
+        {
+            Bytes body { 'N', 'I', 'K', 'S' };
+            for (auto& [id, data] : chunks)
+            {
+                Bytes c { 1, 0, 0, 0 };
+                c.insert (c.end(), data.begin(), data.end());
+                body.insert (body.end(), id, id + 4);
+                for (int i = 0; i < 4; ++i) body.push_back ((juce::uint8) (c.size() >> (8 * i)));
+                body.insert (body.end(), c.begin(), c.end());
+                if (c.size() & 1) body.push_back (0);
+            }
+            Bytes f { 'R', 'I', 'F', 'F' };
+            for (int i = 0; i < 4; ++i) f.push_back ((juce::uint8) (body.size() >> (8 * i)));
+            f.insert (f.end(), body.begin(), body.end());
+            return f;
+        };
+
+        // Super 8's kind: VST2 numbers, short names, the section on the first knob of a run.
+        const auto synthFile = riff ({
+            { "NISI", map ({ { "name", str ("Sling Cave") }, { "vendor", str ("Native Instruments") }, { "bankchain", arr ({ str ("Super 8 R2") }) } }) },
+            { "NICA", map ({ { "ni8", arr ({ arr ({ knob ("Filter", 2, "Cutoff"), knob ({}, 3, "Reso"), knob ("Filter Env", 4, "Attack"), knob ("Amp Env", 5, "Attack"),
+                                                    map ({ { "name", str ("Unassigned") } }) }) }) } }) },
+            { "PLID", map ({ { "VST.magic", num (1313428280) } }) } });
+        NksPreset synth;
+        CHECK (NksPreset::parse (synthFile.data(), synthFile.size(), synth).wasOk());
+        CHECK (synth.name == "Sling Cave" && synth.vendor == "Native Instruments" && synth.product == "Super 8 R2" && ! synth.vst3Ids);
+        CHECK (synth.pages.size() == 1 && synth.pages[0].name == "Filter, Filter Env, Amp Env" && synth.pages[0].knobs.size() == 5);
+        CHECK (synth.pages[0].knobs[1].paramId == "3" && synth.pages[0].knobs[1].label == "Reso" && synth.pages[0].knobs[1].paramName == "Filter");   // the section goes on
+        CHECK (synth.pages[0].knobs[4].isEmpty());                                                                                                   // unassigned
+        CHECK (NksPreset::parse ("RIFF\0\0\0\0WAVE", 12, synth).failed());
+
+        juce::PluginDescription super8; super8.name = "Super 8"; super8.manufacturerName = "Native Instruments GmbH"; super8.pluginFormatName = "VST3";
+        juce::PluginDescription other8 = super8; other8.manufacturerName = "Someone Else";
+        CHECK (synth.matches (super8) == 1 && synth.matches (other8) == 0);
+
+        auto param = [] (int index, juce::String id, juce::String name) { ParamInfo p; p.index = index; p.id = id; p.name = name; return p; };
+        // The VST3 version kept the numbers: the parameter at each is the one meant, whatever its name now.
+        const ParamInfoList kept { param (0, "100", "Global: Volume"), param (1, "101", "PMod: Env Attack"), param (2, "102", "Filter: Cutoff Frequency"),
+                                   param (3, "103", "Filter: Resonance"), param (4, "104", "Filter Env: Attack"), param (5, "105", "Amp Env: Attack") };
+        {
+            const auto m = controlMapFromNks (synth, super8, kept);
+            CHECK (m.pages.size() == 1 && m.pages[0].knobs.size() == 4 && m.pluginName == "Super 8" && m.author == "Native Instruments");
+            CHECK (m.pages[0].knobs[0].paramId == "102" && m.pages[0].knobs[0].label == "Cutoff");
+            CHECK (m.pages[0].knobs[2].paramId == "104" && m.pages[0].knobs[3].paramId == "105");   // each Attack its own
+        }
+        // Renumbered: found by section and name instead, and a bare "Attack" never guessed among several.
+        const ParamInfoList moved { param (0, "7", "Filter Env: Attack"), param (1, "8", "Cutoff"), param (2, "9", "Resonance"),
+                                    param (3, "10", "Amp Env Attack"), param (4, "11", "PMod: Env Attack"), param (5, "12", "Something") };
+        {
+            const auto m = controlMapFromNks (synth, super8, moved);
+            CHECK (m.pages.size() == 1 && m.pages[0].knobs.size() == 4);
+            CHECK (m.pages[0].knobs[0].paramId == "8" && m.pages[0].knobs[1].paramId == "9");         // "Reso" is short for Resonance
+            CHECK (m.pages[0].knobs[2].paramId == "7" && m.pages[0].knobs[3].paramId == "10");
+            NksPreset bare = synth;
+            for (auto& k : bare.pages[0].knobs) k.paramName = {};
+            const auto b = controlMapFromNks (bare, super8, moved);
+            CHECK (b.pages[0].knobs.size() == 2);      // which Attack? neither, rather than a wrong one
+        }
+
+        // SWAM's kind: VST3 ids, and the plugin's own name in the file.
+        const auto vst3File = riff ({
+            { "NISI", map ({ { "name", str ("Jazz") }, { "vendor", str ("Audio Modeling") }, { "bankchain", arr ({ str ("SWAM Violin 3") }) } }) },
+            { "NICA", map ({ { "ni8", arr ({ arr ({ knob ("Expressivity", 352031384, "Expression"), knob ({}, 1044572362, "Vibrato") }) }) } }) },
+            { "PLID", map ({ { "VST3.uid", arr ({ num (1448301651), num (1986802547) }) }, { "pluginName", str ("SWAM Violin 3") }, { "pluginVendor", str ("Audio Modeling") } }) } });
+        NksPreset violin;
+        CHECK (NksPreset::parse (vst3File.data(), vst3File.size(), violin).wasOk() && violin.vst3Ids && violin.pluginName == "SWAM Violin 3");
+        juce::PluginDescription swam; swam.name = "SWAM Violin 3"; swam.manufacturerName = "Audio Modeling"; swam.pluginFormatName = "VST3";
+        juce::PluginDescription viola = swam; viola.name = "SWAM Viola 3";
+        CHECK (violin.matches (swam) == 3 && violin.matches (viola) == 0);
+        {
+            const ParamInfoList ps { param (0, "1044572362", "Vibrato Depth"), param (1, "352031384", "Expression"), param (2, "5", "Vibrato") };
+            const auto m = controlMapFromNks (violin, swam, ps);
+            CHECK (m.pages.size() == 1 && m.pages[0].knobs[0].paramId == "352031384" && m.pages[0].knobs[0].label.isEmpty());   // same name: no label
+            CHECK (m.pages[0].knobs[1].paramId == "1044572362" && m.pages[0].knobs[1].label == "Vibrato");                       // by id, not the name
+        }
+
+        // The search: the presets of each folder, the pages most of them share, found by plugin.
+        juce::TemporaryFile tmpNks;
+        const auto root = tmpNks.getFile();
+        CHECK (root.getChildFile ("Super 8 R2/Presets").createDirectory() && root.getChildFile ("SWAM Violin 3").createDirectory());
+        auto write = [] (const juce::File& f, const Bytes& b) { return f.replaceWithData (b.data(), b.size()); };
+        CHECK (write (root.getChildFile ("Super 8 R2/Presets/A.nksf"), synthFile) && write (root.getChildFile ("Super 8 R2/Presets/B.nksf"), synthFile));
+        const auto odd = riff ({ { "NISI", map ({ { "name", str ("Odd") }, { "vendor", str ("Native Instruments") }, { "bankchain", arr ({ str ("Super 8 R2") }) } }) },
+                                 { "NICA", map ({ { "ni8", arr ({ arr ({ knob ("Other", 9, "Thing") }) }) } }) } });
+        CHECK (write (root.getChildFile ("Super 8 R2/Presets/C.nksf"), odd));
+        CHECK (write (root.getChildFile ("SWAM Violin 3/Jazz.nksf"), vst3File) && write (root.getChildFile ("SWAM Violin 3/notes.txt"), str ("x")));
+        {
+            ControlMapLibrary lib (root.getChildFile ("setups"));
+            CHECK (lib.findNks (super8) == nullptr && lib.getNksGeneration() == 0);
+            lib.startNksSearch ({ root });
+            CHECK (lib.waitForNks (10000) && lib.getNksGeneration() == 1);
+            const auto* s8 = lib.findNks (super8);
+            CHECK (s8 != nullptr && s8->name == "Sling Cave" && s8->pages[0].knobs.size() == 5);      // two of three agree
+            CHECK (lib.findNks (swam) != nullptr && lib.findNks (swam)->vst3Ids && lib.findNks (viola) == nullptr);
+        }
+        root.deleteRecursively();
+    }
+
     // ---- an instrument's setup, an input's knobs and buttons --------------
     {
         SlotDef sd; sd.plugin.name = "Kontakt 8"; sd.controlMap = "Alicia's Keys";

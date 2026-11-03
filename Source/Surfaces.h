@@ -121,7 +121,8 @@ public:
     struct Page { juce::String name; std::array<Knob, SurfaceView::numKnobs> knobs; };
     struct Layout
     {
-        const ControlMap* map = nullptr;   // the setup in use, or null for the automatic pages
+        const ControlMap* map = nullptr;   // the setup in use, or null for the maker's or the automatic pages
+        bool fromNks = false;              // the maker's pages, from its NKS presets
         std::vector<Page> pages;
     };
     /** The pages of one instrument, as they are now (the plugin must be running). */
@@ -210,6 +211,7 @@ private:
     std::map<ControlSurface*, SurfaceView> shown;
     std::map<int, Focus> focus;
     std::map<int, Layout> layouts;
+    int nksGeneration = 0;                 // the library's, when the layouts were made
     std::map<std::pair<int, int>, Pending> pending;
     std::map<std::pair<int, int>, LastSet> lastSet;
     Learning learning;

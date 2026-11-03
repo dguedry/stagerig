@@ -58,10 +58,9 @@ SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot) cons
     if (plugin == nullptr) return layout;
     const auto& params = plugin->getParameters();
 
-    layout.map = library.find (sd.plugin, sd.controlMap);
-    if (layout.map != nullptr && ! layout.map->pages.empty())
+    auto fromSetup = [&] (const ControlMap& map)
     {
-        for (const auto& mp : layout.map->pages)
+        for (const auto& mp : map.pages)
         {
             Page page;
             page.name = mp.name;
@@ -77,7 +76,24 @@ SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot) cons
             }
             layout.pages.push_back (std::move (page));
         }
+    };
+    layout.map = library.find (sd.plugin, sd.controlMap);
+    if (layout.map != nullptr && ! layout.map->pages.empty())
+    {
+        fromSetup (*layout.map);
         return layout;
+    }
+    // No setup of ours: the maker's pages, if its NKS presets have them.
+    if (const auto* nks = library.findNks (sd.plugin))
+    {
+        const auto made = controlMapFromNks (*nks, sd.plugin, params);
+        if (! made.pages.empty())
+        {
+            fromSetup (made);
+            layout.map = nullptr;
+            layout.fromNks = true;
+            return layout;
+        }
     }
 
     /* No setup: the front panel's knobs first, as the Stage view has them,
@@ -125,10 +141,12 @@ int SurfaceHub::getFocusSlot (int input)
     const bool stillThere = f.program == program && f.slot >= 0 && f.slot < (int) prog.slots.size() && prog.slots[(size_t) f.slot].isPlugin();
     if (! stillThere)
     {
-        // A new program: the instrument that has a setup, else its first plugin.
+        // A new program: the instrument that has a setup, else one its maker gave pages, else its first plugin.
         int pick = -1;
         for (int s = 0; s < (int) prog.slots.size() && pick < 0; ++s)
             if (prog.slots[(size_t) s].isPlugin() && library.find (prog.slots[(size_t) s].plugin, prog.slots[(size_t) s].controlMap) != nullptr) pick = s;
+        for (int s = 0; s < (int) prog.slots.size() && pick < 0; ++s)
+            if (prog.slots[(size_t) s].isPlugin() && library.findNks (prog.slots[(size_t) s].plugin) != nullptr) pick = s;
         for (int s = 0; s < (int) prog.slots.size() && pick < 0; ++s)
             if (prog.slots[(size_t) s].isPlugin()) pick = s;
         if (f.program != program || f.slot != pick) layouts.erase (input);
@@ -562,6 +580,9 @@ void SurfaceHub::lookForKeyboards()
 
 void SurfaceHub::tick()
 {
+    // The search for NKS presets finished: the knobs may have their makers' pages now.
+    if (library.getNksGeneration() != nksGeneration) { nksGeneration = library.getNksGeneration(); layouts.clear(); }
+
     if (searching && Time::getMillisecondCounter() - lastSearch > 2000)
     {
         lastSearch = Time::getMillisecondCounter();

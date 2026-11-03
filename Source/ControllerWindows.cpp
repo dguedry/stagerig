@@ -57,11 +57,17 @@ public:
 
         addAndMakeVisible (title);
         title.setFont (FontOptions (17.0f, Font::bold));
-        title.setText ("Knobs, screen and lights for " + plugin.name, dontSendNotification);
+        title.setText ("What your keyboard's knobs turn on " + plugin.name, dontSendNotification);
         addAndMakeVisible (explain);
         explain.setColour (Label::textColourId, textDim);
-        explain.setText ("A controller setup gives a keyboard's knobs pages of this instrument's parameters, with names for its screen, "
-                         "and colours its keys: keyswitches, a kit's pads, the range that plays. Make one, or import one someone shared.", dontSendNotification);
+        {
+            const auto& prog = engine.getSetup().inputs[(size_t) input].programs[(size_t) program];
+            const auto progName = String (program).paddedLeft ('0', 3) + (prog.name.isNotEmpty() ? " \"" + prog.name + "\"" : String());
+            explain.setText ("Pages of eight knobs, with names for a keyboard's screen, and colours for its keys: keyswitches, a kit's pads, the range "
+                             "that plays. A setup belongs to " + plugin.name + ", so every program with it can use it; which one this instrument "
+                             "uses is kept with program " + progName + ". For one knob or pedal in this program only, use the program's MIDI mappings.",
+                             dontSendNotification);
+        }
 
         addAndMakeVisible (caption (setupCap, "SETUP"));
         addAndMakeVisible (setupBox);
@@ -128,7 +134,7 @@ public:
     {
         auto r = getLocalBounds().reduced (12);
         title.setBounds (r.removeFromTop (24));
-        explain.setBounds (r.removeFromTop (36));
+        explain.setBounds (r.removeFromTop (54));
         r.removeFromTop (6);
 
         auto row = r.removeFromTop (16);
@@ -233,7 +239,10 @@ private:
     void fillSetups (const String& select)
     {
         setupBox.clear (dontSendNotification);
-        setupBox.addItem ("None: the front panel's knobs, then every parameter", 1);
+        if (const auto* nks = library.findNks (plugin))
+            setupBox.addItem ("None: " + (nks->vendor.isNotEmpty() ? nks->vendor + "'s" : String ("the maker's")) + " own pages, from its NKS presets", 1);
+        else
+            setupBox.addItem ("None: the front panel's knobs, then every parameter", 1);
         const auto maps = library.forPlugin (plugin);
         names.clear();
         for (const auto* m : maps) names.add (m->name);
@@ -417,10 +426,18 @@ private:
         m.pluginManufacturer = plugin.manufacturerName;
         m.name = plugin.name;
         for (int n = 2; library.find (plugin, m.name) != nullptr; ++n) m.name = plugin.name + " " + String (n);
-        // It starts as the knobs are now, so there is something to change rather than eight blanks.
+        // It starts as the knobs are now -- the maker's pages, or the front panel's -- so there is something to change rather than eight blanks.
+        const auto* nks = library.findNks (plugin);
+        if (auto* p = livePlugin(); p != nullptr && nks != nullptr)
+        {
+            const auto made = controlMapFromNks (*nks, plugin, p->getParameters());
+            m.pages = made.pages;
+            m.author = made.author;
+            m.notes = made.notes;
+        }
         ControlPage first;
         first.name = "Sound";
-        if (auto* p = livePlugin())
+        if (auto* p = livePlugin(); p != nullptr && m.pages.empty())
         {
             const auto& sd = slotDef();
             std::vector<int> picks;
@@ -430,13 +447,15 @@ private:
                 if ((int) first.knobs.size() < ControlPage::numKnobs)
                     first.knobs.push_back ({ p->getParameters()[(size_t) idx].id, p->getParameters()[(size_t) idx].name, {} });
         }
-        m.pages.push_back (first);
+        if (m.pages.empty()) m.pages.push_back (first);
         if (const auto r = library.save (m); r.failed()) { status.setText (r.getErrorMessage(), dontSendNotification); return; }
         engine.setSlotControlMap (input, program, slot, m.name);
         hub.libraryChanged();
         if (changed) changed();
         fillSetups (m.name);
-        status.setText ("A new setup, from the knobs as they were. Name it after the instrument if the plugin holds many.", dontSendNotification);
+        status.setText (m.author.isNotEmpty() && nks != nullptr ? "A new setup, from " + m.author + "'s pages, for you to change."
+                                                                 : String ("A new setup, from the knobs as they were. Name it after the instrument if the plugin holds many."),
+                        dontSendNotification);
     }
 
     void deleteSetup()
@@ -557,8 +576,9 @@ public:
 
         addAndMakeVisible (explain);
         explain.setColour (Label::textColourId, textDim);
-        explain.setText ("The knobs of the keyboards above work by themselves. For any other keyboard, teach its knobs here: "
-                         "press Learn, then turn the knob. Buttons are taught the same way, on any keyboard.", dontSendNotification);
+        explain.setText ("Which knob and button on this keyboard is which, in every program. The knobs of the keyboards above work by themselves; "
+                         "for any other, press Learn and turn the knob. Buttons are taught the same way, on any keyboard. What the knobs turn "
+                         "is each plugin's: its Keyboard button.", dontSendNotification);
 
         for (int i = 0; i < numRows; ++i)
         {
@@ -601,7 +621,7 @@ public:
         inputCap.setBounds (r.removeFromTop (16));
         inputBox.setBounds (r.removeFromTop (26).removeFromLeft (260));
         r.removeFromTop (4);
-        explain.setBounds (r.removeFromTop (36));
+        explain.setBounds (r.removeFromTop (52));
         r.removeFromTop (4);
         auto left = r.removeFromLeft (r.getWidth() / 2).withTrimmedRight (10);
         for (int i = 0; i < numRows; ++i)
@@ -717,12 +737,12 @@ Component* showControlMapEditor (Engine& engine, SurfaceHub& hub, ControlMapLibr
     const auto& prog = inputs[(size_t) input].programs[(size_t) program];
     if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return nullptr;
     return launch (new ControlMapEditor (engine, hub, library, input, program, slot, std::move (changed)),
-            "Controller setup: " + prog.slots[(size_t) slot].plugin.name, 820, 640);
+            "Keyboard knobs: " + prog.slots[(size_t) slot].plugin.name, 820, 658);
 }
 
 Component* showControllers (Engine& engine, SurfaceHub& hub, int selectedInput, std::function<void()> changed)
 {
-    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Keyboards and knobs", 860, 494);
+    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Your keyboards", 860, 510);
 }
 
 } // namespace perf

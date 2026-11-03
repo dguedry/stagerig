@@ -27,6 +27,7 @@
 #endif
 
 #include "Surfaces.h"
+#include "ControlMaps.h"
 
 using namespace perf;
 using namespace juce;
@@ -124,11 +125,65 @@ static int probeKompleteKontrol (int seconds)
     return 0;
 }
 
+/* STAGERIG_TEST_NKS=<part of a plugin's name>: finds this computer's NKS
+   presets, then loads each plugin of that name from the rig's plugin list and
+   prints how its maker's knobs were found among its parameters. */
+static int probeNks (const String& wanted)
+{
+    const auto t0 = Time::getMillisecondCounterHiRes();
+    ControlMapLibrary library (File::getSpecialLocation (File::tempDirectory).getChildFile ("stagerig-nks-probe"));
+    const auto folders = ControlMapLibrary::defaultNksFolders();
+    for (const auto& f : folders) std::printf ("nks: looking in %s\n", f.getFullPathName().toRawUTF8());
+    library.startNksSearch (folders);
+    if (! library.waitForNks (600000)) { std::printf ("nks: the search did not finish\n"); return 1; }
+    std::printf ("nks: search done in %.1f s\n", (Time::getMillisecondCounterHiRes() - t0) / 1000.0);
+
+    KnownPluginList list;
+    File settingsFile = File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("StageRig/StageRig.settings");
+    if (auto xml = parseXML (settingsFile))
+        for (auto* v : xml->getChildWithTagNameIterator ("VALUE"))
+            if (v->getStringAttribute ("name") == "pluginList")
+                if (auto* kp = v->getChildByName ("KNOWNPLUGINS")) list.recreateFromXml (*kp);
+    for (const auto& d : list.getTypes())
+    {
+        if (! d.name.containsIgnoreCase (wanted)) continue;
+        const auto* nks = library.findNks (d);
+        if (nks == nullptr) { std::printf ("nks: %s (%s): no NKS presets\n", d.name.toRawUTF8(), d.pluginFormatName.toRawUTF8()); continue; }
+        std::printf ("nks: %s (%s %s): pages of \"%s\" from %s, %s ids, matched %d\n", d.name.toRawUTF8(), d.pluginFormatName.toRawUTF8(),
+                     d.manufacturerName.toRawUTF8(), nks->name.toRawUTF8(), nks->product.toRawUTF8(), nks->vst3Ids ? "VST3" : "VST2", nks->matches (d));
+        RemotePlugin plugin;
+        String error;
+        if (! plugin.load (d, 48000.0, 256, error)) { std::printf ("nks:   could not load it: %s\n", error.toRawUTF8()); continue; }
+        const auto& params = plugin.getParameters();
+        const auto map = controlMapFromNks (*nks, d, params);
+        int asked = 0, got = 0;
+        for (const auto& np : nks->pages) for (const auto& k : np.knobs) if (k.paramId.isNotEmpty()) ++asked;
+        for (const auto& mp : map.pages) for (const auto& k : mp.knobs) if (! k.isEmpty()) ++got;
+        std::printf ("nks:   %d parameters; %d of %d knobs found\n", (int) params.size(), got, asked);
+        const bool aligned = map.pages.size() == nks->pages.size();
+        for (size_t pi = 0; pi < nks->pages.size(); ++pi)
+        {
+            std::printf ("nks:   page \"%s\"\n", nks->pages[pi].name.toRawUTF8());
+            for (size_t ki = 0; ki < nks->pages[pi].knobs.size(); ++ki)
+            {
+                const auto& k = nks->pages[pi].knobs[ki];
+                if (k.paramId.isEmpty()) continue;
+                const ControlKnob* hit = aligned && ki < map.pages[pi].knobs.size() && ! map.pages[pi].knobs[ki].isEmpty() ? &map.pages[pi].knobs[ki] : nullptr;
+                std::printf ("nks:     %-12s %-12s id %-11s -> %s\n", k.paramName.toRawUTF8(), k.label.toRawUTF8(), k.paramId.toRawUTF8(),
+                             hit != nullptr ? ("\"" + hit->paramName + "\" (" + hit->paramId + ")").toRawUTF8() : aligned ? "NOT FOUND" : "(pages dropped)");
+            }
+        }
+    }
+    return 0;
+}
+
 int main()
 {
     ScopedJuceInitialiser_GUI init;
     if (const char* k = std::getenv ("STAGERIG_TEST_KONTROL_SECONDS"); k != nullptr && *k != 0)
         return probeKompleteKontrol (String (k).getIntValue());
+    if (const char* n = std::getenv ("STAGERIG_TEST_NKS"); n != nullptr && *n != 0)
+        return probeNks (String (n));
 
     // Own scratch folder: PluginHost keeps its crash list ("dead man's pedal") next to
     // the settings file, and a plain temp file would share /tmp with every other run,
@@ -3855,6 +3910,49 @@ int main()
         const auto before = fake->views.size();
         hub.tick();
         CHECK (fake->views.size() == before);      // nothing changed: nothing sent
+
+        // A maker's NKS pages, for an instrument with no setup of ours: the keyboard's knobs take them.
+        if (auto* live = engine.getPlugin (0, 100, 0); live != nullptr && live->getParameters().size() >= 3)
+        {
+            using Bytes = std::vector<uint8>;
+            auto str = [] (const String& t) { Bytes b; const auto u = t.toStdString(); b.push_back (0xd9); b.push_back ((uint8) u.size()); b.insert (b.end(), u.begin(), u.end()); return b; };
+            auto cat = [] (uint8 head, std::vector<Bytes> parts) { Bytes b { head }; for (auto& p : parts) b.insert (b.end(), p.begin(), p.end()); return b; };
+            const auto& ps = live->getParameters();
+            const auto knobs = cat (0x92, { cat (0x83, { str ("id"), Bytes { 0xce, 0x70, 0, 0, 1 }, str ("name"), str (ps[2].name), str ("section"), str ("Tone") }),
+                                            cat (0x82, { str ("id"), Bytes { 0xce, 0x70, 0, 0, 2 }, str ("name"), str (ps[1].name) }) });
+            auto chunk = [] (const char* id, const Bytes& data)
+            {
+                Bytes c { (uint8) id[0], (uint8) id[1], (uint8) id[2], (uint8) id[3] };
+                const auto n = data.size() + 4;
+                for (int i = 0; i < 4; ++i) c.push_back ((uint8) (n >> (8 * i)));
+                c.insert (c.end(), { 1, 0, 0, 0 });
+                c.insert (c.end(), data.begin(), data.end());
+                if (n & 1) c.push_back (0);
+                return c;
+            };
+            Bytes body { 'N', 'I', 'K', 'S' };
+            for (const auto& c : { chunk ("NISI", cat (0x83, { str ("name"), str ("Init"), str ("vendor"), str (synth.manufacturerName), str ("bankchain"), cat (0x91, { str (synth.name) }) })),
+                                   chunk ("NICA", cat (0x81, { str ("ni8"), cat (0x91, { knobs }) })) })
+                body.insert (body.end(), c.begin(), c.end());
+            Bytes file { 'R', 'I', 'F', 'F' };
+            for (int i = 0; i < 4; ++i) file.push_back ((uint8) (body.size() >> (8 * i)));
+            file.insert (file.end(), body.begin(), body.end());
+            const auto nksDir = scratchDir.getChildFile ("NKS presets");
+            nksDir.createDirectory();
+            CHECK (nksDir.getChildFile ("Init.nksf").replaceWithData (file.data(), file.size()));
+
+            ControlMapLibrary withNks (scratchDir.getChildFile ("Controller setups (NKS)"));
+            withNks.startNksSearch ({ nksDir });
+            CHECK (withNks.waitForNks (10000));
+            SurfaceHub nksHub (engine, withNks, settings, /*lookForKeyboards*/ false);
+            const auto layout = nksHub.layoutFor (0, 100, 0);
+            CHECK (layout.fromNks && layout.map == nullptr && layout.pages.size() == 1 && layout.pages[0].name == "Tone");
+            if (! layout.pages.empty())
+                CHECK (layout.pages[0].knobs[0].paramIndex == ps[2].index && layout.pages[0].knobs[1].paramIndex == ps[1].index
+                       && layout.pages[0].knobs[2].paramIndex < 0);
+            CHECK (! hub.layoutFor (0, 100, 0).fromNks);      // a library without them: the front panel, as before
+            nksDir.deleteRecursively();
+        }
 
         // The programs around this one, for a keyboard that names them; choosing one, and an instrument, from it.
         {
