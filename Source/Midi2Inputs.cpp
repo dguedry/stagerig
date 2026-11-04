@@ -94,6 +94,8 @@ StringArray Midi2Inputs::open (const StringArray& identifiers)
         }
         if (session == nullptr || ! session->isAlive())
         {
+            kept.clear();            // a dead session's connections first, then the session
+            connections.clear();
             session.reset();
             auto s = ump::Endpoints::getInstance()->makeSession ("StageRig MIDI 2.0");
             if (s.isAlive()) session = std::make_unique<ump::Session> (std::move (s));

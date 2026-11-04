@@ -2188,6 +2188,15 @@ public:
     {
         styleHeader (header);
         addAndMakeVisible (header);
+        /* The keyboard's eight knobs are the other kind of control: they follow
+           the instrument in play (its Knobs button), so they are named here,
+           not listed as mappings. */
+        addAndMakeVisible (knobsLine);
+        knobsLine.setColour (Label::textColourId, textDim);
+        knobsLine.setFont (FontOptions (12.5f));
+        addAndMakeVisible (knobsBtn);
+        knobsBtn.setTooltip ("What the keyboard's eight knobs turn on the instrument: the same in every program with it");
+        knobsBtn.onClick = [this] { owner.showKnobsForFocus(); };
         addAndMakeVisible (table);
         table.setModel (this);
         table.setColour (ListBox::backgroundColourId, bgPanel);
@@ -2311,6 +2320,19 @@ public:
         table.updateContent();
         table.repaint();
         updateButtons();
+        const auto summary = owner.keyboardKnobsSummary();
+        knobsLine.setText (summary.isNotEmpty() ? "Keyboard knobs 1-8: " + summary : String ("Keyboard knobs 1-8: set on each instrument, with its Knobs button"), dontSendNotification);
+        knobsBtn.setEnabled (summary.isNotEmpty());
+    }
+
+    void onKeyboardKnob (int knob)
+    {
+        learnBtn.setToggleState (false, dontSendNotification);
+        haveSource = false;
+        sourceLabel.setText ("keyboard knob " + String (knob + 1), dontSendNotification);
+        owner.showStatus ("That is keyboard knob " + String (knob + 1) + ": it follows the instrument's Knobs layout, so it is never a mapping. "
+                          "Learn a pedal, wheel or slider instead.");
+        updateButtons();
     }
 
     void onLearn (MappingDef::Source s, int number)
@@ -2349,6 +2371,11 @@ public:
     {
         auto r = getLocalBounds().reduced (6);
         header.setBounds (r.removeFromTop (22));
+        auto knobsRow = r.removeFromTop (22);
+        knobsBtn.setBounds (knobsRow.removeFromRight (80).reduced (0, 1));
+        knobsRow.removeFromRight (6);
+        knobsLine.setBounds (knobsRow);
+        r.removeFromTop (2);
         auto editor = r.removeFromBottom (3 * 26 + 8);
         r.removeFromBottom (4);
         table.setBounds (r);
@@ -2392,7 +2419,13 @@ public:
         String text;
         switch (col)
         {
-            case colSource: text = m.sourceDescription(); break;
+            case colSource:
+                text = m.sourceDescription();
+                // A controller the keyboard's knobs take never reaches a mapping: say so where it is set.
+                if (m.source == MappingDef::Source::CC)
+                    if (const int k = engine.keyboardKnobFor (owner.getSelectedInput(), m.number); k >= 0)
+                        text << "  (taken by keyboard knob " << (k + 1) << ")";
+                break;
             case colTarget: text = targetLabel (m.slot, m.effect); break;
             case colParam:  text = m.paramName.isNotEmpty() ? m.paramName : m.paramId; break;
             case colMin:    text = String (m.minValue, 2); break;
@@ -2602,7 +2635,9 @@ private:
 
     Engine& engine;
     MainComponent& owner;
-    Label header { {}, "MIDI MAPPINGS  (this program only: one knob or pedal moves one plugin parameter)" };
+    Label header { {}, "MIDI MAPPINGS  (this program only: a pedal, wheel or slider moves one parameter)" };
+    Label knobsLine;
+    TextButton knobsBtn { "Knobs..." };
     TableListBox table;
     ComboBox targetBox;
     ParamPicker paramBox;
@@ -3358,6 +3393,50 @@ void MainComponent::programContentChanged (int inputIndex, int program)
 void MainComponent::learnReceived (int, MappingDef::Source source, int number)
 {
     mappingsPanel->onLearn (source, number);
+}
+
+void MainComponent::learnedKeyboardKnob (int, int knob)
+{
+    mappingsPanel->onKeyboardKnob (knob);
+}
+
+String MainComponent::keyboardKnobsSummary() const
+{
+    if (surfaceHub == nullptr || selectedInput < 0 || selectedInput >= (int) engine.getSetup().inputs.size()) return {};
+    const auto& in = engine.getSetup().inputs[(size_t) selectedInput];
+    if (in.kind != InputDef::Kind::midi) return {};
+    const int program = getEditedProgram();
+    const auto& prog = in.programs[(size_t) program];
+    // The knobs are on the program in play; for another program, its first instrument is what they would be on.
+    int slot = program == in.currentProgram ? surfaceHub->getFocusSlot (selectedInput) : -1;
+    if (slot < 0)
+        for (int s = 0; s < (int) prog.slots.size(); ++s)
+            if (prog.slots[(size_t) s].isPlugin()) { slot = s; break; }
+    if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return {};
+    const auto& sd = prog.slots[(size_t) slot];
+    String text = sd.plugin.name;
+    const auto layout = surfaceHub->layoutFor (selectedInput, program, slot);
+    if (! layout.pages.empty())
+    {
+        const int page = program == in.currentProgram ? jlimit (0, (int) layout.pages.size() - 1, surfaceHub->getFocusPage (selectedInput)) : 0;
+        text << ", page \"" << layout.pages[(size_t) page].name << "\"";
+        if (layout.pages.size() > 1) text << " of " << (int) layout.pages.size();
+    }
+    text << (layout.map.has_value() ? " (your layout \"" + layout.map->name + "\")" : layout.fromNks ? String (" (the maker's pages)") : String (" (automatic)"));
+    return text;
+}
+
+void MainComponent::showKnobsForFocus()
+{
+    if (surfaceHub == nullptr || selectedInput < 0 || selectedInput >= (int) engine.getSetup().inputs.size()) return;
+    const auto& in = engine.getSetup().inputs[(size_t) selectedInput];
+    const int program = getEditedProgram();
+    const auto& prog = in.programs[(size_t) program];
+    int slot = program == in.currentProgram ? surfaceHub->getFocusSlot (selectedInput) : -1;
+    if (slot < 0)
+        for (int s = 0; s < (int) prog.slots.size(); ++s)
+            if (prog.slots[(size_t) s].isPlugin()) { slot = s; break; }
+    if (slot >= 0) showKnobsFor (slot);
 }
 
 void MainComponent::parameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex)

@@ -79,8 +79,9 @@ SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot, bool
             layout.pages.push_back (std::move (page));
         }
     };
-    layout.map = automatic ? nullptr : library.find (sd.plugin, sd.controlMap);
-    if (layout.map != nullptr && ! layout.map->pages.empty())
+    if (! automatic)
+        if (const auto* m = library.find (sd.plugin, sd.controlMap)) layout.map = *m;
+    if (layout.map.has_value() && ! layout.map->pages.empty())
     {
         fromSetup (*layout.map);
         return layout;
@@ -92,7 +93,7 @@ SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot, bool
         if (! made.pages.empty())
         {
             fromSetup (made);
-            layout.map = nullptr;
+            layout.map.reset();
             layout.fromNks = true;
             return layout;
         }
@@ -196,6 +197,14 @@ SurfaceView SurfaceHub::viewFor (int input)
             v.programs.emplace_back (p, in.programs[(size_t) p].name.isNotEmpty() ? in.programs[(size_t) p].name : "Program " + String (p).paddedLeft ('0', 3));
     for (int k = 0; k < SurfaceView::numKnobs; ++k)
         v.knobControllers[(size_t) k] = in.controls.knobCC[(size_t) k] > 0 ? in.controls.knobCC[(size_t) k] : SurfaceControls::autoKnobCC + k;
+    // A spare controller a knob was taught goes to the taught knob: the untaught one is told the next spare instead.
+    for (int k = 0; k < SurfaceView::numKnobs; ++k)
+    {
+        if (in.controls.knobCC[(size_t) k] > 0) continue;
+        auto taken = [&] (int cc) { for (int j = 0; j < SurfaceView::numKnobs; ++j) if (j != k && v.knobControllers[(size_t) j] == cc) return true; return false; };
+        for (int cc = SurfaceControls::autoKnobCC + k; taken (v.knobControllers[(size_t) k]) && cc < 120; ++cc)
+            if (! taken (cc)) v.knobControllers[(size_t) k] = cc;
+    }
     v.bankFirst = program - program % SurfaceView::numKnobs;
     for (int i = 0; i < SurfaceView::numKnobs; ++i)
     {
@@ -224,7 +233,7 @@ SurfaceView SurfaceHub::viewFor (int input)
     {
         const auto& sd = prog.slots[(size_t) slot];
         v.instrument = sd.plugin.name;
-        if (layout.map != nullptr && ! layout.map->name.equalsIgnoreCase (sd.plugin.name)) v.instrument << ": " << layout.map->name;
+        if (layout.map.has_value() && ! layout.map->name.equalsIgnoreCase (sd.plugin.name)) v.instrument << ": " << layout.map->name;
     }
     v.pageCount = (int) layout.pages.size();
     v.page = jlimit (0, jmax (0, v.pageCount - 1), v.page);
@@ -419,7 +428,7 @@ void SurfaceHub::taught (const String& id, int cc)
     if (input < 0 || input >= (int) inputs.size()) { cancelLearn(); return; }
     auto c = inputs[(size_t) input].controls;
     const bool knob = what >= 0 && what < SurfaceControls::numKnobs;
-    if (knob && cc <= 0) return;     // a knob is a controller: a keyboard's button cannot be one, so keep waiting
+    if (knob && cc <= 0) { engine.armSurfaceLearn (input); return; }     // a knob is a controller: a keyboard's button cannot be one, so keep waiting
 
     // One control, one job: whatever else it did, it stops doing.
     for (auto& k : c.knobCC) if (cc > 0 && k == cc) k = 0;
@@ -491,8 +500,11 @@ int SurfaceHub::inputFor (const ControlSurface& s) const
 {
     const auto& inputs = engine.getSetup().inputs;
     const auto keys = s.getKeysPortName();
+    // Its own port first, then one that starts with its name ("KOMPLETE KONTROL S88" for "... MIDI 1"), so a shorter name never takes another keyboard.
     for (int i = 0; i < (int) inputs.size(); ++i)
-        if (inputs[(size_t) i].kind == InputDef::Kind::midi && inputs[(size_t) i].midiDeviceName.containsIgnoreCase (keys)) return i;
+        if (inputs[(size_t) i].kind == InputDef::Kind::midi && inputs[(size_t) i].midiDeviceName.equalsIgnoreCase (keys)) return i;
+    for (int i = 0; i < (int) inputs.size(); ++i)
+        if (inputs[(size_t) i].kind == InputDef::Kind::midi && inputs[(size_t) i].midiDeviceName.startsWithIgnoreCase (keys)) return i;
     for (int i = 0; i < (int) inputs.size(); ++i)
         if (inputs[(size_t) i].kind == InputDef::Kind::midi) return i;
     return -1;
@@ -512,8 +524,9 @@ StringArray SurfaceHub::plainPorts() const
 
 bool SurfaceHub::isPlainKeys (const String& keys) const
 {
+    // The list holds port names; a driver's keys name is the port's, or the start of it ("KOMPLETE KONTROL S88" of "... MIDI 1").
     for (const auto& p : plainPorts())
-        if (p.containsIgnoreCase (keys) || keys.containsIgnoreCase (p)) return true;
+        if (p.equalsIgnoreCase (keys) || p.startsWithIgnoreCase (keys)) return true;
     return false;
 }
 
@@ -561,6 +574,13 @@ std::vector<SurfaceHub::KeyboardInfo> SurfaceHub::getKeyboards() const
         for (const auto& d : ins) if (d.name.containsIgnoreCase (keys)) return d.name;
         return keys;
     };
+    auto inputsOn = [&inputs] (const String& port)
+    {
+        std::vector<int> on;
+        for (int i = 0; i < (int) inputs.size(); ++i)
+            if (inputs[(size_t) i].kind == InputDef::Kind::midi && inputs[(size_t) i].midiDeviceName == port) on.push_back (i);
+        return on;
+    };
     for (const auto& s : surfaces)
     {
         if (! s->isFound()) continue;
@@ -568,6 +588,7 @@ std::vector<SurfaceHub::KeyboardInfo> SurfaceHub::getKeyboards() const
         k.name = s->getName().upToLastOccurrenceOf (" (MIDI-CI)", false, false);
         k.port = portFor (s->getKeysPortName());
         k.input = inputFor (*s);
+        k.inputs = inputsOn (k.port);
         k.language = s->getLanguage();
         k.screen = s->hasScreen();
         k.lights = s->hasLights();
@@ -576,7 +597,7 @@ std::vector<SurfaceHub::KeyboardInfo> SurfaceHub::getKeyboards() const
         list.push_back (k);
     }
     // The rest of the keyboards the inputs play from: plain MIDI.
-    const bool mk1 = ! KompleteKontrolMk1::find().empty();
+    const auto mk1s = KompleteKontrolMk1::find();
     for (int i = 0; i < (int) inputs.size(); ++i)
     {
         const auto& in = inputs[(size_t) i];
@@ -589,14 +610,18 @@ std::vector<SurfaceHub::KeyboardInfo> SurfaceHub::getKeyboards() const
         k.name = in.midiDeviceName;
         k.port = in.midiDeviceName;
         k.input = i;
+        k.inputs = inputsOn (k.port);
         k.language = "plain MIDI";
         k.plain = plainPorts().contains (in.midiDeviceName);
-        for (int cc : in.controls.knobCC) if (cc > 0) k.knobsByThemselves = false;
-        if (mk1 && in.midiDeviceName.containsIgnoreCase ("KOMPLETE KONTROL S") && ! in.midiDeviceName.containsIgnoreCase ("MK"))
-        {
-            k.plain = ! isKompleteKontrolEnabled();
-            k.more = "its screens, light guide and knobs, as StageRig worked them out (experimental)";
-        }
+        k.knobsByThemselves = false;
+        for (int cc : in.controls.knobCC) if (cc > 0) k.knobsByThemselves = true;    // taught: they work, in their way
+        for (const auto& d : mk1s)
+            if (in.midiDeviceName.containsIgnoreCase (String ("KOMPLETE KONTROL ") + d.model->name) && ! in.midiDeviceName.containsIgnoreCase ("MK"))
+            {
+                k.name = String ("Komplete Kontrol ") + d.model->name + " MK1";
+                k.plain = ! isKompleteKontrolEnabled();
+                k.more = "its screens, light guide and knobs (experimental: worked out from the keyboard itself)";
+            }
         list.push_back (k);
     }
     return list;
@@ -730,7 +755,8 @@ void SurfaceHub::lookForKeyboards()
     {
         bool told = false;
         for (const auto& s : surfaces)
-            if (dynamic_cast<MidiCiKeyboard*> (s.get()) != nullptr && s->isFound() && inputFor (*s) == i) told = true;
+            if (dynamic_cast<MidiCiKeyboard*> (s.get()) != nullptr && s->isFound()
+                && (inputFor (*s) == i || inputs[(size_t) i].midiDeviceName.equalsIgnoreCase (s->getKeysPortName()))) told = true;
         engine.setInputAutoKnobs (i, told);
     }
 
@@ -827,25 +853,37 @@ namespace
     constexpr uint8 lkStationary = 0x20, lkPluginModeName = 0x25;
 }
 
+/** What is left of a Launchkey port's name without the part that says which of
+    its two ports it is: "Launchkey MK4 49 MIDI 2" and "MIDIIN2 (Launchkey MK4 49)"
+    both give "Launchkey MK4 49", so a keyboard's two ports go together, and two
+    Launchkeys never get mixed. */
+static String launchkeyStem (const String& name)
+{
+    String s = name;
+    if (s.containsIgnoreCase ("MIDIIN2 (") || s.containsIgnoreCase ("MIDIOUT2 ("))
+        s = s.fromFirstOccurrenceOf ("(", false, false).upToLastOccurrenceOf (")", false, false);
+    for (const char* cut : { " MIDI ", " DAW", " In", " Out" })
+        if (s.containsIgnoreCase (cut)) s = s.upToFirstOccurrenceOf (cut, false, true);
+    return s.trim();
+}
+
 std::vector<LaunchkeyMk4::Ports> LaunchkeyMk4::find()
 {
     std::vector<Ports> found;
-    MidiDeviceInfo dawIn, dawOut;
-    String keys;
-    for (const auto& d : MidiInput::getAvailableDevices())
-        if (isLaunchkeyMk4 (d.name))
-        {
-            if (isDawPort (d.name)) { if (dawIn.identifier.isEmpty()) dawIn = d; }
-            else if (keys.isEmpty()) keys = d.name;
-        }
-    for (const auto& d : MidiOutput::getAvailableDevices())
-        if (isLaunchkeyMk4 (d.name) && isDawPort (d.name) && dawOut.identifier.isEmpty()) dawOut = d;
-    if (dawIn.identifier.isNotEmpty() && dawOut.identifier.isNotEmpty())
+    const auto ins = MidiInput::getAvailableDevices(), outs = MidiOutput::getAvailableDevices();
+    for (const auto& dawIn : ins)
     {
+        if (! isLaunchkeyMk4 (dawIn.name) || ! isDawPort (dawIn.name)) continue;
+        const auto stem = launchkeyStem (dawIn.name);
         Ports p;
-        p.in = dawIn; p.out = dawOut;
-        p.mini = dawOut.name.containsIgnoreCase ("Mini");
+        p.in = dawIn;
+        for (const auto& d : outs)
+            if (isLaunchkeyMk4 (d.name) && isDawPort (d.name) && launchkeyStem (d.name) == stem) { p.out = d; break; }
+        if (p.out.identifier.isEmpty()) continue;
+        p.mini = dawIn.name.containsIgnoreCase ("Mini");
         p.keysName = p.mini ? "Launchkey Mini" : "Launchkey";
+        for (const auto& d : ins)
+            if (isLaunchkeyMk4 (d.name) && ! isDawPort (d.name) && launchkeyStem (d.name) == stem) { p.keysName = d.name; break; }
         found.push_back (p);
     }
     return found;

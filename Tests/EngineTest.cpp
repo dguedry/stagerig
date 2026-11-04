@@ -4249,7 +4249,7 @@ int main()
             CHECK (withNks.waitForNks (10000));
             SurfaceHub nksHub (engine, withNks, settings, /*lookForKeyboards*/ false);
             const auto layout = nksHub.layoutFor (0, 100, 0);
-            CHECK (layout.fromNks && layout.map == nullptr && layout.pages.size() == 1 && layout.pages[0].name == "Tone");
+            CHECK (layout.fromNks && ! layout.map.has_value() && layout.pages.size() == 1 && layout.pages[0].name == "Tone");
             if (! layout.pages.empty())
                 CHECK (layout.pages[0].knobs[0].paramIndex == ps[2].index && layout.pages[0].knobs[1].paramIndex == ps[1].index
                        && layout.pages[0].knobs[2].paramIndex < 0);
@@ -4302,7 +4302,7 @@ int main()
 
         // A knob of the keyboard moves the parameter it shows.
         const auto layout = hub.layoutFor (0, 100, 0);
-        CHECK (! layout.pages.empty() && layout.map == nullptr);
+        CHECK (! layout.pages.empty() && ! layout.map.has_value());
         auto* plug = engine.getPlugin (0, 100, 0);
         const int p0 = layout.pages.empty() ? -1 : layout.pages[0].knobs[0].paramIndex;
         const int p1 = layout.pages.empty() ? -1 : layout.pages[0].knobs[1].paramIndex;

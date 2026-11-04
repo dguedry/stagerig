@@ -330,14 +330,19 @@ namespace
             p += n;
             return s;
         }
+        /* A preset's pages are a few dozen entries; a count beyond this is a
+           corrupt or hostile file, not something to allocate for. */
+        static constexpr size_t maxEntries = 4096;
         var array (size_t n, int depth)
         {
+            if (n > maxEntries) { ok = false; return {}; }
             Array<var> a;
             for (size_t i = 0; i < n && ok; ++i) a.add (read (depth + 1));
             return a;
         }
         var map (size_t n, int depth)
         {
+            if (n > maxEntries) { ok = false; return {}; }
             DynamicObject::Ptr o (new DynamicObject());
             for (size_t i = 0; i < n && ok; ++i)
             {
@@ -618,13 +623,23 @@ void ControlMapLibrary::startNksSearch (const Array<File>& folders)
         // The presets by folder: a plugin keeps its presets together, and they mostly share their pages.
         std::map<String, Array<File>> byFolder;
         int seen = 0;
-        for (const auto& root : folders)
-            for (const auto& entry : RangedDirectoryIterator (root, true, "*.nksf", File::findFiles, File::FollowSymlinks::no))
+        /* One folder at a time, so a stop (StageRig quitting) is seen within
+           one folder's listing however big the tree; symlinks are not followed. */
+        std::vector<File> toWalk (folders.begin(), folders.end());
+        while (! toWalk.empty() && ! nksStop.load() && seen <= 200000)
+        {
+            const File dir = toWalk.back();
+            toWalk.pop_back();
+            if (dir.isSymbolicLink()) continue;
+            for (const auto& child : dir.findChildFiles (File::findFilesAndDirectories | File::ignoreHiddenFiles, false))
             {
-                if (nksStop.load() || ++seen > 200000) break;
-                auto& list = byFolder[entry.getFile().getParentDirectory().getFullPathName()];
-                if (list.size() < 16) list.add (entry.getFile());
+                if (child.isSymbolicLink()) continue;
+                if (child.isDirectory()) { if (toWalk.size() < 100000) toWalk.push_back (child); continue; }
+                if (! child.hasFileExtension (".nksf") || ++seen > 200000) continue;
+                auto& list = byFolder[dir.getFullPathName()];
+                if (list.size() < 16) list.add (child);
             }
+        }
         std::vector<NksPreset> found;
         for (const auto& [dir, files] : byFolder)
         {

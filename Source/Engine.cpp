@@ -1289,6 +1289,21 @@ void Engine::setInputAutoKnobs (int inputIndex, bool b)
     runtimes[(size_t) inputIndex]->autoKnobs.store (b);
 }
 
+bool Engine::isInputAutoKnobs (int inputIndex) const
+{
+    return validInput (inputIndex) && runtimes[(size_t) inputIndex]->autoKnobs.load();
+}
+
+int Engine::keyboardKnobFor (int inputIndex, int cc) const
+{
+    if (! validInput (inputIndex) || cc <= 0) return -1;
+    const auto& c = setup.inputs[(size_t) inputIndex].controls;
+    for (int k = 0; k < SurfaceControls::numKnobs; ++k)
+        if (c.knobCC[(size_t) k] == cc || (c.knobCC[(size_t) k] == 0 && cc == SurfaceControls::autoKnobCC + k && isInputAutoKnobs (inputIndex)))
+            return k;
+    return -1;
+}
+
 void Engine::setInputMidi1Only (int inputIndex, bool b)
 {
     if (! validInput (inputIndex)) return;
@@ -3968,7 +3983,8 @@ void Engine::handleAsyncUpdate()
             }
 
             case Event::learn:
-                listeners.call ([&] (Listener& l) { l.learnReceived (e.input, (MappingDef::Source) e.a, e.b); });
+                if (e.c > 0) listeners.call ([&] (Listener& l) { l.learnedKeyboardKnob (e.input, e.c - 1); });
+                else         listeners.call ([&] (Listener& l) { l.learnReceived (e.input, (MappingDef::Source) e.a, e.b); });
                 break;
 
             case Event::touched:
@@ -4281,7 +4297,8 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exa
     if (m.isController())
     {
         const int cc = m.getControllerNumber(), value = m.getControllerValue();
-        if (surfaceLearnInput.load (std::memory_order_relaxed) == i)
+        // Teaching: CC 0 is Bank Select, sent with a program change -- never a knob or button, so it is not the one.
+        if (cc > 0 && surfaceLearnInput.load (std::memory_order_relaxed) == i)
         {
             surfaceLearnInput.store (-1);
             postEvent ({ Event::surfaceLearn, i, cc, value, 0, 0 });
@@ -4293,6 +4310,8 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exa
                 if (const int taught = in.knobCC[(size_t) k].load (std::memory_order_relaxed);
                     taught == cc || (taught == 0 && cc == SurfaceControls::autoKnobCC + k && in.autoKnobs.load (std::memory_order_relaxed)))
                 {
+                    // Waiting to learn a mapping: this is a keyboard knob, which is never one. Said, not taken.
+                    if (learnArmed.load()) { learnArmed = false; postEvent ({ Event::learn, i, (int) MappingDef::Source::CC, cc, 1 + k, 0 }); return; }
                     // A knob told what to send (the spare controllers) sends where it is.
                     const bool relative = taught == cc && in.knobsRelative.load (std::memory_order_relaxed);
                     // d: the exact place, in 24 bits plus one, from a MIDI 2.0 keyboard.

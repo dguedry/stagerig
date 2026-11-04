@@ -59,7 +59,7 @@ public:
     ControlMapEditor (Engine& e, SurfaceHub& h, ControlMapLibrary& lib, int in, int prog, int sl, std::function<void()> ch)
         : engine (e), hub (h), library (lib), input (in), program (prog), slot (sl), changed (std::move (ch))
     {
-        plugin = slotDef().plugin;
+        plugin = slotDef() != nullptr ? slotDef()->plugin : PluginDescription();
         engine.addListener (this);
 
         addAndMakeVisible (title);
@@ -67,7 +67,9 @@ public:
         title.setText ("Knobs for " + plugin.name, dontSendNotification);
         addAndMakeVisible (subtitle);
         subtitle.setColour (Label::textColourId, textDim);
-        subtitle.setText ("The same in every program with " + plugin.name + ". On any keyboard: knob 1 is the first box, knob 8 the last.", dontSendNotification);
+        subtitle.setJustificationType (Justification::topLeft);
+        subtitle.setText ("How it works: turning knob 1 to 8 on your keyboard turns the parameter in box 1 to 8 here, whatever the keyboard. "
+                          "A keyboard with a screen is sent these names and values. The same in every program with " + plugin.name + ".", dontSendNotification);
 
         for (auto* b : { &knobsTab, &keysTab })
         {
@@ -96,6 +98,8 @@ public:
             page = jmax (0, page - 1);
             saveAndShow();
         };
+        addChildComponent (pageBox);
+        pageBox.onChange = [this] { if (pageBox.getSelectedId() > 0 && pageBox.getSelectedId() - 1 != page) { page = pageBox.getSelectedId() - 1; showAll(); } };
         addAndMakeVisible (pageNameEd);
         pageNameEd.setTextToShowWhenEmpty ("Page name", textDim);
         pageNameEd.setTooltip ("The page's name, shown when you step to it");
@@ -152,8 +156,8 @@ public:
         top.removeFromRight (4);
         knobsTab.setBounds (top.removeFromRight (80));
         title.setBounds (top);
-        subtitle.setBounds (r.removeFromTop (20));
-        r.removeFromTop (10);
+        subtitle.setBounds (r.removeFromTop (34));
+        r.removeFromTop (6);
 
         auto row = r.removeFromTop (26);
         layoutCap.setBounds (row.removeFromLeft (56));
@@ -278,8 +282,35 @@ private:
         }
     };
 
-    const SlotDef& slotDef() const { return engine.getSetup().inputs[(size_t) input].programs[(size_t) program].slots[(size_t) slot]; }
-    RemotePlugin* livePlugin() const { return engine.isPluginAlive (input, program, slot) ? engine.getPlugin (input, program, slot) : nullptr; }
+    /** The instrument this window is for, or null once it is gone (removed, or its input). */
+    const SlotDef* slotDef() const
+    {
+        const auto& inputs = engine.getSetup().inputs;
+        if (input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return nullptr;
+        const auto& prog = inputs[(size_t) input].programs[(size_t) program];
+        if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return nullptr;
+        const auto& sd = prog.slots[(size_t) slot];
+        return sd.plugin.name == plugin.name && sd.plugin.fileOrIdentifier == plugin.fileOrIdentifier ? &sd : nullptr;
+    }
+    RemotePlugin* livePlugin() const { return slotDef() != nullptr && engine.isPluginAlive (input, program, slot) ? engine.getPlugin (input, program, slot) : nullptr; }
+
+    /** The instrument went (or another took its place): the window closes rather than edit the wrong thing. */
+    bool stillHere()
+    {
+        if (slotDef() != nullptr) return true;
+        if (! closing)
+        {
+            closing = true;
+            MessageManager::callAsync ([sp = SafePointer<ControlMapEditor> (this)]
+            {
+                if (sp == nullptr) return;
+                if (auto* dw = sp->findParentComponentOfClass<DialogWindow>()) delete dw;
+            });
+        }
+        return false;
+    }
+    void setupChanged() override                        { stillHere(); }
+    void programContentChanged (int, int) override      { stillHere(); }
 
     void fillParams()
     {
@@ -302,9 +333,10 @@ private:
     /** What is in use now: one of yours, or the automatic pages made into a layout to show (not saved). */
     void load()
     {
+        if (! stillHere()) return;
         names.clear();
         for (const auto* m : library.forPlugin (plugin)) names.add (m->name);
-        const auto chosen = slotDef().controlMap;
+        const auto chosen = slotDef()->controlMap;
         own = false;
         edit = {};
         if (chosen != "-")
@@ -373,6 +405,7 @@ private:
 
     void saveAndShow()
     {
+        if (! stillHere()) return;
         if (own)
         {
             if (const auto r = library.save (edit); r.failed()) { status.setText (r.getErrorMessage(), dontSendNotification); return; }
@@ -393,6 +426,7 @@ private:
 
     void chooseLayout()
     {
+        if (! stillHere()) return;
         const int id = layoutBox.getSelectedId();
         storeKeys();
         engine.setSlotControlMap (input, program, slot, id >= 10 ? names[id - 10] : String ("-"));
@@ -417,6 +451,10 @@ private:
             addAndMakeVisible (*b);
             pageTabs.push_back (std::move (b));
         }
+        pageBox.clear (dontSendNotification);
+        for (int i = 0; i < (int) edit.pages.size(); ++i)
+            pageBox.addItem ("Page " + String (i + 1) + " of " + String ((int) edit.pages.size()) + ": " + edit.pages[(size_t) i].name, i + 1);
+        pageBox.setSelectedId (page + 1, dontSendNotification);
         layoutPageTabs();
         pageNameEd.setText (page < (int) edit.pages.size() ? edit.pages[(size_t) page].name : String(), dontSendNotification);
         removePageBtn.setEnabled (edit.pages.size() > 1);
@@ -426,22 +464,41 @@ private:
         showSelected();
         showKeys();
 
-        StringArray shown, turned;
+        StringArray shown, turned, taught, untaught;
         for (const auto& k : hub.getKeyboards())
-            if (k.input == input && ! k.plain) (k.screen ? shown : turned).add (k.name);
+        {
+            if (k.input != input) continue;
+            if (k.plain || ! k.knobsByThemselves) (k.knobsByThemselves ? taught : untaught).add (k.name);
+            else (k.screen ? shown : turned).add (k.name);
+        }
         String text;
         if (! shown.isEmpty()) text << "Shown on " << shown.joinIntoString (", ") << ". ";
-        if (! turned.isEmpty()) text << "Turned by " << turned.joinIntoString (", ") << ", which " << (turned.size() == 1 ? "has" : "have") << " no screen for the names.";
-        if (text.isEmpty()) text = "No keyboard with knobs plays this input yet: Options > Your keyboards.";
+        if (! turned.isEmpty()) text << "Turned by " << turned.joinIntoString (", ") << ", which " << (turned.size() == 1 ? "has" : "have") << " no screen for the names. ";
+        if (! taught.isEmpty()) text << "Turned by the taught knobs of " << taught.joinIntoString (", ") << ". ";
+        if (! untaught.isEmpty()) text << untaught.joinIntoString (", ") << " plays this input as plain MIDI: teach its knobs in Options > Your keyboards. ";
+        if (text.isEmpty()) text = "No keyboard plays this input yet: choose its MIDI device in the Inputs list.";
+        // The other kind of control, in this program only: a pedal or wheel mapped to this plugin.
+        StringArray mapped;
+        for (const auto& m : engine.getSetup().inputs[(size_t) input].programs[(size_t) program].mappings)
+            if (m.slot == slot && m.effect < 0)
+                mapped.add (m.sourceDescription() + " turns " + (m.paramName.isNotEmpty() ? m.paramName : m.paramId));
+        if (! mapped.isEmpty()) text << " In this program " << mapped.joinIntoString (", ") << " (MIDI mappings).";
         where.setText (text, dontSendNotification);
         if (livePlugin() == nullptr) status.setText ("The plugin is not running, so its parameters cannot be listed. Load the program first.", dontSendNotification);
     }
 
+    /** The pages as tabs while they fit across; a list when there are too many (an automatic layout can have dozens). */
     void layoutPageTabs()
     {
         auto r = pageTabsArea;
+        int needed = 0;
+        for (auto& b : pageTabs) needed += jmin (140, jmax (60, b->getBestWidthForHeight (r.getHeight()))) + 4;
+        const bool asTabs = needed <= r.getWidth();
+        pageBox.setVisible (! asTabs && knobsTab.getToggleState());
+        pageBox.setBounds (r.withWidth (jmin (260, r.getWidth())));
         for (auto& b : pageTabs)
         {
+            b->setVisible (asTabs && knobsTab.getToggleState());
             const int w = jmin (140, jmax (60, b->getBestWidthForHeight (r.getHeight())));
             b->setBounds (r.removeFromLeft (w));
             r.removeFromLeft (4);
@@ -547,6 +604,7 @@ private:
 
     void pickFromWindow()
     {
+        if (! stillHere()) return;
         auto* p = livePlugin();
         if (p == nullptr) return;
         waitingForWindow = ! waitingForWindow;
@@ -565,6 +623,7 @@ private:
 
     void timerCallback() override
     {
+        if (! stillHere()) return;
         if (params.empty() && livePlugin() != nullptr) { fillParams(); load(); }
         // The knob just turned on the keyboard lights up; the values follow the plugin.
         const auto turn = hub.getLastTurn (input);
@@ -580,7 +639,7 @@ private:
         for (auto* c : std::initializer_list<Component*> { &addPageBtn, &removePageBtn, &pageNameEd, &editCap, &paramPicker, &labelEd, &fromWindowBtn, &clearBtn })
             c->setVisible (knobs);
         for (auto& t : tiles) t.setVisible (knobs);
-        for (auto& b : pageTabs) b->setVisible (knobs);
+        layoutPageTabs();
         for (auto* c : std::initializer_list<Component*> { &keysCap, &keysView, &addKeysBtn }) c->setVisible (! knobs);
     }
 
@@ -749,12 +808,12 @@ private:
     ParamInfoList params;
     StringArray names;
     ControlMap edit;
-    bool own = false, madeOwn = false, waitingForWindow = false;
+    bool own = false, madeOwn = false, waitingForWindow = false, closing = false;
     int page = 0, selected = 0;
 
     Label title, subtitle, layoutCap, editCap, keysCap, where, status;
     TextButton knobsTab { "Knobs" }, keysTab { "Key colours" };
-    ComboBox layoutBox;
+    ComboBox layoutBox, pageBox;
     TextButton shareBtn { "Share..." }, addPageBtn { "+ Page" }, removePageBtn { "Remove page" }, fromWindowBtn, clearBtn { "Clear" }, addKeysBtn { "+ Keys" };
     TextEditor pageNameEd, labelEd;
     std::vector<std::unique_ptr<TextButton>> pageTabs;
@@ -910,10 +969,13 @@ private:
         for (const auto& k : list)
         {
             auto row = std::make_unique<KeyboardRow>();
-            const auto plays = k.input >= 0 && k.input < (int) inputs.size() ? "plays " + inputs[(size_t) k.input].name : String ("plays no input");
+            StringArray playing;
+            for (int i : k.inputs) if (i >= 0 && i < (int) inputs.size()) playing.add (inputs[(size_t) i].name);
+            if (playing.isEmpty() && k.input >= 0 && k.input < (int) inputs.size()) playing.add (inputs[(size_t) k.input].name);
+            const auto plays = playing.isEmpty() ? String ("plays no input") : "plays " + playing.joinIntoString (" and ");
             row->name.setText (k.name + "   " + plays, dontSendNotification);
             StringArray what;
-            if (k.plain) what.add ("plain MIDI, set so");
+            if (k.plain) what.add (k.more.isNotEmpty() ? "plain MIDI" : "plain MIDI, as set here");
             else         what.add (k.language);
             if (k.screen) what.add ("names on its screen");
             if (k.lights) what.add ("its keys lit");
@@ -1029,7 +1091,7 @@ Component* showControlMapEditor (Engine& engine, SurfaceHub& hub, ControlMapLibr
     const auto& prog = inputs[(size_t) input].programs[(size_t) program];
     if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return nullptr;
     return launch (new ControlMapEditor (engine, hub, library, input, program, slot, std::move (changed)),
-            "Knobs: " + prog.slots[(size_t) slot].plugin.name, 900, 470);
+            "Knobs: " + prog.slots[(size_t) slot].plugin.name, 900, 486);
 }
 
 Component* showControllers (Engine& engine, SurfaceHub& hub, int selectedInput, std::function<void()> changed)

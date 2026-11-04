@@ -66,6 +66,9 @@ public:
         virtual void programContentChanged (int inputIndex, int program) { juce::ignoreUnused (inputIndex, program); }
         /** A MIDI controller arrived while learn mode was armed. */
         virtual void learnReceived (int inputIndex, MappingDef::Source source, int number) { juce::ignoreUnused (inputIndex, source, number); }
+        /** armLearn() waited for a controller and the one moved is one of the keyboard's eight knobs,
+            which follow the instrument (SurfaceHub) and are never a mapping. */
+        virtual void learnedKeyboardKnob (int inputIndex, int knob) { juce::ignoreUnused (inputIndex, knob); }
         /** A controller was pressed while waiting to learn the tap controller. */
         virtual void tapTempoLearned (int cc) { juce::ignoreUnused (cc); }
         /** The user touched a parameter in a plugin GUI (effect == -1 for an instrument). */
@@ -242,6 +245,9 @@ public:
     /** The input's keyboard has been told to send SurfaceControls::autoKnobCC.. for
         its untaught knobs (MIDI-CI): those controllers turn the knobs. Not saved. */
     void setInputAutoKnobs (int inputIndex, bool);
+    bool isInputAutoKnobs (int inputIndex) const;
+    /** The keyboard knob (0..7) this controller on the input turns, taught or told, or -1. */
+    int keyboardKnobFor (int inputIndex, int cc) const;
     /** Hears the input's keyboard as MIDI 1.0 even when it speaks MIDI 2.0 (InputDef::midi1Only). */
     void setInputMidi1Only (int inputIndex, bool);
     /** Whether this MIDI input belongs to a keyboard speaking MIDI 2.0. */

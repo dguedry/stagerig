@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <functional>
 #include <map>
+#include <optional>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -134,7 +135,7 @@ public:
     struct Page { juce::String name; std::array<Knob, SurfaceView::numKnobs> knobs; };
     struct Layout
     {
-        const ControlMap* map = nullptr;   // the setup in use, or null for the maker's or the automatic pages
+        std::optional<ControlMap> map;     // the user's layout in use, a copy; none for the maker's or the automatic pages
         bool fromNks = false;              // the maker's pages, from its NKS presets
         std::vector<Page> pages;
     };
@@ -186,6 +187,7 @@ public:
         juce::String name;              // "Komplete Kontrol S88 MK1", "KORG Keystage"
         juce::String port;              // its MIDI port's name: what setPlainMidi() takes
         int input = -1;                 // the input it plays, or -1
+        std::vector<int> inputs;        // every input that plays from its port
         juce::String language;          // how StageRig talks to it: "standard MIDI-CI", "plain MIDI"
         bool screen = false, lights = false;
         bool knobsByThemselves = false; // its knobs work without teaching

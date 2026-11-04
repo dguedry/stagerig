@@ -49,6 +49,10 @@ public:
     void playInstrumentFromKeyboard (int slot);
     /** The controller setup of an instrument of the program being edited: its knobs, screen and lights. */
     void showKnobsFor (int slot);
+    /** The Knobs window for the instrument the input's knobs are on, in the edited program. */
+    void showKnobsForFocus();
+    /** "Surge XT, page Front panel (automatic)": what the keyboard's eight knobs turn in the edited program, or empty. */
+    juce::String keyboardKnobsSummary() const;
 
 private:
     // Engine::Listener
@@ -57,6 +61,7 @@ private:
     void programChanged (int inputIndex, int program) override;
     void programContentChanged (int inputIndex, int program) override;
     void learnReceived (int inputIndex, MappingDef::Source, int number) override;
+    void learnedKeyboardKnob (int inputIndex, int knob) override;
     void tapTempoLearned (int cc) override;
     void parameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex) override;
     void statusMessage (const juce::String&) override;
