@@ -69,7 +69,8 @@ namespace
 }
 
 /** STAGERIG_TEST_KONTROL_SECONDS=n: drives a real Komplete Kontrol MK1 for n
-    seconds instead of the tests -- the lights in moving colours, every knob,
+    seconds instead of the tests -- the lights in moving colours, a program
+    and eight knobs on its screens, every knob (moving its screen's bars),
     touch and button printed as it comes, and unplugging and plugging in again
     followed -- to try the driver on the keyboard itself. */
 static int probeKompleteKontrol (int seconds)
@@ -80,6 +81,16 @@ static int probeKompleteKontrol (int seconds)
     uint32 nextLook = 0, nextColours = 0;
     int phase = 0;
     std::vector<ControlSurface::Touch> touches;
+    // What its screens show: a program, and eight knobs to turn.
+    SurfaceView view;
+    view.program = 12; view.programName = "Grand Piano Ballad";
+    const char* names[] = { "Filter Cutoff", "Resonance", "Attack", "Release", "Reverb Mix", "Chorus", "Volume", "Pan" };
+    for (int k = 0; k < SurfaceView::numKnobs; ++k)
+    {
+        view.knobNames[(size_t) k] = names[k];
+        view.knobLevels[(size_t) k] = 0.5f;
+        view.knobValues[(size_t) k] = "50 %";
+    }
     while (Time::getMillisecondCounter() < end)
     {
         const auto now = Time::getMillisecondCounter();
@@ -102,9 +113,7 @@ static int probeKompleteKontrol (int seconds)
             {
                 // Every C red, the rest in a colour that changes every three seconds.
                 static const uint32 others[] = { 0x0000ff, 0x00ff00, 0xffff00, 0xff00ff };
-                SurfaceView v;
-                for (int n = 0; n < 128; ++n) v.keyColours[(size_t) n] = n % 12 == 0 ? 0xff0000 : others[phase % 4];
-                kk->show (v);
+                for (int n = 0; n < 128; ++n) view.keyColours[(size_t) n] = n % 12 == 0 ? 0xff0000 : others[phase % 4];
                 ++phase;
                 nextColours = now + 3000;
             }
@@ -112,10 +121,18 @@ static int probeKompleteKontrol (int seconds)
             kk->takeTouches (touches);
             for (const auto& t : touches)
             {
+                if (t.type == ControlSurface::Touch::knob)
+                {
+                    // Each knob moves its screen's bars and value.
+                    auto& level = view.knobLevels[(size_t) t.index];
+                    level = jlimit (0.0f, 1.0f, level + t.amount);
+                    view.knobValues[(size_t) t.index] = String (roundToInt (level * 100.0f)) + " %";
+                }
                 if (t.type == ControlSurface::Touch::knob)            std::printf ("kontrol: knob %d turned %+.3f\n", t.index + 1, t.amount);
                 else if (t.type == ControlSurface::Touch::knobTouch)  std::printf ("kontrol: knob %d %s\n", t.index + 1, t.down ? "touched" : "let go");
                 else                                                  std::printf ("kontrol: %s %s\n", SurfaceHub::describeControl (t.id).toRawUTF8(), t.down ? "pressed" : "released");
             }
+            kk->show (view);
             if (const auto p = kk->getProblem(); p != said && p.isNotEmpty()) { std::printf ("kontrol: PROBLEM %s\n", p.toRawUTF8()); said = p; }
         }
         std::fflush (stdout);
@@ -4232,6 +4249,32 @@ int main()
                 turn  = turn  || (t.type == ControlSurface::Touch::knob && t.index == 0 && std::abs (t.amount - 0.015f) < 1e-6f);
             }
             CHECK (press && touch && turn && found.size() == 3);
+
+            // Its nine screens, as the S88 showed them: a line across all nine a report.
+            CHECK (KompleteKontrolMk1::fitWords ("Filter Cutoff", 8) == "FltrCtff" && KompleteKontrolMk1::fitWords ("Reverb Mix", 8) == "Revrb Mx"
+                   && KompleteKontrolMk1::fitWords ("  Bass ", 8) == "Bass" && KompleteKontrolMk1::fitWords ("1234.5 Hz", 8) == "1234.5Hz");
+            SurfaceView sv;
+            sv.program = 7; sv.programName = "Grand Piano Ballad";
+            sv.knobNames[0] = "Filter Cutoff"; sv.knobValues[0] = String (CharPointer_UTF8 ("\xc3\xa9t\xc3\xa9")); sv.knobLevels[0] = 1.0f;
+            sv.knobLevels[1] = 0.0f;
+            const auto lines = KompleteKontrolMk1::screenReports (sv);
+            auto glyphAt = [&] (int line, int screen, int letter)
+            {
+                const auto* p = lines[(size_t) line].data() + 9 + screen * 16 + letter * 2;
+                return p[0] | (p[1] << 8);
+            };
+            const uint8 head[] = { 0xe0, 0x00, 0x00, 0x02, 0x00, 0x48, 0x00, 0x01, 0x00 };
+            CHECK (lines[0].size() == 249 && std::memcmp (lines[2].data(), head, sizeof (head)) == 0 && lines[0][3] == 0 && lines[1][3] == 1);
+            CHECK (glyphAt (1, 0, 0) == 0x10fb && glyphAt (2, 0, 0) == 0x523f);       // "Grand Pn" over "Ballad"
+            CHECK (glyphAt (1, 1, 0) == 0x18c3 && glyphAt (2, 1, 0) == 0x2860);       // "FltrCtff" over "ete": accents dropped
+            CHECK (lines[0][9 + 16] == 0x07 && lines[0][9 + 16 + 15] == 0x03);        // a full knob: every bar
+            CHECK (lines[0][9 + 32] == 0x04 && lines[0][9 + 34] == 0x00);             // at the bottom: only the frame
+            CHECK (lines[0][9] == 0x00 && glyphAt (1, 3, 0) == 0);                    // one page; no knob 3
+            sv.programName = "Program 007"; sv.pageCount = 3; sv.page = 2; sv.pageName = "Effects";
+            const auto paged = KompleteKontrolMk1::screenReports (sv);
+            CHECK (paged[2][9] == 0xff && paged[2][10] == 0x24 && paged[0][9] == 0x07);   // "007" below "Program"; the last page's bars
+            sv.programName = "Organ";
+            CHECK (KompleteKontrolMk1::screenReports (sv)[2][9] == 0xf3);        // a short name leaves room for "Effects"
         }
 
         engine.setInputControls (0, {});

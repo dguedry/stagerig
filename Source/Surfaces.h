@@ -332,10 +332,11 @@ private:
 
 //==============================================================================
 /** Native Instruments Komplete Kontrol S-series MK1 (S25/49/61/88), over its
-    USB HID interface (Linux): the light guide, and the eight knobs and the
-    buttons, which report as "kk:b<n>" to be taught. Its keys are ordinary
-    MIDI and need none of this. Worked out from the device, not from a
-    published protocol, so it is off until turned on. */
+    USB HID interface (Linux): the light guide, the nine small screens, and
+    the eight knobs and the buttons, which report as "kk:b<n>" to be taught.
+    Its keys are ordinary MIDI and need none of this. Worked out from the
+    device and from shaduzlabs' cabl library, not from a published
+    protocol, so it is off until turned on. */
 class KompleteKontrolMk1 : public ControlSurface
 {
 public:
@@ -354,12 +355,22 @@ public:
     juce::String getKeysPortName() const override   { return juce::String ("KOMPLETE KONTROL ") + device.model->name; }
     bool isConnected() const override               { return fd >= 0 && ! gone.load(); }
     bool hasLights() const override                 { return true; }
+    bool hasScreen() const override                 { return true; }
     void show (const SurfaceView&) override;
     void takeTouches (std::vector<Touch>& out) override;
     juce::String getProblem() const override;
 
     /** The light guide's report for these key colours. */
     static std::vector<juce::uint8> lightReport (const std::array<juce::uint32, 128>& keyColours, const Model&);
+
+    /** The nine small screens, one report a line across all nine: line 0
+        a row of nine bars, lines 1 and 2 eight letters each. The first
+        screen names the program, and the eight over the knobs each knob,
+        its value and, in bars, how far up it is. */
+    static constexpr int numScreens = 9, screenLetters = 8, numScreenLines = 3;
+    static std::array<std::vector<juce::uint8>, numScreenLines> screenReports (const SurfaceView&);
+    /** Words made to fit `letters` letters: inner vowels go first, then spaces. */
+    static juce::String fitWords (const juce::String&, int letters);
     /** What changed between two of the keyboard's control reports (report id 1, without the id). */
     static void compareReports (const juce::uint8* before, const juce::uint8* now, int size, std::vector<Touch>& out);
 
@@ -379,12 +390,14 @@ private:
 
     /* Writing waits for the keyboard (the kernel gives up after five
        seconds), so it is done on a thread of its own, never the message
-       thread: only the newest light report is kept, and one the keyboard
-       has not taken yet is replaced. */
+       thread: only the newest light report and screen lines are kept, and
+       one the keyboard has not taken yet is replaced. */
     std::mutex writeMutex;
     std::condition_variable writeWake;
     std::vector<juce::uint8> nextLights;
     bool lightsWaiting = false;
+    std::array<std::vector<juce::uint8>, numScreenLines> nextLines, shownLines;
+    std::array<bool, numScreenLines> lineWaiting {};
     std::array<juce::uint32, 128> lit {};
     bool litOnce = false;
 };

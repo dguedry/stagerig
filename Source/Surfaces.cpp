@@ -3,6 +3,7 @@
 #include "RemotePlugin.h"
 #include <cstring>
 #include <chrono>
+#include <limits>
 
 #if JUCE_LINUX || JUCE_BSD
  #include <cerrno>
@@ -1189,6 +1190,136 @@ void KompleteKontrolMk1::compareReports (const uint8* before, const uint8* now, 
     }
 }
 
+namespace
+{
+    /* The screens' letters: sixteen segments each, one bit a segment, for
+       ASCII 0..127. From shaduzlabs' cabl library (FONT_16-seg.h, MIT
+       licence, Copyright (C) 2015 Vincenzo Pacella). */
+    const uint16 mk1Font[128] = {
+        0x0000, 0x0578, 0x0578, 0x830f, 0x0503, 0x5a87, 0x0c7c, 0x1878, 0x1887, 0x4860, 0x0a81, 0x4c66,
+        0x5d03, 0x4a62, 0x5a7e, 0xff00, 0x21c0, 0x840c, 0x2466, 0x420c, 0x189f, 0xc333, 0xf878, 0x2466,
+        0xe000, 0x0700, 0x2900, 0x9400, 0x0060, 0x2466, 0xe030, 0x0703, 0x0000, 0x0004, 0x0204, 0x5ac0,
+        0x5abb, 0x7e99, 0x8b79, 0x0004, 0x8400, 0x2100, 0xff00, 0x5a00, 0x2000, 0x1800, 0x0000, 0x2400,
+        0x24ff, 0x040c, 0x1877, 0x183f, 0x188c, 0x18bb, 0x18fb, 0x000f, 0x18ff, 0x18bf, 0x0021, 0x2001,
+        0x8103, 0x1830, 0x2403, 0x5007, 0x487f, 0x18cf, 0x523f, 0x00f3, 0x423f, 0x18f3, 0x18c3, 0x10fb,
+        0x18cc, 0x4200, 0x203c, 0x8cc0, 0x00f0, 0x05cc, 0x81cc, 0x00ff, 0x18c7, 0x80ff, 0x98c7, 0x18bb,
+        0x4203, 0x00fc, 0x24c0, 0xa0cc, 0xa500, 0x5884, 0x2433, 0x00e1, 0x8100, 0x001e, 0x0180, 0x0030,
+        0x0100, 0xc860, 0x48e0, 0x0860, 0x4a60, 0x2860, 0x5a02, 0x4aa1, 0x48c0, 0x4000, 0x4220, 0xc600,
+        0x4200, 0x5848, 0x4840, 0x4860, 0x0ac1, 0x4a81, 0x0840, 0x9010, 0x08e0, 0x4060, 0x2040, 0xa048,
+        0x6600, 0x2500, 0x2820, 0x4a12, 0x4200, 0x5221, 0x0580, 0x540c,
+    };
+
+    uint16 mk1Glyph (juce_wchar c)
+    {
+        if (c >= 32 && c < 128) return mk1Font[c];
+        // Accented letters as their plain ones; anything else as a question mark.
+        static const char32_t accented[] = U"\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00c7\u00e7\u00c8\u00c9\u00ca\u00cb"
+                                             U"\u00e8\u00e9\u00ea\u00eb\u00cc\u00cd\u00ce\u00cf\u00ec\u00ed\u00ee\u00ef\u00d1\u00f1\u00d2\u00d3\u00d4\u00d5"
+                                             U"\u00d6\u00d8\u00f2\u00f3\u00f4\u00f5\u00f6\u00f8\u00d9\u00da\u00db\u00dc\u00f9\u00fa\u00fb\u00fc\u00dd\u00fd\u00ff\u00df";
+        static const char* plain = "AAAAAAaaaaaaCcEEEEeeeeIIIIiiiiNnOOOOOOooooooUUUUuuuuYyys";
+        for (int i = 0; accented[i] != 0; ++i)
+            if ((char32_t) c == accented[i]) return mk1Font[(uint8) plain[i]];
+        return mk1Font[(uint8) '?'];
+    }
+
+    void putMk1Text (uint8* screen, const String& text)
+    {
+        for (int i = 0; i < jmin (KompleteKontrolMk1::screenLetters, text.length()); ++i)
+        {
+            const auto g = mk1Glyph (text[i]);
+            screen[i * 2] = (uint8) (g & 0xff);
+            screen[i * 2 + 1] = (uint8) (g >> 8);
+        }
+    }
+
+    /** Nine bars for 0..1: the first sits in a frame that is always shown. */
+    void putMk1Bars (uint8* screen, float level)
+    {
+        const int bars = roundToInt (jlimit (0.0f, 1.0f, level) * 9.0f);
+        screen[0] = (uint8) (0x04 | (bars > 0 ? 0x03 : 0x00));
+        for (int k = 1; k < 8; ++k)
+            screen[k * 2] = bars > k ? 0x03 : 0x00;
+        screen[15] = bars > 8 ? 0x03 : 0x00;
+    }
+
+    /** A name over two lines of eight: whole words to each where they fit,
+        broken between the words where least has to go. */
+    void wrapMk1Name (const String& name, String& first, String& second)
+    {
+        const int n = KompleteKontrolMk1::screenLetters;
+        StringArray words; words.addTokens (name.trim(), " ", {});
+        words.removeEmptyStrings();
+        const auto joined = words.joinIntoString (" ");
+        if (joined.length() <= n) { first = joined; second = {}; return; }
+        if (words.size() < 2) { first = joined.substring (0, n); second = KompleteKontrolMk1::fitWords (joined.substring (n), n); return; }
+        int best = 1, bestLost = std::numeric_limits<int>::max();
+        for (int k = 1; k < words.size(); ++k)
+        {
+            const int a = words.joinIntoString (" ", 0, k).length(), b = words.joinIntoString (" ", k).length();
+            const int lost = jmax (0, a - n) + jmax (0, b - n);
+            if (lost < bestLost) { best = k; bestLost = lost; }
+        }
+        first = KompleteKontrolMk1::fitWords (words.joinIntoString (" ", 0, best), n);
+        second = KompleteKontrolMk1::fitWords (words.joinIntoString (" ", best), n);
+    }
+}
+
+String KompleteKontrolMk1::fitWords (const String& text, int letters)
+{
+    StringArray words; words.addTokens (text.trim(), " ", {});
+    words.removeEmptyStrings();
+    String s = words.joinIntoString (" ");
+    auto isVowel = [] (juce_wchar c) { return String ("aeiou").containsChar (c); };
+    // "Filter Cutoff" -> "Fltr Ctff" -> "FltrCtff": lower-case vowels inside words, from the end.
+    for (int i = s.length() - 1; i > 0 && s.length() > letters; --i)
+        if (isVowel (s[i]) && s[i - 1] != ' ')
+            s = s.substring (0, i) + s.substring (i + 1);
+    for (int i = s.length() - 1; i > 0 && s.length() > letters; --i)
+        if (s[i] == ' ')
+            s = s.substring (0, i) + s.substring (i + 1);
+    return s.substring (0, letters);
+}
+
+std::array<std::vector<uint8>, KompleteKontrolMk1::numScreenLines> KompleteKontrolMk1::screenReports (const SurfaceView& v)
+{
+    // Report 0xe0: where (x, y, width, height, 16 bits each), then 240 bytes:
+    // one line across all nine screens, 16 bytes a screen.
+    std::array<std::vector<uint8>, numScreenLines> lines;
+    for (int y = 0; y < numScreenLines; ++y)
+    {
+        auto& r = lines[(size_t) y];
+        r.assign (1 + 8 + 240, 0);
+        r[0] = 0xe0;
+        r[3] = (uint8) y;
+        r[5] = numScreens * screenLetters;
+        r[7] = 1;
+    }
+    auto screen = [&] (int line, int index) { return lines[(size_t) line].data() + 9 + index * 16; };
+
+    // The first screen: the program's name, and the page when there is room.
+    if (v.program >= 0)
+    {
+        String first, second;
+        wrapMk1Name (v.programName, first, second);
+        if (second.isEmpty() && v.pageCount > 1)
+            second = fitWords (v.pageName.isNotEmpty() ? v.pageName : "Page " + String (v.page + 1), screenLetters);
+        putMk1Text (screen (1, 0), first);
+        putMk1Text (screen (2, 0), second);
+        if (v.pageCount > 1)
+            putMk1Bars (screen (0, 0), (float) (v.page + 1) / (float) v.pageCount);
+    }
+    // The eight over the knobs.
+    for (int k = 0; k < SurfaceView::numKnobs; ++k)
+    {
+        if (v.knobNames[(size_t) k].isEmpty() && v.knobLevels[(size_t) k] < 0.0f) continue;
+        putMk1Text (screen (1, k + 1), fitWords (v.knobNames[(size_t) k], screenLetters));
+        putMk1Text (screen (2, k + 1), fitWords (v.knobValues[(size_t) k], screenLetters));
+        if (v.knobLevels[(size_t) k] >= 0.0f)
+            putMk1Bars (screen (0, k + 1), v.knobLevels[(size_t) k]);
+    }
+    return lines;
+}
+
 #if JUCE_LINUX || JUCE_BSD
 std::vector<KompleteKontrolMk1::Device> KompleteKontrolMk1::find()
 {
@@ -1225,9 +1356,15 @@ KompleteKontrolMk1::~KompleteKontrolMk1()
     {
         const std::lock_guard<std::mutex> l (writeMutex);
         stopping = true;
-        // The keyboard's lights go dark as StageRig lets go, if it is still answering.
+        // The keyboard's lights and screens go dark as StageRig lets go, if it is still answering.
         nextLights = lightReport ({}, *device.model);
         lightsWaiting = litOnce;
+        const auto blank = screenReports ({});
+        for (size_t y = 0; y < blank.size(); ++y)
+        {
+            lineWaiting[y] = litOnce && blank[y] != shownLines[y];
+            nextLines[y] = blank[y];
+        }
     }
     writeWake.notify_all();
     if (writer.joinable()) writer.join();
@@ -1244,7 +1381,7 @@ String KompleteKontrolMk1::getProblem() const
 
 void KompleteKontrolMk1::write()
 {
-    // Hand the light guide to the computer, then send each newest report.
+    // Hand the light guide and screens to the computer, then send each newest report.
     const uint8 takeOver[] = { 0xa0, 0x00, 0x00 };
     auto put = [this] (const uint8* data, size_t size)
     {
@@ -1266,11 +1403,21 @@ void KompleteKontrolMk1::write()
         bool last = false;
         {
             std::unique_lock<std::mutex> l (writeMutex);
-            writeWake.wait (l, [this] { return lightsWaiting || stopping.load(); });
-            if (! lightsWaiting) return;
-            report.swap (nextLights);
-            lightsWaiting = false;
-            last = stopping.load();
+            auto anyLine = [this] { return std::find (lineWaiting.begin(), lineWaiting.end(), true) != lineWaiting.end(); };
+            writeWake.wait (l, [&] { return lightsWaiting || anyLine() || stopping.load(); });
+            if (lightsWaiting)
+            {
+                report.swap (nextLights);
+                lightsWaiting = false;
+            }
+            else if (anyLine())
+            {
+                const auto y = (size_t) std::distance (lineWaiting.begin(), std::find (lineWaiting.begin(), lineWaiting.end(), true));
+                report.swap (nextLines[y]);
+                lineWaiting[y] = false;
+            }
+            else return;
+            last = stopping.load() && ! lightsWaiting && ! anyLine();
         }
         if (! put (report.data(), report.size()) || last) return;
     }
@@ -1312,13 +1459,27 @@ void KompleteKontrolMk1::read()
 
 void KompleteKontrolMk1::show (const SurfaceView& v)
 {
-    if (fd < 0 || stalled.load() || (litOnce && v.keyColours == lit)) return;
+    if (fd < 0 || stalled.load()) return;
+    auto lines = screenReports (v);
+    const bool newLights = ! litOnce || v.keyColours != lit;
+    bool any = newLights;
     {
         const std::lock_guard<std::mutex> l (writeMutex);
-        nextLights = lightReport (v.keyColours, *device.model);
-        lightsWaiting = true;
+        if (newLights)
+        {
+            nextLights = lightReport (v.keyColours, *device.model);
+            lightsWaiting = true;
+        }
+        for (size_t y = 0; y < lines.size(); ++y)
+        {
+            if (lines[y] == shownLines[y]) continue;
+            shownLines[y] = lines[y];
+            nextLines[y] = std::move (lines[y]);
+            lineWaiting[y] = true;
+            any = true;
+        }
     }
-    writeWake.notify_one();
+    if (any) writeWake.notify_one();
     lit = v.keyColours;
     litOnce = true;
 }

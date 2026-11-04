@@ -100,6 +100,13 @@ Copyright: none
 License: public-domain
  The pslextensions header states that it is placed in the public domain.
 
+Files: Source/Surfaces.cpp
+Copyright: 2026 Donnie Guedry <dguedry@gmail.com>
+ 2015 Vincenzo Pacella
+License: GPL-3+ and Expat
+Comment: The Komplete Kontrol MK1 screens' 16-segment font (mk1Font) is
+ from shaduzlabs' cabl library, under the Expat (MIT) licence.
+
 Files: external/clap/*
 Copyright: 2021-2024 Alexandre Bique and the CLAP contributors
 License: Expat

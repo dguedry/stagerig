@@ -64,7 +64,7 @@ other plugin.
 - **Sections carry a cue sheet**: entering the chorus can change a keyboard's program, mute a part, bypass an effect or cue the lights. A song played by hand has **scenes** instead, stepped from a footswitch or the tablet.
 - **Built-in MIDI effects**: an arpeggiator, a chord, a scale, a run and a big band (each key plays the chord on that step of the key, voiced as you set it), following the song's key; a humanizer; and a phrase player that plays a short MIDI file from each key. Nothing to install.
 - **A performance view**: each keyboard's program in large type, with a front panel of knobs under it -- level, pan, and the plugin's cutoff, resonance, envelope and effects, picked by name or chosen by hand. **Perform** gives it the whole window; the same knobs are on the tablet.
-- **The keyboard's knobs follow what you play**: eight knobs turn the instrument in play, in pages, with buttons for the next page, instrument and program, taught by turning and pressing them. NKS-ready plugins (SWAM, Super 8, BBC Symphony Orchestra and the like) bring their makers' knob pages, read from their NKS presets, on any keyboard. **Controller setups** name a plugin's knob pages and colour its keys (keyswitches, a kit's pads) and are files you can share. A Novation Launchkey MK4's screen shows the program and the knobs; a Komplete Kontrol S MK2/MK3, A or M names the programs on its screen and chooses them with its track buttons; a Komplete Kontrol MK1's light guide shows each instrument's keys (experimental, Linux).
+- **The keyboard's knobs follow what you play**: eight knobs turn the instrument in play, in pages, with buttons for the next page, instrument and program, taught by turning and pressing them. NKS-ready plugins (SWAM, Super 8, BBC Symphony Orchestra and the like) bring their makers' knob pages, read from their NKS presets, on any keyboard. **Controller setups** name a plugin's knob pages and colour its keys (keyswitches, a kit's pads) and are files you can share. A Novation Launchkey MK4's screen shows the program and the knobs; a Komplete Kontrol S MK2/MK3, A or M names the programs on its screen and chooses them with its track buttons; a Komplete Kontrol MK1's light guide shows each instrument's keys and its small screens the program and knobs (experimental, Linux).
 - **A pedal for a layer or an effect**: mappings can switch an instrument or an effect, or be its level; one knob can move several things.
 - **Backing tracks follow the song's tempo and key**: find the tempo in the audio, and the files stretch and transpose with the song.
 - **Record the gig**: every output to WAV as it left for the desk, and the keyboards to a MIDI file, in a dated folder beside the setup.
@@ -450,5 +450,8 @@ JUCE's. The CLAP headers are MIT-licensed. [Ableton Link](https://github.com/Abl
 is included as a submodule under its GPLv2-or-later licence (it is also
 offered commercially by Ableton), together with the standalone Asio library it
 uses, under the Boost Software License.
+The Komplete Kontrol MK1 screens' letters come from the 16-segment font in
+[cabl](https://github.com/shaduzlabs/cabl) (Copyright (C) 2015 Vincenzo Pacella,
+MIT licence).
 
 Packaging for distributions: see [docs/PACKAGING.md](https://github.com/dguedry/stagerig/blob/main/docs/PACKAGING.md).
