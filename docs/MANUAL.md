@@ -138,24 +138,35 @@ whichever section answers what you typed.
 
 | Area | What it does |
 |---|---|
-| **Toolbar** (top) | **New**, **Open...**, **Save**, **Save As...**, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options**, the tempo and **Tap**, **Tail** with its seconds box, the **Songs**, **Perform**, **Stage** and **Keyboard** toggles, **PANIC**. |
+| **Toolbar** (top) | **New**, **Open...**, **Save**, **Save As...**, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options**, the tempo and **Tap**, **Tail** with its seconds box, the **Songs**, **Perform**, **Stage** and **Keys** toggles, **PANIC**. |
 | **Songs** (far left, on by default) | Every song on top, the running order of the chosen set list below, and the backing track's **Play**. |
 | **Inputs** (left) | Your keyboards, audio inputs, and the Backing track. Select one to edit its programs; its name, device, channel and Program Change settings are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, the group box, **Copy**, **Paste** and **Clear** are below. |
 | **Instruments** (right, top) | The instruments of the current program, each with its controls, MIDI chain and effects, then **PROGRAM EFFECTS**. |
 | **MIDI mappings** (right, bottom) | Knobs and pedals mapped to plugin parameters in this program, with Learn and Suggest. |
-| **Keyboard** (bottom, optional) | An on-screen keyboard for testing without a controller. |
+| **Keys** (bottom, optional) | An on-screen keyboard for trying sounds without a controller. |
 | **Status bar** | Current file, CPU, sample rate, buffer size and latency, and warnings such as *N dropouts* or *clock held by another app*. |
 
 **New** starts an empty setup, and asks first when the current one has unsaved
 changes. **Open...** opens a setup file.
 
-**Options** holds the things set once: **Preload all programs (instant
-changes; uses more memory)**, **Let held notes ring through a program
-change**, **Show songs and set lists**, **Outputs & master effects...**,
-**Rescan MIDI devices**, **Print the program list (for the stand)...** and
-**General MIDI sounds (soundfont file)...**. Each is explained where it
-matters below.
+**Options** holds the things set once, in four groups. *Keyboards and
+pedals*: **Your keyboards...** (what is connected and how StageRig talks to
+each), **Pedals and buttons...** (every pedal and button job in one list)
+and **Rescan MIDI devices**. *Playing*: **Preload all programs** and **Let
+held notes ring through a program change**. *Sound and sync*: **Outputs &
+master effects...**, **General MIDI sounds...**, **Send MIDI clock to** and
+**Ableton Link**. *The show*: **Pre-show check...**, **Show songs and set
+lists**, **Print the program list...** and **Record the gig**. Each is
+explained where it matters below.
+
+Where a control is set, in one line: a pedal or button that does a job of
+the rig -- the set list, the track, the tempo, the loop, an output's volume,
+a keyboard's programs and knob pages -- is in **Pedals and buttons**. A
+pedal, wheel or slider that moves one plugin parameter in one program is a
+**MIDI mapping**, in that program. What the keyboard's eight knobs turn on
+an instrument is its **Knobs** button. Which keyboards are connected, and
+their knobs on one StageRig does not know, is **Your keyboards**.
 
 **Tail** is how many seconds the previous program keeps sounding after a
 program change, so releases and reverbs fade instead of being cut. Set it in
@@ -635,17 +646,26 @@ report** puts what StageRig knows about your keyboards and MIDI ports, and
 what they have said to it lately, on the clipboard, to paste into a message
 when something does not work.
 
-**Teaching a keyboard.** For a keyboard whose knobs do not work by
+**Teaching a keyboard's knobs.** For a keyboard whose knobs do not work by
 themselves, the lower part of **Your keyboards** chooses an input and lists
-its eight knobs and seven buttons (**Next program**, **Previous program**,
-**Next knob page**, **Previous knob page**, **Next instrument**, **Next 8
-programs**, **Previous 8 programs**). Press **Learn** and turn the knob, or
-press the button. Buttons can be taught on any keyboard. Tick **The knobs
-are endless** for knobs that turn without stopping and send steps (around
-64) rather than a position. What you teach is kept with the input, in the
-setup file. A taught knob or button no longer reaches the instruments as a
-controller, and is never a MIDI mapping: **Learn MIDI** in the mappings
-says so if you turn one. **Next program** passes over empty programs.
+its eight knobs. Press **Learn** and turn the knob. Tick **The knobs are
+endless** for knobs that turn without stopping and send steps (around 64)
+rather than a position. What you teach is kept with the input, in the setup
+file. A taught knob no longer reaches the instruments as a controller, and
+is never a MIDI mapping: **Learn MIDI** in the mappings says so if you turn
+one.
+
+**Pedals and buttons.** **Options ▸ Pedals and buttons...** (also
+**Pedals...** in the songs panel) is every pedal and button job in one
+list, each with **Learn** and **Forget**: the set list's **Next song** and
+**Previous song**; the backing track's **Start / stop** and **Next section,
+next scene, or release a vamp**; **Tap tempo**; the loop's **Record, play,
+stop** and **Clear**; each output's volume; and, for each keyboard, **Next
+program**, **Previous program**, **Next knob page**, **Previous knob page**,
+**Next instrument**, **Next 8 programs** and **Previous 8 programs**. The
+jobs of the rig work from a pedal on any keyboard, in every program; a
+keyboard's own jobs are per keyboard, and on a keyboard StageRig talks to
+can be one of its own buttons. **Next program** passes over empty programs.
 **Next 8 programs** goes to the next eight (8–15 after 0–7) that have
 anything in them, to the same place among them if that one has something,
 else to the first that does: for a long set list.
@@ -819,7 +839,7 @@ Loading a song is a program change on every input it names, so **Tail** and
 held notes apply as they do when you change a program by hand: nothing is cut
 off mid-note. Changing a program on a keyboard does not change the song.
 
-Two footswitches step through the set list. **Footswitches...** learns them:
+Two footswitches step through the set list. **Pedals...** learns them:
 under **Next song** and **Previous song**, press **Learn: press the
 pedal...**, then the pedal, rather than looking up what it sends. **Stop using
 CC n** unlearns one. They work whatever is loaded and whatever input they
@@ -1109,14 +1129,14 @@ short fade:
 - **Play** at the top of the songs panel (it reads **Stop** while playing),
   which also shows where the track is (*0:42 / 3:51*);
 - the Play bar at the top of the tablet's Set list tab;
-- a footswitch: **Footswitches... ▸ Backing track: start / stop**, then press
+- a footswitch: **Pedals... ▸ Backing track: start / stop**, then press
   the pedal. It works on any keyboard and channel, like the song pedals.
 
 **Next** beside Play does the job of one pedal: during a vamp it lets the
 vamp go on (it reads **End vamp** then); otherwise it queues the next section.
 The tablet shows the sections as buttons under its Play bar -- tap one to go
 there when the current section ends -- with **End vamp ▸** during a vamp, and
-a footswitch can do the same: **Footswitches... ▸ Next section of the track,
+a footswitch can do the same: **Pedals... ▸ Next section of the track,
 or next scene / release vamp**. The panel shows the section you are in and
 the one queued (*Verse 1:12 / 3:40 > Chorus*). For a song played by hand the
 same button reads **Next scene**, as does the tablet's big button, and the
@@ -1389,7 +1409,7 @@ Right-click **Tap** to set a pedal or button that taps it. Choose **Learn:
 press the pedal or button...** and press it: that is easier than looking up
 what your keyboard sends, and it works even if something is already assigned.
 **Type a controller number...** is still there if you prefer it, and
-**Footswitches... ▸ Tap tempo** in the songs panel learns the same pedal.
+**Pedals... ▸ Tap tempo** in the songs panel learns the same pedal.
 
 A footswitch is the usual choice; most send controller 64 or controller 80.
 That controller works on any input and in any program, so it taps the tempo
@@ -1409,13 +1429,13 @@ it may simply never ask the host for the tempo; set it in the plugin.
 
 ### Looping a passage
 
-**Loop** beside Footswitches... loops what you play on the selected keyboard: press it
+**Loop** beside Pedals... loops what you play on the selected keyboard: press it
 and play; press it again and the passage goes round on its own, trimmed to
 whole bars at the rig's tempo (the nearest; at least one), while you play
 over it. Press again to stop it, again to start it from the top; right-click
 for **Clear**. The button reads *Rec...*, then *2 bars*, then *Loop >*.
 
-A footswitch is the way to do it with your hands on the keys: **Footswitches
+A footswitch is the way to do it with your hands on the keys: **Pedals...
 ▸ Loop: record / play / stop**, and a second pedal for **Loop: clear**. The
 pedal loops the keyboard it is pressed on. Press it on the *one*: the loop
 starts the moment you press, and ends on the nearest bar line to your second
@@ -1479,7 +1499,7 @@ the tablet.
 
 ## The on-screen keyboard
 
-**Keyboard** in the toolbar opens an on-screen keyboard at the bottom of the
+**Keys** in the toolbar opens an on-screen keyboard at the bottom of the
 window with velocity, sustain, mod wheel, pitch bend and a free controller
 number and value. It plays into the selected input on that input's channel,
 through exactly the same path as a real keyboard, so it works for auditioning

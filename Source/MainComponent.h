@@ -109,7 +109,7 @@ private:
                      audioBtn { "Audio..." }, pluginsBtn { "Plugins..." },
                      panicBtn { "PANIC" };
     juce::TextButton optionsBtn { "Options" };
-    juce::TextButton keyboardBtn { "Keyboard" };
+    juce::TextButton keyboardBtn { "Keys" };
     juce::TextButton stageBtn { "Stage" };
     juce::TextButton performBtn { "Perform" };
     juce::String lastLivePosition;                        // what the settings last heard of where the show is
@@ -147,6 +147,7 @@ private:
     std::unique_ptr<SurfaceHub> surfaceHub;
     std::vector<juce::Component::SafePointer<juce::Component>> controllerWindows;   // closed before the hub goes
     void showControllers();
+    void showPedals();
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;
 

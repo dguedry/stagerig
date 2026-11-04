@@ -84,7 +84,7 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
 
     addAndMakeVisible (loopBtn);
     loopBtn.setTooltip ("Loop a passage on the selected keyboard: press to record, press again to play it round (whole bars at the rig's tempo), "
-                        "press to stop, press to play again. Right-click clears. A footswitch can do the same (Footswitches...).");
+                        "press to stop, press to play again. Right-click clears. A footswitch can do the same (Pedals...).");
     loopBtn.onClick = [this]
     {
         const int input = selectedInputProvider ? selectedInputProvider() : 0;
@@ -93,11 +93,11 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     };
     addAndMakeVisible (playBtn);
     playBtn.setTooltip ("Start or stop the backing track of the song in play, after its count-in. "
-                        "A footswitch can do the same (Footswitches...).");
+                        "A footswitch can do the same (Pedals...).");
     playBtn.onClick = [this] { engine.toggleTrack(); refreshTransport(); };
     addAndMakeVisible (nextBtn);
     nextBtn.setTooltip ("Releases a vamp at the end of its pass, or queues the next section of the backing track; "
-                        "for a song played by hand, its next scene. A footswitch can do the same (Footswitches...).");
+                        "for a song played by hand, its next scene. A footswitch can do the same (Pedals...).");
     nextBtn.onClick = [this] { engine.advanceTrack(); refreshTransport(); };
     addAndMakeVisible (trackLabel);
     trackLabel.setFont (FontOptions (12.0f));
@@ -130,8 +130,8 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     setBtn.onClick = [this] { showSetMenu(); };
 
     addAndMakeVisible (footBtn);
-    footBtn.setTooltip ("Pedals that step through the set list and start, stop or advance the backing track");
-    footBtn.onClick = [this] { showFootswitchMenu(); };
+    footBtn.setTooltip ("Every pedal and button job in one list: the set list, the backing track, the tempo, the loop, the outputs' volume, each keyboard's programs and pages");
+    footBtn.onClick = [this] { if (onShowPedals) onShowPedals(); else showFootswitchMenu(); };
 
     /* The set can move without anyone touching this panel -- a footswitch, the
        tablet, a program change. Polling rather than listening keeps this panel

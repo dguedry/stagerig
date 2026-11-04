@@ -2696,21 +2696,22 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
        fit a 1280-wide window: the tempo readout was squashed to nothing and
        the preload checkbox hidden, on exactly the laptop this runs on. */
     addAndMakeVisible (optionsBtn);
-    optionsBtn.setTooltip ("Outputs and master effects, the songs panel, preloading, note hold, MIDI rescan, a printable program list, General MIDI sounds, MIDI clock to hardware");
+    optionsBtn.setTooltip ("Your keyboards and pedals; how programs change; outputs, General MIDI sounds, MIDI clock and Link; the pre-show check, the program list and recording");
     optionsBtn.onClick = [this]
     {
         const auto& setup = engine.getSetup();
         PopupMenu m;
-        m.addItem (11, "Pre-show check...  (everything that can go wrong, before the first song)");
-        m.addSeparator();
-        m.addItem (12, "Your keyboards...");
-        m.addItem (1, "Preload all programs (instant changes; uses more memory)", true, setup.preloadAllPrograms);
-        m.addItem (2, "Let held notes ring through a program change", true, setup.holdAcrossChange);
-        m.addItem (6, "Show songs and set lists", true, songsPanel != nullptr && songsPanel->isVisible());
-        m.addSeparator();
-        m.addItem (5, "Outputs & master effects...");
+        /* In sections, each a question a player asks: what is plugged in,
+           how it plays, where the sound goes, and the show itself. */
+        m.addSectionHeader ("Keyboards and pedals");
+        m.addItem (12, "Your keyboards...  (what is connected, and how StageRig talks to each)");
+        m.addItem (13, "Pedals and buttons...  (every pedal and button job, in one list)");
         m.addItem (3, "Rescan MIDI devices");
-        m.addItem (4, "Print the program list (for the stand)...");
+        m.addSectionHeader ("Playing");
+        m.addItem (1, "Preload all programs  (instant changes; uses more memory)", true, setup.preloadAllPrograms);
+        m.addItem (2, "Let held notes ring through a program change", true, setup.holdAcrossChange);
+        m.addSectionHeader ("Sound and sync");
+        m.addItem (5, "Outputs & master effects...");
         {
             const auto sf = GmSynth::findSoundfont (engine.getGmSoundfont());
             m.addItem (7, "General MIDI sounds (soundfont file)..." + (sf != File() ? "  (" + sf.getFileName() + ")" : String ("  (none found)")));
@@ -2733,7 +2734,10 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
                        true, engine.isLinkEnabled());
             m.addItem (10, "Link also starts and stops the others", engine.isLinkEnabled(), engine.isLinkStartStopSync());
         }
-        m.addSeparator();
+        m.addSectionHeader ("The show");
+        m.addItem (11, "Pre-show check...  (everything that can go wrong, before the first song)");
+        m.addItem (6, "Show songs and set lists", true, songsPanel != nullptr && songsPanel->isVisible());
+        m.addItem (4, "Print the program list (for the stand)...");
         m.addItem (8, engine.isRecording() ? "Stop recording the gig  (" + formatElapsed (engine.getRecordingSeconds()) + ")"
                                             : "Record the gig  (every output to WAV, the keyboards to MIDI)");
         m.showMenuAsync (PopupMenu::Options().withTargetComponent (optionsBtn), [this] (int r)
@@ -2772,6 +2776,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
                 case 7: chooseGmSoundfont(); break;
                 case 11: showShowCheck(); break;
                 case 12: showControllers(); break;
+                case 13: showPedals(); break;
                 default: break;
             }
         });
@@ -2782,7 +2787,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     addAndMakeVisible (keyboardBtn);
     keyboardBtn.setClickingTogglesState (true);
     keyboardBtn.setColour (TextButton::buttonOnColourId, accentDim);
-    keyboardBtn.setTooltip ("Show an on-screen keyboard and controllers that play into the selected input");
+    keyboardBtn.setTooltip ("Show an on-screen keyboard and controllers that play into the selected input, for trying sounds without a keyboard");
     keyboardBtn.onClick = [this]
     {
         const bool show = keyboardBtn.getToggleState();
@@ -2831,6 +2836,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
        panel you want while building a set and while playing one, and in the way
        the rest of the time. */
     songsPanel = std::make_unique<SongsPanel> (engine);
+    songsPanel->onShowPedals = [this] { showPedals(); };
     songsPanel->selectedInputProvider = [this] { return getSelectedInput(); };
 
     // Pane dividers: drag to give a pane more room; remembered across runs.
@@ -3051,6 +3057,13 @@ void MainComponent::showKnobsFor (int slot)
     if (surfaceHub == nullptr) return;
     controllerWindows.erase (std::remove (controllerWindows.begin(), controllerWindows.end(), nullptr), controllerWindows.end());
     controllerWindows.push_back (showControlMapEditor (engine, *surfaceHub, *controlMaps, selectedInput, getEditedProgram(), slot, [this] { markDirty(); }));
+}
+
+void MainComponent::showPedals()
+{
+    if (surfaceHub == nullptr) return;
+    controllerWindows.erase (std::remove (controllerWindows.begin(), controllerWindows.end(), nullptr), controllerWindows.end());
+    controllerWindows.push_back (perf::showPedals (engine, *surfaceHub, [this] { markDirty(); }));
 }
 
 void MainComponent::showControllers()
@@ -3938,6 +3951,7 @@ void MainComponent::showTempoMenu()
     m.addSectionHeader ("Tap from a MIDI controller");
     // Pressing the pedal beats looking up what it sends, so that comes first.
     m.addItem (4, "Learn: press the pedal or button...");
+    m.addItem (5, "All pedals and buttons...");
     m.addItem (2, tapCC > 0 ? "Type a controller number (now CC " + String (tapCC) + ")..."
                             : "Type a controller number...");
     if (tapCC > 0)
@@ -3972,6 +3986,7 @@ void MainComponent::showTempoMenu()
             showStatus ("No controller taps the tempo now.");
             markDirty();
         }
+        else if (choice == 5) showPedals();
         else if (choice == 4)
         {
             engine.armTapTempoLearn (true);

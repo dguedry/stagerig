@@ -441,6 +441,7 @@ public:
     int  getSectionCC() const                       { return setup.sectionCC; }
     void setSectionCC (int cc);
     void armSectionLearn()                          { sectionLearnArmed.store (true); }
+    bool isSectionLearnArmed() const                { return sectionLearnArmed.load(); }
 
     /** Looping a passage on a keyboard: record what you play, and it goes
         round in whole bars at the rig's tempo while you play over it. One
@@ -458,6 +459,7 @@ public:
     void setLooperCC (int cc);
     void setLooperClearCC (int cc);
     void armLooperLearn (bool clearPedal)           { (clearPedal ? looperClearLearnArmed : looperLearnArmed).store (true); }
+    bool isLooperLearnArmed (bool clearPedal) const { return (clearPedal ? looperClearLearnArmed : looperLearnArmed).load(); }
     /** The backing-track input: where the songs' MIDI files play. -1 while none. */
     int  getTrackInput() const                      { return setup.trackInput(); }
     /** Makes the backing-track input if there is none, and returns its index. */

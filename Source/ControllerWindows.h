@@ -12,6 +12,10 @@ namespace perf
     file or the instrument's choice changed. Returns the window, which holds
     on to the hub and the library: it must be closed before they go. */
 juce::Component* showControlMapEditor (Engine&, SurfaceHub&, ControlMapLibrary&, int input, int program, int slot, std::function<void()> changed);
+/** Every pedal and button job of the rig in one list -- the set list, the backing
+    track, the tempo, the loop, each output's volume, and each keyboard's program and
+    page buttons -- each with Learn and Forget. */
+juce::Component* showPedals (Engine&, SurfaceHub&, std::function<void()> changed);
 
 /** The keyboards StageRig talks to, and what each input's knobs and
     buttons do: taught by turning or pressing them. Returns the window, as above. */

@@ -849,7 +849,7 @@ public:
             Timer::callAfterDelay (1500, [sp = SafePointer<ControllersView> (this)] { if (sp != nullptr) sp->reportBtn.setButtonText ("Copy report"); });
         };
 
-        addAndMakeVisible (caption (inputCap, "TEACH KNOBS AND BUTTONS ON"));
+        addAndMakeVisible (caption (inputCap, "TEACH THE KNOBS OF"));
         addAndMakeVisible (inputBox);
         const auto& inputs = engine.getSetup().inputs;
         for (int i = 0; i < (int) inputs.size(); ++i)
@@ -860,14 +860,14 @@ public:
 
         addAndMakeVisible (explain);
         explain.setColour (Label::textColourId, textDim);
-        explain.setText ("Only for a keyboard whose knobs do not work by themselves: press Learn, then turn the knob. Buttons are taught the "
-                         "same way on any keyboard, to step through programs and knob pages. What the knobs turn on each instrument is its Knobs button.",
-                         dontSendNotification);
+        explain.setText ("Only for a keyboard whose knobs do not work by themselves: press Learn, then turn the knob. What the knobs turn "
+                         "on each instrument is its Knobs button. Pedals and buttons -- programs, pages, the set list, the track, the tempo -- "
+                         "are all in Options > Pedals and buttons.", dontSendNotification);
 
         for (int i = 0; i < numRows; ++i)
         {
             auto& r = rows[(size_t) i];
-            r.name.setText (i < SurfaceControls::numKnobs ? "Knob " + String (i + 1) : String (SurfaceControls::actionName (i - SurfaceControls::numKnobs)), dontSendNotification);
+            r.name.setText ("Knob " + String (i + 1), dontSendNotification);
             addAndMakeVisible (r.name);
             addAndMakeVisible (r.what);
             r.what.setColour (Label::textColourId, textDim);
@@ -910,15 +910,15 @@ public:
         r.removeFromTop (4);
         explain.setBounds (r.removeFromTop (52));
         r.removeFromTop (4);
-        auto left = r.removeFromLeft (r.getWidth() / 2).withTrimmedRight (10);
+        auto left = r.removeFromLeft (r.getWidth() / 2).withTrimmedRight (10), right = r;
         for (int i = 0; i < numRows; ++i)
         {
-            auto& col = i < SurfaceControls::numKnobs ? left : r;
+            auto& col = i < 4 ? left : right;
             auto line = col.removeFromTop (28).reduced (0, 2);
             auto& row = rows[(size_t) i];
             row.forget.setBounds (line.removeFromRight (60)); line.removeFromRight (4);
             row.learn.setBounds (line.removeFromRight (70)); line.removeFromRight (6);
-            row.name.setBounds (line.removeFromLeft (i < SurfaceControls::numKnobs ? 60 : 130));
+            row.name.setBounds (line.removeFromLeft (60));
             row.what.setBounds (line);
         }
         left.removeFromTop (4);
@@ -926,7 +926,7 @@ public:
     }
 
 private:
-    static constexpr int numRows = SurfaceControls::numKnobs + SurfaceControls::numActions;
+    static constexpr int numRows = SurfaceControls::numKnobs;
     static constexpr int rowHeight = 46;
     struct Row { Label name, what; TextButton learn { "Learn" }, forget { "Forget" }; };
 
@@ -1019,13 +1019,7 @@ private:
         for (int i = 0; i < numRows; ++i)
         {
             auto& r = rows[(size_t) i];
-            String what;
-            if (i < SurfaceControls::numKnobs) what = c.knobCC[(size_t) i] > 0 ? "Controller " + String (c.knobCC[(size_t) i]) : String ("not taught");
-            else
-            {
-                const auto& id = c.buttons[(size_t) (i - SurfaceControls::numKnobs)];
-                what = id.isNotEmpty() ? SurfaceHub::describeControl (id) : String ("not taught");
-            }
+            String what = c.knobCC[(size_t) i] > 0 ? "Controller " + String (c.knobCC[(size_t) i]) : String ("not taught");
             r.what.setText (learning == i ? String ("Waiting: turn or press it now...") : what, dontSendNotification);
             r.what.setColour (Label::textColourId, learning == i ? Colours::orange : textDim);
             r.learn.setButtonText (learning == i ? "Cancel" : "Learn");
@@ -1040,8 +1034,7 @@ private:
     {
         if (learning == row) { hub.cancelLearn(); learning = -1; showControls(); return; }
         learning = row;
-        const int what = row < SurfaceControls::numKnobs ? row : 100 + (row - SurfaceControls::numKnobs);
-        hub.learn (current(), what, [sp = SafePointer<ControllersView> (this)] (const String&)
+        hub.learn (current(), row, [sp = SafePointer<ControllersView> (this)] (const String&)
         {
             if (sp == nullptr) return;
             sp->learning = -1;
@@ -1055,8 +1048,7 @@ private:
     {
         if (current() < 0) return;
         auto c = engine.getSetup().inputs[(size_t) current()].controls;
-        if (row < SurfaceControls::numKnobs) c.knobCC[(size_t) row] = 0;
-        else c.buttons[(size_t) (row - SurfaceControls::numKnobs)].clear();
+        c.knobCC[(size_t) row] = 0;
         engine.setInputControls (current(), c);
         if (changed) changed();
         showControls();
@@ -1082,6 +1074,246 @@ private:
     ComboBox inputBox;
     std::array<Row, (size_t) numRows> rows;
 };
+
+//==============================================================================
+/** Every pedal and button of the rig in one list, so there is one place to
+    look. Rig-wide jobs (the set list, the backing track, the tempo, the loop,
+    an output's volume) work from a pedal on any keyboard; a keyboard's own
+    jobs (programs, pages, instruments) are per keyboard, and can be one of
+    its own buttons on a keyboard StageRig talks to. MIDI mappings are the
+    other kind -- one program only -- and are not here. */
+class PedalsView : public Component, private Timer
+{
+public:
+    PedalsView (Engine& e, SurfaceHub& h, std::function<void()> ch) : engine (e), hub (h), changed (std::move (ch))
+    {
+        addAndMakeVisible (explain);
+        explain.setColour (Label::textColourId, textDim);
+        explain.setJustificationType (Justification::topLeft);
+        explain.setText ("Press Learn, then press the pedal or button. The jobs at the top work from a pedal on any keyboard, in every program; "
+                         "a keyboard's own jobs are per keyboard, and on a keyboard StageRig talks to can be one of its buttons. "
+                         "A pedal or knob that should move one parameter in one program is a MIDI mapping instead.", dontSendNotification);
+        addAndMakeVisible (view);
+        view.setViewedComponent (&list, false);
+        view.setScrollBarsShown (true, false);
+        build();
+        startTimer (250);
+    }
+
+    ~PedalsView() override { hub.cancelLearn(); }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (12);
+        explain.setBounds (r.removeFromTop (54));
+        r.removeFromTop (6);
+        view.setBounds (r);
+        layoutRows();
+    }
+
+private:
+    struct Row : public Component
+    {
+        bool header = false;
+        String job, where;
+        std::function<int()> get;                     // the controller taught, 0 for none (rig-wide jobs)
+        std::function<String()> describe;             // a keyboard's own job: what it is, in words, or empty
+        std::function<void()> arm, forget;
+        std::function<bool()> armed;
+        bool learning = false;
+        Label name, what;
+        TextButton learn { "Learn" }, forgetBtn { "Forget" };
+
+        Row()
+        {
+            addAndMakeVisible (name);
+            addAndMakeVisible (what);
+            what.setColour (Label::textColourId, textDim);
+            addAndMakeVisible (learn);
+            addAndMakeVisible (forgetBtn);
+        }
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (6, 2);
+            if (header) { name.setBounds (r); return; }
+            forgetBtn.setBounds (r.removeFromRight (64)); r.removeFromRight (4);
+            learn.setBounds (r.removeFromRight (70)); r.removeFromRight (8);
+            name.setBounds (r.removeFromLeft (jmin (300, r.getWidth() / 2)));
+            what.setBounds (r);
+        }
+        void paint (Graphics& g) override
+        {
+            if (header) return;
+            g.setColour (bgRow);
+            g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (0, 1), 3.0f);
+        }
+        String taught() const
+        {
+            if (describe) return describe();
+            const int cc = get ? get() : 0;
+            return cc > 0 ? "CC " + String (cc) + where : String();
+        }
+        void show()
+        {
+            if (header) return;
+            const auto t = taught();
+            what.setText (learning ? String ("Waiting: press it now...") : t.isNotEmpty() ? t : String ("not taught"), dontSendNotification);
+            what.setColour (Label::textColourId, learning ? Colours::orange : textDim);
+            learn.setButtonText (learning ? "Waiting..." : "Learn");
+            forgetBtn.setEnabled (t.isNotEmpty());
+        }
+    };
+
+    Row& add (const String& job)
+    {
+        auto r = std::make_unique<Row>();
+        r->job = job;
+        r->name.setText (job, dontSendNotification);
+        list.addAndMakeVisible (*r);
+        rows.push_back (std::move (r));
+        return *rows.back();
+    }
+    void addHeader (const String& text)
+    {
+        auto& r = add (text);
+        r.header = true;
+        caption (r.name, text);
+    }
+
+    void build()
+    {
+        rows.clear();
+        auto rig = [this] (const String& job, std::function<int()> get, std::function<void()> arm, std::function<void()> forget, std::function<bool()> armed)
+        {
+            auto& r = add (job);
+            r.where = ", on any keyboard";
+            r.get = std::move (get); r.arm = std::move (arm); r.forget = std::move (forget); r.armed = std::move (armed);
+            wire (r);
+        };
+        auto& e = engine;
+        addHeader ("SET LIST");
+        rig ("Next song",     [&e] { return e.getNextSongCC(); }, [&e] { e.armSongLearn (true); },  [&e] { e.setNextSongCC (0); }, [&e] { return e.isSongLearnArmed(); });
+        rig ("Previous song", [&e] { return e.getPrevSongCC(); }, [&e] { e.armSongLearn (false); }, [&e] { e.setPrevSongCC (0); }, [&e] { return e.isSongLearnArmed(); });
+        addHeader ("BACKING TRACK");
+        rig ("Start / stop the track", [&e] { return e.getTransportCC(); }, [&e] { e.armTransportLearn(); }, [&e] { e.setTransportCC (0); }, [&e] { return e.isTransportLearnArmed(); });
+        rig ("Next section, next scene, or release a vamp", [&e] { return e.getSectionCC(); }, [&e] { e.armSectionLearn(); }, [&e] { e.setSectionCC (0); }, [&e] { return e.isSectionLearnArmed(); });
+        addHeader ("TEMPO");
+        rig ("Tap tempo", [&e] { return e.getTapTempoCC(); }, [&e] { e.armTapTempoLearn (true); }, [&e] { e.setTapTempoCC (0); }, [&e] { return e.isTapTempoLearnArmed(); });
+        addHeader ("LOOP A PASSAGE  (on the keyboard the pedal is pressed on)");
+        rig ("Record, play, stop", [&e] { return e.getLooperCC(); }, [&e] { e.armLooperLearn (false); }, [&e] { e.setLooperCC (0); }, [&e] { return e.isLooperLearnArmed (false); });
+        rig ("Clear the loop",     [&e] { return e.getLooperClearCC(); }, [&e] { e.armLooperLearn (true); }, [&e] { e.setLooperClearCC (0); }, [&e] { return e.isLooperLearnArmed (true); });
+        const auto& outputs = engine.getSetup().outputs;
+        if (! outputs.empty())
+        {
+            addHeader ("OUTPUT VOLUME  (a pedal or knob)");
+            for (int o = 0; o < (int) outputs.size(); ++o)
+                rig (outputs[(size_t) o].name + " volume",
+                     [&e, o] { const auto& outs = e.getSetup().outputs; return o < (int) outs.size() ? outs[(size_t) o].volumeCC : 0; },
+                     [&e, o] { e.armOutputVolumeLearn (o); }, [&e, o] { e.setOutputVolumeCC (o, 0); }, [&e] { return e.isOutputVolumeLearnArmed(); });
+        }
+        // Each keyboard's own jobs.
+        const auto& inputs = engine.getSetup().inputs;
+        for (int i = 0; i < (int) inputs.size(); ++i)
+        {
+            if (inputs[(size_t) i].kind != InputDef::Kind::midi) continue;
+            addHeader ("ON " + inputs[(size_t) i].name.toUpperCase() + "  (" + (inputs[(size_t) i].midiDeviceName.isNotEmpty() ? inputs[(size_t) i].midiDeviceName : String ("no MIDI device yet")) + ")");
+            for (int a = 0; a < SurfaceControls::numActions; ++a)
+            {
+                auto& r = add (SurfaceControls::actionName (a));
+                r.describe = [&e, i, a]
+                {
+                    const auto& ins = e.getSetup().inputs;
+                    if (i >= (int) ins.size()) return String();
+                    const auto& id = ins[(size_t) i].controls.buttons[(size_t) a];
+                    return id.isNotEmpty() ? SurfaceHub::describeControl (id) : String();
+                };
+                r.arm = [this, i, a, raw = &r]
+                {
+                    hub.learn (i, 100 + a, [sp = SafePointer<PedalsView> (this), raw] (const String&)
+                    {
+                        if (sp == nullptr) return;
+                        raw->learning = false;
+                        sp->refresh();
+                        if (sp->changed) sp->changed();
+                    });
+                };
+                r.armed = [this] { return hub.isLearning(); };
+                r.forget = [&e, i, a]
+                {
+                    auto c = e.getSetup().inputs[(size_t) i].controls;
+                    c.buttons[(size_t) a].clear();
+                    e.setInputControls (i, c);
+                };
+                wire (r);
+            }
+        }
+        refresh();
+        layoutRows();
+    }
+
+    void wire (Row& r)
+    {
+        r.learn.onClick = [this, raw = &r]
+        {
+            if (raw->learning) return;
+            // One learn at a time: another row waiting is let go.
+            for (auto& o : rows) o->learning = false;
+            hub.cancelLearn();
+            raw->learning = true;
+            raw->arm();
+            refresh();
+        };
+        r.forgetBtn.onClick = [this, raw = &r]
+        {
+            raw->forget();
+            raw->learning = false;
+            refresh();
+            if (changed) changed();
+        };
+    }
+
+    void refresh()
+    {
+        for (auto& r : rows) r->show();
+    }
+
+    void layoutRows()
+    {
+        const int w = jmax (300, view.getWidth() - view.getScrollBarThickness());
+        int y = 0;
+        for (auto& r : rows)
+        {
+            const int h = r->header ? 26 : 30;
+            r->setBounds (0, y, w, h);
+            y += h;
+        }
+        list.setSize (w, jmax (30, y));
+    }
+
+    void timerCallback() override
+    {
+        // A learn is over when the engine is no longer waiting (its controller then shows), or the hub's finished.
+        bool any = false;
+        for (auto& r : rows)
+            if (r->learning && r->armed && ! r->armed()) { r->learning = false; any = true; }
+        if (any && changed) changed();
+        // Outputs and inputs come and go: the list follows.
+        String sig;
+        for (const auto& o : engine.getSetup().outputs) sig << o.name << "|";
+        for (const auto& in : engine.getSetup().inputs) sig << in.name << "/" << in.midiDeviceName << "|";
+        if (sig != shape) { shape = sig; build(); return; }
+        refresh();
+    }
+
+    Engine& engine;
+    SurfaceHub& hub;
+    std::function<void()> changed;
+    Label explain;
+    Viewport view;
+    Component list;
+    std::vector<std::unique_ptr<Row>> rows;
+    String shape;
+};
 }
 
 Component* showControlMapEditor (Engine& engine, SurfaceHub& hub, ControlMapLibrary& library, int input, int program, int slot, std::function<void()> changed)
@@ -1096,7 +1328,12 @@ Component* showControlMapEditor (Engine& engine, SurfaceHub& hub, ControlMapLibr
 
 Component* showControllers (Engine& engine, SurfaceHub& hub, int selectedInput, std::function<void()> changed)
 {
-    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Your keyboards", 860, 560);
+    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Your keyboards", 860, 470);
+}
+
+Component* showPedals (Engine& engine, SurfaceHub& hub, std::function<void()> changed)
+{
+    return launch (new PedalsView (engine, hub, std::move (changed)), "Pedals and buttons", 760, 620);
 }
 
 } // namespace perf

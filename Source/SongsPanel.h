@@ -35,6 +35,8 @@ public:
     static constexpr int minimumWidth   = 190;
 
     explicit SongsPanel (Engine&);
+    /** Opens the window of every pedal and button job (MainComponent's); the panel's own menu otherwise. */
+    std::function<void()> onShowPedals;
     ~SongsPanel() override;
 
     void paint (juce::Graphics&) override;
@@ -105,7 +107,7 @@ private:
     juce::TextButton toSetBtn { "Add to set list >" }, fromSetBtn { "< Remove" },
                      upBtn { "^" }, downBtn { "v" };
     juce::TextButton songUpBtn { "^" }, songDownBtn { "v" };
-    juce::TextButton setBtn { "Set list..." }, footBtn { "Footswitches..." };
+    juce::TextButton setBtn { "Set list..." }, footBtn { "Pedals..." };
 
     // The backing track of the song in play: start/stop, and where it is.
     /** The Loop button: a click is the pedal, a right-click offers Stop and Clear. */
