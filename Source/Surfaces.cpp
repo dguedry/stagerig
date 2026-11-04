@@ -1,4 +1,5 @@
 #include "Surfaces.h"
+#include "PropertyExchange.h"
 #include "PanelParams.h"
 #include "RemotePlugin.h"
 #include <cstring>
@@ -187,8 +188,14 @@ SurfaceView SurfaceHub::viewFor (int input)
     const int program = in.currentProgram;
     const auto& prog = in.programs[(size_t) program];
     v.inputName = in.name;
+    v.channel = in.channel;
     v.program = program;
     v.programName = prog.name.isNotEmpty() ? prog.name : "Program " + String (program).paddedLeft ('0', 3);
+    for (int p = 0; p < InputDef::numPrograms; ++p)
+        if (p == program || ! in.programs[(size_t) p].isEmpty())
+            v.programs.emplace_back (p, in.programs[(size_t) p].name.isNotEmpty() ? in.programs[(size_t) p].name : "Program " + String (p).paddedLeft ('0', 3));
+    for (int k = 0; k < SurfaceView::numKnobs; ++k)
+        v.knobControllers[(size_t) k] = in.controls.knobCC[(size_t) k] > 0 ? in.controls.knobCC[(size_t) k] : SurfaceControls::autoKnobCC + k;
     v.bankFirst = program - program % SurfaceView::numKnobs;
     for (int i = 0; i < SurfaceView::numKnobs; ++i)
     {
@@ -496,6 +503,8 @@ void SurfaceHub::setKompleteKontrolEnabled (bool on) { settings.setValue ("surfa
 void SurfaceHub::setLaunchkeyEnabled (bool on)       { settings.setValue ("surfaceLaunchkey", on); lastSearch = 0; }
 bool SurfaceHub::isKontrolDawEnabled() const         { return settings.getBoolValue ("surfaceKontrolDaw", true); }
 void SurfaceHub::setKontrolDawEnabled (bool on)      { settings.setValue ("surfaceKontrolDaw", on); lastSearch = 0; }
+bool SurfaceHub::isMidiCiEnabled() const             { return settings.getBoolValue ("surfaceMidiCi", true); }
+void SurfaceHub::setMidiCiEnabled (bool on)          { settings.setValue ("surfaceMidiCi", on); lastSearch = 0; }
 
 StringArray SurfaceHub::getProblems() const
 {
@@ -509,7 +518,8 @@ std::vector<SurfaceHub::SurfaceInfo> SurfaceHub::getSurfaces() const
 {
     std::vector<SurfaceInfo> list;
     for (const auto& s : surfaces)
-        list.push_back ({ s->getName(), inputFor (*s), s->hasScreen(), s->hasLights() });
+        if (s->isFound())
+            list.push_back ({ s->getName(), inputFor (*s), s->hasScreen(), s->hasLights() });
     return list;
 }
 
@@ -527,8 +537,9 @@ void SurfaceHub::lookForKeyboards()
         auto* kk = dynamic_cast<KompleteKontrolMk1*> (it->get());
         auto* lk = dynamic_cast<LaunchkeyMk4*> (it->get());
         auto* ni = dynamic_cast<KompleteKontrolDaw*> (it->get());
+        auto* ci = dynamic_cast<MidiCiKeyboard*> (it->get());
         const bool off = (kk != nullptr && ! isKompleteKontrolEnabled()) || (lk != nullptr && ! isLaunchkeyEnabled())
-                      || (ni != nullptr && ! isKontrolDawEnabled());
+                      || (ni != nullptr && ! isKontrolDawEnabled()) || (ci != nullptr && ! isMidiCiEnabled());
         if (off || ! (*it)->isConnected())
         {
             shown.erase (it->get());
@@ -575,6 +586,37 @@ void SurfaceHub::lookForKeyboards()
             if (ni->opened()) { surfaces.push_back (std::move (ni)); changed = true; }
             else problems.add ("Could not open the " + p.name + "'s DAW port, " + p.out.name + ".");
         }
+
+    /* Any other keyboard an input plays from is asked, once, whether it
+       speaks MIDI-CI; the ones a driver above already has are left to it. */
+    if (isMidiCiEnabled())
+    {
+        StringArray names;
+        for (const auto& in : engine.getSetup().inputs)
+            if (in.kind == InputDef::Kind::midi && in.midiDeviceName.isNotEmpty()) names.addIfNotAlreadyThere (in.midiDeviceName);
+        for (const auto& p : MidiCiKeyboard::find (names))
+        {
+            bool have = false;
+            for (const auto& s : surfaces)
+            {
+                if (auto* ci = dynamic_cast<MidiCiKeyboard*> (s.get()); ci != nullptr && ci->getInputIdentifier() == p.in.identifier) have = true;
+                else if (dynamic_cast<MidiCiKeyboard*> (s.get()) == nullptr && p.in.name.containsIgnoreCase (s->getKeysPortName())) have = true;
+            }
+            if (have) continue;
+            auto ci = std::make_unique<MidiCiKeyboard> (p);
+            if (ci->opened()) { surfaces.push_back (std::move (ci)); changed = true; }
+        }
+    }
+
+    // An input whose keyboard is told which controllers its knobs send hears the spare ones as knobs.
+    const auto& inputs = engine.getSetup().inputs;
+    for (int i = 0; i < (int) inputs.size(); ++i)
+    {
+        bool told = false;
+        for (const auto& s : surfaces)
+            if (dynamic_cast<MidiCiKeyboard*> (s.get()) != nullptr && s->isFound() && inputFor (*s) == i) told = true;
+        engine.setInputAutoKnobs (i, told);
+    }
 
     if (changed && onSurfacesChanged) onSurfacesChanged();
 }

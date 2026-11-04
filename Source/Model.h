@@ -296,6 +296,10 @@ struct SurfaceControls
 {
     static constexpr int numKnobs = 8;
     std::array<int, numKnobs> knobCC {};   // 0 = not taught (CC 0 is bank select: never a knob)
+    /** Knobs left untaught on a keyboard that can be told what to send (MIDI-CI
+        Property Exchange) are told these: 102 to 109, controllers MIDI leaves
+        undefined, so no plugin takes them for something else. */
+    static constexpr int autoKnobCC = 102;
     /** The knobs send steps around 64 (65 = one to the right, 63 = one to
         the left) rather than where they are: endless encoders. */
     bool knobsRelative = false;

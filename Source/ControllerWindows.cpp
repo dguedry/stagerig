@@ -551,6 +551,13 @@ public:
         addAndMakeVisible (launchkeyBtn);
         addAndMakeVisible (kontrolBtn);
         addAndMakeVisible (kontrolDawBtn);
+        addAndMakeVisible (midiCiBtn);
+        midiCiBtn.setButtonText ("MIDI 2.0 keyboards that ask (MIDI-CI Property Exchange, such as Korg's Keystage): the program and knob names on its screen");
+        midiCiBtn.setToggleState (hub.isMidiCiEnabled(), dontSendNotification);
+        midiCiBtn.onClick = [this] { hub.setMidiCiEnabled (midiCiBtn.getToggleState()); };
+        midiCiBtn.setTooltip ("StageRig asks each keyboard its inputs use, once, in MIDI 2.0's standard way (MIDI-CI); one that answers is told the program "
+                              "in play, the programs to choose from, and the knobs' names and the controllers they send. A keyboard that does not "
+                              "speak MIDI-CI ignores the question.");
         kontrolDawBtn.setButtonText ("Komplete Kontrol S MK2 and MK3, A and M: program names on its screen, its track buttons choose them");
         kontrolDawBtn.setToggleState (hub.isKontrolDawEnabled(), dontSendNotification);
         kontrolDawBtn.onClick = [this] { hub.setKontrolDawEnabled (kontrolDawBtn.getToggleState()); };
@@ -617,6 +624,7 @@ public:
         launchkeyBtn.setBounds (r.removeFromTop (24));
         kontrolBtn.setBounds (r.removeFromTop (24));
         kontrolDawBtn.setBounds (r.removeFromTop (24));
+        midiCiBtn.setBounds (r.removeFromTop (24));
         r.removeFromTop (14);
         inputCap.setBounds (r.removeFromTop (16));
         inputBox.setBounds (r.removeFromTop (26).removeFromLeft (260));
@@ -724,7 +732,7 @@ private:
     std::function<void()> changed;
     int learning = -1;
     Label foundCap, found, inputCap, explain;
-    ToggleButton launchkeyBtn, kontrolBtn, kontrolDawBtn, relativeBtn;
+    ToggleButton launchkeyBtn, kontrolBtn, kontrolDawBtn, midiCiBtn, relativeBtn;
     ComboBox inputBox;
     std::array<Row, (size_t) numRows> rows;
 };
@@ -742,7 +750,7 @@ Component* showControlMapEditor (Engine& engine, SurfaceHub& hub, ControlMapLibr
 
 Component* showControllers (Engine& engine, SurfaceHub& hub, int selectedInput, std::function<void()> changed)
 {
-    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Your keyboards", 860, 510);
+    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Your keyboards", 860, 534);
 }
 
 } // namespace perf

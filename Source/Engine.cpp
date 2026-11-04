@@ -272,6 +272,7 @@ struct Engine::InputRuntime
     // The keyboard's taught knobs and buttons (SurfaceControls), read on the MIDI thread.
     std::array<std::atomic<int>, SurfaceControls::numKnobs> knobCC {};
     std::atomic<bool> knobsRelative { false };
+    std::atomic<bool> autoKnobs { false };      // untaught knobs answer to SurfaceControls::autoKnobCC + k
     std::array<std::atomic<int>, SurfaceControls::numActions> buttonCC {};
     ExactValues exact;             // a MIDI 2.0 keyboard's full values
     MidiMessageCollector collector;
@@ -1280,6 +1281,12 @@ void Engine::openMidiDevices()
 bool Engine::isInputHeardAsMidi2 (int inputIndex) const
 {
     return validInput (inputIndex) && heardAsMidi2.contains (setup.inputs[(size_t) inputIndex].midiDeviceIdentifier);
+}
+
+void Engine::setInputAutoKnobs (int inputIndex, bool b)
+{
+    if (! validInput (inputIndex)) return;
+    runtimes[(size_t) inputIndex]->autoKnobs.store (b);
 }
 
 void Engine::setInputMidi1Only (int inputIndex, bool b)
@@ -4283,9 +4290,11 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exa
         if (cc > 0)
         {
             for (int k = 0; k < SurfaceControls::numKnobs; ++k)
-                if (in.knobCC[(size_t) k].load (std::memory_order_relaxed) == cc)
+                if (const int taught = in.knobCC[(size_t) k].load (std::memory_order_relaxed);
+                    taught == cc || (taught == 0 && cc == SurfaceControls::autoKnobCC + k && in.autoKnobs.load (std::memory_order_relaxed)))
                 {
-                    const bool relative = in.knobsRelative.load (std::memory_order_relaxed);
+                    // A knob told what to send (the spare controllers) sends where it is.
+                    const bool relative = taught == cc && in.knobsRelative.load (std::memory_order_relaxed);
                     // d: the exact place, in 24 bits plus one, from a MIDI 2.0 keyboard.
                     postEvent ({ Event::surfaceKnob, i, k, relative ? value - 64 : value, relative ? 1 : 0,
                                  exact >= 0 && ! relative ? (int) (exact >> 8) + 1 : 0 });

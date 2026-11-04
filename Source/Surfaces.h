@@ -42,6 +42,12 @@ struct SurfaceView
     /** The program's plugins by name, and which of them the knobs turn (-1: none). */
     juce::StringArray pluginNames;
     int focusPlugin = -1;
+    /** Every program with something in it, by number, named as programName is. */
+    std::vector<std::pair<int, juce::String>> programs;
+    int channel = 0;                                 // the input's: 0 for all
+    /** The controller each knob is taught to send, or a spare one for a
+        keyboard that is told which to send (SurfaceControls::autoKnobCC). */
+    std::array<int, numKnobs> knobControllers {};
 
     SurfaceView()                                   { knobLevels.fill (-1.0f); }
 
@@ -50,7 +56,8 @@ struct SurfaceView
         return inputName == o.inputName && program == o.program && programName == o.programName && instrument == o.instrument
             && pageName == o.pageName && page == o.page && pageCount == o.pageCount && knobNames == o.knobNames && knobValues == o.knobValues
             && knobLevels == o.knobLevels && bankFirst == o.bankFirst && bankNames == o.bankNames && programBefore == o.programBefore
-            && programAfter == o.programAfter && bankBefore == o.bankBefore && bankAfter == o.bankAfter && pluginNames == o.pluginNames && focusPlugin == o.focusPlugin;
+            && programAfter == o.programAfter && bankBefore == o.bankBefore && bankAfter == o.bankAfter && pluginNames == o.pluginNames && focusPlugin == o.focusPlugin
+            && programs == o.programs && channel == o.channel && knobControllers == o.knobControllers;
     }
     bool operator== (const SurfaceView& o) const   { return sameText (o) && keyColours == o.keyColours; }
     bool operator!= (const SurfaceView& o) const   { return ! (*this == o); }
@@ -72,6 +79,8 @@ public:
     virtual juce::String getKeysPortName() const = 0;
     virtual bool isConnected() const = 0;
     virtual bool hasScreen() const                 { return false; }
+    /** Known to be there: false for one still waiting to hear whether a keyboard answers (MidiCiKeyboard). */
+    virtual bool isFound() const                   { return true; }
     virtual bool hasLights() const                 { return false; }
 
     virtual void show (const SurfaceView&) = 0;
@@ -165,6 +174,8 @@ public:
     void setLaunchkeyEnabled (bool);
     bool isKontrolDawEnabled() const;
     void setKontrolDawEnabled (bool);
+    bool isMidiCiEnabled() const;
+    void setMidiCiEnabled (bool);
     /** The input a keyboard works with: the one its keys play on, or the first keyboard input. */
     int inputFor (const ControlSurface&) const;
 

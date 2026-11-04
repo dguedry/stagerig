@@ -13,6 +13,7 @@
 #include "GmSynth.h"
 #include "MidiEditor.h"
 #include "StagePanel.h"
+#include "PropertyExchange.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
 #include <map>
@@ -65,6 +66,8 @@ namespace
         void learnReceived (int i, MappingDef::Source s, int n) override { learnInput = i; learnSource = s; learnNumber = n; }
         void programChanged (int i, int p) override { programChangedInput = i; programChangedTo = p; }
         void statusMessage (const String& s) override { std::printf ("     [status] %s\n", s.toRawUTF8()); }
+        int knobTurned = -1, knobValue = -1;
+        void surfaceKnob (int, int knob, int value, bool, float) override { knobTurned = knob; knobValue = value; }
     };
 }
 
@@ -194,6 +197,131 @@ static int probeNks (const String& wanted)
     return 0;
 }
 
+/* A keyboard speaking MIDI-CI Property Exchange, played by JUCE's own
+   MIDI-CI: it finds StageRig, reads the program in play, the programs and the
+   knobs, and is told when the program changes. STAGERIG_TEST_MIDICI=1 runs
+   only this. Returns the failures. */
+static int checkMidiCi()
+{
+    const int before = failures;
+    {
+        namespace ci = juce::midi_ci;
+        std::deque<std::vector<std::byte>> toKeyboard, toRig;
+        struct Out : ci::DeviceMessageHandler
+        {
+            std::deque<std::vector<std::byte>>& q;
+            explicit Out (std::deque<std::vector<std::byte>>& d) : q (d) {}
+            void processMessage (ump::BytesOnGroup m) override { q.emplace_back (m.bytes.begin(), m.bytes.end()); }
+        } keyboardOut (toRig);
+        struct Heard : ci::DeviceListener
+        {
+            std::vector<std::pair<String, var>> updates;     // resource's subscribeId's command, body
+            void propertySubscriptionDataReceived (ci::MUID, const ci::PropertySubscriptionData& d) override
+            {
+                updates.emplace_back (String (ci::PropertySubscriptionCommandUtils::toString (d.header.command)),
+                                      d.body.empty() ? var() : ci::Encodings::jsonFrom7BitText (d.body));
+            }
+        } heard;
+        Random random;
+        ci::Device keyboard (ci::DeviceOptions().withOutputs ({ &keyboardOut })
+                                 .withDeviceInfo ({ { std::byte { 0x42 }, std::byte {}, std::byte {} }, {}, {}, {} })
+                                 .withFeatures (ci::DeviceFeatures().withPropertyExchangeSupported())
+                                 .withMaxSysExSize (512)
+                                 .withProductInstanceId (ci::DeviceOptions::makeProductInstanceId (random)));
+        keyboard.addListener (heard);
+        PropertyResponder rig ([&toKeyboard] (Span<const std::byte> b) { toKeyboard.emplace_back (b.begin(), b.end()); });
+        auto settleCi = [&]
+        {
+            for (int i = 0; i < 1000 && (! toKeyboard.empty() || ! toRig.empty()); ++i)
+            {
+                if (! toRig.empty())      { auto m = std::move (toRig.front()); toRig.pop_front(); rig.receive (Span<const std::byte> (m.data(), m.size())); }
+                if (! toKeyboard.empty()) { auto m = std::move (toKeyboard.front()); toKeyboard.pop_front(); keyboard.processMessage ({ 0, m }); }
+            }
+        };
+        SurfaceView pv;
+        pv.inputName = "Upper"; pv.channel = 2; pv.program = 3; pv.programName = "Grand Piano";
+        pv.programs = { { 0, "Organ" }, { 3, "Grand Piano" }, { 9, "Strings" } };
+        pv.knobNames[0] = "Cutoff"; pv.knobValues[0] = "40%"; pv.knobLevels[0] = 0.4f;
+        for (int k = 0; k < SurfaceView::numKnobs; ++k) pv.knobControllers[(size_t) k] = SurfaceControls::autoKnobCC + k;
+        rig.show (pv);
+        CHECK (! rig.isAskedFor());
+        keyboard.sendDiscovery();
+        settleCi();
+        const auto muids = keyboard.getDiscoveredMuids();
+        CHECK (muids.size() == 1);
+        if (muids.size() == 1)
+        {
+            const auto m = muids[0];
+            // As a keyboard does next: what can you tell me? Then JUCE reads ResourceList, DeviceInfo and ChannelList.
+            keyboard.sendPropertyCapabilitiesInquiry (m);
+            settleCi();
+            const auto channels = keyboard.getChannelListForMuid (m);
+            std::printf ("     MIDI-CI: resources %s, device %s\n", JSON::toString (keyboard.getResourceListForMuid (m), true).toRawUTF8(),
+                         JSON::toString (keyboard.getDeviceInfoForMuid (m), true).toRawUTF8());
+            if (! channels.isArray() || channels.size() == 0) { CHECK (channels.size() == 1); return failures - before; }
+            std::printf ("     MIDI-CI: a keyboard found StageRig, read %s\n", JSON::toString (channels, true).toRawUTF8());
+            CHECK (rig.isAskedFor() && keyboard.getDeviceInfoForMuid (m).getProperty ("model", {}) == var ("StageRig"));
+            CHECK (channels[0].getProperty ("programTitle", {}) == var ("Grand Piano") && channels[0].getProperty ("channel", {}) == var (2)
+                   && channels[0].getProperty ("bankPC", {})[2] == var (3));
+            CHECK (keyboard.getResourceListForMuid (m).size() == 6);
+
+            auto get = [&] (const String& resource, std::optional<ci::Pagination> page, var& body, int& total)
+            {
+                ci::PropertyRequestHeader h;
+                h.resource = resource;
+                h.pagination = page;
+                bool done = false;
+                keyboard.sendPropertyGetInquiry (m, h, [&] (const ci::PropertyExchangeResult& r)
+                {
+                    done = ! r.getError().has_value() && r.getHeaderAsReplyHeader().status == 200;
+                    body = ci::Encodings::jsonFrom7BitText (r.getBody());
+                    const auto ext = r.getHeaderAsReplyHeader().extended;
+                    const auto it = ext.find (Identifier ("totalCount"));
+                    total = it != ext.end() ? (int) it->second : -1;
+                });
+                settleCi();
+                return done;
+            };
+            var body; int total = 0;
+            CHECK (get ("ProgramList", ci::Pagination { 1, 5 }, body, total) && total == 3 && body.size() == 2
+                   && body[0].getProperty ("title", {}) == var ("Grand Piano") && body[1].getProperty ("bankPC", {})[2] == var (9));
+            CHECK (get ("X-ParameterList", std::nullopt, body, total) && body.size() == 8
+                   && body[0].getProperty ("name", {}) == var ("Cutoff") && body[7].getProperty ("controlcc", {}) == var (109));
+            CHECK (get ("X-ProgramEdit", std::nullopt, body, total) && body.getProperty ("currentValues", {})[0].getProperty ("value", {}) == var (51));
+            CHECK (! get ("X-Nothing", std::nullopt, body, total));
+
+            // Told when the program changes, and when a knob moves -- unless the keyboard's own knob moved it.
+            for (const auto* resource : { "ChannelList", "X-ProgramEdit" })
+            {
+                ci::PropertySubscriptionHeader h;
+                h.resource = resource;
+                h.command = ci::PropertySubscriptionCommand::start;
+                keyboard.beginSubscription (m, h);
+                settleCi();
+            }
+            pv.program = 9; pv.programName = "Strings";
+            rig.show (pv);
+            settleCi();
+            bool toldProgram = false;
+            for (const auto& [command, b] : heard.updates)
+                toldProgram = toldProgram || (command == "full" && b[0].getProperty ("programTitle", {}) == var ("Strings"));
+            std::printf ("     MIDI-CI: %d updates after a program change\n", (int) heard.updates.size());
+            CHECK (toldProgram);
+            heard.updates.clear();
+            rig.knobTurnedOnKeyboard (0);
+            pv.knobValues[0] = "45%"; pv.knobLevels[0] = 0.45f;
+            rig.show (pv);
+            settleCi();
+            CHECK (heard.updates.empty());
+            pv.knobValues[1] = "70%"; pv.knobLevels[1] = 0.7f; pv.knobNames[1] = "Res";
+            rig.show (pv);                       // a new knob name: the knobs are told again
+            settleCi();
+            CHECK (! heard.updates.empty());
+        }
+    }
+    return failures - before;
+}
+
 /* STAGERIG_TEST_MIDI2=1: what this computer offers for MIDI 2.0 -- every
    MIDI endpoint, the protocol it speaks and its MIDI inputs -- and whether a
    MIDI 2.0 keyboard can be made in software, as the tests make one. */
@@ -242,6 +370,8 @@ int main()
     ScopedJuceInitialiser_GUI init;
     if (const char* m = std::getenv ("STAGERIG_TEST_MIDI2"); m != nullptr && *m != 0)
         return probeMidi2();
+    if (const char* m = std::getenv ("STAGERIG_TEST_MIDICI"); m != nullptr && *m != 0)
+        return checkMidiCi() == 0 ? 0 : 1;
     if (const char* k = std::getenv ("STAGERIG_TEST_KONTROL_SECONDS"); k != nullptr && *k != 0)
         return probeKompleteKontrol (String (k).getIntValue());
     if (const char* n = std::getenv ("STAGERIG_TEST_NKS"); n != nullptr && *n != 0)
@@ -506,6 +636,17 @@ int main()
         render (engine, 2);
         CHECK (inst->fetchParameterValue (target->index, v));
         CHECK (std::abs (v - 0.25f) < 0.02f);
+
+        // The spare controllers a MIDI-CI keyboard is told to send are its knobs only while it is there.
+        listener.knobTurned = -1;
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, SurfaceControls::autoKnobCC + 2, 90));
+        pump (50);
+        CHECK (listener.knobTurned == -1);
+        engine.setInputAutoKnobs (0, true);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, SurfaceControls::autoKnobCC + 2, 90));
+        pump (50);
+        CHECK (listener.knobTurned == 2 && listener.knobValue == 90);
+        engine.setInputAutoKnobs (0, false);
 
         // MIDI 2.0: what the plugins get as MIDI 1.0, and the full value beside it.
         {
@@ -4420,6 +4561,8 @@ int main()
             sv.programName = "Organ";
             CHECK (KompleteKontrolMk1::screenReports (sv)[2][9] == 0xf3);        // a short name leaves room for "Effects"
         }
+
+        checkMidiCi();
 
         engine.setInputControls (0, {});
         engine.selectProgram (0, keepProgram); settle();

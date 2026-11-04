@@ -239,6 +239,9 @@ public:
     void setInputProgramChangeChannel (int inputIndex, int channel);
     void setInputChannel (int inputIndex, int channel);
     void setInputRespondToProgramChange (int inputIndex, bool);
+    /** The input's keyboard has been told to send SurfaceControls::autoKnobCC.. for
+        its untaught knobs (MIDI-CI): those controllers turn the knobs. Not saved. */
+    void setInputAutoKnobs (int inputIndex, bool);
     /** Hears the input's keyboard as MIDI 1.0 even when it speaks MIDI 2.0 (InputDef::midi1Only). */
     void setInputMidi1Only (int inputIndex, bool);
     /** Whether this MIDI input belongs to a keyboard speaking MIDI 2.0. */
