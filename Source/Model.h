@@ -354,6 +354,10 @@ struct InputDef
     juce::String midiDeviceName;      // used to re-find a device if identifiers change
     int channel = 0;                  // 0 = omni
     bool respondToProgramChange = true;
+    /** A keyboard that speaks MIDI 2.0 is heard as MIDI 2.0, its controllers
+        at full resolution (Midi2Inputs.h); this hears it as MIDI 1.0 instead,
+        for one that misbehaves. */
+    bool midi1Only = false;
     /** Which channel carries Program Change for this input. Keyboards differ: most
         send it on the channel they play on, but a workstation may use a global
         channel (a Roland Jupiter-50 sends registrations on 16 while playing on

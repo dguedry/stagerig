@@ -30,6 +30,7 @@ int main()
     upper.currentProgram = 5;
 
     upper.programChangeChannel = 16;          // a workstation's global channel
+    upper.midi1Only = true;                    // a MIDI 2.0 keyboard heard as MIDI 1.0
     {
         SlotDef ext; ext.kind = SlotDef::Kind::external;
         ext.midiOutIdentifier = "20-0"; ext.midiOutName = "Montage"; ext.outChannel = 3; ext.listensTo = 1 << 1;
@@ -262,6 +263,7 @@ int main()
     CHECK (loaded.inputs[1].channel == 2);
     CHECK (loaded.inputs[0].programChangeChannel == 16);                       // a workstation's global channel
     CHECK (loaded.inputs[1].programChangeChannel == InputDef::pcChannelSameAsNotes);   // the default
+    CHECK (loaded.inputs[0].midi1Only && ! loaded.inputs[1].midi1Only);
 
     auto& u = loaded.inputs[0];
     CHECK (u.name == "Upper");

@@ -425,11 +425,11 @@ void SurfaceHub::taught (const String& id, int cc)
     if (done) done (describeControl (id));
 }
 
-void SurfaceHub::surfaceKnob (int input, int knob, int value, bool relative)
+void SurfaceHub::surfaceKnob (int input, int knob, int value, bool relative, float exact)
 {
     auto& p = pending[{ input, knob }];
     if (relative) p.delta += (float) value / 100.0f;
-    else        { p.absolute = (float) value / 127.0f; p.delta = 0.0f; }
+    else        { p.absolute = exact >= 0.0f ? exact : (float) value / 127.0f; p.delta = 0.0f; }
 }
 
 void SurfaceHub::handleTouch (ControlSurface& surface, const ControlSurface::Touch& t)

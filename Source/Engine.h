@@ -9,6 +9,7 @@
 #include "MidiFx.h"
 #include <ableton/Link.hpp>
 #include "GmSynth.h"
+#include "Midi2Inputs.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
@@ -73,8 +74,10 @@ public:
         /** The backing track was armed, started, stopped or came to its end. */
         virtual void transportChanged() {}
         /** A knob taught in the input's SurfaceControls moved: `value` is where it
-            is (0..127), or for relative knobs the steps it moved (+ right, - left). */
-        virtual void surfaceKnob (int inputIndex, int knob, int value, bool relative) { juce::ignoreUnused (inputIndex, knob, value, relative); }
+            is (0..127), or for relative knobs the steps it moved (+ right, - left).
+            `exact` is where it is at full resolution, 0..1, from a keyboard
+            speaking MIDI 2.0; otherwise -1. */
+        virtual void surfaceKnob (int inputIndex, int knob, int value, bool relative, float exact) { juce::ignoreUnused (inputIndex, knob, value, relative, exact); }
         /** A button taught as a controller in the input's SurfaceControls was pressed. */
         virtual void surfaceButton (int inputIndex, int action) { juce::ignoreUnused (inputIndex, action); }
         /** A controller moved on the input while armSurfaceLearn() waited for one. */
@@ -236,6 +239,12 @@ public:
     void setInputProgramChangeChannel (int inputIndex, int channel);
     void setInputChannel (int inputIndex, int channel);
     void setInputRespondToProgramChange (int inputIndex, bool);
+    /** Hears the input's keyboard as MIDI 1.0 even when it speaks MIDI 2.0 (InputDef::midi1Only). */
+    void setInputMidi1Only (int inputIndex, bool);
+    /** Whether this MIDI input belongs to a keyboard speaking MIDI 2.0. */
+    static bool isMidi2Device (const juce::String& identifier)      { return Midi2Inputs::isMidi2 (identifier); }
+    /** Whether the input's keyboard is being heard as MIDI 2.0 now. */
+    bool isInputHeardAsMidi2 (int inputIndex) const;
     /** The keyboard's knobs and buttons (Model.h's SurfaceControls). */
     void setInputControls (int inputIndex, const SurfaceControls&);
     /** The next controller on that input is reported to surfaceLearned()
@@ -595,6 +604,8 @@ public:
     /** Feeds a MIDI message into an input as if it had arrived from its device
         (channel filter, program change and learn handling all apply). Thread-safe. */
     void injectMidi (int inputIndex, const juce::MidiMessage&);
+    /** A MIDI 2.0 message, as if the input's keyboard spoke MIDI 2.0 and sent it. */
+    void injectMidi2 (int inputIndex, const juce::universal_midi_packets::View&);
 
     /** Renders one block exactly as the audio callback would. Only for tests /
         offline use when constructed with startAudioDevice = false. */
@@ -721,7 +732,10 @@ private:
     // MidiInputCallback
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
     static bool acceptsProgramChangeOn (const InputRuntime&, int channel);
-    void routeMidi (InputRuntime&, int inputIndex, const juce::MidiMessage&);   // caller holds lock
+    /** `exact`: a MIDI 2.0 controller's, pressure's or pitch bend's full value (0..2^32-1), else -1. Caller holds lock. */
+    void routeMidi (InputRuntime&, int inputIndex, const juce::MidiMessage&, juce::int64 exact = -1);
+    /** What a keyboard sent, from either path: MIDI 1.0 (handleIncomingMidiMessage) or Midi2Inputs. */
+    void receiveMidi (const juce::String& identifier, const juce::MidiMessage&, juce::int64 exact);
 
     // AsyncUpdater / Timer / ChangeListener
     void handleAsyncUpdate() override;
@@ -846,6 +860,9 @@ private:
 
     // External instruments
     MidiOuts midiOuts;
+    // Keyboards speaking MIDI 2.0, and the inputs (identifiers) heard through it.
+    std::unique_ptr<Midi2Inputs> midi2;
+    juce::StringArray heardAsMidi2;           // message thread
     /** Every loaded Scale and Run that follows the song's key is told the key in play. */
     void applySongKey();
     Recorder recorder;

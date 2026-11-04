@@ -209,6 +209,17 @@ Each keyboard input has, below the list:
   front-panel buttons select StageRig programs. *Any channel* accepts program
   changes from anywhere on that MIDI port: the setting to try when they are
   not getting through and you do not know what the keyboard sends.
+- **Hear as MIDI 1.0** -- shown only for a keyboard that speaks MIDI 2.0.
+  StageRig hears such a keyboard as MIDI 2.0 by itself: its knobs, pedals,
+  pressure and pitch bend arrive at full resolution instead of in MIDI 1.0's
+  128 steps, so a slow sweep of a mapped knob, a keyboard knob or an output's
+  fader moves smoothly rather than in small jumps. The plugins are still sent
+  MIDI 1.0, which is what nearly all of them understand, so velocity reaches
+  them in 128 steps either way. Tick it for a keyboard that misbehaves when
+  heard as MIDI 2.0. On Linux this needs a kernel and ALSA new enough to
+  speak MIDI 2.0 (Linux 6.5 and ALSA 1.2.10 or later); on macOS and Windows
+  it depends on the system's own MIDI 2.0 support. Not yet tried with a real
+  MIDI 2.0 keyboard: tell us how it goes.
 - **Output** -- which output this input's sound goes to. See *Outputs and
   master effects*.
 

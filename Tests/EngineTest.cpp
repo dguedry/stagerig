@@ -194,9 +194,54 @@ static int probeNks (const String& wanted)
     return 0;
 }
 
+/* STAGERIG_TEST_MIDI2=1: what this computer offers for MIDI 2.0 -- every
+   MIDI endpoint, the protocol it speaks and its MIDI inputs -- and whether a
+   MIDI 2.0 keyboard can be made in software, as the tests make one. */
+static int probeMidi2()
+{
+    namespace ump = juce::universal_midi_packets;
+    auto* endpoints = ump::Endpoints::getInstance();
+    const auto backend = endpoints->getBackend();
+    std::printf ("midi2: backend %d, virtual MIDI 2.0 service %d\n", backend.has_value() ? (int) *backend : -1,
+                 (int) endpoints->isVirtualMidiUmpServiceActive());
+    auto list = [endpoints]
+    {
+        for (const auto& id : endpoints->getEndpoints())
+        {
+            const auto ep = endpoints->getEndpoint (id);
+            const auto info = endpoints->getStaticDeviceInfo (id);
+            const auto protocol = ep.has_value() ? ep->getProtocol() : std::nullopt;
+            std::printf ("midi2: %-40s protocol %s, MIDI 2.0 support %d\n",
+                         (ep.has_value() ? ep->getName() : info.has_value() ? info->getName() : String ("?")).toRawUTF8(),
+                         ! protocol.has_value() ? "?" : *protocol == ump::PacketProtocol::MIDI_2_0 ? "2.0" : "1.0",
+                         ep.has_value() ? (int) ep->hasMidi2Support() : -1);
+            if (info.has_value())
+                for (const auto& legacy : info->getLegacyIdentifiersSrc())
+                    if (legacy.isNotEmpty())
+                        std::printf ("midi2:     input %s, heard as MIDI 2.0: %d\n", legacy.toRawUTF8(), (int) Midi2Inputs::isMidi2 (legacy));
+        }
+    };
+    list();
+    auto session = endpoints->makeSession ("StageRig MIDI 2 probe");
+    std::printf ("midi2: session %d\n", (int) session.isAlive());
+    const auto block = ump::Block{}.withName ("Keys").withFirstGroup (0).withNumGroups (1).withEnabled (true)
+                                   .withDirection (ump::BlockDirection::bidirectional);
+    auto keys = session.createVirtualEndpoint ("StageRig MIDI 2 probe keys", ump::DeviceInfo{}, "stagerig-probe-1",
+                                               ump::PacketProtocol::MIDI_2_0, Span<const ump::Block> (&block, 1), ump::BlocksAreStatic::yes);
+    std::printf ("midi2: virtual MIDI 2.0 keyboard %d\n", (int) keys.isAlive());
+    if (keys.isAlive())
+    {
+        MessageManager::getInstance()->runDispatchLoopUntil (500);
+        list();
+    }
+    return 0;
+}
+
 int main()
 {
     ScopedJuceInitialiser_GUI init;
+    if (const char* m = std::getenv ("STAGERIG_TEST_MIDI2"); m != nullptr && *m != 0)
+        return probeMidi2();
     if (const char* k = std::getenv ("STAGERIG_TEST_KONTROL_SECONDS"); k != nullptr && *k != 0)
         return probeKompleteKontrol (String (k).getIntValue());
     if (const char* n = std::getenv ("STAGERIG_TEST_NKS"); n != nullptr && *n != 0)
@@ -461,6 +506,105 @@ int main()
         render (engine, 2);
         CHECK (inst->fetchParameterValue (target->index, v));
         CHECK (std::abs (v - 0.25f) < 0.02f);
+
+        // MIDI 2.0: what the plugins get as MIDI 1.0, and the full value beside it.
+        {
+            namespace ump = juce::universal_midi_packets;
+            ump::SingleGroupMidi1ToBytestreamTranslator translator (64);
+            std::vector<std::pair<MidiMessage, int64>> got;
+            auto keep = [&got] (const MidiMessage& mm, int64 exact) { got.emplace_back (mm, exact); };
+            const auto cc = ump::Factory::makeControlChangeV2 (0, 2, 74, 0x9abcdef0u);
+            Midi2Inputs::translate (ump::View (cc.data()), 0.0, translator, keep);
+            CHECK (got.size() == 1 && got[0].first.isController() && got[0].first.getChannel() == 3 && got[0].first.getControllerNumber() == 74
+                   && got[0].first.getControllerValue() == (0x9abcdef0 >> 25) && got[0].second == 0x9abcdef0);
+            got.clear();
+            const auto bend = ump::Factory::makePitchBendV2 (0, 0, 0x80000000u);
+            Midi2Inputs::translate (ump::View (bend.data()), 0.0, translator, keep);
+            CHECK (got.size() == 1 && got[0].first.isPitchWheel() && got[0].first.getPitchWheelValue() == 8192 && got[0].second == 0x80000000);
+            got.clear();
+            const auto note = ump::Factory::makeNoteOnV2 (0, 0, 60, ump::Factory::NoteAttributeKind::none, 0x8000, 0);
+            Midi2Inputs::translate (ump::View (note.data()), 0.0, translator, keep);
+            CHECK (got.size() == 1 && got[0].first.isNoteOn() && got[0].first.getVelocity() == 64 && got[0].second == -1);
+        }
+
+        /* A slow turn on a MIDI 2.0 keyboard, within one of MIDI 1.0's 128
+           steps (0x41000000 and 0x41ffffff are both 32 of 127), still moves
+           the plugin's parameter, while the plugin is sent MIDI 1.0. */
+        {
+            namespace ump = juce::universal_midi_packets;
+            auto turn2 = [&] (uint32 value)
+            {
+                const auto p = ump::Factory::makeControlChangeV2 (0, 0, 74, value);
+                engine.injectMidi2 (0, ump::View (p.data()));
+                render (engine, 2);
+                float now = -1.0f;
+                CHECK (inst->fetchParameterValue (target->index, now));
+                return now;
+            };
+            const float low = turn2 (0x41000000u), high = turn2 (0x41ffffffu);
+            const float wantLow = 0.25f + 0.5f * (float) (0x41000000u / 4294967295.0), wantHigh = 0.25f + 0.5f * (float) (0x41ffffffu / 4294967295.0);
+            std::printf ("     MIDI 2.0: within one MIDI 1.0 step the parameter went %.5f -> %.5f (wanted %.5f -> %.5f)\n", low, high, wantLow, wantHigh);
+            CHECK (std::abs (low - wantLow) < 2e-4f && std::abs (high - wantHigh) < 2e-4f && high > low + 0.001f);
+            // The same controller from MIDI 1.0 afterwards is its own 7 bits, not the last exact value.
+            engine.injectMidi (0, MidiMessage::controllerEvent (1, 74, 100));
+            render (engine, 2);
+            float seven = -1.0f;
+            CHECK (inst->fetchParameterValue (target->index, seven) && std::abs (seven - (0.25f + 0.5f * 100.0f / 127.0f)) < 2e-4f);
+        }
+
+        /* A keyboard speaking MIDI 2.0, made in software (where the system's
+           ALSA can make one): heard through its own MIDI 2.0 connection. */
+        {
+            namespace ump = juce::universal_midi_packets;
+            auto session = ump::Endpoints::getInstance()->makeSession ("StageRig test");
+            const auto block = ump::Block{}.withName ("Keys").withFirstGroup (0).withNumGroups (1).withEnabled (true)
+                                           .withDirection (ump::BlockDirection::bidirectional);
+            auto keys = session.createVirtualEndpoint ("StageRig MIDI 2 test keys", ump::DeviceInfo{}, "stagerig-test-1",
+                                                       ump::PacketProtocol::MIDI_2_0, Span<const ump::Block> (&block, 1), ump::BlocksAreStatic::yes);
+            String id;
+            for (int tries = 0; tries < 40 && keys.isAlive() && id.isEmpty(); ++tries)
+            {
+                pump (50);
+                if (const auto info = ump::Endpoints::getInstance()->getStaticDeviceInfo (keys.getId()))
+                    id = info->getLegacyIdentifiersSrc()[0];
+            }
+            if (! keys.isAlive() || id.isEmpty())
+                std::printf ("     MIDI 2.0: no virtual MIDI 2.0 keyboard can be made here; skipped\n");
+            else
+            {
+                const auto before = engine.getSetup().inputs[0];
+                engine.setInputMidiDevice (0, MidiDeviceInfo ("StageRig MIDI 2 test keys", id));
+                std::printf ("     MIDI 2.0: test keyboard %s, MIDI 2.0 %d, heard as MIDI 2.0 %d\n", id.toRawUTF8(),
+                             (int) Engine::isMidi2Device (id), (int) engine.isInputHeardAsMidi2 (0));
+                CHECK (Engine::isMidi2Device (id) && engine.isInputHeardAsMidi2 (0));
+                auto out = session.connectOutput (keys.getId());
+                auto turn = [&] (uint32 value)
+                {
+                    ump::Packets p;
+                    p.add (ump::Factory::makeControlChangeV2 (0, 0, 74, value));
+                    out.send (p.begin(), p.end());
+                    pump (100);
+                    render (engine, 2);
+                    float now = -1.0f;
+                    CHECK (inst->fetchParameterValue (target->index, now));
+                    return now;
+                };
+                // 0x41000000 and 0x41ffffff are both 32 of 127 in MIDI 1.0.
+                const float low = turn (0x41000000u), high = turn (0x41ffffffu);
+                const float wantLow = 0.25f + 0.5f * (float) (0x41000000u / 4294967295.0), wantHigh = 0.25f + 0.5f * (float) (0x41ffffffu / 4294967295.0);
+                std::printf ("     MIDI 2.0: within one MIDI 1.0 step the parameter went %.5f -> %.5f (wanted %.5f -> %.5f)\n", low, high, wantLow, wantHigh);
+                CHECK (std::abs (low - wantLow) < 2e-4f && std::abs (high - wantHigh) < 2e-4f && high > low + 0.001f);
+
+                // Heard as MIDI 1.0 at the input's asking: the same turn is one step.
+                engine.setInputMidi1Only (0, true);
+                CHECK (! engine.isInputHeardAsMidi2 (0));
+                const float low1 = turn (0x41000000u), high1 = turn (0x41ffffffu);
+                std::printf ("     MIDI 2.0 heard as MIDI 1.0: %.5f -> %.5f\n", low1, high1);
+                CHECK (std::abs (low1 - high1) < 1e-5f && std::abs (low1 - (0.25f + 0.5f * 32.0f / 127.0f)) < 2e-4f);
+                engine.setInputMidi1Only (0, false);
+                engine.setInputMidiDevice (0, MidiDeviceInfo (before.midiDeviceName, before.midiDeviceIdentifier));
+            }
+        }
     }
 
     // --- a pedal on the instrument itself: on / off, toggled, and a level ------------------

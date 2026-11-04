@@ -165,6 +165,18 @@ public:
             pcChannelBox.setEnabled (pcToggle.getToggleState());
         };
 
+        addChildComponent (midi1Toggle);
+        midi1Toggle.setTooltip ("This keyboard speaks MIDI 2.0, so StageRig hears its knobs, pedals and pressure at full resolution "
+                                "instead of in 128 steps: a slow sweep of a mapped knob moves the plugin smoothly. Tick this to hear it "
+                                "as MIDI 1.0 instead, for a keyboard that misbehaves. The plugins get MIDI 1.0 either way.");
+        midi1Toggle.onClick = [this]
+        {
+            int sel = list.getSelectedRow();
+            if (sel < 0) return;
+            engine.setInputMidi1Only (sel, midi1Toggle.getToggleState());
+            owner.markDirty();
+        };
+
         addAndMakeVisible (outputBox);
         outputBox.setTooltip ("Which output this input's sound goes to. An output is a pair of interface channels with its own master effects and volume. Set them up under Options > Outputs & master effects.");
         outputBox.onChange = [this]
@@ -277,6 +289,9 @@ public:
                                     : (def.programChangeChannel == InputDef::pcChannelAny ? 2 : def.programChangeChannel + 2),
                                     dontSendNotification);
         pcChannelBox.setEnabled (def.respondToProgramChange);
+        // Only for a keyboard speaking MIDI 2.0 (or one already set to MIDI 1.0, so it can be unset).
+        midi1Toggle.setVisible (! def.isTrack() && (def.midi1Only || Engine::isMidi2Device (def.midiDeviceIdentifier)));
+        midi1Toggle.setToggleState (def.midi1Only, dontSendNotification);
         resized();      // the editor is taller for an audio input
     }
 
@@ -289,7 +304,7 @@ public:
            It was 150, so the last row was being clipped, which is why the PC
            channel selector looked squeezed. */
         const bool audio = audioBox.isVisible();
-        auto editor = r.removeFromBottom (audio ? 262 : 216);
+        auto editor = r.removeFromBottom ((audio ? 262 : 216) + (midi1Toggle.isVisible() ? 28 : 0));
         auto buttons = r.removeFromBottom (26);
         r.removeFromBottom (4);
         list.setBounds (r);
@@ -321,6 +336,11 @@ public:
         pcChannelLabel.setBounds (pcRow.removeFromLeft (56));
         pcChannelBox.setBounds (pcRow.removeFromLeft (130));
         editor.removeFromTop (6);
+        if (midi1Toggle.isVisible())
+        {
+            midi1Toggle.setBounds (editor.removeFromTop (22));
+            editor.removeFromTop (6);
+        }
         auto outRow = editor.removeFromTop (24);
         outputLabel.setBounds (outRow.removeFromLeft (56));
         outputBox.setBounds (outRow);
@@ -403,6 +423,7 @@ private:
     Label deviceLabel { {}, "MIDI device" }, channelLabel { {}, "Channel" };
     ComboBox deviceBox, channelBox;
     ToggleButton pcToggle { "Respond to Program Change" };
+    ToggleButton midi1Toggle { "Hear as MIDI 1.0 (it speaks MIDI 2.0)" };
     Label pcChannelLabel { {}, "Arrive on" };
     ComboBox pcChannelBox;
     Label audioLabel { {}, "Audio channels" };

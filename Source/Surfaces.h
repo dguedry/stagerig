@@ -194,7 +194,7 @@ private:
     void setupChanged() override                                    { layouts.clear(); focus.clear(); }
     void programChanged (int, int) override                         { layouts.clear(); }
     void programContentChanged (int, int) override                  { layouts.clear(); }
-    void surfaceKnob (int input, int knob, int value, bool relative) override;
+    void surfaceKnob (int input, int knob, int value, bool relative, float exact) override;
     void surfaceButton (int input, int action) override             { doAction (input, action); }
     void surfaceLearned (int input, int cc, int value) override;
 

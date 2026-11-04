@@ -146,9 +146,56 @@ struct Engine::MappingRuntime
     bool wasHigh = false;          // audio thread: for the toggle's edge
 };
 
+/* A keyboard speaking MIDI 2.0 sends each controller, channel pressure and
+   pitch bend at full resolution, which MIDI 1.0 rounds. The last full value
+   of each, per channel, written on the MIDI thread before the message is
+   queued and read with it on the audio thread. Bit 32 marks one as there. */
+struct ExactValues
+{
+    std::array<std::atomic<uint64_t>, 16 * 128> cc {};
+    std::array<std::atomic<uint64_t>, 16> pressure {}, bend {};
+
+    std::atomic<uint64_t>* slotFor (const MidiMessage& m)
+    {
+        const int ch = m.getChannel() - 1;
+        if (ch < 0 || ch > 15) return nullptr;
+        if (m.isController())       return &cc[(size_t) (ch * 128 + m.getControllerNumber())];
+        if (m.isChannelPressure())  return &pressure[(size_t) ch];
+        if (m.isPitchWheel())       return &bend[(size_t) ch];
+        return nullptr;
+    }
+    void store (const MidiMessage& m, uint32_t value)
+    {
+        if (auto* a = slotFor (m)) a->store ((uint64_t) 1 << 32 | value, std::memory_order_relaxed);
+    }
+    /** This message's value, 0..1, at full resolution when the last one stored
+        is the value it was made from; otherwise -1. Several on one controller
+        in one block each check against the newest, so all but the last fall
+        back to their own 7 bits, and the last -- the one that stays -- is exact. */
+    float read (const MidiMessage& m) const
+    {
+        auto* a = const_cast<ExactValues*> (this)->slotFor (m);
+        if (a == nullptr) return -1.0f;
+        const auto e = a->load (std::memory_order_relaxed);
+        if ((e >> 32) == 0) return -1.0f;
+        const auto v = (uint32_t) e;
+        const bool same = m.isController()      ? (int) (v >> 25) == m.getControllerValue()
+                        : m.isChannelPressure() ? (int) (v >> 25) == m.getChannelPressureValue()
+                                                : (int) (v >> 18) == m.getPitchWheelValue();
+        return same ? (float) ((double) v / 4294967295.0) : -1.0f;
+    }
+    void clear()
+    {
+        for (auto& a : cc) a.store (0);
+        for (auto& a : pressure) a.store (0);
+        for (auto& a : bend) a.store (0);
+    }
+};
+
 struct Engine::ProgramRuntime
 {
     int program = 0;
+    const ExactValues* exact = nullptr;    // its input's, for its mappings; none for an output's chain
     std::vector<std::unique_ptr<SlotRuntime>> slots;
     std::vector<std::unique_ptr<EffectRuntime>> effects;   // program-level chain
     std::vector<MappingRuntime> mappings;
@@ -226,6 +273,7 @@ struct Engine::InputRuntime
     std::array<std::atomic<int>, SurfaceControls::numKnobs> knobCC {};
     std::atomic<bool> knobsRelative { false };
     std::array<std::atomic<int>, SurfaceControls::numActions> buttonCC {};
+    ExactValues exact;             // a MIDI 2.0 keyboard's full values
     MidiMessageCollector collector;
     MidiBuffer block;
     MidiBuffer trackMidi;          // the backing track's MIDI for this block, merged into `block`
@@ -316,6 +364,7 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
         deviceManager.addAudioCallback (this);
     }
     deviceManager.addMidiInputDeviceCallback ({}, this);
+    midi2 = std::make_unique<Midi2Inputs> ([this] (const String& id, const MidiMessage& m, int64 exact) { receiveMidi (id, m, exact); });
 
     // Backing tracks: WAV, AIFF, FLAC, Ogg and MP3, read ahead on their own thread.
     trackFormats.registerBasicFormats();
@@ -345,6 +394,7 @@ Engine::~Engine()
 {
     stopTimer();
     cancelPendingUpdate();
+    midi2.reset();
     deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
     deviceManager.removeChangeListener (this);
@@ -1204,8 +1254,39 @@ void Engine::openMidiDevices()
         runtimes[(size_t) i]->deviceIdentifier = found ? def.midiDeviceIdentifier : String();
     }
 
+    /* A keyboard speaking MIDI 2.0 is heard through Midi2Inputs, unless an
+       input on it asks for MIDI 1.0; the MIDI 1.0 path leaves it alone, so
+       nothing arrives twice. */
+    StringArray asMidi2;
+    for (const auto& id : wanted)
+    {
+        bool midi1 = false;
+        for (const auto& def : setup.inputs)
+            if (def.midiDeviceIdentifier == id && def.midi1Only) midi1 = true;
+        if (! midi1) asMidi2.add (id);
+    }
+    const auto heard = midi2 != nullptr ? midi2->open (asMidi2) : StringArray();
+    if (heard != heardAsMidi2)
+    {
+        const ScopedLock sl (lock);
+        for (auto& rt : runtimes) rt->exact.clear();
+    }
+    heardAsMidi2 = heard;
+
     for (auto& d : available)
-        deviceManager.setMidiInputDeviceEnabled (d.identifier, wanted.contains (d.identifier));
+        deviceManager.setMidiInputDeviceEnabled (d.identifier, wanted.contains (d.identifier) && ! heard.contains (d.identifier));
+}
+
+bool Engine::isInputHeardAsMidi2 (int inputIndex) const
+{
+    return validInput (inputIndex) && heardAsMidi2.contains (setup.inputs[(size_t) inputIndex].midiDeviceIdentifier);
+}
+
+void Engine::setInputMidi1Only (int inputIndex, bool b)
+{
+    if (! validInput (inputIndex)) return;
+    setup.inputs[(size_t) inputIndex].midi1Only = b;
+    openMidiDevices();
 }
 
 //==============================================================================
@@ -2537,6 +2618,7 @@ std::unique_ptr<Engine::ProgramRuntime> Engine::buildProgram (int inputIndex, in
 {
     auto rt = std::make_unique<ProgramRuntime>();
     rt->program = program;
+    rt->exact = &runtimes[(size_t) inputIndex]->exact;
     rt->mix.setSize (2, blockSize);
     rt->programMidi.ensureSize (2048);
     rt->sentMidi.ensureSize (2048);
@@ -3811,7 +3893,7 @@ void Engine::handleAsyncUpdate()
                 break;
 
             case Event::surfaceKnob:
-                listeners.call ([&e] (Listener& l) { l.surfaceKnob (e.input, e.a, e.b, e.c != 0); });
+                listeners.call ([&e] (Listener& l) { l.surfaceKnob (e.input, e.a, e.b, e.c != 0, e.d > 0 ? (float) (e.d - 1) / 16777215.0f : -1.0f); });
                 break;
             case Event::surfaceButton:
                 listeners.call ([&e] (Listener& l) { l.surfaceButton (e.input, e.a); });
@@ -4015,7 +4097,11 @@ void Engine::housekeeping()
 //==============================================================================
 void Engine::handleIncomingMidiMessage (MidiInput* source, const MidiMessage& m)
 {
-    const String id = source->getIdentifier();
+    receiveMidi (source->getIdentifier(), m, -1);
+}
+
+void Engine::receiveMidi (const String& id, const MidiMessage& m, int64 exact)
+{
     if (m.getChannel() == 0) return;    // sysex / realtime: ignored
 
     const ScopedLock sl (lock);
@@ -4023,7 +4109,7 @@ void Engine::handleIncomingMidiMessage (MidiInput* source, const MidiMessage& m)
         if (runtimes[(size_t) i]->deviceIdentifier == id)
         {
             recorder.writeMidi (i, m);
-            routeMidi (*runtimes[(size_t) i], i, m);
+            routeMidi (*runtimes[(size_t) i], i, m, exact);
         }
 }
 
@@ -4038,6 +4124,19 @@ void Engine::injectMidi (int inputIndex, const MidiMessage& m)
     if (inputIndex >= 0 && inputIndex < (int) runtimes.size()) recorder.writeMidi (inputIndex, stamped);
     if (inputIndex >= 0 && inputIndex < (int) runtimes.size())
         routeMidi (*runtimes[(size_t) inputIndex], inputIndex, stamped);
+}
+
+void Engine::injectMidi2 (int inputIndex, const universal_midi_packets::View& v)
+{
+    universal_midi_packets::SingleGroupMidi1ToBytestreamTranslator translator (256);
+    Midi2Inputs::translate (v, Time::getMillisecondCounterHiRes() * 0.001, translator, [this, inputIndex] (const MidiMessage& m, int64 exact)
+    {
+        if (m.getChannel() == 0) return;
+        const ScopedLock sl (lock);
+        if (inputIndex < 0 || inputIndex >= (int) runtimes.size()) return;
+        recorder.writeMidi (inputIndex, m);
+        routeMidi (*runtimes[(size_t) inputIndex], inputIndex, m, exact);
+    });
 }
 
 /** Does a Program Change on `ch` belong to this input?  Same-as-notes follows the
@@ -4055,10 +4154,12 @@ bool Engine::acceptsProgramChangeOn (const InputRuntime& in, int ch)
     return ch == pc;
 }
 
-void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
+void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exact)
 {
     const int ch = m.getChannel();
     const int want = in.channel.load();
+    if (exact >= 0) in.exact.store (m, (uint32_t) exact);
+    const float exactValue = exact >= 0 ? (float) ((double) exact / 4294967295.0) : -1.0f;
 
     // Program Change is filtered on its own channel, which is not always the one the
     // keyboard plays on, so this is tested before the note filter would drop it.
@@ -4144,7 +4245,7 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
         for (int o = 0; o < (int) outputs.size(); ++o)
             if (cc > 0 && outputs[(size_t) o]->volumeCC.load (std::memory_order_relaxed) == cc)
             {
-                const float f = (float) m.getControllerValue() / 127.0f;
+                const float f = exactValue >= 0.0f ? exactValue : (float) m.getControllerValue() / 127.0f;
                 outputs[(size_t) o]->gain.store (f * f);          // a fader's taper: half way is -12 dB
                 postEvent ({ Event::outputVolume, o, m.getControllerValue(), 0, 0, 0 });
                 return;
@@ -4185,7 +4286,9 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
                 if (in.knobCC[(size_t) k].load (std::memory_order_relaxed) == cc)
                 {
                     const bool relative = in.knobsRelative.load (std::memory_order_relaxed);
-                    postEvent ({ Event::surfaceKnob, i, k, relative ? value - 64 : value, relative ? 1 : 0, 0 });
+                    // d: the exact place, in 24 bits plus one, from a MIDI 2.0 keyboard.
+                    postEvent ({ Event::surfaceKnob, i, k, relative ? value - 64 : value, relative ? 1 : 0,
+                                 exact >= 0 && ! relative ? (int) (exact >> 8) + 1 : 0 });
                     return;
                 }
             for (int a = 0; a < SurfaceControls::numActions; ++a)
@@ -4576,8 +4679,10 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
             processProgram (*rt, emptyMidi, &rt->received, nullptr, nullptr, out, numOut, numSamples, panicNow, false);
 }
 
-static inline float normalisedValueOf (const MidiMessage& m, MappingDef::Source s)
+static inline float normalisedValueOf (const MidiMessage& m, MappingDef::Source s, const ExactValues* exact)
 {
+    if (exact != nullptr)
+        if (const float e = exact->read (m); e >= 0.0f) return e;
     switch (s)
     {
         case MappingDef::Source::CC:              return m.getControllerValue() / 127.0f;
@@ -4718,7 +4823,7 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const M
                 /* The instrument or effect itself. Changed here, at once, and
                    told to the message thread so the setup and the panel agree. */
                 if (map.slotNode == nullptr && map.effectNode == nullptr) continue;
-                const float norm = normalisedValueOf (m, map.def.source);
+                const float norm = normalisedValueOf (m, map.def.source, prog.exact);
                 const float value = jlimit (0.0f, 1.0f, map.def.minValue + (map.def.maxValue - map.def.minValue) * norm);
                 const bool high = value >= 0.5f;
                 bool apply = false, on = false;
@@ -4751,7 +4856,7 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const M
                 continue;
             }
             if (map.plugin == nullptr || map.paramIndex < 0 || ! map.plugin->isAlive()) continue;
-            const float norm = normalisedValueOf (m, map.def.source);
+            const float norm = normalisedValueOf (m, map.def.source, prog.exact);
             const float value = map.def.minValue + (map.def.maxValue - map.def.minValue) * norm;
             map.plugin->queueParameterChange (map.paramIndex, jlimit (0.0f, 1.0f, value));
             if (! map.def.passThrough) consumed = true;
