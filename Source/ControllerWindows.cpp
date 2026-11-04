@@ -46,154 +46,214 @@ namespace
 //==============================================================================
 namespace
 {
-class ControlMapEditor : public Component
+/** What the keyboard's eight knobs turn on one instrument, shown as the
+    eight knobs: each box is a knob, named and valued, lit when that knob is
+    turned. Click one to change it underneath. The layout is the plugin's, so
+    every program with it shares it; it starts automatic (the maker's pages,
+    or StageRig's picks) and becomes yours, saved as you go, the moment one
+    thing is changed. Nothing here is about keyboards: what a knob turns is
+    the same on all of them. */
+class ControlMapEditor : public Component, private Timer, private Engine::Listener
 {
 public:
     ControlMapEditor (Engine& e, SurfaceHub& h, ControlMapLibrary& lib, int in, int prog, int sl, std::function<void()> ch)
         : engine (e), hub (h), library (lib), input (in), program (prog), slot (sl), changed (std::move (ch))
     {
-        const auto& sd = slotDef();
-        plugin = sd.plugin;
+        plugin = slotDef().plugin;
+        engine.addListener (this);
 
         addAndMakeVisible (title);
-        title.setFont (FontOptions (17.0f, Font::bold));
-        title.setText ("What your keyboard's knobs turn on " + plugin.name, dontSendNotification);
-        addAndMakeVisible (explain);
-        explain.setColour (Label::textColourId, textDim);
-        {
-            const auto& prog = engine.getSetup().inputs[(size_t) input].programs[(size_t) program];
-            const auto progName = String (program).paddedLeft ('0', 3) + (prog.name.isNotEmpty() ? " \"" + prog.name + "\"" : String());
-            explain.setText ("Pages of eight knobs, with names for a keyboard's screen, and colours for its keys: keyswitches, a kit's pads, the range "
-                             "that plays. A setup belongs to " + plugin.name + ", so every program with it can use it; which one this instrument "
-                             "uses is kept with program " + progName + ". For one knob or pedal in this program only, use the program's MIDI mappings.",
-                             dontSendNotification);
-        }
+        title.setFont (FontOptions (18.0f, Font::bold));
+        title.setText ("Knobs for " + plugin.name, dontSendNotification);
+        addAndMakeVisible (subtitle);
+        subtitle.setColour (Label::textColourId, textDim);
+        subtitle.setText ("The same in every program with " + plugin.name + ". On any keyboard: knob 1 is the first box, knob 8 the last.", dontSendNotification);
 
-        addAndMakeVisible (caption (setupCap, "SETUP"));
-        addAndMakeVisible (setupBox);
-        setupBox.onChange = [this] { chooseSetup(); };
-        for (auto* b : { &newBtn, &deleteBtn, &importBtn, &exportBtn, &saveBtn, &addPageBtn, &removePageBtn, &addKeysBtn })
+        for (auto* b : { &knobsTab, &keysTab })
+        {
             addAndMakeVisible (b);
-        newBtn.onClick = [this] { newSetup(); };
-        deleteBtn.onClick = [this] { deleteSetup(); };
-        importBtn.onClick = [this] { importSetup(); };
-        exportBtn.onClick = [this] { exportSetup(); };
-        saveBtn.onClick = [this] { save(); };
-        addPageBtn.onClick = [this] { storePage(); storeKeys(); edit.pages.push_back ({ "Page " + String ((int) edit.pages.size() + 1), {} }); page = (int) edit.pages.size() - 1; showMap(); touched(); };
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (1);
+            b->onClick = [this] { showTab(); };
+        }
+        knobsTab.setToggleState (true, dontSendNotification);
+
+        addAndMakeVisible (caption (layoutCap, "LAYOUT"));
+        addAndMakeVisible (layoutBox);
+        layoutBox.onChange = [this] { chooseLayout(); };
+        addAndMakeVisible (shareBtn);
+        shareBtn.onClick = [this] { shareMenu(); };
+
+        addAndMakeVisible (addPageBtn);
+        addPageBtn.setTooltip ("Another page of eight knobs: the keyboard's page buttons step to it");
+        addPageBtn.onClick = [this] { makeOwn(); edit.pages.push_back ({ "Page " + String ((int) edit.pages.size() + 1), {} }); page = (int) edit.pages.size() - 1; saveAndShow(); };
+        addAndMakeVisible (removePageBtn);
         removePageBtn.onClick = [this]
         {
-            if (edit.pages.empty()) return;
-            storeKeys();
+            makeOwn();
+            if (edit.pages.size() <= 1) return;
             edit.pages.erase (edit.pages.begin() + page);
             page = jmax (0, page - 1);
-            showMap();
-            touched();
+            saveAndShow();
         };
-        addKeysBtn.onClick = [this] { storePage(); storeKeys(); edit.keys.push_back ({ 36, 47, keyColourChoices[edit.keys.size() % 9].rgb, {} }); showMap(); touched(); };
-        saveBtn.setColour (TextButton::buttonColourId, Colour (0xff2b4f80));
-
-        addAndMakeVisible (caption (nameCap, "NAME"));
-        addAndMakeVisible (caption (authorCap, "MADE BY"));
-        addAndMakeVisible (nameEd);
-        addAndMakeVisible (authorEd);
-        nameEd.onTextChange = authorEd.onTextChange = [this] { touched(); };
-        nameEd.setTooltip ("What this setup is for: the plugin's name for the whole plugin, or the instrument inside it (\"Alicia's Keys\")");
-
-        addAndMakeVisible (caption (pageCap, "KNOB PAGE"));
-        addAndMakeVisible (pageBox);
-        pageBox.onChange = [this] { if (pageBox.getSelectedId() > 0) { storePage(); page = pageBox.getSelectedId() - 1; showPage(); } };
         addAndMakeVisible (pageNameEd);
-        pageNameEd.onTextChange = [this] { touched(); };
+        pageNameEd.setTextToShowWhenEmpty ("Page name", textDim);
         pageNameEd.setTooltip ("The page's name, shown when you step to it");
+        pageNameEd.onReturnKey = pageNameEd.onFocusLost = [this] { renamePage(); };
 
         for (int k = 0; k < ControlPage::numKnobs; ++k)
         {
-            auto& r = knobRows[(size_t) k];
-            r.cap.setText ("Knob " + String (k + 1), dontSendNotification);
-            r.cap.setColour (Label::textColourId, textDim);
-            addAndMakeVisible (r.cap);
-            addAndMakeVisible (r.param);
-            addAndMakeVisible (r.label);
-            r.label.setTextToShowWhenEmpty ("Name on the screen", textDim);
-            r.param.onChange = [this] { touched(); };
-            r.label.onTextChange = [this] { touched(); };
+            auto& t = tiles[(size_t) k];
+            addAndMakeVisible (t);
+            t.number = k + 1;
+            t.onClick = [this, k] { select (k); };
         }
 
-        addAndMakeVisible (caption (keysCap, "KEYS"));
+        addAndMakeVisible (caption (editCap, ""));
+        addAndMakeVisible (paramPicker);
+        paramPicker.onChange = [this] { pickParam (paramPicker.getSelectedId() - 2); };
+        addAndMakeVisible (labelEd);
+        labelEd.setTextToShowWhenEmpty ("Name on the screen (the parameter's own when empty)", textDim);
+        labelEd.onReturnKey = labelEd.onFocusLost = [this] { renameKnob(); };
+        addAndMakeVisible (fromWindowBtn);
+        fromWindowBtn.setTooltip ("Opens the plugin's window: move the control you want, and this knob turns it");
+        fromWindowBtn.onClick = [this] { pickFromWindow(); };
+        addAndMakeVisible (clearBtn);
+        clearBtn.onClick = [this] { pickParam (-1); };
+
+        addAndMakeVisible (caption (keysCap, "KEY COLOURS: keyswitches, a kit's pads, the range that plays"));
         addAndMakeVisible (keysView);
         keysView.setViewedComponent (&keysList, false);
         keysView.setScrollBarsShown (true, false);
+        addAndMakeVisible (addKeysBtn);
+        addKeysBtn.onClick = [this] { makeOwn(); storeKeys(); edit.keys.push_back ({ 36, 47, keyColourChoices[edit.keys.size() % 9].rgb, {} }); saveAndShow(); };
+
+        addAndMakeVisible (where);
+        where.setColour (Label::textColourId, textDim);
         addAndMakeVisible (status);
         status.setColour (Label::textColourId, textDim);
 
         fillParams();
-        fillSetups (sd.controlMap);
+        load();
+        showTab();
+        startTimerHz (15);
+    }
+
+    ~ControlMapEditor() override
+    {
+        engine.removeListener (this);
     }
 
     void resized() override
     {
-        auto r = getLocalBounds().reduced (12);
-        title.setBounds (r.removeFromTop (24));
-        explain.setBounds (r.removeFromTop (54));
-        r.removeFromTop (6);
-
-        auto row = r.removeFromTop (16);
-        setupCap.setBounds (row);
-        row = r.removeFromTop (26);
-        exportBtn.setBounds (row.removeFromRight (80)); row.removeFromRight (4);
-        importBtn.setBounds (row.removeFromRight (80)); row.removeFromRight (4);
-        deleteBtn.setBounds (row.removeFromRight (70)); row.removeFromRight (4);
-        newBtn.setBounds (row.removeFromRight (60)); row.removeFromRight (8);
-        setupBox.setBounds (row);
+        auto r = getLocalBounds().reduced (14);
+        auto top = r.removeFromTop (26);
+        keysTab.setBounds (top.removeFromRight (110));
+        top.removeFromRight (4);
+        knobsTab.setBounds (top.removeFromRight (80));
+        title.setBounds (top);
+        subtitle.setBounds (r.removeFromTop (20));
         r.removeFromTop (10);
 
-        row = r.removeFromTop (16);
-        nameCap.setBounds (row.removeFromLeft (row.getWidth() / 2));
-        authorCap.setBounds (row);
-        row = r.removeFromTop (26);
-        nameEd.setBounds (row.removeFromLeft (row.getWidth() / 2).withTrimmedRight (8));
-        authorEd.setBounds (row);
-        r.removeFromTop (10);
+        auto row = r.removeFromTop (26);
+        layoutCap.setBounds (row.removeFromLeft (56));
+        shareBtn.setBounds (row.removeFromRight (90));
+        row.removeFromRight (8);
+        layoutBox.setBounds (row);
+        r.removeFromTop (12);
 
-        row = r.removeFromTop (16);
-        pageCap.setBounds (row);
-        row = r.removeFromTop (26);
-        removePageBtn.setBounds (row.removeFromRight (100)); row.removeFromRight (4);
-        addPageBtn.setBounds (row.removeFromRight (90)); row.removeFromRight (8);
-        pageBox.setBounds (row.removeFromLeft (row.getWidth() / 2).withTrimmedRight (8));
-        pageNameEd.setBounds (row);
-        r.removeFromTop (6);
-
-        // The knobs in two columns of four, as most keyboards lay them out in a row of eight.
-        auto knobArea = r.removeFromTop (4 * 30);
-        auto left = knobArea.removeFromLeft (knobArea.getWidth() / 2).withTrimmedRight (8);
-        for (int k = 0; k < ControlPage::numKnobs; ++k)
-        {
-            auto& col = k < 4 ? left : knobArea;
-            auto line = col.removeFromTop (30).reduced (0, 2);
-            auto& kr = knobRows[(size_t) k];
-            kr.cap.setBounds (line.removeFromLeft (52));
-            kr.label.setBounds (line.removeFromRight (jmin (130, line.getWidth() / 2)));
-            line.removeFromRight (4);
-            kr.param.setBounds (line);
-        }
-        r.removeFromTop (8);
-
-        auto bottom = r.removeFromBottom (28);
-        saveBtn.setBounds (bottom.removeFromRight (120));
-        bottom.removeFromRight (8);
+        auto bottom = r.removeFromBottom (20);
         status.setBounds (bottom);
+        where.setBounds (r.removeFromBottom (20));
         r.removeFromBottom (6);
 
-        row = r.removeFromTop (24);
-        addKeysBtn.setBounds (row.removeFromRight (110).reduced (0, 1));
+        // Knobs: the pages, the eight boxes, and the chosen one's editor.
+        auto knobsArea = r;
+        row = knobsArea.removeFromTop (26);
+        removePageBtn.setBounds (row.removeFromRight (110));
+        row.removeFromRight (4);
+        addPageBtn.setBounds (row.removeFromRight (80));
+        row.removeFromRight (8);
+        pageNameEd.setBounds (row.removeFromRight (160));
+        row.removeFromRight (8);
+        pageTabsArea = row;
+        layoutPageTabs();
+        knobsArea.removeFromTop (10);
+        auto tileRow = knobsArea.removeFromTop (118);
+        const int gap = 6, w = (tileRow.getWidth() - gap * 7) / 8;
+        for (int k = 0; k < ControlPage::numKnobs; ++k)
+            tiles[(size_t) k].setBounds (tileRow.getX() + k * (w + gap), tileRow.getY(), w, tileRow.getHeight());
+        knobsArea.removeFromTop (12);
+        editCap.setBounds (knobsArea.removeFromTop (18));
+        row = knobsArea.removeFromTop (28);
+        clearBtn.setBounds (row.removeFromRight (70));
+        row.removeFromRight (4);
+        fromWindowBtn.setBounds (row.removeFromRight (190));
+        row.removeFromRight (8);
+        paramPicker.setBounds (row);
+        knobsArea.removeFromTop (6);
+        labelEd.setBounds (knobsArea.removeFromTop (26));
+
+        // Keys.
+        auto keysArea = r;
+        row = keysArea.removeFromTop (26);
+        addKeysBtn.setBounds (row.removeFromRight (110));
         keysCap.setBounds (row);
-        keysView.setBounds (r);
+        keysArea.removeFromTop (4);
+        keysView.setBounds (keysArea);
         layoutKeys();
     }
 
 private:
-    struct KnobRow { Label cap; ParamPicker param; TextEditor label; };
+    /** One knob: its name, what it turns, and where it is. */
+    struct Tile : public Component
+    {
+        int number = 1;
+        String name, param, value;
+        float level = -1.0f;
+        bool selected = false, lit = false, empty = true;
+        std::function<void()> onClick;
+
+        void paint (Graphics& g) override
+        {
+            auto r = getLocalBounds().toFloat().reduced (1.0f);
+            g.setColour (lit ? Colour (0xff3a4f6e) : bgRow);
+            g.fillRoundedRectangle (r, 6.0f);
+            g.setColour (selected ? Colour (0xff5fa8ff) : Colour (0xff444852));
+            g.drawRoundedRectangle (r, 6.0f, selected ? 2.0f : 1.0f);
+
+            auto inner = getLocalBounds().reduced (6);
+            g.setColour (textDim);
+            g.setFont (FontOptions (10.5f));
+            g.drawText ("KNOB " + String (number), inner.removeFromTop (14), Justification::centred);
+
+            // The knob itself: an arc to where it is.
+            auto dial = inner.removeFromTop (46).toFloat().withSizeKeepingCentre (40.0f, 40.0f);
+            const float range = MathConstants<float>::pi * 1.5f;
+            Path track;
+            track.addCentredArc (dial.getCentreX(), dial.getCentreY(), 17.0f, 17.0f, 0.0f, -range / 2.0f, range / 2.0f, true);
+            g.setColour (Colour (0xff50555f));
+            g.strokePath (track, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
+            if (level >= 0.0f)
+            {
+                Path on;
+                on.addCentredArc (dial.getCentreX(), dial.getCentreY(), 17.0f, 17.0f, 0.0f, -range / 2.0f, -range / 2.0f + range * level, true);
+                g.setColour (Colour (0xff5fa8ff));
+                g.strokePath (on, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
+            }
+
+            g.setColour (empty ? textDim : Colours::white);
+            g.setFont (FontOptions (13.5f, Font::bold));
+            g.drawFittedText (empty ? String ("(nothing)") : name, inner.removeFromTop (20), Justification::centred, 1, 0.8f);
+            g.setColour (textDim);
+            g.setFont (FontOptions (11.5f));
+            g.drawFittedText (value.isNotEmpty() ? value : param, inner.removeFromTop (16), Justification::centred, 1, 0.8f);
+            if (value.isNotEmpty() && param.isNotEmpty() && param != name)
+                g.drawFittedText (param, inner.removeFromTop (14), Justification::centred, 1, 0.8f);
+        }
+        void mouseDown (const MouseEvent&) override { if (onClick) onClick(); }
+    };
+
     struct KeyRow : public Component
     {
         TextEditor low, high, label;
@@ -225,74 +285,307 @@ private:
     {
         auto* p = livePlugin();
         params = p != nullptr ? p->getParameters() : ParamInfoList();
-        for (auto& r : knobRows)
-        {
-            r.param.clear (dontSendNotification);
-            r.param.addItem ("(nothing)", 1);
-            for (const auto& prm : params)
-                if (prm.midiController < 0) r.param.addItem (prm, prm.index + 2);
-        }
-        if (p == nullptr) status.setText ("The plugin is not running, so its parameters cannot be listed. Load the program first.", dontSendNotification);
+        paramPicker.clear (dontSendNotification);
+        paramPicker.addItem ("(nothing)", 1);
+        for (const auto& prm : params)
+            if (prm.midiController < 0) paramPicker.addItem (prm, prm.index + 2);
     }
 
-    /** The setups for this plugin in the box; `select` by name, "-" for none. */
-    void fillSetups (const String& select)
+    int paramIndexOf (const ControlKnob& knob) const
     {
-        setupBox.clear (dontSendNotification);
-        if (const auto* nks = library.findNks (plugin))
-            setupBox.addItem ("None: " + (nks->vendor.isNotEmpty() ? nks->vendor + "'s" : String ("the maker's")) + " own pages, from its NKS presets", 1);
-        else
-            setupBox.addItem ("None: the front panel's knobs, then every parameter", 1);
-        const auto maps = library.forPlugin (plugin);
+        for (const auto& prm : params)
+            if ((knob.paramId.isNotEmpty() && prm.id == knob.paramId) || (knob.paramId.isEmpty() && knob.paramName.isNotEmpty() && prm.name.equalsIgnoreCase (knob.paramName)))
+                return prm.index;
+        return -1;
+    }
+
+    /** What is in use now: one of yours, or the automatic pages made into a layout to show (not saved). */
+    void load()
+    {
         names.clear();
-        for (const auto* m : maps) names.add (m->name);
-        for (int i = 0; i < names.size(); ++i) setupBox.addItem (names[i], 10 + i);
-        int id = 1;
-        if (select == "-") id = 1;
-        else if (select.isEmpty()) id = names.isEmpty() ? 1 : 10;
-        else if (names.indexOf (select, true) >= 0) id = 10 + names.indexOf (select, true);
-        setupBox.setSelectedId (id, dontSendNotification);
-        loadSelected();
-    }
-
-    void loadSelected()
-    {
-        const int id = setupBox.getSelectedId();
-        hasMap = id >= 10;
-        original = {};
+        for (const auto* m : library.forPlugin (plugin)) names.add (m->name);
+        const auto chosen = slotDef().controlMap;
+        own = false;
         edit = {};
-        if (hasMap)
-            if (const auto* m = library.find (plugin, names[id - 10])) { original = *m; edit = *m; }
-        page = 0;
-        dirty = false;
-        showMap();
+        if (chosen != "-")
+            if (const auto* m = library.find (plugin, chosen)) { edit = *m; own = true; }
+        if (! own) edit = automaticLayout();
+
+        layoutBox.clear (dontSendNotification);
+        layoutBox.addItem (automaticName(), 1);
+        for (int i = 0; i < names.size(); ++i) layoutBox.addItem ("Yours: " + names[i], 10 + i);
+        layoutBox.setSelectedId (own ? 10 + jmax (0, names.indexOf (edit.name, true)) : 1, dontSendNotification);
+        page = jlimit (0, jmax (0, (int) edit.pages.size() - 1), page);
+        showAll();
     }
 
-    void chooseSetup()
+    String automaticName() const
     {
-        const int id = setupBox.getSelectedId();
-        const String chosen = id >= 10 ? names[id - 10] : String ("-");
-        if (dirty && hasMap) save();           // nothing typed is lost by looking at another
-        engine.setSlotControlMap (input, program, slot, chosen);
+        if (const auto* nks = library.findNks (plugin))
+            return "Automatic: " + (nks->vendor.isNotEmpty() ? nks->vendor + "'s" : String ("the maker's")) + " own pages";
+        return "Automatic: StageRig's picks, then every parameter";
+    }
+
+    ControlMap automaticLayout() const
+    {
+        ControlMap m;
+        m.pluginName = plugin.name;
+        m.pluginManufacturer = plugin.manufacturerName;
+        auto* p = livePlugin();
+        if (p == nullptr) return m;
+        // As the keyboard has it with no layout of yours: what the hub works out.
+        const auto layout = hub.layoutFor (input, program, slot, true);
+        for (const auto& pg : layout.pages)
+        {
+            ControlPage page;
+            page.name = pg.name;
+            for (const auto& k : pg.knobs)
+            {
+                ControlKnob knob;
+                if (k.paramIndex >= 0 && k.paramIndex < (int) p->getParameters().size())
+                {
+                    const auto& prm = p->getParameters()[(size_t) k.paramIndex];
+                    knob = { prm.id, prm.name, k.name != prm.name ? k.name : String() };
+                }
+                page.knobs.push_back (knob);
+            }
+            while (! page.knobs.empty() && page.knobs.back().isEmpty()) page.knobs.pop_back();
+            m.pages.push_back (page);
+        }
+        if (m.pages.empty()) m.pages.push_back ({ "Sound", {} });
+        return m;
+    }
+
+    /** About to change something: an automatic layout becomes yours first. */
+    void makeOwn()
+    {
+        storeKeys();
+        if (own) return;
+        auto m = automaticLayout();
+        m.name = plugin.name;
+        for (int n = 2; library.find (plugin, m.name) != nullptr; ++n) m.name = plugin.name + " " + String (n);
+        if (const auto* nks = library.findNks (plugin)) m.notes = "Made from " + (nks->vendor.isNotEmpty() ? nks->vendor + "'s" : String ("the maker's")) + " pages.";
+        m.keys = edit.keys;
+        edit = m;
+        own = true;
+        madeOwn = true;
+    }
+
+    void saveAndShow()
+    {
+        if (own)
+        {
+            if (const auto r = library.save (edit); r.failed()) { status.setText (r.getErrorMessage(), dontSendNotification); return; }
+            engine.setSlotControlMap (input, program, slot, edit.name);
+            hub.libraryChanged();
+            if (changed) changed();
+            status.setText (madeOwn ? "Saved as your layout \"" + edit.name + "\": every program with " + plugin.name + " now uses it. "
+                                      "Automatic is still there in Layout."
+                                    : "Saved.", dontSendNotification);
+            madeOwn = false;
+        }
+        const int keepPage = page, keepSel = selected;
+        load();
+        page = jlimit (0, jmax (0, (int) edit.pages.size() - 1), keepPage);
+        selected = keepSel;
+        showAll();
+    }
+
+    void chooseLayout()
+    {
+        const int id = layoutBox.getSelectedId();
+        storeKeys();
+        engine.setSlotControlMap (input, program, slot, id >= 10 ? names[id - 10] : String ("-"));
         hub.libraryChanged();
         if (changed) changed();
-        fillSetups (chosen);
+        page = 0;
+        load();
+        status.setText (id >= 10 ? String() : String ("Automatic: StageRig works the pages out. Change a knob to make them yours."), dontSendNotification);
     }
 
-    void showMap()
+    void showAll()
     {
-        for (auto* c : std::initializer_list<Component*> { &nameEd, &authorEd, &pageBox, &pageNameEd, &addPageBtn, &removePageBtn, &addKeysBtn, &saveBtn, &deleteBtn, &exportBtn })
-            c->setEnabled (hasMap);
-        nameEd.setText (edit.name, dontSendNotification);
-        authorEd.setText (edit.author, dontSendNotification);
-        pageBox.clear (dontSendNotification);
+        // Page tabs.
+        pageTabs.clear();
         for (int i = 0; i < (int) edit.pages.size(); ++i)
-            pageBox.addItem (String (i + 1) + ". " + edit.pages[(size_t) i].name, i + 1);
-        page = jlimit (0, jmax (0, (int) edit.pages.size() - 1), page);
-        pageBox.setSelectedId (edit.pages.empty() ? 0 : page + 1, dontSendNotification);
-        removePageBtn.setEnabled (hasMap && ! edit.pages.empty());
-        showPage();
+        {
+            auto b = std::make_unique<TextButton> (edit.pages[(size_t) i].name.isNotEmpty() ? edit.pages[(size_t) i].name : "Page " + String (i + 1));
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (2);
+            b->setToggleState (i == page, dontSendNotification);
+            b->onClick = [this, i] { page = i; showAll(); };
+            addAndMakeVisible (*b);
+            pageTabs.push_back (std::move (b));
+        }
+        layoutPageTabs();
+        pageNameEd.setText (page < (int) edit.pages.size() ? edit.pages[(size_t) page].name : String(), dontSendNotification);
+        removePageBtn.setEnabled (edit.pages.size() > 1);
+        shareBtn.setEnabled (true);
 
+        showTiles();
+        showSelected();
+        showKeys();
+
+        StringArray shown, turned;
+        for (const auto& k : hub.getKeyboards())
+            if (k.input == input && ! k.plain) (k.screen ? shown : turned).add (k.name);
+        String text;
+        if (! shown.isEmpty()) text << "Shown on " << shown.joinIntoString (", ") << ". ";
+        if (! turned.isEmpty()) text << "Turned by " << turned.joinIntoString (", ") << ", which " << (turned.size() == 1 ? "has" : "have") << " no screen for the names.";
+        if (text.isEmpty()) text = "No keyboard with knobs plays this input yet: Options > Your keyboards.";
+        where.setText (text, dontSendNotification);
+        if (livePlugin() == nullptr) status.setText ("The plugin is not running, so its parameters cannot be listed. Load the program first.", dontSendNotification);
+    }
+
+    void layoutPageTabs()
+    {
+        auto r = pageTabsArea;
+        for (auto& b : pageTabs)
+        {
+            const int w = jmin (140, jmax (60, b->getBestWidthForHeight (r.getHeight())));
+            b->setBounds (r.removeFromLeft (w));
+            r.removeFromLeft (4);
+        }
+    }
+
+    void showTiles()
+    {
+        auto* p = livePlugin();
+        const ControlPage* pg = page < (int) edit.pages.size() ? &edit.pages[(size_t) page] : nullptr;
+        for (int k = 0; k < ControlPage::numKnobs; ++k)
+        {
+            auto& t = tiles[(size_t) k];
+            ControlKnob knob;
+            if (pg != nullptr && k < (int) pg->knobs.size()) knob = pg->knobs[(size_t) k];
+            const int idx = paramIndexOf (knob);
+            t.empty = idx < 0;
+            t.param = idx >= 0 ? params[(size_t) idx].name : String();
+            t.name = knob.label.isNotEmpty() ? knob.label : t.param;
+            t.level = -1.0f;
+            t.value = {};
+            if (p != nullptr && idx >= 0 && idx < (int) p->getParameters().size())
+            {
+                const auto& prm = p->getParameters()[(size_t) idx];
+                t.level = jlimit (0.0f, 1.0f, p->getCachedParameterValue (idx));
+                t.value = prm.boolean || prm.numSteps == 2 ? String (t.level >= 0.5f ? "On" : "Off") : String (roundToInt (t.level * 100.0f)) + "%";
+            }
+            t.selected = k == selected;
+            t.repaint();
+        }
+    }
+
+    void select (int k)
+    {
+        selected = k;
+        waitingForWindow = false;
+        showTiles();
+        showSelected();
+    }
+
+    void showSelected()
+    {
+        const ControlPage* pg = page < (int) edit.pages.size() ? &edit.pages[(size_t) page] : nullptr;
+        ControlKnob knob;
+        if (pg != nullptr && selected < (int) pg->knobs.size()) knob = pg->knobs[(size_t) selected];
+        editCap.setText ("KNOB " + String (selected + 1) + " TURNS", dontSendNotification);
+        const int idx = paramIndexOf (knob);
+        paramPicker.setSelectedId (idx >= 0 ? idx + 2 : 1, dontSendNotification);
+        labelEd.setText (knob.label, dontSendNotification);
+        const bool running = livePlugin() != nullptr;
+        paramPicker.setEnabled (running);
+        fromWindowBtn.setEnabled (running);
+        fromWindowBtn.setButtonText (waitingForWindow ? "Move it in the plugin now..." : "Pick it in the plugin's window");
+        clearBtn.setEnabled (idx >= 0 || knob.label.isNotEmpty());
+    }
+
+    ControlKnob& knobForEdit()
+    {
+        makeOwn();
+        page = jlimit (0, jmax (0, (int) edit.pages.size() - 1), page);
+        if (edit.pages.empty()) edit.pages.push_back ({ "Sound", {} });
+        auto& knobs = edit.pages[(size_t) page].knobs;
+        while ((int) knobs.size() <= selected) knobs.push_back ({});
+        return knobs[(size_t) selected];
+    }
+
+    void trimPage()
+    {
+        if (page >= (int) edit.pages.size()) return;
+        auto& knobs = edit.pages[(size_t) page].knobs;
+        while (! knobs.empty() && knobs.back().isEmpty() && knobs.back().label.isEmpty()) knobs.pop_back();
+    }
+
+    void pickParam (int idx)
+    {
+        auto& knob = knobForEdit();
+        if (idx >= 0 && idx < (int) params.size()) knob = { params[(size_t) idx].id, params[(size_t) idx].name, knob.label };
+        else knob = {};
+        waitingForWindow = false;
+        trimPage();
+        saveAndShow();
+    }
+
+    void renameKnob()
+    {
+        const ControlPage* pg = page < (int) edit.pages.size() ? &edit.pages[(size_t) page] : nullptr;
+        const auto now = pg != nullptr && selected < (int) pg->knobs.size() ? pg->knobs[(size_t) selected].label : String();
+        const auto text = labelEd.getText().trim();
+        if (text == now) return;
+        knobForEdit().label = text;
+        trimPage();
+        saveAndShow();
+    }
+
+    void renamePage()
+    {
+        const auto text = pageNameEd.getText().trim();
+        if (page >= (int) edit.pages.size() || text.isEmpty() || text == edit.pages[(size_t) page].name) return;
+        makeOwn();
+        edit.pages[(size_t) page].name = text;
+        saveAndShow();
+    }
+
+    void pickFromWindow()
+    {
+        auto* p = livePlugin();
+        if (p == nullptr) return;
+        waitingForWindow = ! waitingForWindow;
+        if (waitingForWindow) p->showEditor (plugin.name);
+        showSelected();
+    }
+
+    // Engine::Listener: a control moved in the plugin's window, while one is waited for.
+    void parameterTouched (int in, int prog, int sl, int effect, int paramIndex) override
+    {
+        if (! waitingForWindow || in != input || prog != program || sl != slot || effect >= 0) return;
+        pickParam (paramIndex);
+        status.setText ("Knob " + String (selected + 1) + " turns " + (paramIndex >= 0 && paramIndex < (int) params.size() ? params[(size_t) paramIndex].name : String ("it")) + ".",
+                        dontSendNotification);
+    }
+
+    void timerCallback() override
+    {
+        if (params.empty() && livePlugin() != nullptr) { fillParams(); load(); }
+        // The knob just turned on the keyboard lights up; the values follow the plugin.
+        const auto turn = hub.getLastTurn (input);
+        const bool recent = turn.knob >= 0 && Time::getMillisecondCounter() - turn.at < 700;
+        for (int k = 0; k < ControlPage::numKnobs; ++k)
+            tiles[(size_t) k].lit = recent && turn.knob == k;
+        if (knobsTab.getToggleState()) showTiles();
+    }
+
+    void showTab()
+    {
+        const bool knobs = knobsTab.getToggleState();
+        for (auto* c : std::initializer_list<Component*> { &addPageBtn, &removePageBtn, &pageNameEd, &editCap, &paramPicker, &labelEd, &fromWindowBtn, &clearBtn })
+            c->setVisible (knobs);
+        for (auto& t : tiles) t.setVisible (knobs);
+        for (auto& b : pageTabs) b->setVisible (knobs);
+        for (auto* c : std::initializer_list<Component*> { &keysCap, &keysView, &addKeysBtn }) c->setVisible (! knobs);
+    }
+
+    void showKeys()
+    {
         keyRows.clear();
         for (const auto& z : edit.keys)
         {
@@ -304,70 +597,38 @@ private:
             for (int i = 0; i < (int) std::size (keyColourChoices); ++i) if (keyColourChoices[i].rgb == z.colour) pick = i + 1;
             row->colour.setSelectedId (pick, dontSendNotification);
             auto* raw = row.get();
-            row->low.onTextChange = row->high.onTextChange = row->label.onTextChange = [this] { touched(); };
-            row->colour.onChange = [this] { touched(); };
+            row->low.onFocusLost = row->high.onFocusLost = row->label.onFocusLost = row->low.onReturnKey = row->high.onReturnKey = row->label.onReturnKey
+                = [this] { keysEdited(); };
+            row->colour.onChange = [this] { keysEdited(); };
             row->remove.onClick = [this, raw]
             {
-                storePage();
                 storeKeys();
                 for (size_t i = 0; i < keyRows.size(); ++i)
-                    if (keyRows[i].get() == raw) { edit.keys.erase (edit.keys.begin() + (long) i); break; }
-                MessageManager::callAsync ([sp = SafePointer<ControlMapEditor> (this)] { if (sp != nullptr) { sp->showMap(); sp->touched(); } });
+                    if (keyRows[i].get() == raw) { makeOwn(); edit.keys.erase (edit.keys.begin() + (long) i); break; }
+                MessageManager::callAsync ([sp = SafePointer<ControlMapEditor> (this)] { if (sp != nullptr) sp->saveAndShow(); });
             };
             keysList.addAndMakeVisible (*row);
             keyRows.push_back (std::move (row));
         }
         layoutKeys();
-        if (livePlugin() == nullptr) status.setText ("The plugin is not running, so its parameters cannot be listed. Load the program first.", dontSendNotification);
-        else if (! hasMap) status.setText ("No setup: the knobs turn the front panel's picks, then every parameter eight at a time.", dontSendNotification);
-        else if (! dirty) status.setText (edit.notes, dontSendNotification);
     }
 
-    void showPage()
+    void keysEdited()
     {
-        const bool any = hasMap && page < (int) edit.pages.size();
-        pageNameEd.setText (any ? edit.pages[(size_t) page].name : String(), dontSendNotification);
-        pageNameEd.setEnabled (any);
-        for (int k = 0; k < ControlPage::numKnobs; ++k)
-        {
-            auto& r = knobRows[(size_t) k];
-            ControlKnob knob;
-            if (any && k < (int) edit.pages[(size_t) page].knobs.size()) knob = edit.pages[(size_t) page].knobs[(size_t) k];
-            int id = 1;
-            for (const auto& prm : params)
-                if ((knob.paramId.isNotEmpty() && prm.id == knob.paramId) || (knob.paramId.isEmpty() && knob.paramName.isNotEmpty() && prm.name.equalsIgnoreCase (knob.paramName)))
-                { id = prm.index + 2; break; }
-            r.param.setSelectedId (id, dontSendNotification);
-            r.label.setText (knob.label, dontSendNotification);
-            r.param.setEnabled (any && ! params.empty());
-            r.label.setEnabled (any);
-        }
-    }
-
-    /** What the page's knobs show into the setup being edited. */
-    void storePage()
-    {
-        if (! hasMap || page >= (int) edit.pages.size()) return;
-        auto& p = edit.pages[(size_t) page];
-        p.name = pageNameEd.getText().trim();
-        if (p.name.isEmpty()) p.name = "Page " + String (page + 1);
-        p.knobs.clear();
-        for (int k = 0; k < ControlPage::numKnobs; ++k)
-        {
-            const auto& r = knobRows[(size_t) k];
-            ControlKnob knob;
-            const int idx = r.param.getSelectedId() - 2;
-            if (idx >= 0 && idx < (int) params.size()) { knob.paramId = params[(size_t) idx].id; knob.paramName = params[(size_t) idx].name; }
-            knob.label = r.label.getText().trim();
-            p.knobs.push_back (knob);
-        }
-        // Knobs left empty at the end are not written.
-        while (! p.knobs.empty() && p.knobs.back().isEmpty() && p.knobs.back().label.isEmpty()) p.knobs.pop_back();
+        const auto before = edit.keys;
+        storeKeys();
+        bool same = before.size() == edit.keys.size();
+        for (size_t i = 0; same && i < before.size(); ++i)
+            same = before[i].low == edit.keys[i].low && before[i].high == edit.keys[i].high && before[i].colour == edit.keys[i].colour && before[i].label == edit.keys[i].label;
+        if (same) return;
+        const auto keys = edit.keys;
+        makeOwn();
+        edit.keys = keys;
+        saveAndShow();
     }
 
     void storeKeys()
     {
-        if (! hasMap) return;
         for (size_t i = 0; i < keyRows.size() && i < edit.keys.size(); ++i)
         {
             auto& z = edit.keys[i];
@@ -388,97 +649,63 @@ private:
         for (size_t i = 0; i < keyRows.size(); ++i) keyRows[i]->setBounds (0, (int) i * 30, w, 30);
     }
 
-    void touched()
+    void shareMenu()
     {
-        if (! hasMap) return;
-        dirty = true;
-        status.setText ("Not saved yet", dontSendNotification);
+        PopupMenu m;
+        m.addItem (1, "Import a layout someone shared...");
+        m.addItem (2, "Export this layout, to share...", own);
+        m.addSeparator();
+        m.addItem (3, "Rename this layout...", own);
+        m.addItem (4, "Delete this layout", own);
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (shareBtn), [sp = SafePointer<ControlMapEditor> (this)] (int r)
+        {
+            if (sp == nullptr) return;
+            if (r == 1) sp->importLayout();
+            if (r == 2) sp->exportLayout();
+            if (r == 3) sp->renameLayout();
+            if (r == 4) sp->deleteLayout();
+        });
     }
 
-    void save()
+    void renameLayout()
     {
-        if (! hasMap) return;
-        storePage();
-        storeKeys();
-        edit.name = nameEd.getText().trim();
-        edit.author = authorEd.getText().trim();
-        if (edit.name.isEmpty()) edit.name = plugin.name;
-        if (! edit.name.equalsIgnoreCase (original.name))
+        auto* w = new AlertWindow ("Rename the layout", "What it is for: the plugin, or the instrument inside it (\"Alicia's Keys\").", MessageBoxIconType::NoIcon);
+        w->addTextEditor ("name", edit.name);
+        w->addButton ("Rename", 1, KeyPress (KeyPress::returnKey));
+        w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+        w->enterModalState (true, ModalCallbackFunction::create ([sp = SafePointer<ControlMapEditor> (this), w] (int r)
         {
-            for (const auto* m : library.forPlugin (plugin))
-                if (m->name.equalsIgnoreCase (edit.name)) { status.setText ("There is already a setup called " + edit.name + " for " + plugin.name + ".", dontSendNotification); return; }
-            if (original.pluginName.isNotEmpty()) library.remove (original);     // renamed: the old file goes
-        }
-        if (const auto r = library.save (edit); r.failed()) { status.setText (r.getErrorMessage(), dontSendNotification); return; }
-        engine.setSlotControlMap (input, program, slot, edit.name);
-        hub.libraryChanged();
-        if (changed) changed();
-        dirty = false;
-        fillSetups (edit.name);
-        status.setText ("Saved. Every program with " + plugin.name + " can use it.", dontSendNotification);
+            std::unique_ptr<AlertWindow> owned (w);
+            if (sp == nullptr || r == 0) return;
+            const auto name = w->getTextEditorContents ("name").trim();
+            if (name.isEmpty() || name.equalsIgnoreCase (sp->edit.name)) return;
+            if (sp->library.find (sp->plugin, name) != nullptr) { sp->status.setText ("There is already a layout called " + name + ".", dontSendNotification); return; }
+            const auto old = sp->edit;
+            sp->edit.name = name;
+            sp->library.remove (old);
+            sp->saveAndShow();
+        }), false);
     }
 
-    void newSetup()
+    void deleteLayout()
     {
-        if (dirty && hasMap) save();
-        ControlMap m;
-        m.pluginName = plugin.name;
-        m.pluginManufacturer = plugin.manufacturerName;
-        m.name = plugin.name;
-        for (int n = 2; library.find (plugin, m.name) != nullptr; ++n) m.name = plugin.name + " " + String (n);
-        // It starts as the knobs are now -- the maker's pages, or the front panel's -- so there is something to change rather than eight blanks.
-        const auto* nks = library.findNks (plugin);
-        if (auto* p = livePlugin(); p != nullptr && nks != nullptr)
-        {
-            const auto made = controlMapFromNks (*nks, plugin, p->getParameters());
-            m.pages = made.pages;
-            m.author = made.author;
-            m.notes = made.notes;
-        }
-        ControlPage first;
-        first.name = "Sound";
-        if (auto* p = livePlugin(); p != nullptr && m.pages.empty())
-        {
-            const auto& sd = slotDef();
-            std::vector<int> picks;
-            if (sd.panelParams.empty()) picks = pickPanelParams (p->getParameters(), ControlPage::numKnobs);
-            else for (const auto& id : sd.panelParams) if (const int i = p->findParameterIndex (id); i >= 0) picks.push_back (i);
-            for (int idx : picks)
-                if ((int) first.knobs.size() < ControlPage::numKnobs)
-                    first.knobs.push_back ({ p->getParameters()[(size_t) idx].id, p->getParameters()[(size_t) idx].name, {} });
-        }
-        if (m.pages.empty()) m.pages.push_back (first);
-        if (const auto r = library.save (m); r.failed()) { status.setText (r.getErrorMessage(), dontSendNotification); return; }
-        engine.setSlotControlMap (input, program, slot, m.name);
-        hub.libraryChanged();
-        if (changed) changed();
-        fillSetups (m.name);
-        status.setText (m.author.isNotEmpty() && nks != nullptr ? "A new setup, from " + m.author + "'s pages, for you to change."
-                                                                 : String ("A new setup, from the knobs as they were. Name it after the instrument if the plugin holds many."),
-                        dontSendNotification);
-    }
-
-    void deleteSetup()
-    {
-        if (! hasMap) return;
-        const auto doomed = original;
-        auto sp = SafePointer<ControlMapEditor> (this);
-        AlertWindow::showOkCancelBox (AlertWindow::WarningIcon, "Delete setup", "Delete the setup " + doomed.name + " for " + plugin.name + "?\n\nIts file goes from this computer. There is no undo.",
-                                      "Delete", "Keep", nullptr, ModalCallbackFunction::create ([sp, doomed] (int r)
+        const auto doomed = edit;
+        AlertWindow::showOkCancelBox (AlertWindow::WarningIcon, "Delete the layout", "Delete your layout " + doomed.name + " for " + plugin.name
+                                      + "? The knobs go back to automatic. There is no undo.", "Delete", "Keep", nullptr,
+                                      ModalCallbackFunction::create ([sp = SafePointer<ControlMapEditor> (this), doomed] (int r)
         {
             if (sp == nullptr || r == 0) return;
             sp->library.remove (doomed);
             sp->engine.setSlotControlMap (sp->input, sp->program, sp->slot, {});
             sp->hub.libraryChanged();
             if (sp->changed) sp->changed();
-            sp->dirty = false;
-            sp->fillSetups ({});
+            sp->load();
         }));
     }
 
-    void importSetup()
+    void importLayout()
     {
-        chooser = std::make_unique<FileChooser> ("Import a controller setup", File::getSpecialLocation (File::userHomeDirectory).getChildFile ("Downloads"),
+        chooser = std::make_unique<FileChooser> ("Import a layout", File::getSpecialLocation (File::userHomeDirectory).getChildFile ("Downloads"),
                                                  String ("*") + ControlMap::fileExtension + ";*.json");
         chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [sp = SafePointer<ControlMapEditor> (this)] (const FileChooser& fc)
         {
@@ -488,22 +715,20 @@ private:
             sp->hub.libraryChanged();
             if (! m.appliesTo (sp->plugin))
             {
-                sp->status.setText ("Imported " + m.name + ", a setup for " + m.pluginName + ": it is there for that plugin's instruments.", dontSendNotification);
+                sp->status.setText ("Imported " + m.name + ", a layout for " + m.pluginName + ": it is there for that plugin.", dontSendNotification);
                 return;
             }
             sp->engine.setSlotControlMap (sp->input, sp->program, sp->slot, m.name);
             if (sp->changed) sp->changed();
-            sp->fillSetups (m.name);
+            sp->load();
             sp->status.setText ("Imported " + m.name + (m.author.isNotEmpty() ? ", made by " + m.author : String()) + ".", dontSendNotification);
         });
     }
 
-    void exportSetup()
+    void exportLayout()
     {
-        if (! hasMap) return;
-        if (dirty) save();
-        const auto fileName = library.fileFor (edit).getFileName();
-        chooser = std::make_unique<FileChooser> ("Export the controller setup", File::getSpecialLocation (File::userDocumentsDirectory).getChildFile (fileName),
+        if (! own) return;
+        chooser = std::make_unique<FileChooser> ("Export the layout", File::getSpecialLocation (File::userDocumentsDirectory).getChildFile (library.fileFor (edit).getFileName()),
                                                  String ("*") + ControlMap::fileExtension);
         chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::warnAboutOverwriting, [sp = SafePointer<ControlMapEditor> (this)] (const FileChooser& fc)
         {
@@ -523,16 +748,19 @@ private:
     PluginDescription plugin;
     ParamInfoList params;
     StringArray names;
-    ControlMap original, edit;
-    bool hasMap = false, dirty = false;
-    int page = 0;
+    ControlMap edit;
+    bool own = false, madeOwn = false, waitingForWindow = false;
+    int page = 0, selected = 0;
 
-    Label title, explain, setupCap, nameCap, authorCap, pageCap, keysCap, status;
-    ComboBox setupBox, pageBox;
-    TextButton newBtn { "New" }, deleteBtn { "Delete" }, importBtn { "Import..." }, exportBtn { "Export..." }, saveBtn { "Save" },
-               addPageBtn { "+ Page" }, removePageBtn { "- This page" }, addKeysBtn { "+ Keys" };
-    TextEditor nameEd, authorEd, pageNameEd;
-    std::array<KnobRow, ControlPage::numKnobs> knobRows;
+    Label title, subtitle, layoutCap, editCap, keysCap, where, status;
+    TextButton knobsTab { "Knobs" }, keysTab { "Key colours" };
+    ComboBox layoutBox;
+    TextButton shareBtn { "Share..." }, addPageBtn { "+ Page" }, removePageBtn { "Remove page" }, fromWindowBtn, clearBtn { "Clear" }, addKeysBtn { "+ Keys" };
+    TextEditor pageNameEd, labelEd;
+    std::vector<std::unique_ptr<TextButton>> pageTabs;
+    Rectangle<int> pageTabsArea;
+    std::array<Tile, ControlPage::numKnobs> tiles;
+    ParamPicker paramPicker;
     Viewport keysView;
     Component keysList;
     std::vector<std::unique_ptr<KeyRow>> keyRows;
@@ -545,34 +773,24 @@ class ControllersView : public Component, private Timer
 public:
     ControllersView (Engine& e, SurfaceHub& h, int selected, std::function<void()> ch) : engine (e), hub (h), changed (std::move (ch))
     {
-        addAndMakeVisible (caption (foundCap, "KEYBOARDS STAGERIG TALKS TO"));
-        addAndMakeVisible (found);
-        found.setJustificationType (Justification::topLeft);
-        addAndMakeVisible (launchkeyBtn);
-        addAndMakeVisible (kontrolBtn);
-        addAndMakeVisible (kontrolDawBtn);
-        addAndMakeVisible (midiCiBtn);
-        midiCiBtn.setButtonText ("MIDI 2.0 keyboards that ask (MIDI-CI Property Exchange, such as Korg's Keystage): the program and knob names on its screen");
-        midiCiBtn.setToggleState (hub.isMidiCiEnabled(), dontSendNotification);
-        midiCiBtn.onClick = [this] { hub.setMidiCiEnabled (midiCiBtn.getToggleState()); };
-        midiCiBtn.setTooltip ("StageRig asks each keyboard its inputs use, once, in MIDI 2.0's standard way (MIDI-CI); one that answers is told the program "
-                              "in play, the programs to choose from, and the knobs' names and the controllers they send. A keyboard that does not "
-                              "speak MIDI-CI ignores the question.");
-        kontrolDawBtn.setButtonText ("Komplete Kontrol S MK2 and MK3, A and M: program names on its screen, its track buttons choose them");
-        kontrolDawBtn.setToggleState (hub.isKontrolDawEnabled(), dontSendNotification);
-        kontrolDawBtn.onClick = [this] { hub.setKontrolDawEnabled (kontrolDawBtn.getToggleState()); };
-        kontrolDawBtn.setTooltip ("Through the keyboard's DAW port, in Native Instruments' DAW protocol. An MK3 has the port itself; an MK2's, an A's "
-                                  "and an M's is made by NI's Host Integration, on Windows and macOS.");
-        launchkeyBtn.setButtonText ("Novation Launchkey MK4: its screen shows the program and the knobs, its knobs turn them");
-        kontrolBtn.setButtonText ("Komplete Kontrol S MK1: its light guide shows the instruments' keys (experimental, Linux)");
-        launchkeyBtn.setToggleState (hub.isLaunchkeyEnabled(), dontSendNotification);
-        kontrolBtn.setToggleState (hub.isKompleteKontrolEnabled(), dontSendNotification);
-        launchkeyBtn.onClick = [this] { hub.setLaunchkeyEnabled (launchkeyBtn.getToggleState()); };
-        kontrolBtn.onClick = [this] { hub.setKompleteKontrolEnabled (kontrolBtn.getToggleState()); };
-        kontrolBtn.setTooltip ("Worked out from the keyboard itself, not from a published description. A Komplete Kontrol has been seen to drop off "
-                               "the USB while this was on and need a full power-down to come back; the keys kept playing throughout.");
+        addAndMakeVisible (caption (foundCap, "YOUR KEYBOARDS"));
+        addAndMakeVisible (keyboardsView);
+        keyboardsView.setViewedComponent (&keyboardsList, false);
+        keyboardsView.setScrollBarsShown (true, false);
+        addAndMakeVisible (none);
+        none.setColour (Label::textColourId, textDim);
+        none.setJustificationType (Justification::topLeft);
+        addAndMakeVisible (reportBtn);
+        reportBtn.setTooltip ("Copies what StageRig knows about your keyboards and MIDI ports, and what they have said to it lately, "
+                              "to paste into a message when something does not work.");
+        reportBtn.onClick = [this]
+        {
+            SystemClipboard::copyTextToClipboard (hub.getReport());
+            reportBtn.setButtonText ("Copied");
+            Timer::callAfterDelay (1500, [sp = SafePointer<ControllersView> (this)] { if (sp != nullptr) sp->reportBtn.setButtonText ("Copy report"); });
+        };
 
-        addAndMakeVisible (caption (inputCap, "KNOBS AND BUTTONS OF"));
+        addAndMakeVisible (caption (inputCap, "TEACH KNOBS AND BUTTONS ON"));
         addAndMakeVisible (inputBox);
         const auto& inputs = engine.getSetup().inputs;
         for (int i = 0; i < (int) inputs.size(); ++i)
@@ -583,9 +801,9 @@ public:
 
         addAndMakeVisible (explain);
         explain.setColour (Label::textColourId, textDim);
-        explain.setText ("Which knob and button on this keyboard is which, in every program. The knobs of the keyboards above work by themselves; "
-                         "for any other, press Learn and turn the knob. Buttons are taught the same way, on any keyboard. What the knobs turn "
-                         "is each plugin's: its Keyboard button.", dontSendNotification);
+        explain.setText ("Only for a keyboard whose knobs do not work by themselves: press Learn, then turn the knob. Buttons are taught the "
+                         "same way on any keyboard, to step through programs and knob pages. What the knobs turn on each instrument is its Knobs button.",
+                         dontSendNotification);
 
         for (int i = 0; i < numRows; ++i)
         {
@@ -610,7 +828,7 @@ public:
             if (changed) changed();
         };
         showControls();
-        showFound();
+        showKeyboards();
         startTimer (500);
     }
 
@@ -619,12 +837,14 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced (12);
-        foundCap.setBounds (r.removeFromTop (16));
-        found.setBounds (r.removeFromTop (60));
-        launchkeyBtn.setBounds (r.removeFromTop (24));
-        kontrolBtn.setBounds (r.removeFromTop (24));
-        kontrolDawBtn.setBounds (r.removeFromTop (24));
-        midiCiBtn.setBounds (r.removeFromTop (24));
+        auto head = r.removeFromTop (22);
+        reportBtn.setBounds (head.removeFromRight (110));
+        foundCap.setBounds (head);
+        r.removeFromTop (4);
+        auto area = r.removeFromTop (4 * rowHeight);
+        keyboardsView.setBounds (area);
+        none.setBounds (area);
+        layoutKeyboards();
         r.removeFromTop (14);
         inputCap.setBounds (r.removeFromTop (16));
         inputBox.setBounds (r.removeFromTop (26).removeFromLeft (260));
@@ -648,7 +868,84 @@ public:
 
 private:
     static constexpr int numRows = SurfaceControls::numKnobs + SurfaceControls::numActions;
+    static constexpr int rowHeight = 46;
     struct Row { Label name, what; TextButton learn { "Learn" }, forget { "Forget" }; };
+
+    /** One keyboard: what it is, what it plays, how StageRig talks to it and what it does. */
+    struct KeyboardRow : public Component
+    {
+        Label name, detail;
+        ToggleButton plain { "Plain MIDI" };
+        KeyboardRow()
+        {
+            addAndMakeVisible (name);
+            name.setFont (FontOptions (14.0f, Font::bold));
+            addAndMakeVisible (detail);
+            detail.setColour (Label::textColourId, textDim);
+            addAndMakeVisible (plain);
+            plain.setTooltip ("Only a plain MIDI keyboard: its keys, pedals and taught knobs, and StageRig sends it nothing. "
+                              "For a keyboard that misbehaves when StageRig talks to it.");
+        }
+        void paint (Graphics& g) override { g.setColour (bgRow); g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (0, 2), 4.0f); }
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (8, 4);
+            plain.setBounds (r.removeFromRight (110));
+            name.setBounds (r.removeFromTop (r.getHeight() / 2));
+            detail.setBounds (r);
+        }
+    };
+
+    void showKeyboards()
+    {
+        const auto list = hub.getKeyboards();
+        const auto& inputs = engine.getSetup().inputs;
+        String signature;
+        for (const auto& k : list) signature << k.name << k.port << k.input << k.language << (int) k.screen << (int) k.lights << (int) k.knobsByThemselves << (int) k.plain << "|";
+        for (const auto& p : hub.getProblems()) signature << p;
+        if (signature == shownKeyboards) return;
+        shownKeyboards = signature;
+
+        keyboardRows.clear();
+        for (const auto& k : list)
+        {
+            auto row = std::make_unique<KeyboardRow>();
+            const auto plays = k.input >= 0 && k.input < (int) inputs.size() ? "plays " + inputs[(size_t) k.input].name : String ("plays no input");
+            row->name.setText (k.name + "   " + plays, dontSendNotification);
+            StringArray what;
+            if (k.plain) what.add ("plain MIDI, set so");
+            else         what.add (k.language);
+            if (k.screen) what.add ("names on its screen");
+            if (k.lights) what.add ("its keys lit");
+            what.add (k.knobsByThemselves ? "its knobs work by themselves" : "teach its knobs below");
+            if (k.plain && k.more.isNotEmpty()) what.add ("untick Plain MIDI for " + k.more);
+            row->detail.setText (what.joinIntoString ("  -  "), dontSendNotification);
+            row->plain.setToggleState (k.plain, dontSendNotification);
+            row->plain.setEnabled (k.port.isNotEmpty());
+            row->plain.onClick = [this, port = k.port, raw = row.get()]
+            {
+                hub.setPlainMidi (port, raw->plain.getToggleState());
+                shownKeyboards.clear();
+            };
+            keyboardsList.addAndMakeVisible (*row);
+            keyboardRows.push_back (std::move (row));
+        }
+        String text;
+        for (const auto& p : hub.getProblems()) text << p << "\n";
+        if (keyboardRows.empty())
+            text = "No keyboard an input plays from is plugged in. Choose each input's MIDI device in the Inputs list; any keyboard plays, "
+                   "and StageRig talks to one that can show names or light its keys by itself.\n" + text;
+        none.setText (text.trimEnd(), dontSendNotification);
+        none.setVisible (keyboardRows.empty());
+        layoutKeyboards();
+    }
+
+    void layoutKeyboards()
+    {
+        const int w = jmax (200, keyboardsView.getWidth() - keyboardsView.getScrollBarThickness());
+        keyboardsList.setSize (w, jmax (rowHeight, (int) keyboardRows.size() * rowHeight));
+        for (size_t i = 0; i < keyboardRows.size(); ++i) keyboardRows[i]->setBounds (0, (int) i * rowHeight, w, rowHeight);
+    }
 
     int current() const { return inputBox.getSelectedId() - 1; }
 
@@ -675,24 +972,6 @@ private:
         }
         relativeBtn.setToggleState (c.knobsRelative, dontSendNotification);
         relativeBtn.setEnabled (any);
-    }
-
-    void showFound()
-    {
-        String text;
-        const auto& inputs = engine.getSetup().inputs;
-        for (const auto& s : hub.getSurfaces())
-        {
-            text << s.name << "   on " << (s.input >= 0 && s.input < (int) inputs.size() ? inputs[(size_t) s.input].name : String ("no input"));
-            StringArray has;
-            has.add ("knobs and buttons");
-            if (s.screen) has.add ("screen");
-            if (s.lights) has.add ("light guide");
-            text << "   (" << has.joinIntoString (", ") << ")\n";
-        }
-        for (const auto& p : hub.getProblems()) text << p << "\n";
-        if (text.isEmpty()) text = "None plugged in. Any keyboard still plays; its knobs and buttons can be taught below.";
-        if (text != found.getText()) found.setText (text.trimEnd(), dontSendNotification);
     }
 
     void learn (int row)
@@ -723,7 +1002,7 @@ private:
 
     void timerCallback() override
     {
-        showFound();
+        showKeyboards();
         if (learning >= 0 && ! hub.isLearning()) { learning = -1; showControls(); }
     }
 
@@ -731,8 +1010,13 @@ private:
     SurfaceHub& hub;
     std::function<void()> changed;
     int learning = -1;
-    Label foundCap, found, inputCap, explain;
-    ToggleButton launchkeyBtn, kontrolBtn, kontrolDawBtn, midiCiBtn, relativeBtn;
+    Label foundCap, none, inputCap, explain;
+    TextButton reportBtn { "Copy report" };
+    Viewport keyboardsView;
+    Component keyboardsList;
+    std::vector<std::unique_ptr<KeyboardRow>> keyboardRows;
+    String shownKeyboards;
+    ToggleButton relativeBtn;
     ComboBox inputBox;
     std::array<Row, (size_t) numRows> rows;
 };
@@ -745,12 +1029,12 @@ Component* showControlMapEditor (Engine& engine, SurfaceHub& hub, ControlMapLibr
     const auto& prog = inputs[(size_t) input].programs[(size_t) program];
     if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return nullptr;
     return launch (new ControlMapEditor (engine, hub, library, input, program, slot, std::move (changed)),
-            "Keyboard knobs: " + prog.slots[(size_t) slot].plugin.name, 820, 658);
+            "Knobs: " + prog.slots[(size_t) slot].plugin.name, 900, 470);
 }
 
 Component* showControllers (Engine& engine, SurfaceHub& hub, int selectedInput, std::function<void()> changed)
 {
-    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Your keyboards", 860, 534);
+    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Your keyboards", 860, 560);
 }
 
 } // namespace perf

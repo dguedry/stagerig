@@ -82,7 +82,14 @@ void PropertyResponder::receive (Span<const std::byte> bytes)
 
 void PropertyResponder::announce()
 {
+    note ("asked who is there (Discovery)");
     device->sendDiscovery();
+}
+
+void PropertyResponder::note (const String& what)
+{
+    log.add (Time::getCurrentTime().toString (false, true, true, true) + "  " + what);
+    if (log.size() > 40) log.remove (0);
 }
 
 String PropertyResponder::getRemoteName() const
@@ -185,6 +192,9 @@ ci::PropertyReplyData PropertyResponder::propertyGetDataRequested (ci::MUID, con
     asked = true;
     ci::PropertyReplyData reply;
     auto content = contentOf (header.resource, header.resId);
+    note ("asked for " + header.resource + (header.resId.isNotEmpty() ? " " + header.resId : String())
+          + (header.pagination.has_value() ? " from " + String (header.pagination->offset) + ", " + String (header.pagination->limit) : String())
+          + (content.isVoid() ? ": not there (404)" : String()));
     if (content.isVoid())
     {
         reply.header.status = 404;
@@ -214,6 +224,7 @@ ci::PropertyReplyData PropertyResponder::propertyGetDataRequested (ci::MUID, con
 ci::PropertyReplyHeader PropertyResponder::propertySetDataRequested (ci::MUID, const ci::PropertyRequestData& request)
 {
     asked = true;
+    note ("asked to set " + request.header.resource + ": refused (405)");
     ci::PropertyReplyHeader h;
     h.status = 405;
     h.message = request.header.resource + " is StageRig's to set: choose a program by sending its Program Change.";
@@ -223,6 +234,7 @@ ci::PropertyReplyHeader PropertyResponder::propertySetDataRequested (ci::MUID, c
 bool PropertyResponder::subscriptionStartRequested (ci::MUID, const ci::PropertySubscriptionHeader& header)
 {
     asked = true;
+    note ("asked to be told of " + header.resource);
     return header.resource == "ChannelList" || header.resource == "ProgramList"
         || header.resource == "X-ParameterList" || header.resource == "X-ProgramEdit";
 }
@@ -237,6 +249,7 @@ void PropertyResponder::subscriptionDidStart (ci::MUID m, const String& subId, c
 void PropertyResponder::subscriptionWillEnd (ci::MUID m, const ci::Subscription& sub)
 {
     subscribers[sub.resource].erase ({ m, sub.subscribeId });
+    note ("no longer told of " + sub.resource);
 }
 
 void PropertyResponder::tell (const String& resource, bool whole)
@@ -248,6 +261,7 @@ void PropertyResponder::tell (const String& resource, bool whole)
     if (sent[resource] == text) return;
     sent[resource] = text;
     const auto body = ci::Encodings::jsonTo7BitText (content);
+    note ("told of " + resource + (whole ? String() : String (" (to ask again)")));
     for (const auto& s : it->second)
     {
         ci::PropertySubscriptionHeader h;
@@ -333,6 +347,15 @@ String MidiCiKeyboard::getName() const
 {
     const auto remote = responder.getRemoteName();
     return (remote.isNotEmpty() ? remote : ports.in.name) + " (MIDI-CI)";
+}
+
+String MidiCiKeyboard::getReport() const
+{
+    String r;
+    r << "  ports: in " << ports.in.name << ", out " << ports.out.name << "\n";
+    if (const auto remote = responder.getRemoteName(); remote.isNotEmpty()) r << "  says it is: " << remote << "\n";
+    for (const auto& line : responder.getLog()) r << "  " << line << "\n";
+    return r.trimEnd();
 }
 
 bool MidiCiKeyboard::isConnected() const

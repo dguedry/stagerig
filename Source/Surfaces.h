@@ -81,6 +81,10 @@ public:
     virtual bool hasScreen() const                 { return false; }
     /** Known to be there: false for one still waiting to hear whether a keyboard answers (MidiCiKeyboard). */
     virtual bool isFound() const                   { return true; }
+    /** How StageRig talks to it, in words: "standard MIDI-CI", "Novation's published protocol". */
+    virtual juce::String getLanguage() const = 0;
+    /** What it has said and been told, in words, for a bug report. */
+    virtual juce::String getReport() const         { return {}; }
     virtual bool hasLights() const                 { return false; }
 
     virtual void show (const SurfaceView&) = 0;
@@ -134,8 +138,9 @@ public:
         bool fromNks = false;              // the maker's pages, from its NKS presets
         std::vector<Page> pages;
     };
-    /** The pages of one instrument, as they are now (the plugin must be running). */
-    Layout layoutFor (int input, int program, int slot) const;
+    /** The pages of one instrument, as they are now (the plugin must be running);
+        `automatic`: as they would be with no layout of the user's. */
+    Layout layoutFor (int input, int program, int slot, bool automatic = false) const;
     /** The instrument of the input's program the knobs turn (-1 for none), and their page. */
     int getFocusSlot (int input);
     int getFocusPage (int input);
@@ -151,6 +156,9 @@ public:
     void setKnob (int input, int knob, float value);
     /** One of SurfaceControls::Action. */
     void doAction (int input, int action);
+    /** The knob last turned on the input, and when (Time::getMillisecondCounter()); knob -1 for none yet. */
+    struct Turn { int knob = -1; juce::uint32 at = 0; };
+    Turn getLastTurn (int input) const              { auto it = lastTurn.find (input); return it != lastTurn.end() ? it->second : Turn(); }
 
     // Teaching ---------------------------------------------------------------------
     /** Waits for a control on the input: what = 0..7 for a knob (a MIDI
@@ -163,19 +171,38 @@ public:
     /** "Controller 21", "Komplete Kontrol button 12", "Launchkey button 104". */
     static juce::String describeControl (const juce::String& id);
 
-    // Keyboards StageRig talks to ----------------------------------------------------
+    // Keyboards -----------------------------------------------------------------------
+    /* StageRig talks to a keyboard in the most standard way it answers to:
+       MIDI-CI when it answers that, else its maker's protocol where StageRig
+       knows it, else plain MIDI, which every keyboard is. Nothing is chosen
+       but one thing, per keyboard: to be only a plain MIDI keyboard. */
     struct SurfaceInfo { juce::String name; int input = -1; bool screen = false, lights = false; };
+    /** The keyboards StageRig talks to beyond MIDI. */
     std::vector<SurfaceInfo> getSurfaces() const;
+
+    /** A keyboard an input plays from, or one StageRig talks to. */
+    struct KeyboardInfo
+    {
+        juce::String name;              // "Komplete Kontrol S88 MK1", "KORG Keystage"
+        juce::String port;              // its MIDI port's name: what setPlainMidi() takes
+        int input = -1;                 // the input it plays, or -1
+        juce::String language;          // how StageRig talks to it: "standard MIDI-CI", "plain MIDI"
+        bool screen = false, lights = false;
+        bool knobsByThemselves = false; // its knobs work without teaching
+        bool plain = false;             // set to be a plain MIDI keyboard
+        bool experimental = false;      // talked to in a way StageRig worked out itself
+        juce::String more;              // what else it could do, when plain ("its screens and lights, experimental")
+    };
+    std::vector<KeyboardInfo> getKeyboards() const;
+    /** Makes the keyboard on this port only a plain MIDI keyboard, or lets StageRig talk to it again.
+        A Komplete Kontrol MK1, which StageRig talks to in a way it worked out itself, starts plain. */
+    void setPlainMidi (const juce::String& port, bool);
+    /** Everything about the keyboards and MIDI ports, in words, to paste into a bug report. */
+    juce::String getReport() const;
     /** Problems finding keyboards, in words (a device that could not be opened). */
     juce::StringArray getProblems() const;
     bool isKompleteKontrolEnabled() const;
     void setKompleteKontrolEnabled (bool);
-    bool isLaunchkeyEnabled() const;
-    void setLaunchkeyEnabled (bool);
-    bool isKontrolDawEnabled() const;
-    void setKontrolDawEnabled (bool);
-    bool isMidiCiEnabled() const;
-    void setMidiCiEnabled (bool);
     /** The input a keyboard works with: the one its keys play on, or the first keyboard input. */
     int inputFor (const ControlSurface&) const;
 
@@ -196,6 +223,9 @@ public:
 private:
     void timerCallback() override                   { tick(); }
     void lookForKeyboards();
+    bool isPlain (const ControlSurface&) const;
+    bool isPlainKeys (const juce::String& keysPortName) const;
+    juce::StringArray plainPorts() const;
     void handleTouch (ControlSurface&, const ControlSurface::Touch&);
     void taught (const juce::String& controlId, int cc);
     const Layout& currentLayout (int input);
@@ -226,6 +256,7 @@ private:
     std::map<std::pair<int, int>, Pending> pending;
     std::map<std::pair<int, int>, LastSet> lastSet;
     Learning learning;
+    std::map<int, Turn> lastTurn;
     juce::StringArray problems;
     std::map<ControlSurface*, juce::String> reportedProblems;
     juce::uint32 lastSearch = 0;
@@ -251,6 +282,7 @@ public:
     const juce::String& getOutputIdentifier() const { return ports.out.identifier; }
 
     juce::String getName() const override           { return ports.mini ? "Launchkey Mini MK4" : "Launchkey MK4"; }
+    juce::String getLanguage() const override       { return "Novation's published protocol"; }
     juce::String getKeysPortName() const override   { return ports.keysName; }
     bool isConnected() const override;
     bool hasScreen() const override                 { return true; }
@@ -305,6 +337,7 @@ public:
     bool areBanksForPrograms() const                { return banksForPrograms.load(); }
 
     juce::String getName() const override           { return ports.name; }
+    juce::String getLanguage() const override       { return "Native Instruments' DAW protocol"; }
     juce::String getKeysPortName() const override   { return ports.keysName; }
     bool isConnected() const override;
     bool hasScreen() const override                 { return true; }
@@ -363,6 +396,7 @@ public:
     const juce::String& getPath() const             { return device.path; }
 
     juce::String getName() const override           { return juce::String ("Komplete Kontrol ") + device.model->name + " MK1"; }
+    juce::String getLanguage() const override       { return "its USB connection, as StageRig worked it out (experimental)"; }
     juce::String getKeysPortName() const override   { return juce::String ("KOMPLETE KONTROL ") + device.model->name; }
     bool isConnected() const override               { return fd >= 0 && ! gone.load(); }
     bool hasLights() const override                 { return true; }

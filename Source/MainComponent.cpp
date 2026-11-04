@@ -1451,8 +1451,7 @@ public:
             velCurve.setTooltip ("Reshapes incoming velocities: louder makes soft playing come out stronger (for a stiff keyboard or a quiet library), softer does the opposite. Double-click for linear.");
             addAndMakeVisible (guiBtn);
             addAndMakeVisible (knobsBtn);
-            knobsBtn.setTooltip ("What your keyboard's knobs turn on this plugin, in pages, and how its keys light: the plugin's controller setup, "
-                                 "shared by every program with it");
+            knobsBtn.setTooltip ("What the keyboard's eight knobs turn on this plugin, the same on any keyboard and in every program with it");
             knobsBtn.onClick = [this] { panel.owner.showKnobsFor (index); };
             addAndMakeVisible (removeBtn);
             removeBtn.setTooltip ("Remove this instrument from the program");
@@ -1815,7 +1814,7 @@ public:
         Label gainCap, transposeCap, keysCap, chCap, inChCap, panCap, velCap, curveCap;
         ComboBox outCh;
         TextButton inCh { "All channels" };
-        TextButton guiBtn { "Window" }, knobsBtn { "Keyboard" }, removeBtn { "X" };
+        TextButton guiBtn { "Window" }, knobsBtn { "Knobs" }, removeBtn { "X" };
         EffectChainComponent midiChain, chain;
     };
 
@@ -2669,7 +2668,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         PopupMenu m;
         m.addItem (11, "Pre-show check...  (everything that can go wrong, before the first song)");
         m.addSeparator();
-        m.addItem (12, "Your keyboards...  (which knob and button is which, in every program)");
+        m.addItem (12, "Your keyboards...");
         m.addItem (1, "Preload all programs (instant changes; uses more memory)", true, setup.preloadAllPrograms);
         m.addItem (2, "Let held notes ring through a program change", true, setup.holdAcrossChange);
         m.addItem (6, "Show songs and set lists", true, songsPanel != nullptr && songsPanel->isVisible());

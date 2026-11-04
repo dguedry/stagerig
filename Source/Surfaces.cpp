@@ -47,7 +47,7 @@ uint32 SurfaceHub::dim (uint32 c, float amount) const
 }
 
 //==============================================================================
-SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot) const
+SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot, bool automatic) const
 {
     Layout layout;
     const auto& inputs = engine.getSetup().inputs;
@@ -79,7 +79,7 @@ SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot) cons
             layout.pages.push_back (std::move (page));
         }
     };
-    layout.map = library.find (sd.plugin, sd.controlMap);
+    layout.map = automatic ? nullptr : library.find (sd.plugin, sd.controlMap);
     if (layout.map != nullptr && ! layout.map->pages.empty())
     {
         fromSetup (*layout.map);
@@ -281,6 +281,7 @@ SurfaceView SurfaceHub::viewFor (int input)
 void SurfaceHub::turnKnob (int input, int knob, float delta)
 {
     if (input < 0 || input >= (int) engine.getSetup().inputs.size()) return;
+    if (knob >= 0 && knob < SurfaceView::numKnobs) lastTurn[input] = { knob, Time::getMillisecondCounter() };
     // The instrument and page first: settling them can drop the layout the reference below points into.
     const int slot = getFocusSlot (input), page = getFocusPage (input);
     const auto& layout = currentLayout (input);
@@ -306,6 +307,7 @@ void SurfaceHub::turnKnob (int input, int knob, float delta)
 void SurfaceHub::setKnob (int input, int knob, float value)
 {
     if (input < 0 || input >= (int) engine.getSetup().inputs.size()) return;
+    if (knob >= 0 && knob < SurfaceView::numKnobs) lastTurn[input] = { knob, Time::getMillisecondCounter() };
     const int program = engine.getSetup().inputs[(size_t) input].currentProgram;
     const int slot = getFocusSlot (input), page = getFocusPage (input);
     const auto& layout = currentLayout (input);
@@ -498,13 +500,39 @@ int SurfaceHub::inputFor (const ControlSurface& s) const
 
 //==============================================================================
 bool SurfaceHub::isKompleteKontrolEnabled() const   { return settings.getBoolValue ("surfaceKompleteKontrol", false); }
-bool SurfaceHub::isLaunchkeyEnabled() const         { return settings.getBoolValue ("surfaceLaunchkey", true); }
 void SurfaceHub::setKompleteKontrolEnabled (bool on) { settings.setValue ("surfaceKompleteKontrol", on); lastSearch = 0; }
-void SurfaceHub::setLaunchkeyEnabled (bool on)       { settings.setValue ("surfaceLaunchkey", on); lastSearch = 0; }
-bool SurfaceHub::isKontrolDawEnabled() const         { return settings.getBoolValue ("surfaceKontrolDaw", true); }
-void SurfaceHub::setKontrolDawEnabled (bool on)      { settings.setValue ("surfaceKontrolDaw", on); lastSearch = 0; }
-bool SurfaceHub::isMidiCiEnabled() const             { return settings.getBoolValue ("surfaceMidiCi", true); }
-void SurfaceHub::setMidiCiEnabled (bool on)          { settings.setValue ("surfaceMidiCi", on); lastSearch = 0; }
+
+StringArray SurfaceHub::plainPorts() const
+{
+    StringArray ports;
+    ports.addLines (settings.getValue ("plainMidiKeyboards"));
+    ports.removeEmptyStrings();
+    return ports;
+}
+
+bool SurfaceHub::isPlainKeys (const String& keys) const
+{
+    for (const auto& p : plainPorts())
+        if (p.containsIgnoreCase (keys) || keys.containsIgnoreCase (p)) return true;
+    return false;
+}
+
+bool SurfaceHub::isPlain (const ControlSurface& s) const   { return isPlainKeys (s.getKeysPortName()); }
+
+void SurfaceHub::setPlainMidi (const String& port, bool plain)
+{
+    // The MK1's translator is StageRig's own guesswork, so it is off unless asked for: plain is its default.
+    if (port.containsIgnoreCase ("KOMPLETE KONTROL S") && ! port.containsIgnoreCase ("MK"))
+    {
+        setKompleteKontrolEnabled (! plain);
+        return;
+    }
+    auto ports = plainPorts();
+    ports.removeString (port, true);
+    if (plain) ports.add (port);
+    settings.setValue ("plainMidiKeyboards", ports.joinIntoString ("\n"));
+    lastSearch = 0;
+}
 
 StringArray SurfaceHub::getProblems() const
 {
@@ -523,6 +551,82 @@ std::vector<SurfaceHub::SurfaceInfo> SurfaceHub::getSurfaces() const
     return list;
 }
 
+std::vector<SurfaceHub::KeyboardInfo> SurfaceHub::getKeyboards() const
+{
+    std::vector<KeyboardInfo> list;
+    const auto ins = MidiInput::getAvailableDevices();
+    const auto& inputs = engine.getSetup().inputs;
+    auto portFor = [&ins] (const String& keys)
+    {
+        for (const auto& d : ins) if (d.name.containsIgnoreCase (keys)) return d.name;
+        return keys;
+    };
+    for (const auto& s : surfaces)
+    {
+        if (! s->isFound()) continue;
+        KeyboardInfo k;
+        k.name = s->getName().upToLastOccurrenceOf (" (MIDI-CI)", false, false);
+        k.port = portFor (s->getKeysPortName());
+        k.input = inputFor (*s);
+        k.language = s->getLanguage();
+        k.screen = s->hasScreen();
+        k.lights = s->hasLights();
+        k.knobsByThemselves = true;
+        k.experimental = dynamic_cast<const KompleteKontrolMk1*> (s.get()) != nullptr;
+        list.push_back (k);
+    }
+    // The rest of the keyboards the inputs play from: plain MIDI.
+    const bool mk1 = ! KompleteKontrolMk1::find().empty();
+    for (int i = 0; i < (int) inputs.size(); ++i)
+    {
+        const auto& in = inputs[(size_t) i];
+        if (in.kind != InputDef::Kind::midi || in.midiDeviceName.isEmpty()) continue;
+        bool connected = false, listed = false;
+        for (const auto& d : ins) if (d.name == in.midiDeviceName) connected = true;
+        for (const auto& k : list) if (k.port == in.midiDeviceName) listed = true;
+        if (! connected || listed) continue;
+        KeyboardInfo k;
+        k.name = in.midiDeviceName;
+        k.port = in.midiDeviceName;
+        k.input = i;
+        k.language = "plain MIDI";
+        k.plain = plainPorts().contains (in.midiDeviceName);
+        for (int cc : in.controls.knobCC) if (cc > 0) k.knobsByThemselves = false;
+        if (mk1 && in.midiDeviceName.containsIgnoreCase ("KOMPLETE KONTROL S") && ! in.midiDeviceName.containsIgnoreCase ("MK"))
+        {
+            k.plain = ! isKompleteKontrolEnabled();
+            k.more = "its screens, light guide and knobs, as StageRig worked them out (experimental)";
+        }
+        list.push_back (k);
+    }
+    return list;
+}
+
+String SurfaceHub::getReport() const
+{
+    String r;
+    r << "StageRig " << (JUCEApplicationBase::getInstance() != nullptr ? JUCEApplicationBase::getInstance()->getApplicationVersion() : String ("(test)"))
+      << " on " << SystemStats::getOperatingSystemName() << "\n\n";
+    r << "MIDI inputs:\n";
+    for (const auto& d : MidiInput::getAvailableDevices())
+        r << "  " << d.name << (Midi2Inputs::isMidi2 (d.identifier) ? "  [MIDI 2.0]" : "") << "\n";
+    r << "MIDI outputs:\n";
+    for (const auto& d : MidiOutput::getAvailableDevices()) r << "  " << d.name << "\n";
+    r << "\nKeyboards:\n";
+    const auto& inputs = engine.getSetup().inputs;
+    for (const auto& k : getKeyboards())
+        r << "  " << k.name << ": " << (k.plain ? String ("plain MIDI (set so)") : k.language)
+          << ", plays " << (k.input >= 0 && k.input < (int) inputs.size() ? inputs[(size_t) k.input].name : String ("no input"))
+          << (k.screen ? ", screen" : "") << (k.lights ? ", lights" : "") << "\n";
+    for (const auto& s : surfaces)
+    {
+        r << "\n" << s->getName() << " -- " << s->getLanguage() << (s->isFound() ? "" : " (asked; no answer)") << "\n";
+        if (const auto more = s->getReport(); more.isNotEmpty()) r << more << "\n";
+    }
+    for (const auto& p : getProblems()) r << "\nProblem: " << p << "\n";
+    return r;
+}
+
 void SurfaceHub::addSurfaceForTesting (std::unique_ptr<ControlSurface> s)
 {
     surfaces.push_back (std::move (s));
@@ -537,9 +641,16 @@ void SurfaceHub::lookForKeyboards()
         auto* kk = dynamic_cast<KompleteKontrolMk1*> (it->get());
         auto* lk = dynamic_cast<LaunchkeyMk4*> (it->get());
         auto* ni = dynamic_cast<KompleteKontrolDaw*> (it->get());
-        auto* ci = dynamic_cast<MidiCiKeyboard*> (it->get());
-        const bool off = (kk != nullptr && ! isKompleteKontrolEnabled()) || (lk != nullptr && ! isLaunchkeyEnabled())
-                      || (ni != nullptr && ! isKontrolDawEnabled()) || (ci != nullptr && ! isMidiCiEnabled());
+        ignoreUnused (lk, ni);
+        /* The standard first: a maker's translator gives way to MIDI-CI on a
+           keyboard that answers it. */
+        bool standardThere = false;
+        if (dynamic_cast<MidiCiKeyboard*> (it->get()) == nullptr)
+            for (const auto& s : surfaces)
+                if (auto* ci = dynamic_cast<MidiCiKeyboard*> (s.get()); ci != nullptr && ci->isFound()
+                        && ci->getKeysPortName().containsIgnoreCase ((*it)->getKeysPortName()))
+                    standardThere = true;
+        const bool off = (kk != nullptr && ! isKompleteKontrolEnabled()) || isPlain (**it) || standardThere;
         if (off || ! (*it)->isConnected())
         {
             shown.erase (it->get());
@@ -563,45 +674,50 @@ void SurfaceHub::lookForKeyboards()
             else problems.add (error);
         }
 
-    if (isLaunchkeyEnabled())
-        for (const auto& p : LaunchkeyMk4::find())
-        {
-            bool have = false;
-            for (const auto& s : surfaces)
-                if (auto* lk = dynamic_cast<LaunchkeyMk4*> (s.get()); lk != nullptr && lk->getOutputIdentifier() == p.out.identifier) have = true;
-            if (have) continue;
-            auto lk = std::make_unique<LaunchkeyMk4> (p);
-            if (lk->opened()) { surfaces.push_back (std::move (lk)); changed = true; }
-            else problems.add ("Could not open the Launchkey's DAW port, " + p.out.name + ".");
-        }
+    auto answersMidiCi = [this] (const String& keys)
+    {
+        for (const auto& s : surfaces)
+            if (auto* ci = dynamic_cast<MidiCiKeyboard*> (s.get()); ci != nullptr && ci->isFound() && ci->getKeysPortName().containsIgnoreCase (keys))
+                return true;
+        return false;
+    };
 
-    if (isKontrolDawEnabled())
-        for (const auto& p : KompleteKontrolDaw::find())
-        {
-            bool have = false;
-            for (const auto& s : surfaces)
-                if (auto* ni = dynamic_cast<KompleteKontrolDaw*> (s.get()); ni != nullptr && ni->getOutputIdentifier() == p.out.identifier) have = true;
-            if (have) continue;
-            auto ni = std::make_unique<KompleteKontrolDaw> (p);
-            if (ni->opened()) { surfaces.push_back (std::move (ni)); changed = true; }
-            else problems.add ("Could not open the " + p.name + "'s DAW port, " + p.out.name + ".");
-        }
+    for (const auto& p : LaunchkeyMk4::find())
+    {
+        bool have = false;
+        for (const auto& s : surfaces)
+            if (auto* lk = dynamic_cast<LaunchkeyMk4*> (s.get()); lk != nullptr && lk->getOutputIdentifier() == p.out.identifier) have = true;
+        if (have || isPlainKeys (p.keysName) || answersMidiCi (p.keysName)) continue;
+        auto lk = std::make_unique<LaunchkeyMk4> (p);
+        if (lk->opened()) { surfaces.push_back (std::move (lk)); changed = true; }
+        else problems.add ("Could not open the Launchkey's DAW port, " + p.out.name + ".");
+    }
 
-    /* Any other keyboard an input plays from is asked, once, whether it
-       speaks MIDI-CI; the ones a driver above already has are left to it. */
-    if (isMidiCiEnabled())
+    for (const auto& p : KompleteKontrolDaw::find())
+    {
+        bool have = false;
+        for (const auto& s : surfaces)
+            if (auto* ni = dynamic_cast<KompleteKontrolDaw*> (s.get()); ni != nullptr && ni->getOutputIdentifier() == p.out.identifier) have = true;
+        if (have || isPlainKeys (p.keysName) || answersMidiCi (p.keysName)) continue;
+        auto ni = std::make_unique<KompleteKontrolDaw> (p);
+        if (ni->opened()) { surfaces.push_back (std::move (ni)); changed = true; }
+        else problems.add ("Could not open the " + p.name + "'s DAW port, " + p.out.name + ".");
+    }
+
+    /* Every keyboard an input plays from is asked, once, whether it speaks
+       MIDI-CI, the standard: one that answers is talked to that way, and a
+       maker's translator above gives way to it (at the next look). */
     {
         StringArray names;
         for (const auto& in : engine.getSetup().inputs)
             if (in.kind == InputDef::Kind::midi && in.midiDeviceName.isNotEmpty()) names.addIfNotAlreadyThere (in.midiDeviceName);
+        const auto plain = plainPorts();
         for (const auto& p : MidiCiKeyboard::find (names))
         {
+            if (plain.contains (p.in.name)) continue;
             bool have = false;
             for (const auto& s : surfaces)
-            {
                 if (auto* ci = dynamic_cast<MidiCiKeyboard*> (s.get()); ci != nullptr && ci->getInputIdentifier() == p.in.identifier) have = true;
-                else if (dynamic_cast<MidiCiKeyboard*> (s.get()) == nullptr && p.in.name.containsIgnoreCase (s->getKeysPortName())) have = true;
-            }
             if (have) continue;
             auto ci = std::make_unique<MidiCiKeyboard> (p);
             if (ci->opened()) { surfaces.push_back (std::move (ci)); changed = true; }

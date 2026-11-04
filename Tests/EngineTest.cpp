@@ -4171,6 +4171,7 @@ int main()
             std::vector<Touch> queued;
             String getName() const override             { return "Fake"; }
             String getKeysPortName() const override     { return "Fake keys"; }
+            String getLanguage() const override         { return "a test's"; }
             bool isConnected() const override           { return true; }
             bool hasScreen() const override             { return true; }
             void show (const SurfaceView& v) override   { views.push_back (v); }

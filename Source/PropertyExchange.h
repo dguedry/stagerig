@@ -44,6 +44,8 @@ public:
     bool isAskedFor() const                         { return asked; }
     /** The keyboard's name for itself, from its DeviceInfo when it gave one. */
     juce::String getRemoteName() const;
+    /** What was asked and told lately, oldest first, for a bug report. */
+    juce::StringArray getLog() const                { return log; }
 
     /** The properties' contents, as sent: for the tests. */
     static juce::var channelList (const SurfaceView&);
@@ -70,6 +72,8 @@ private:
     struct Subscriber { juce::midi_ci::MUID muid; juce::String id; bool operator< (const Subscriber& o) const { return std::tie (muid, id) < std::tie (o.muid, o.id); } };
     std::map<juce::String, std::set<Subscriber>> subscribers;
     std::array<juce::uint32, SurfaceView::numKnobs> turnedAt {};
+    juce::StringArray log;
+    void note (const juce::String&);
 };
 
 /** A keyboard on a MIDI port pair that answers MIDI-CI: StageRig's
@@ -88,6 +92,8 @@ public:
     const juce::String& getInputIdentifier() const  { return ports.in.identifier; }
 
     juce::String getName() const override;
+    juce::String getLanguage() const override       { return "standard MIDI-CI"; }
+    juce::String getReport() const override;
     juce::String getKeysPortName() const override   { return ports.in.name; }
     bool isConnected() const override;
     bool isFound() const override                   { return responder.isAskedFor(); }
