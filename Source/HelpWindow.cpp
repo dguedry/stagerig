@@ -1,4 +1,5 @@
 #include "HelpWindow.h"
+#include "Theme.h"
 #include "BinaryData.h"
 
 using namespace juce;
@@ -8,11 +9,8 @@ namespace perf
 
 namespace
 {
-    const Colour bgDark    { 0xff1e1f24 };
-    const Colour bgPanel   { 0xff26282f };
+    using namespace perf::theme;
     const Colour bgCode    { 0xff15161c };
-    const Colour accent    { 0xff5aa9ff };
-    const Colour textDim   { 0xff9aa0ab };
 }
 
 //==============================================================================

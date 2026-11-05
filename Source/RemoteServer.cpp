@@ -2988,18 +2988,12 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
             {
                 // An output's master chain, reached from any input that lands on it.
                 const auto& od = setup.outputs[(size_t) bus];
-                auto* plugin = effect >= 0 && effect < (int) od.chain.effects.size()
-                             ? engine.getPlugin (Engine::outputAddress (bus), 0, -1, effect) : nullptr;
-                const auto name = "Output " + od.name + " / FX" + String (effect + 1) + " / " + (plugin != nullptr ? plugin->getName() : String());
-                if (plugin == nullptr || ! plugin->isAlive())
+                if (effect < 0 || effect >= (int) od.chain.effects.size())
                     *error = "That plugin is not loaded on the computer.";
-                else if (! plugin->isEditorOpen() && ! plugin->showEditor (name))
-                    *error = "Could not open that plugin's window.";
+                else if (const auto problem = engine.openPluginWindow (Engine::outputAddress (bus), 0, -1, effect, title.get()); problem.isNotEmpty())
+                    *error = problem;
                 else
-                {
-                    *title = name;
-                    plugin->keepEditorOnTop (true);
-                }
+                    engine.getPlugin (Engine::outputAddress (bus), 0, -1, effect)->keepEditorOnTop (true);
             }
             else if (input >= 0 && input < (int) setup.inputs.size())
             {
@@ -3012,22 +3006,13 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                                               : chain != nullptr && effect < (int) chain->size();
                 if (valid)
                 {
-                    auto* plugin = engine.getPlugin (input, prog, slot, effect);
-                    if (plugin == nullptr || ! plugin->isAlive())
-                        *error = "That plugin is not loaded on the computer.";
-                    else if (! plugin->isEditorOpen() && ! plugin->showEditor (
-                                 in.name + " / " + String (prog).paddedLeft ('0', 3)
-                                 + "  " + def.name + " / " + plugin->getName()))
-                        *error = "Could not open that plugin's window.";
+                    if (const auto problem = engine.openPluginWindow (input, prog, slot, effect, title.get()); problem.isNotEmpty())
+                        *error = problem;
                     else
-                    {
-                        *title = in.name + " / " + String (prog).paddedLeft ('0', 3)
-                              + "  " + def.name + " / " + plugin->getName();
                         /* Whether just opened or already open: from now on a
                            tablet is looking at it, and taps only land if it is
                            not covered. See keepEditorOnTop in the host. */
-                        plugin->keepEditorOnTop (true);
-                    }
+                        engine.getPlugin (input, prog, slot, effect)->keepEditorOnTop (true);
                 }
             }
             ready->signal();

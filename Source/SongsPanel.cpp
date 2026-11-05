@@ -1,4 +1,5 @@
 #include "SongsPanel.h"
+#include "Theme.h"
 #include "Confirm.h"
 #include "Charts.h"
 #include "MidiFx.h"
@@ -21,11 +22,8 @@ using namespace juce;
 
 namespace
 {
-    const Colour bgPanel   { 0xff1b1d22 };
-    const Colour bgRow     { 0xff23262d };
-    const Colour accent    { 0xff4f9dff };
-    const Colour accentDim { 0xff2b4f80 };
-    const Colour textDim   { 0xff9aa0ab };
+    using perf::theme::accent; using perf::theme::accentDim; using perf::theme::textDim;
+    const Colour bgPanel = perf::theme::bgPane, bgRow = perf::theme::bgPaneRow;   // set into the ground, not raised from it
 }
 
 //==============================================================================
@@ -1450,10 +1448,9 @@ private:
             auto& engine = owner.engine;
             if (sd->isPlugin())
             {
-                auto* plugin = engine.getPlugin (track(), program(), sl);
-                if (plugin == nullptr || ! plugin->isAlive()) return;
-                const auto& songs = engine.getSongs();
-                plugin->showEditor ((owner.songIndex < (int) songs.size() ? songs[(size_t) owner.songIndex].name + " / " : String()) + sd->displayName());
+                // The one opener: the same title and the same word when it fails, wherever a window is asked for.
+                if (const auto problem = engine.openPluginWindow (track(), program(), sl, -1); problem.isNotEmpty())
+                    AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, sd->displayName(), problem);
             }
             else if (sd->isExternal())
             {

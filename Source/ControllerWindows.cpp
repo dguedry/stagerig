@@ -1,4 +1,5 @@
 #include "ControllerWindows.h"
+#include "Theme.h"
 #include "ParamPicker.h"
 #include "PanelParams.h"
 #include "RemotePlugin.h"
@@ -9,9 +10,7 @@ using namespace juce;
 
 namespace
 {
-    const Colour bgPanel   { 0xff26282f };
-    const Colour bgRow     { 0xff2e313a };
-    const Colour textDim   { 0xff9aa0ab };
+    using namespace perf::theme;
 
     String noteName (int n) { return MidiMessage::getMidiNoteName (n, true, true, 3); }
 
@@ -32,14 +31,7 @@ namespace
     Component* launch (Component* content, const String& title, int w, int h)
     {
         content->setSize (w, h);
-        DialogWindow::LaunchOptions o;
-        o.content.setOwned (content);
-        o.dialogTitle = title;
-        o.dialogBackgroundColour = bgPanel;
-        o.escapeKeyTriggersCloseButton = true;
-        o.useNativeTitleBar = true;
-        o.resizable = true;
-        return o.launchAsync();
+        return perf::theme::launchDialog (content, title, 0, 0);
     }
 }
 
@@ -620,7 +612,9 @@ private:
         auto* p = livePlugin();
         if (p == nullptr) return;
         waitingForWindow = ! waitingForWindow;
-        if (waitingForWindow) p->showEditor (plugin.name);
+        if (waitingForWindow)
+            if (const auto problem = engine.openPluginWindow (input, program, slot, -1); problem.isNotEmpty())
+            { status.setText (problem, dontSendNotification); waitingForWindow = false; }
         showSelected();
     }
 

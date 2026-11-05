@@ -1,4 +1,5 @@
 #include "GmMixer.h"
+#include "Theme.h"
 #include "GmSynth.h"
 
 using namespace juce;
@@ -8,9 +9,7 @@ namespace perf
 
 namespace
 {
-    const Colour bgPanel { 0xff1b1d22 };
-    const Colour bgRow   { 0xff23262d };
-    const Colour textDim { 0xff9aa0ab };
+    using namespace perf::theme;
 
     const char* const familyNames[16] = { "Piano", "Chromatic percussion", "Organ", "Guitar", "Bass", "Strings", "Ensemble", "Brass",
                                           "Reed", "Pipe", "Synth lead", "Synth pad", "Synth effects", "Ethnic", "Percussive", "Sound effects" };

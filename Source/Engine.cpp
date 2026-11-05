@@ -646,6 +646,29 @@ double Engine::tapTempo()
 
 void Engine::resetTapTempo() { tapTimes.clear(); }
 
+String Engine::openPluginWindow (int inputIndex, int program, int slot, int effect, String* titleOut)
+{
+    auto* plugin = getPlugin (inputIndex, program, slot, effect);
+    if (plugin == nullptr || ! plugin->isAlive()) return "That plugin is not running. Use Reload to restart it.";
+
+    String title = plugin->getName();
+    if (isOutputAddress (inputIndex))
+    {
+        const int o = outputFromAddress (inputIndex);
+        if (o >= 0 && o < (int) setup.outputs.size())
+            title = "Output " + setup.outputs[(size_t) o].name + " / effect " + String (effect + 1) + " / " + plugin->getName();
+    }
+    else if (validInput (inputIndex) && program >= 0 && program < InputDef::numPrograms)
+    {
+        const auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+        title = setup.inputs[(size_t) inputIndex].name + " / " + String (program).paddedLeft ('0', 3)
+              + (def.name.isNotEmpty() ? "  " + def.name : String()) + " / " + plugin->getName();
+    }
+    if (titleOut != nullptr) *titleOut = title;
+    if (plugin->isEditorOpen()) return {};
+    return plugin->showEditor (title) ? String() : plugin->getName() + ": could not open its window (" + plugin->getLastError() + ")";
+}
+
 //==============================================================================
 // The rig's pedals: one table, one learn, one press.
 //==============================================================================

@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Theme.h"
 #include "GmSynth.h"
 #include "PatchDialog.h"
 #include "GmMixer.h"
@@ -21,12 +22,7 @@ namespace perf
 
 namespace
 {
-    const Colour bgDark    { 0xff1e1f24 };
-    const Colour bgPanel   { 0xff26282f };
-    const Colour bgRow     { 0xff2e313a };
-    const Colour accent    { 0xff4f9dff };
-    const Colour accentDim { 0xff2b4f80 };
-    const Colour textDim   { 0xff9aa0ab };
+    using namespace perf::theme;
 
     String programTitle (int index, const ProgramDef& p)
     {
@@ -2579,14 +2575,7 @@ private:
 
         auto suggestions = suggestMappings (plugin->getParameters(), *desc, engine.getPluginHost().getMappingTemplates(), t->slot, t->effect, def->mappings);
         auto* content = new SuggestionsComponent (engine, owner.getSelectedInput(), owner.getEditedProgram(), t->label, std::move (suggestions));
-        DialogWindow::LaunchOptions o;
-        o.content.setOwned (content);
-        o.dialogTitle = "Suggested mappings";
-        o.dialogBackgroundColour = bgPanel;
-        o.escapeKeyTriggersCloseButton = true;
-        o.useNativeTitleBar = true;
-        o.resizable = false;
-        o.launchAsync();
+        perf::theme::launchDialog (content, "Suggested mappings", 0, 0, false);
     }
 
     void saveTemplate()
@@ -3460,25 +3449,10 @@ void MainComponent::statusMessage (const String& s) { showStatus (s); }
 //==============================================================================
 void MainComponent::openPluginEditor (int inputIndex, int program, int slot, int effect)
 {
-    auto* plugin = engine.getPlugin (inputIndex, program, slot, effect);
-    if (plugin == nullptr || ! plugin->isAlive()) { showStatus ("Plugin is not running. Use Reload to restart it."); return; }
-
-    if (looksLikeAraPlugin (plugin->getDescription()))
+    if (auto* plugin = engine.getPlugin (inputIndex, program, slot, effect); plugin != nullptr && looksLikeAraPlugin (plugin->getDescription()))
         showStatus (araWarning (plugin->getName()));
-
-    const auto& setup = engine.getSetup();
-    String title = plugin->getName();
-    if (Engine::isOutputAddress (inputIndex))
-    {
-        const int o = Engine::outputFromAddress (inputIndex);
-        if (o < (int) setup.outputs.size())
-            title = "Output " + setup.outputs[(size_t) o].name + " / effect " + String (effect + 1) + " / " + plugin->getName();
-    }
-    else if (inputIndex >= 0 && inputIndex < (int) setup.inputs.size())
-        title = setup.inputs[(size_t) inputIndex].name + " / " + programTitle (program, setup.inputs[(size_t) inputIndex].programs[(size_t) program]) + " / " + plugin->getName();
-
-    if (! plugin->showEditor (title))
-        showStatus (plugin->getName() + ": could not open its editor (" + plugin->getLastError() + ")");
+    if (const auto problem = engine.openPluginWindow (inputIndex, program, slot, effect); problem.isNotEmpty())
+        showStatus (problem);
 }
 
 //==============================================================================
@@ -3750,28 +3724,14 @@ void MainComponent::showShowCheck()
     };
     auto* content = new ShowCheckView (run);
     content->setSize (720, 520);
-    DialogWindow::LaunchOptions o;
-    o.content.setOwned (content);
-    o.dialogTitle = "Pre-show check";
-    o.dialogBackgroundColour = bgPanel;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.launchAsync();
+    perf::theme::launchDialog (content, "Pre-show check", 0, 0);
 }
 
 void MainComponent::showOutputs()
 {
     auto* content = new OutputsComponent (engine, *this);
     content->setSize (760, 420);
-    DialogWindow::LaunchOptions o;
-    o.content.setOwned (content);
-    o.dialogTitle = "Outputs & master effects";
-    o.dialogBackgroundColour = bgPanel;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.launchAsync();
+    perf::theme::launchDialog (content, "Outputs & master effects", 0, 0);
 }
 
 void MainComponent::playInstrumentFromKeyboard (int slot)
@@ -3790,14 +3750,7 @@ void MainComponent::showAudioSettings()
 {
     auto* content = new AudioSettingsComponent (engine, settings, [this] (const String& s) { showStatus (s); });
     content->setSize (640, 640);
-    DialogWindow::LaunchOptions o;
-    o.content.setOwned (content);
-    o.dialogTitle = "Audio settings";
-    o.dialogBackgroundColour = bgPanel;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.launchAsync();
+    perf::theme::launchDialog (content, "Audio settings", 0, 0);
 }
 
 /** Ask which wifi adapter should serve the hotspot, and remember the answer.
@@ -4115,13 +4068,7 @@ void MainComponent::showRemote()
         content->setSize (520, content->getHeight() + 36);
     }
 
-    DialogWindow::LaunchOptions o;
-    o.content.setOwned (content);
-    o.dialogTitle = "Tablet control";
-    o.dialogBackgroundColour = bgPanel;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.launchAsync();
+    perf::theme::launchDialog (content, "Tablet control", 0, 0);
     showStatus ("Tablet control on: " + url + "  code " + remote->getToken());
 
     /* A blocked port looks exactly like a broken app from the tablet's side: the
@@ -4172,14 +4119,7 @@ void MainComponent::showPluginManager()
 {
     auto* content = new PluginManagerComponent (engine.getPluginHost(), [this] (const String& s) { showStatus (s); });
     content->setSize (960, 600);
-    DialogWindow::LaunchOptions o;
-    o.content.setOwned (content);
-    o.dialogTitle = "Plugins";
-    o.dialogBackgroundColour = bgPanel;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.launchAsync();
+    perf::theme::launchDialog (content, "Plugins", 0, 0);
 }
 
 } // namespace perf

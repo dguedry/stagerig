@@ -599,6 +599,11 @@ public:
         program chain. Returns nullptr if the program isn't loaded or the plugin failed to
         start; a plugin whose process died is returned but reports isAlive() == false. */
     RemotePlugin* getPlugin (int inputIndex, int program, int slot, int effect = -1) const;
+    /** Opens a plugin's own window -- the one way, wherever it is asked for --
+        titled "<input> / 007  Program / <plugin>" (or "Output ... / effect n /
+        ..."), and returns what went wrong, or nothing. A window already open
+        is left as it is. The title it got is given back when asked. */
+    juce::String openPluginWindow (int inputIndex, int program, int slot, int effect, juce::String* titleOut = nullptr);
     bool isPluginAlive (int inputIndex, int program, int slot, int effect = -1) const;
     /** True while the plugin's process is being started on the loader thread. */
     bool isPluginLoading (int inputIndex, int program, int slot, int effect = -1) const;

@@ -1,4 +1,5 @@
 #include "SectionActions.h"
+#include "Theme.h"
 #include <memory>
 #include <vector>
 
@@ -9,10 +10,7 @@ using namespace juce;
 
 namespace
 {
-    const Colour bgPanel   { 0xff1b1d22 };
-    const Colour bgRow     { 0xff23262d };
-    const Colour accent    { 0xff4f9dff };
-    const Colour textDim   { 0xff9aa0ab };
+    using namespace perf::theme;
 
     class ActionsComponent : public Component
     {
@@ -289,14 +287,7 @@ void showSectionActions (Engine& engine, int songIndex, int markerIndex, std::fu
 
     auto* content = new ActionsComponent (engine, songIndex, markerIndex, std::move (changed));
     content->setSize (640, jmax (260, content->preferredHeight()));
-    DialogWindow::LaunchOptions o;
-    o.content.setOwned (content);
-    o.dialogTitle = "When the track enters " + (markers[(size_t) markerIndex].name.isNotEmpty() ? markers[(size_t) markerIndex].name : "this section");
-    o.dialogBackgroundColour = bgPanel;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.launchAsync();
+    perf::theme::launchDialog (content, "When the track enters " + (markers[(size_t) markerIndex].name.isNotEmpty() ? markers[(size_t) markerIndex].name : "this section"), 0, 0);
 }
 
 } // namespace perf

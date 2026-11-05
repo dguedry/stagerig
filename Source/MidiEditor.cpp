@@ -1,4 +1,5 @@
 #include "MidiEditor.h"
+#include "Theme.h"
 #include "GmSynth.h"
 #include "GmMixer.h"
 #include <algorithm>
@@ -13,10 +14,7 @@ namespace perf
 
 namespace
 {
-    const Colour bgPanel   { 0xff1b1d22 };
-    const Colour bgRow     { 0xff23262d };
-    const Colour accent    { 0xff4f9dff };
-    const Colour textDim   { 0xff9aa0ab };
+    using namespace perf::theme;
     const Colour selColour { 0xffffb347 };
 
     bool isNoteOn (const MidiMessage& m)  { return m.isNoteOn() && m.getVelocity() > 0; }

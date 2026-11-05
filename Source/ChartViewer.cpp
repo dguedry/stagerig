@@ -1,4 +1,5 @@
 #include "ChartViewer.h"
+#include "Theme.h"
 #include "Charts.h"
 #include "MidiFx.h"
 #include <juce_gui_extra/juce_gui_extra.h>
@@ -12,10 +13,7 @@ using namespace juce;
 
 namespace
 {
-    const Colour bgPanel   { 0xff1b1d22 };
-    const Colour bgRow     { 0xff23262d };
-    const Colour accent    { 0xff4f9dff };
-    const Colour textDim   { 0xff9aa0ab };
+    using namespace perf::theme;
     const Colour paper     { 0xfff4f1e8 };
     const Colour ink       { 0xff1a1a1a };
     const Colour chordInk  { 0xff1b56a8 };

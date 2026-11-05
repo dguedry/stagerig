@@ -1,4 +1,5 @@
 #include "TrackTimeline.h"
+#include "Theme.h"
 #include <algorithm>
 #include <cmath>
 
@@ -9,11 +10,7 @@ using namespace juce;
 
 namespace
 {
-    const Colour bgPanel   { 0xff1b1d22 };
-    const Colour bgRow     { 0xff23262d };
-    const Colour accent    { 0xff4f9dff };
-    const Colour accentDim { 0xff2b4f80 };
-    const Colour textDim   { 0xff9aa0ab };
+    using namespace perf::theme;
     const Colour gold      { 0xffe0b64a };
     const Colour vampCol   { 0xff8a6a2a };
 
