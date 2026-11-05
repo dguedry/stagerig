@@ -1,4 +1,5 @@
 #include "TrackTimeline.h"
+#include "TimeText.h"
 #include "Theme.h"
 #include <algorithm>
 #include <cmath>
@@ -260,11 +261,7 @@ double TrackTimeline::snapped (double seconds, bool free) const
     return std::abs ((b - seconds) * pxPerSecond) <= kSnapPx ? b : seconds;
 }
 
-String TrackTimeline::formatTime (double s)
-{
-    const int m = (int) (s / 60.0);
-    return String (m) + ":" + String (s - m * 60.0, 1).paddedLeft ('0', 4);
-}
+String TrackTimeline::formatTime (double s) { return clockText (s, 1); }
 
 //==============================================================================
 void TrackTimeline::paint (Graphics& g)

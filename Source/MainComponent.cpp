@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "TimeText.h"
 #include "Theme.h"
 #include "GmSynth.h"
 #include "PatchDialog.h"
@@ -624,15 +625,8 @@ static void addPluginsToMenu (PopupMenu& menu, const Array<PluginDescription>& t
     }
 }
 
-/** The MIDI outputs worth offering: the system's own "Midi Through" loopback
-    is left out -- it is always there, goes nowhere, and looks like a choice. */
-static Array<MidiDeviceInfo> midiOutputPorts()
-{
-    Array<MidiDeviceInfo> ports;
-    for (const auto& d : MidiOutput::getAvailableDevices())
-        if (! d.name.containsIgnoreCase ("Midi Through")) ports.add (d);
-    return ports;
-}
+/** The MIDI outputs worth offering (Engine::midiOutputDevices: the system's own "Midi Through" loopback left out). */
+static Array<MidiDeviceInfo> midiOutputPorts() { return Engine::midiOutputDevices(); }
 
 /** Fills a menu with ports as items idBase + index. The current port, if
     unplugged, is shown ticked and greyed; with none at all the menu says why. */
@@ -3201,11 +3195,7 @@ void MainComponent::savePaneWidths()
     settings.saveIfNeeded();
 }
 
-String MainComponent::formatElapsed (double seconds)
-{
-    const int s = (int) seconds;
-    return String (s / 60) + ":" + String (s % 60).paddedLeft ('0', 2);
-}
+String MainComponent::formatElapsed (double seconds) { return clockText (seconds); }
 
 void MainComponent::toggleRecording()
 {

@@ -1,4 +1,5 @@
 #include "SongsPanel.h"
+#include "TimeText.h"
 #include "Theme.h"
 #include "Confirm.h"
 #include "Charts.h"
@@ -329,7 +330,7 @@ void SongsPanel::timerCallback()
 
 void SongsPanel::refreshTransport()
 {
-    auto mmss = [] (double s) { const int t = (int) s; return String (t / 60) + ":" + String (t % 60).paddedLeft ('0', 2); };
+    auto mmss = [] (double s) { return clockText (s); };
     const int song = engine.getTrackSong();
     const auto& songs = engine.getSongs();
     const bool has = engine.hasTrack() && song >= 0 && song < (int) songs.size();
@@ -1134,7 +1135,7 @@ public:
 
         /* No files and no click: a song played by hand. Its sections are
            scenes, stepped by hand, so the timeline and its tools make way. */
-        scenes = sg.stems.empty() && ! sg.click;
+        scenes = sg.isPlayedByHand();
         sectionsHeader.setText (scenes ? "SCENES" : "SECTIONS", dontSendNotification);
         addSectionBtn.setButtonText (scenes ? "+ Add scene" : "Mark section here");
         addSectionBtn.setTooltip (scenes ? "A new scene at the end, holding the programs loaded on every keyboard now"
@@ -1521,7 +1522,7 @@ private:
             }
             // A MIDI device straight from the port: a hardware synth or module, a lighting controller.
             Array<MidiDeviceInfo> ports;
-            for (const auto& d : MidiOutput::getAvailableDevices()) if (! d.name.containsIgnoreCase ("Midi Through")) ports.add (d);
+            ports = Engine::midiOutputDevices();
             {
                 PopupMenu devices;
                 for (int k = 0; k < ports.size(); ++k) devices.addItem (4000 + k, ports[k].name);
@@ -1647,18 +1648,8 @@ private:
                 up.onClick = [this] { owner.moveScene (index, index - 1); };
             }
         }
-        static String formatTime (double s)
-        {
-            const int m = (int) (s / 60.0);
-            return String (m) + ":" + String (s - m * 60.0, 1).paddedLeft ('0', 4);
-        }
-        static double parseTime (const String& t)
-        {
-            if (t.containsChar (':'))
-                return jmax (0.0, t.upToFirstOccurrenceOf (":", false, false).getDoubleValue() * 60.0
-                                    + t.fromFirstOccurrenceOf (":", false, false).getDoubleValue());
-            return jmax (0.0, t.getDoubleValue());
-        }
+        static String formatTime (double s)       { return clockText (s, 1); }
+        static double parseTime (const String& t) { return parseClock (t); }
         void resized() override
         {
             auto r = getLocalBounds().reduced (0, 2);

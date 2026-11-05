@@ -1742,7 +1742,7 @@ bool Engine::songHasScenes (int songIndex) const
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return false;
     const auto& s = setup.songs[(size_t) songIndex];
-    return s.stems.empty() && ! s.click && ! s.markers.empty();
+    return s.isPlayedByHand() && ! s.markers.empty();
 }
 
 int Engine::getSceneCount() const
@@ -2051,7 +2051,7 @@ String Engine::describeAction (const ActionDef& a) const
     return {};
 }
 
-Array<MidiDeviceInfo> Engine::midiOutputDevices() const
+Array<MidiDeviceInfo> Engine::midiOutputDevices()
 {
     Array<MidiDeviceInfo> out;
     for (const auto& d : MidiOutput::getAvailableDevices())

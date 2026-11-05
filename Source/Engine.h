@@ -433,7 +433,9 @@ public:
     /** A line of words for an action, for the window and the tablet. */
     juce::String describeAction (const ActionDef&) const;
     /** Message thread: the MIDI output ports StageRig can send to, for choosing one. */
-    juce::Array<juce::MidiDeviceInfo> midiOutputDevices() const;
+    /** The MIDI outputs worth offering: the system's own "Midi Through" loopback
+        is left out -- it is always there, goes nowhere, and looks like a choice. */
+    static juce::Array<juce::MidiDeviceInfo> midiOutputDevices();
     void sendMidiToDevice (const juce::String& identifier, const juce::String& name, const juce::MidiMessage&);
     int  getTrackSection() const                    { return player != nullptr ? player->getCurrentSection() : -1; }
     int  getQueuedTrackSection() const              { return player != nullptr ? player->getQueuedSection() : -1; }

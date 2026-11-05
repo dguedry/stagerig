@@ -536,6 +536,8 @@ struct SongDef
         lead-in), and the click is accented every `beatsPerBar` beats. A
         song with no files and a click is a plain metronome. */
     bool click = false;
+    /** No audio and no click: the song is played by hand, and its markers are scenes rather than sections of a track. */
+    bool isPlayedByHand() const { return stems.empty() && ! click; }
     int beatsPerBar = 4;
     double firstBeat = 0.0;
     /** Where Play from the top begins (seconds into the files), for a file
