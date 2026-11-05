@@ -19,6 +19,6 @@ juce::Component* showPedals (Engine&, SurfaceHub&, std::function<void()> changed
 
 /** The keyboards StageRig talks to, and what each input's knobs and
     buttons do: taught by turning or pressing them. Returns the window, as above. */
-juce::Component* showControllers (Engine&, SurfaceHub&, int selectedInput, std::function<void()> changed);
+juce::Component* showControllers (Engine&, SurfaceHub&, std::function<void()> changed);
 
 } // namespace perf

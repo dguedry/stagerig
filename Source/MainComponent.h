@@ -147,6 +147,7 @@ private:
     std::unique_ptr<ControlMapLibrary> controlMaps;
     std::unique_ptr<SurfaceHub> surfaceHub;
     std::vector<juce::Component::SafePointer<juce::Component>> controllerWindows;   // closed before the hub goes
+    bool raiseWindow (const juce::String& title);                                   // brings an open one of these to the front
     void showControllers();
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;

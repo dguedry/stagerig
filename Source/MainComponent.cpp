@@ -165,18 +165,6 @@ public:
             pcChannelBox.setEnabled (pcToggle.getToggleState());
         };
 
-        addChildComponent (midi1Toggle);
-        midi1Toggle.setTooltip ("This keyboard speaks MIDI 2.0, so StageRig hears its knobs, pedals and pressure at full resolution "
-                                "instead of in 128 steps: a slow sweep of a mapped knob moves the plugin smoothly. Tick this to hear it "
-                                "as MIDI 1.0 instead, for a keyboard that misbehaves. The plugins get MIDI 1.0 either way.");
-        midi1Toggle.onClick = [this]
-        {
-            int sel = list.getSelectedRow();
-            if (sel < 0) return;
-            engine.setInputMidi1Only (sel, midi1Toggle.getToggleState());
-            owner.markDirty();
-        };
-
         addAndMakeVisible (outputBox);
         outputBox.setTooltip ("Which output this input's sound goes to. An output is a pair of interface channels with its own master effects and volume. Set them up under Options > Outputs & master effects.");
         outputBox.onChange = [this]
@@ -290,8 +278,6 @@ public:
                                     dontSendNotification);
         pcChannelBox.setEnabled (def.respondToProgramChange);
         // Only for a keyboard speaking MIDI 2.0 (or one already set to MIDI 1.0, so it can be unset).
-        midi1Toggle.setVisible (! def.isTrack() && (def.midi1Only || Engine::isMidi2Device (def.midiDeviceIdentifier)));
-        midi1Toggle.setToggleState (def.midi1Only, dontSendNotification);
         resized();      // the editor is taller for an audio input
     }
 
@@ -304,7 +290,7 @@ public:
            It was 150, so the last row was being clipped, which is why the PC
            channel selector looked squeezed. */
         const bool audio = audioBox.isVisible();
-        auto editor = r.removeFromBottom ((audio ? 262 : 216) + (midi1Toggle.isVisible() ? 28 : 0));
+        auto editor = r.removeFromBottom (audio ? 262 : 216);
         auto buttons = r.removeFromBottom (26);
         r.removeFromBottom (4);
         list.setBounds (r);
@@ -336,11 +322,6 @@ public:
         pcChannelLabel.setBounds (pcRow.removeFromLeft (56));
         pcChannelBox.setBounds (pcRow.removeFromLeft (130));
         editor.removeFromTop (6);
-        if (midi1Toggle.isVisible())
-        {
-            midi1Toggle.setBounds (editor.removeFromTop (22));
-            editor.removeFromTop (6);
-        }
         auto outRow = editor.removeFromTop (24);
         outputLabel.setBounds (outRow.removeFromLeft (56));
         outputBox.setBounds (outRow);
@@ -423,7 +404,6 @@ private:
     Label deviceLabel { {}, "MIDI device" }, channelLabel { {}, "Channel" };
     ComboBox deviceBox, channelBox;
     ToggleButton pcToggle { "Respond to Program Change" };
-    ToggleButton midi1Toggle { "Hear as MIDI 1.0 (it speaks MIDI 2.0)" };
     Label pcChannelLabel { {}, "Arrive on" };
     ComboBox pcChannelBox;
     Label audioLabel { {}, "Audio channels" };
@@ -2727,7 +2707,6 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         }
         m.addSectionHeader ("The show");
         m.addItem (11, "Pre-show check...  (everything that can go wrong, before the first song)");
-        m.addItem (6, "Show songs and set lists", true, songsPanel != nullptr && songsPanel->isVisible());
         m.addItem (4, "Print the program list (for the stand)...");
         m.addItem (8, engine.isRecording() ? "Stop recording the gig  (" + formatElapsed (engine.getRecordingSeconds()) + ")"
                                             : "Record the gig  (every output to WAV, the keyboards to MIDI)");
@@ -2763,7 +2742,6 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
                 case 3: engine.refreshMidiDevices(); showStatus ("MIDI devices rescanned"); break;
                 case 4: printProgramMap(); break;
                 case 5: showOutputs(); break;
-                case 6: setSongsPanelShown (songsPanel == nullptr || ! songsPanel->isVisible()); break;
                 case 7: chooseGmSoundfont(); break;
                 case 11: showShowCheck(); break;
                 case 12: showControllers(); break;
@@ -2819,9 +2797,11 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     performBtn.onClick = [this]
     {
         settings.setValue ("perform", performBtn.getToggleState());
+        stageBtn.setEnabled (! performBtn.getToggleState());    // Perform is the stage view: the button would do nothing
         resized();
     };
     performBtn.setToggleState (settings.getBoolValue ("perform", false), dontSendNotification);
+    stageBtn.setEnabled (! performBtn.getToggleState());
 
     /* Songs and sets. Hidden by default and remembered, like Stage: it is the
        panel you want while building a set and while playing one, and in the way
@@ -3043,25 +3023,39 @@ MainComponent::~MainComponent()
     engine.removeListener (this);
 }
 
+bool MainComponent::raiseWindow (const String& title)
+{
+    // One window per job: the one already open comes to the front rather than a second opening behind it.
+    controllerWindows.erase (std::remove (controllerWindows.begin(), controllerWindows.end(), nullptr), controllerWindows.end());
+    for (auto& w : controllerWindows)
+        if (auto* dw = w->findParentComponentOfClass<DialogWindow>(); dw != nullptr && dw->getName() == title)
+        {
+            dw->toFront (true);
+            return true;
+        }
+    return false;
+}
+
 void MainComponent::showKnobsFor (int slot)
 {
     if (surfaceHub == nullptr) return;
-    controllerWindows.erase (std::remove (controllerWindows.begin(), controllerWindows.end(), nullptr), controllerWindows.end());
-    controllerWindows.push_back (showControlMapEditor (engine, *surfaceHub, *controlMaps, selectedInput, getEditedProgram(), slot, [this] { markDirty(); }));
+    const auto& inputs = engine.getSetup().inputs;
+    const int program = getEditedProgram();
+    if (selectedInput >= 0 && selectedInput < (int) inputs.size() && slot >= 0 && slot < (int) inputs[(size_t) selectedInput].programs[(size_t) program].slots.size()
+        && raiseWindow ("Knobs: " + inputs[(size_t) selectedInput].programs[(size_t) program].slots[(size_t) slot].plugin.name)) return;
+    controllerWindows.push_back (showControlMapEditor (engine, *surfaceHub, *controlMaps, selectedInput, program, slot, [this] { markDirty(); }));
 }
 
 void MainComponent::showPedals()
 {
-    if (surfaceHub == nullptr) return;
-    controllerWindows.erase (std::remove (controllerWindows.begin(), controllerWindows.end(), nullptr), controllerWindows.end());
+    if (surfaceHub == nullptr || raiseWindow ("Pedals and buttons")) return;
     controllerWindows.push_back (perf::showPedals (engine, *surfaceHub, [this] { markDirty(); }));
 }
 
 void MainComponent::showControllers()
 {
-    if (surfaceHub == nullptr) return;
-    controllerWindows.erase (std::remove (controllerWindows.begin(), controllerWindows.end(), nullptr), controllerWindows.end());
-    controllerWindows.push_back (perf::showControllers (engine, *surfaceHub, selectedInput, [this] { markDirty(); }));
+    if (surfaceHub == nullptr || raiseWindow ("Your keyboards")) return;
+    controllerWindows.push_back (perf::showControllers (engine, *surfaceHub, [this] { markDirty(); }));
 }
 
 int MainComponent::getEditedProgram() const

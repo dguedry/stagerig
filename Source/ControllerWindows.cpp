@@ -839,10 +839,16 @@ private:
 };
 
 //==============================================================================
+/** Your keyboards: each keyboard an input plays from, how StageRig talks to
+    it, and the two switches that are about the device rather than a program:
+    Plain MIDI, and for one that speaks MIDI 2.0, hearing it as MIDI 1.0. What
+    its knobs and buttons do is elsewhere, on purpose: the rig's and the
+    keyboard's own jobs in Pedals and buttons, what the knobs turn in each
+    instrument's Knobs window. */
 class ControllersView : public Component, private Timer
 {
 public:
-    ControllersView (Engine& e, SurfaceHub& h, int selected, std::function<void()> ch) : engine (e), hub (h), changed (std::move (ch))
+    ControllersView (Engine& e, SurfaceHub& h, std::function<void()> ch) : engine (e), hub (h), changed (std::move (ch))
     {
         addAndMakeVisible (caption (foundCap, "YOUR KEYBOARDS"));
         addAndMakeVisible (keyboardsView);
@@ -860,50 +866,15 @@ public:
             reportBtn.setButtonText ("Copied");
             Timer::callAfterDelay (1500, [sp = SafePointer<ControllersView> (this)] { if (sp != nullptr) sp->reportBtn.setButtonText ("Copy report"); });
         };
-
-        addAndMakeVisible (caption (inputCap, "TEACH THE KNOBS OF"));
-        addAndMakeVisible (inputBox);
-        const auto& inputs = engine.getSetup().inputs;
-        for (int i = 0; i < (int) inputs.size(); ++i)
-            if (inputs[(size_t) i].kind == InputDef::Kind::midi) inputBox.addItem (inputs[(size_t) i].name, i + 1);
-        inputBox.setSelectedId (selected >= 0 && selected < (int) inputs.size() && inputs[(size_t) selected].kind == InputDef::Kind::midi ? selected + 1 : 0, dontSendNotification);
-        if (inputBox.getSelectedId() == 0 && inputBox.getNumItems() > 0) inputBox.setSelectedItemIndex (0, dontSendNotification);
-        inputBox.onChange = [this] { hub.cancelLearn(); showControls(); };
-
         addAndMakeVisible (explain);
         explain.setColour (Label::textColourId, textDim);
-        explain.setText ("Only for a keyboard whose knobs do not work by themselves: press Learn, then turn the knob. What the knobs turn "
-                         "on each instrument is its Knobs button. Pedals and buttons -- programs, pages, the set list, the track, the tempo -- "
-                         "are all in Options > Pedals and buttons.", dontSendNotification);
-
-        for (int i = 0; i < numRows; ++i)
-        {
-            auto& r = rows[(size_t) i];
-            r.name.setText ("Knob " + String (i + 1), dontSendNotification);
-            addAndMakeVisible (r.name);
-            addAndMakeVisible (r.what);
-            r.what.setColour (Label::textColourId, textDim);
-            addAndMakeVisible (r.learn);
-            addAndMakeVisible (r.forget);
-            r.learn.onClick = [this, i] { learn (i); };
-            r.forget.onClick = [this, i] { forget (i); };
-        }
-        addAndMakeVisible (relativeBtn);
-        relativeBtn.setButtonText ("The knobs are endless: they send steps around 64, not where they are");
-        relativeBtn.onClick = [this]
-        {
-            if (current() < 0) return;
-            auto c = engine.getSetup().inputs[(size_t) current()].controls;
-            c.knobsRelative = relativeBtn.getToggleState();
-            engine.setInputControls (current(), c);
-            if (changed) changed();
-        };
-        showControls();
+        explain.setJustificationType (Justification::topLeft);
+        explain.setText ("StageRig talks to a keyboard the most standard way it knows -- MIDI-CI, else its maker's own protocol -- and plays any other "
+                         "as plain MIDI. What a keyboard's pedals, buttons and knobs do is set in Options > Pedals and buttons, where its own jobs "
+                         "are listed under its name; what its knobs turn on an instrument is that instrument's Knobs window.", dontSendNotification);
         showKeyboards();
         startTimer (500);
     }
-
-    ~ControllersView() override { hub.cancelLearn(); }
 
     void resized() override
     {
@@ -912,41 +883,21 @@ public:
         reportBtn.setBounds (head.removeFromRight (110));
         foundCap.setBounds (head);
         r.removeFromTop (4);
-        auto area = r.removeFromTop (4 * rowHeight);
-        keyboardsView.setBounds (area);
-        none.setBounds (area);
+        explain.setBounds (r.removeFromBottom (52));
+        r.removeFromBottom (8);
+        keyboardsView.setBounds (r);
+        none.setBounds (r);
         layoutKeyboards();
-        r.removeFromTop (14);
-        inputCap.setBounds (r.removeFromTop (16));
-        inputBox.setBounds (r.removeFromTop (26).removeFromLeft (260));
-        r.removeFromTop (4);
-        explain.setBounds (r.removeFromTop (52));
-        r.removeFromTop (4);
-        auto left = r.removeFromLeft (r.getWidth() / 2).withTrimmedRight (10), right = r;
-        for (int i = 0; i < numRows; ++i)
-        {
-            auto& col = i < 4 ? left : right;
-            auto line = col.removeFromTop (28).reduced (0, 2);
-            auto& row = rows[(size_t) i];
-            row.forget.setBounds (line.removeFromRight (60)); line.removeFromRight (4);
-            row.learn.setBounds (line.removeFromRight (70)); line.removeFromRight (6);
-            row.name.setBounds (line.removeFromLeft (60));
-            row.what.setBounds (line);
-        }
-        left.removeFromTop (4);
-        relativeBtn.setBounds (left.removeFromTop (44));
     }
 
 private:
-    static constexpr int numRows = SurfaceControls::numKnobs;
     static constexpr int rowHeight = 46;
-    struct Row { Label name, what; TextButton learn { "Learn" }, forget { "Forget" }; };
 
     /** One keyboard: what it is, what it plays, how StageRig talks to it and what it does. */
     struct KeyboardRow : public Component
     {
         Label name, detail;
-        ToggleButton plain { "Plain MIDI" };
+        ToggleButton plain { "Plain MIDI" }, midi1 { "Hear as MIDI 1.0" };
         KeyboardRow()
         {
             addAndMakeVisible (name);
@@ -956,12 +907,17 @@ private:
             addAndMakeVisible (plain);
             plain.setTooltip ("Only a plain MIDI keyboard: its keys, pedals and taught knobs, and StageRig sends it nothing. "
                               "For a keyboard that misbehaves when StageRig talks to it.");
+            addChildComponent (midi1);
+            midi1.setTooltip ("This keyboard speaks MIDI 2.0, so StageRig hears its knobs, pedals and pressure at full resolution "
+                              "instead of in 128 steps: a slow sweep of a mapped knob moves the plugin smoothly. Tick this to hear it "
+                              "as MIDI 1.0 instead, for a keyboard that misbehaves. The plugins get MIDI 1.0 either way.");
         }
         void paint (Graphics& g) override { g.setColour (bgRow); g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (0, 2), 4.0f); }
         void resized() override
         {
             auto r = getLocalBounds().reduced (8, 4);
             plain.setBounds (r.removeFromRight (110));
+            if (midi1.isVisible()) midi1.setBounds (r.removeFromRight (150));
             name.setBounds (r.removeFromTop (r.getHeight() / 2));
             detail.setBounds (r);
         }
@@ -971,8 +927,26 @@ private:
     {
         const auto list = hub.getKeyboards();
         const auto& inputs = engine.getSetup().inputs;
+        // A keyboard that speaks MIDI 2.0 is heard as one device, whatever inputs play from it (Engine hears it per device).
+        auto midi2 = [&] (const SurfaceHub::KeyboardInfo& k, bool& heardAsMidi1)
+        {
+            bool is = false;
+            heardAsMidi1 = false;
+            for (int i : k.inputs)
+                if (i >= 0 && i < (int) inputs.size())
+                {
+                    if (inputs[(size_t) i].midi1Only) heardAsMidi1 = true;
+                    if (inputs[(size_t) i].midi1Only || Engine::isMidi2Device (inputs[(size_t) i].midiDeviceIdentifier)) is = true;
+                }
+            return is;
+        };
         String signature;
-        for (const auto& k : list) signature << k.name << k.port << k.input << k.language << (int) k.screen << (int) k.lights << (int) k.knobsByThemselves << (int) k.plain << "|";
+        for (const auto& k : list)
+        {
+            bool asMidi1 = false;
+            const bool is2 = midi2 (k, asMidi1);
+            signature << k.name << k.port << k.input << k.language << (int) k.screen << (int) k.lights << (int) k.knobsByThemselves << (int) k.plain << (int) is2 << (int) asMidi1 << "|";
+        }
         for (const auto& p : hub.getProblems()) signature << p;
         if (signature == shownKeyboards) return;
         shownKeyboards = signature;
@@ -993,7 +967,7 @@ private:
             if (k.lights) what.add ("its keys lit");
             what.add (k.knobsByThemselves ? "its knobs work by themselves"
                       : k.knobsSilent    ? "its knobs send no MIDI, so they cannot be taught"
-                                         : "teach its knobs below");
+                                         : "teach its knobs in Pedals and buttons");
             if (k.plain && k.more.isNotEmpty()) what.add ("untick Plain MIDI for " + k.more);
             row->detail.setText (what.joinIntoString ("  -  "), dontSendNotification);
             row->plain.setToggleState (k.plain, dontSendNotification);
@@ -1001,6 +975,15 @@ private:
             row->plain.onClick = [this, port = k.port, raw = row.get()]
             {
                 hub.setPlainMidi (port, raw->plain.getToggleState());
+                shownKeyboards.clear();
+            };
+            bool asMidi1 = false;
+            row->midi1.setVisible (midi2 (k, asMidi1));
+            row->midi1.setToggleState (asMidi1, dontSendNotification);
+            row->midi1.onClick = [this, ins = k.inputs, raw = row.get()]
+            {
+                for (int i : ins) engine.setInputMidi1Only (i, raw->midi1.getToggleState());
+                if (changed) changed();
                 shownKeyboards.clear();
             };
             keyboardsList.addAndMakeVisible (*row);
@@ -1023,101 +1006,17 @@ private:
         for (size_t i = 0; i < keyboardRows.size(); ++i) keyboardRows[i]->setBounds (0, (int) i * rowHeight, w, rowHeight);
     }
 
-    int current() const { return inputBox.getSelectedId() - 1; }
-
-    void showControls()
-    {
-        const int in = current();
-        const bool any = in >= 0 && in < (int) engine.getSetup().inputs.size();
-        const auto c = any ? engine.getSetup().inputs[(size_t) in].controls : SurfaceControls();
-        // Teaching is for a plain MIDI keyboard whose knobs send controllers. Two kinds have nothing to teach: one
-        // StageRig talks to (its knobs work by themselves), and a Komplete Kontrol MK1 left as plain MIDI, whose
-        // knobs never reach MIDI at all -- Learn would wait for ever.
-        String silent, byItself;
-        if (any)
-            for (const auto& k : hub.getKeyboards())
-                if (std::find (k.inputs.begin(), k.inputs.end(), in) != k.inputs.end())
-                {
-                    if (k.knobsSilent && k.plain) silent = k.name;
-                    else if (! k.plain && k.knobsByThemselves) byItself = k.name;
-                }
-        const bool nothingToTeach = silent.isNotEmpty() || byItself.isNotEmpty();
-        // The eight rows are shown only where teaching applies, or where something was taught earlier and can be forgotten.
-        bool anyTaught = false;
-        for (int cc : c.knobCC) if (cc > 0) anyTaught = true;
-        const bool showRows = any && (! nothingToTeach || anyTaught);
-        for (int i = 0; i < numRows; ++i)
-        {
-            auto& r = rows[(size_t) i];
-            String what = c.knobCC[(size_t) i] > 0 ? "CC " + String (c.knobCC[(size_t) i]) : String ("not taught");
-            if (c.knobCC[(size_t) i] <= 0 && silent.isNotEmpty())   what = "no MIDI from it";
-            if (c.knobCC[(size_t) i] <= 0 && byItself.isNotEmpty()) what = "works by itself";
-            r.what.setText (learning == i ? String ("Waiting: turn or press it now...") : what, dontSendNotification);
-            r.what.setColour (Label::textColourId, learning == i ? Colours::orange : textDim);
-            r.learn.setButtonText (learning == i ? "Cancel" : "Learn");
-            r.learn.setEnabled (any && ! nothingToTeach);
-            r.forget.setEnabled (any);
-            for (Component* comp : { (Component*) &r.name, (Component*) &r.what, (Component*) &r.learn, (Component*) &r.forget })
-                comp->setVisible (showRows);
-        }
-        relativeBtn.setVisible (showRows);
-        explain.setText (byItself.isNotEmpty()
-            ? "Nothing to teach: StageRig talks to " + byItself + " itself, so its knobs already work -- turn one with an instrument's "
-              "Knobs window open and its box lights. What they turn is set there, per instrument. This section is only for a plain MIDI "
-              "keyboard whose knobs send controllers."
-            : silent.isNotEmpty()
-            ? silent + "'s knobs send no MIDI while it is plain MIDI, so there is nothing to teach and Learn would wait for ever. "
-              "Untick Plain MIDI for it above: then its knobs work by themselves, named on its screens, and each instrument's Knobs button says what they turn."
-            : "Only for a keyboard whose knobs do not work by themselves: press Learn, then turn the knob. What the knobs turn "
-              "on each instrument is its Knobs button. Pedals and buttons -- programs, pages, the set list, the track, the tempo -- "
-              "are all in Options > Pedals and buttons.", dontSendNotification);
-        relativeBtn.setToggleState (c.knobsRelative, dontSendNotification);
-        relativeBtn.setEnabled (any);
-    }
-
-    void learn (int row)
-    {
-        if (learning == row) { hub.cancelLearn(); learning = -1; showControls(); return; }
-        learning = row;
-        hub.learn (current(), row, [sp = SafePointer<ControllersView> (this)] (const String&)
-        {
-            if (sp == nullptr) return;
-            sp->learning = -1;
-            sp->showControls();
-            if (sp->changed) sp->changed();
-        });
-        showControls();
-    }
-
-    void forget (int row)
-    {
-        if (current() < 0) return;
-        auto c = engine.getSetup().inputs[(size_t) current()].controls;
-        c.knobCC[(size_t) row] = 0;
-        engine.setInputControls (current(), c);
-        if (changed) changed();
-        showControls();
-    }
-
-    void timerCallback() override
-    {
-        showKeyboards();
-        if (learning >= 0 && ! hub.isLearning()) { learning = -1; showControls(); }
-    }
+    void timerCallback() override { showKeyboards(); }
 
     Engine& engine;
     SurfaceHub& hub;
     std::function<void()> changed;
-    int learning = -1;
-    Label foundCap, none, inputCap, explain;
+    Label foundCap, none, explain;
     TextButton reportBtn { "Copy report" };
     Viewport keyboardsView;
     Component keyboardsList;
     std::vector<std::unique_ptr<KeyboardRow>> keyboardRows;
     String shownKeyboards;
-    ToggleButton relativeBtn;
-    ComboBox inputBox;
-    std::array<Row, (size_t) numRows> rows;
 };
 
 //==============================================================================
@@ -1167,15 +1066,18 @@ public:
 private:
     struct Row : public Component
     {
-        bool header = false;
-        String job, where;
+        enum Kind { job, header, note, toggle } kind = job;   // a Learn/Forget row; a section heading; a line of text; a tick
+        String where;
         std::function<int()> get;                     // the controller taught, 0 for none (rig-wide jobs)
         std::function<String()> describe;             // a keyboard's own job: what it is, in words, or empty
         std::function<void()> arm, forget;
         std::function<bool()> armed;
+        std::function<bool()> getTick;                // a toggle row: its state
+        std::function<void (bool)> setTick;
         bool learning = false;
         Label name, what;
         TextButton learn { "Learn" }, forgetBtn { "Forget" };
+        ToggleButton tick;
 
         Row()
         {
@@ -1184,11 +1086,14 @@ private:
             what.setColour (Label::textColourId, textDim);
             addAndMakeVisible (learn);
             addAndMakeVisible (forgetBtn);
+            addChildComponent (tick);
+            tick.onClick = [this] { if (setTick) setTick (tick.getToggleState()); };
         }
         void resized() override
         {
             auto r = getLocalBounds().reduced (6, 2);
-            if (header) { name.setBounds (r); return; }
+            if (kind == header || kind == note) { name.setBounds (r); return; }
+            if (kind == toggle) { tick.setBounds (r); return; }
             forgetBtn.setBounds (r.removeFromRight (64)); r.removeFromRight (4);
             learn.setBounds (r.removeFromRight (70)); r.removeFromRight (8);
             name.setBounds (r.removeFromLeft (jmin (300, r.getWidth() / 2)));
@@ -1196,7 +1101,7 @@ private:
         }
         void paint (Graphics& g) override
         {
-            if (header) return;
+            if (kind != job) return;
             g.setColour (bgRow);
             g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (0, 1), 3.0f);
         }
@@ -1208,7 +1113,8 @@ private:
         }
         void show()
         {
-            if (header) return;
+            if (kind == toggle) { tick.setToggleState (getTick ? getTick() : false, dontSendNotification); return; }
+            if (kind != job) return;
             const auto t = taught();
             what.setText (learning ? String ("Waiting: press it now...") : t.isNotEmpty() ? t : String ("not taught"), dontSendNotification);
             what.setColour (Label::textColourId, learning ? Colours::orange : textDim);
@@ -1220,7 +1126,6 @@ private:
     Row& add (const String& job)
     {
         auto r = std::make_unique<Row>();
-        r->job = job;
         r->name.setText (job, dontSendNotification);
         list.addAndMakeVisible (*r);
         rows.push_back (std::move (r));
@@ -1229,8 +1134,14 @@ private:
     void addHeader (const String& text)
     {
         auto& r = add (text);
-        r.header = true;
+        r.kind = Row::header;
         caption (r.name, text);
+    }
+    void addNote (const String& text)
+    {
+        auto& r = add (text);
+        r.kind = Row::note;
+        r.name.setColour (Label::textColourId, textDim);
     }
 
     void build()
@@ -1270,6 +1181,63 @@ private:
         {
             if (inputs[(size_t) i].kind != InputDef::Kind::midi) continue;
             addHeader ("ON " + inputs[(size_t) i].name.toUpperCase() + "  (" + (inputs[(size_t) i].midiDeviceName.isNotEmpty() ? inputs[(size_t) i].midiDeviceName : String ("no MIDI device yet")) + ")");
+
+            /* Its eight knobs. Taught here only for a plain MIDI keyboard whose knobs send controllers: a keyboard
+               StageRig talks to needs no teaching, and a Komplete Kontrol MK1 left as plain MIDI sends nothing from
+               them at all. Either way the rows go, and one line says why. */
+            String silent, byItself;
+            for (const auto& k : hub.getKeyboards())
+                if (std::find (k.inputs.begin(), k.inputs.end(), i) != k.inputs.end())
+                {
+                    if (k.knobsSilent && k.plain) silent = k.name;
+                    else if (! k.plain && k.knobsByThemselves) byItself = k.name;
+                }
+            bool anyTaught = false;
+            for (int cc : inputs[(size_t) i].controls.knobCC) if (cc > 0) anyTaught = true;
+            if (byItself.isNotEmpty())    addNote ("Its knobs work by themselves: what they turn is each instrument's Knobs window.");
+            else if (silent.isNotEmpty()) addNote ("Its knobs send no MIDI while it is plain MIDI: untick Plain MIDI in Options > Your keyboards and they work by themselves.");
+            if ((silent.isEmpty() && byItself.isEmpty()) || anyTaught)
+            {
+                for (int k = 0; k < SurfaceControls::numKnobs; ++k)
+                {
+                    auto& r = add ("Knob " + String (k + 1));
+                    r.describe = [&e, i, k]
+                    {
+                        const auto& ins = e.getSetup().inputs;
+                        const int cc = i < (int) ins.size() ? ins[(size_t) i].controls.knobCC[(size_t) k] : 0;
+                        return cc > 0 ? "CC " + String (cc) : String();
+                    };
+                    r.arm = [this, i, k, raw = &r]
+                    {
+                        hub.learn (i, k, [sp = SafePointer<PedalsView> (this), raw] (const String&)
+                        {
+                            if (sp == nullptr) return;
+                            raw->learning = false;
+                            sp->refresh();
+                            if (sp->changed) sp->changed();
+                        });
+                    };
+                    r.armed = [this] { return hub.isLearning(); };
+                    r.forget = [&e, i, k]
+                    {
+                        auto c = e.getSetup().inputs[(size_t) i].controls;
+                        c.knobCC[(size_t) k] = 0;
+                        e.setInputControls (i, c);
+                    };
+                    wire (r);
+                }
+                auto& t = add ("The knobs are endless: they send steps around 64, not where they are");
+                t.kind = Row::toggle;
+                t.tick.setButtonText (t.name.getText());
+                t.getTick = [&e, i] { const auto& ins = e.getSetup().inputs; return i < (int) ins.size() && ins[(size_t) i].controls.knobsRelative; };
+                t.setTick = [this, &e, i] (bool on)
+                {
+                    auto c = e.getSetup().inputs[(size_t) i].controls;
+                    c.knobsRelative = on;
+                    e.setInputControls (i, c);
+                    if (changed) changed();
+                };
+            }
             for (int a = 0; a < SurfaceControls::numActions; ++a)
             {
                 auto& r = add (SurfaceControls::actionName (a));
@@ -1334,7 +1302,7 @@ private:
         int y = 0;
         for (auto& r : rows)
         {
-            const int h = r->header ? 26 : 30;
+            const int h = r->kind == Row::header ? 26 : r->kind == Row::note ? 22 : 30;
             r->setBounds (0, y, w, h);
             y += h;
         }
@@ -1352,6 +1320,7 @@ private:
         String sig;
         for (const auto& o : engine.getSetup().outputs) sig << o.name << "|";
         for (const auto& in : engine.getSetup().inputs) sig << in.name << "/" << in.midiDeviceName << "|";
+        for (const auto& k : hub.getKeyboards()) sig << k.name << (int) k.plain << (int) k.knobsByThemselves << (int) k.knobsSilent << "|";
         if (sig != shape) { shape = sig; build(); return; }
         refresh();
     }
@@ -1377,9 +1346,9 @@ Component* showControlMapEditor (Engine& engine, SurfaceHub& hub, ControlMapLibr
             "Knobs: " + prog.slots[(size_t) slot].plugin.name, 900, 502);
 }
 
-Component* showControllers (Engine& engine, SurfaceHub& hub, int selectedInput, std::function<void()> changed)
+Component* showControllers (Engine& engine, SurfaceHub& hub, std::function<void()> changed)
 {
-    return launch (new ControllersView (engine, hub, selectedInput, std::move (changed)), "Your keyboards", 860, 470);
+    return launch (new ControllersView (engine, hub, std::move (changed)), "Your keyboards", 860, 340);
 }
 
 Component* showPedals (Engine& engine, SurfaceHub& hub, std::function<void()> changed)

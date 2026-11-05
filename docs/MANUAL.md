@@ -220,16 +220,17 @@ Each keyboard input has, below the list:
   front-panel buttons select StageRig programs. *Any channel* accepts program
   changes from anywhere on that MIDI port: the setting to try when they are
   not getting through and you do not know what the keyboard sends.
-- **Hear as MIDI 1.0** -- shown only for a keyboard that speaks MIDI 2.0.
-  StageRig hears such a keyboard as MIDI 2.0 by itself: its knobs, pedals,
-  pressure and pitch bend arrive at full resolution instead of in MIDI 1.0's
-  128 steps, so a slow sweep of a mapped knob, a keyboard knob or an output's
-  fader moves smoothly rather than in small jumps. The plugins are still sent
-  MIDI 1.0, which is what nearly all of them understand, so velocity reaches
-  them in 128 steps either way. Tick it for a keyboard that misbehaves when
-  heard as MIDI 2.0. On Linux this needs a kernel and ALSA new enough to
-  speak MIDI 2.0 (Linux 6.5 and ALSA 1.2.10 or later); on macOS and Windows
-  it depends on the system's own MIDI 2.0 support. Not yet tried with a real
+- A keyboard that speaks MIDI 2.0 is heard as MIDI 2.0 by itself: its knobs,
+  pedals, pressure and pitch bend arrive at full resolution instead of in
+  MIDI 1.0's 128 steps, so a slow sweep of a mapped knob, a keyboard knob or
+  an output's fader moves smoothly rather than in small jumps. The plugins
+  are still sent MIDI 1.0, which is what nearly all of them understand, so
+  velocity reaches them in 128 steps either way. **Hear as MIDI 1.0**, on
+  the keyboard's row in **Your keyboards**, is for one that misbehaves when
+  heard as MIDI 2.0; it is about the keyboard, so it covers every input that
+  plays from it. On Linux this needs a kernel and ALSA new enough to speak
+  MIDI 2.0 (Linux 6.5 and ALSA 1.2.10 or later); on macOS and Windows it
+  depends on the system's own MIDI 2.0 support. Not yet tried with a real
   MIDI 2.0 keyboard: tell us how it goes.
 - **Output** -- which output this input's sound goes to. See *Outputs and
   master effects*.
@@ -638,19 +639,22 @@ names on its screen, its keys lit, its knobs working by themselves. StageRig
 talks to a keyboard in the most standard way it answers to -- MIDI-CI, the
 MIDI 2.0 standard, when it answers that; else its maker's protocol, where
 StageRig knows it; else plain MIDI, which every keyboard is -- and nothing
-is chosen. The one choice, per keyboard, is **Plain MIDI**: its keys, pedals
-and taught knobs only, and StageRig sends it nothing. Tick it for a keyboard
-that misbehaves when StageRig talks to it. A Komplete Kontrol MK1 starts
-plain, since StageRig talks to it in a way it worked out itself. **Copy
-report** puts what StageRig knows about your keyboards and MIDI ports, and
-what they have said to it lately, on the clipboard, to paste into a message
-when something does not work.
+is chosen. The choices here are about the keyboard, not a program: **Plain
+MIDI** -- its keys, pedals and taught knobs only, and StageRig sends it
+nothing; tick it for a keyboard that misbehaves when StageRig talks to it
+(a Komplete Kontrol MK1 starts plain, since StageRig talks to it in a way it
+worked out itself) -- and, for one that speaks MIDI 2.0, **Hear as MIDI
+1.0**. What its pedals, buttons and knobs do is not here: that is **Pedals
+and buttons**, with the keyboard's own jobs under its name, and each
+instrument's **Knobs** window. **Copy report** puts what StageRig knows
+about your keyboards and MIDI ports, and what they have said to it lately,
+on the clipboard, to paste into a message when something does not work.
 
 **Teaching a keyboard's knobs.** Only a plain MIDI keyboard whose knobs send
 controllers needs this; for one StageRig talks to, the knobs already work
-and the lower part of **Your keyboards** says so instead. For the other
-kind it chooses an input and lists its eight knobs. Press **Learn** and
-turn the knob. Tick **The knobs are
+and **Pedals and buttons** says so under the keyboard's name instead. For
+the other kind, the keyboard's section there lists its eight knobs above
+its button jobs. Press **Learn** and turn the knob. Tick **The knobs are
 endless** for knobs that turn without stopping and send steps (around 64)
 rather than a position. What you teach is kept with the input, in the setup
 file. A taught knob no longer reaches the instruments as a controller, and
@@ -766,7 +770,7 @@ then Lower 001, then the tempo -- three actions, at the wrong moment.
 
 The songs panel is at the far left: every song on top under **SONGS**, the
 running order of the chosen set list below under **SET LIST**. **Songs** in
-the toolbar (or **Options ▸ Show songs and set lists**) hides and shows it.
+the toolbar hides and shows it.
 
 Each song's row shows its name, then its tempo, a program per keyboard
 (*002 Rhodes   001 Bass*), *♪ chart* when it has one, or *(no sounds stored
