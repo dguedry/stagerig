@@ -59,7 +59,7 @@ public:
     ControlMapEditor (Engine& e, SurfaceHub& h, ControlMapLibrary& lib, int in, int prog, int sl, std::function<void()> ch)
         : engine (e), hub (h), library (lib), input (in), program (prog), slot (sl), changed (std::move (ch))
     {
-        plugin = slotDef() != nullptr ? slotDef()->plugin : PluginDescription();
+        if (const auto* sd = slotAt()) plugin = sd->plugin;
         engine.addListener (this);
 
         addAndMakeVisible (title);
@@ -282,15 +282,23 @@ private:
         }
     };
 
-    /** The instrument this window is for, or null once it is gone (removed, or its input). */
-    const SlotDef* slotDef() const
+    /** Whatever plugin sits in this window's slot now, or null when there is none. */
+    const SlotDef* slotAt() const
     {
         const auto& inputs = engine.getSetup().inputs;
         if (input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return nullptr;
         const auto& prog = inputs[(size_t) input].programs[(size_t) program];
         if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return nullptr;
-        const auto& sd = prog.slots[(size_t) slot];
-        return sd.plugin.name == plugin.name && sd.plugin.fileOrIdentifier == plugin.fileOrIdentifier ? &sd : nullptr;
+        return &prog.slots[(size_t) slot];
+    }
+
+    /** The instrument this window is for, or null once it is gone (removed,
+        replaced by another plugin, or its input). Only meaningful after the
+        constructor has taken the plugin from the slot. */
+    const SlotDef* slotDef() const
+    {
+        const auto* sd = slotAt();
+        return sd != nullptr && sd->plugin.name == plugin.name && sd->plugin.fileOrIdentifier == plugin.fileOrIdentifier ? sd : nullptr;
     }
     RemotePlugin* livePlugin() const { return slotDef() != nullptr && engine.isPluginAlive (input, program, slot) ? engine.getPlugin (input, program, slot) : nullptr; }
 
