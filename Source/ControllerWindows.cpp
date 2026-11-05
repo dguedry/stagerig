@@ -1049,7 +1049,7 @@ private:
         for (int i = 0; i < numRows; ++i)
         {
             auto& r = rows[(size_t) i];
-            String what = c.knobCC[(size_t) i] > 0 ? "Controller " + String (c.knobCC[(size_t) i]) : String ("not taught");
+            String what = c.knobCC[(size_t) i] > 0 ? "CC " + String (c.knobCC[(size_t) i]) : String ("not taught");
             if (c.knobCC[(size_t) i] <= 0 && silent.isNotEmpty())   what = "no MIDI from it";
             if (c.knobCC[(size_t) i] <= 0 && byItself.isNotEmpty()) what = "works by itself";
             r.what.setText (learning == i ? String ("Waiting: turn or press it now...") : what, dontSendNotification);

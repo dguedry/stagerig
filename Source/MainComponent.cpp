@@ -1257,17 +1257,10 @@ public:
         volume.setTooltip ("Master volume of this output, after its effects. Double-click for 0 dB.");
         volume.onValueChange = [this] { if (int s = list.getSelectedRow(); s >= 0) { engine.setOutputGainDb (s, (float) volume.getValue()); owner.markDirty(); } };
 
-        addAndMakeVisible (learnBtn);
-        learnBtn.setTooltip ("Press, then move the pedal or knob that should control this output's volume -- on any keyboard, any channel.");
-        learnBtn.onClick = [this]
-        {
-            const int s = list.getSelectedRow(); if (s < 0) return;
-            if (engine.isOutputVolumeLearnArmed()) { engine.armOutputVolumeLearn (-1); learnBtn.setButtonText ("Learn volume pedal"); }
-            else { engine.armOutputVolumeLearn (s); learnBtn.setButtonText ("Move it now..."); }
-        };
-        addAndMakeVisible (clearCcBtn);
-        clearCcBtn.setTooltip ("Stop a controller moving this volume");
-        clearCcBtn.onClick = [this] { if (int s = list.getSelectedRow(); s >= 0) { engine.setOutputVolumeCC (s, 0); owner.markDirty(); } };
+        // The pedal or knob that moves this volume is taught where every pedal is: one window, one way.
+        addAndMakeVisible (pedalsBtn);
+        pedalsBtn.setTooltip ("Teach a pedal or knob to move this output's volume, in the window of every pedal and button job");
+        pedalsBtn.onClick = [this] { owner.showPedals(); };
 
         for (auto* l : { &nameLabel, &channelsLabel, &volumeLabel, &ccLabel, &chainLabel })
         {
@@ -1284,7 +1277,7 @@ public:
         list.selectRow (0);
         refresh();
     }
-    ~OutputsComponent() override { engine.armOutputVolumeLearn (-1); engine.removeListener (this); }
+    ~OutputsComponent() override { engine.removeListener (this); }
 
     void refresh()
     {
@@ -1293,15 +1286,14 @@ public:
         const auto& outs = engine.getSetup().outputs;
         const int s = list.getSelectedRow();
         const bool valid = s >= 0 && s < (int) outs.size();
-        for (auto* c : std::initializer_list<Component*> { &nameEditor, &channelsBox, &volume, &learnBtn, &clearCcBtn, &chain })
+        for (auto* c : std::initializer_list<Component*> { &nameEditor, &channelsBox, &volume, &pedalsBtn, &chain })
             c->setEnabled (valid);
         removeBtn.setEnabled (valid && outs.size() > 1);
         if (! valid) return;
         const auto& def = outs[(size_t) s];
         if (nameEditor.getText() != def.name) nameEditor.setText (def.name, dontSendNotification);
         volume.setValue (def.gainDb, dontSendNotification);
-        ccLabel.setText (def.volumeCC > 0 ? "Volume follows controller " + String (def.volumeCC) : "No volume controller", dontSendNotification);
-        learnBtn.setButtonText (engine.isOutputVolumeLearnArmed() ? "Move it now..." : "Learn volume pedal");
+        ccLabel.setText (def.volumeCC > 0 ? "Volume follows CC " + String (def.volumeCC) : "No pedal or knob moves this volume yet", dontSendNotification);
 
         const auto names = engine.getAudioOutputChannelNames();
         channelsBox.clear (dontSendNotification);
@@ -1335,8 +1327,7 @@ public:
         volumeLabel.setBounds (r.removeFromTop (16));
         auto vr = r.removeFromTop (24);
         volume.setBounds (vr.removeFromLeft (jmax (120, vr.getWidth() - 300))); vr.removeFromLeft (8);
-        learnBtn.setBounds (vr.removeFromLeft (130)); vr.removeFromLeft (4);
-        clearCcBtn.setBounds (vr.removeFromLeft (60)); vr.removeFromLeft (8);
+        pedalsBtn.setBounds (vr.removeFromLeft (90)); vr.removeFromLeft (8);
         ccLabel.setBounds (vr);
         r.removeFromTop (12);
         chainLabel.setBounds (r.removeFromTop (20));
@@ -1371,7 +1362,7 @@ private:
     void setupChanged() override { refresh(); }
     void outputVolumeLearned (int output, int cc) override
     {
-        owner.showStatus ("Controller " + String (cc) + " now controls the volume of output " + engine.getSetup().outputs[(size_t) jlimit (0, (int) engine.getSetup().outputs.size() - 1, output)].name + ".");
+        owner.showStatus ("CC " + String (cc) + " now moves the volume of " + engine.getSetup().outputs[(size_t) jlimit (0, (int) engine.getSetup().outputs.size() - 1, output)].name + ".");
         owner.markDirty();
         refresh();
     }
@@ -1385,7 +1376,7 @@ private:
     TextEditor nameEditor;
     ComboBox channelsBox;
     Slider volume;
-    TextButton learnBtn { "Learn volume pedal" }, clearCcBtn { "Forget pedal" };
+    TextButton pedalsBtn { "Pedals..." };
     EffectChainComponent chain;
 };
 
@@ -3960,14 +3951,10 @@ void MainComponent::showTempoMenu()
     /* No "Type a tempo..." here any more: the readout itself is the text box,
        which is one click instead of three. */
     const int tapCC = engine.getTapTempoCC();
-    m.addSectionHeader ("Tap from a MIDI controller");
-    // Pressing the pedal beats looking up what it sends, so that comes first.
-    m.addItem (4, "Learn: press the pedal or button...");
-    m.addItem (5, "All pedals and buttons...");
-    m.addItem (2, tapCC > 0 ? "Type a controller number (now CC " + String (tapCC) + ")..."
-                            : "Type a controller number...");
-    if (tapCC > 0)
-        m.addItem (3, "Stop using CC " + String (tapCC));
+    m.addSectionHeader (tapCC > 0 ? "Tap from a pedal: CC " + String (tapCC) : String ("Tap from a pedal"));
+    // Taught where every pedal is, by pressing it; typing the number is for a pedal that is not to hand.
+    m.addItem (5, "Pedals and buttons...");
+    m.addItem (2, "Type a controller number...");
 
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (tapButton), [this] (int choice)
     {
@@ -3992,18 +3979,7 @@ void MainComponent::showTempoMenu()
                 markDirty();
             }), false);
         }
-        else if (choice == 3)
-        {
-            engine.setTapTempoCC (0);
-            showStatus ("No controller taps the tempo now.");
-            markDirty();
-        }
         else if (choice == 5) showPedals();
-        else if (choice == 4)
-        {
-            engine.armTapTempoLearn (true);
-            showStatus ("Press the pedal or button that should tap the tempo...");
-        }
     });
 }
 

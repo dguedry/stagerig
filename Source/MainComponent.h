@@ -49,6 +49,7 @@ public:
     void playInstrumentFromKeyboard (int slot);
     /** The controller setup of an instrument of the program being edited: its knobs, screen and lights. */
     void showKnobsFor (int slot);
+    void showPedals();
     /** The Knobs window for the instrument the input's knobs are on, in the edited program. */
     void showKnobsForFocus();
     /** "Surge XT, page Front panel (automatic)": what the keyboard's eight knobs turn in the edited program, or empty. */
@@ -147,7 +148,6 @@ private:
     std::unique_ptr<SurfaceHub> surfaceHub;
     std::vector<juce::Component::SafePointer<juce::Component>> controllerWindows;   // closed before the hub goes
     void showControllers();
-    void showPedals();
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;
 

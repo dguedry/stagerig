@@ -748,10 +748,11 @@ can be more:
   everything that lands on it: a limiter or EQ on the way to the desk. These
   effects are not part of any program, so a program change never restarts
   them.
-- **Learn volume pedal** waits for the next pedal or knob you move, on any
-  keyboard and channel, and makes it that output's volume -- a master fader
-  without touching a plugin. A fader taper: half way is -12 dB. **Forget
-  pedal** unlearns it.
+- A pedal or knob can move that volume -- a master fader without touching a
+  plugin -- taught where every pedal is: **Pedals...** opens **Pedals and
+  buttons**, whose **OUTPUT VOLUME** rows have **Learn** and **Forget** for
+  each output. It works on any keyboard and channel, and any value counts
+  (a fader is not a press). A fader taper: half way is -12 dB.
 
 The tablet's **GUI** chooser lists an output's master effects under every input
 that lands on it.
@@ -1411,13 +1412,13 @@ becomes a text box. Type, press Return, and that is the tempo; Escape leaves it
 alone. Anything outside 20 to 300 is pulled to the nearer end rather than
 refused, and fractions are kept, so 97.5 stays 97.5.
 
-Right-click **Tap** to set a pedal or button that taps it. Choose **Learn:
-press the pedal or button...** and press it: that is easier than looking up
-what your keyboard sends, and it works even if something is already assigned.
-**Type a controller number...** is still there if you prefer it, and
-**Pedals... ▸ Tap tempo** in the songs panel learns the same pedal.
+A pedal or button can tap it, taught where every pedal is: **Pedals and
+buttons ▸ Tap tempo ▸ Learn**, then press it -- easier than looking up what
+your keyboard sends, and it works even if something is already assigned.
+Right-click **Tap** for the short way there, which also shows the pedal it
+has, and **Type a controller number...** for a pedal that is not to hand.
 
-A footswitch is the usual choice; most send controller 64 or controller 80.
+A footswitch is the usual choice; most send CC 64 or CC 80.
 That controller works on any input and in any program, so it taps the tempo
 whatever you happen to be playing, and only the press counts, not the release.
 

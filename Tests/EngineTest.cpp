@@ -4406,7 +4406,7 @@ int main()
         hub.learn (0, 100 + SurfaceControls::programUp, [&taughtAs] (const String& w) { taughtAs = w; });
         CHECK (hub.isLearning());
         engine.injectMidi (0, MidiMessage::controllerEvent (ch, 105, 127)); pump (60);
-        CHECK (taughtAs == "Controller 105" && ! hub.isLearning());
+        CHECK (taughtAs == "CC 105" && ! hub.isLearning());
         CHECK (engine.getSetup().inputs[0].controls.buttons[SurfaceControls::programUp] == "cc:105");
         CHECK (engine.getSetup().inputs[0].controls.knobCC[1] == 74);       // the knob is still taught
         hub.learn (0, 100 + SurfaceControls::programDown, [&taughtAs] (const String& w) { taughtAs = w; });

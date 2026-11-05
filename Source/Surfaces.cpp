@@ -388,7 +388,7 @@ void SurfaceHub::doAction (int input, int action)
 //==============================================================================
 String SurfaceHub::describeControl (const String& id)
 {
-    if (id.startsWith ("cc:"))   return "Controller " + id.substring (3);
+    if (id.startsWith ("cc:"))   return "CC " + id.substring (3);
     if (id.startsWith ("kk:b"))  return "Komplete Kontrol button " + id.substring (4);
     if (id.startsWith ("lk:n"))  return "Launchkey pad " + id.substring (4);
     if (id.startsWith ("lk:"))   return "Launchkey button " + id.substring (3);
