@@ -139,10 +139,26 @@ public:
     void notifyParameterTouchedForTesting (int inputIndex, int program, int slot, int effect, int paramIndex)
     { noteParameterTouched (inputIndex, program, slot, effect, paramIndex); }
 
-    /** A controller that taps the tempo, on any input and in any program: tempo
-        belongs to the rig, not to one sound. 0 = nothing assigned. Channel 0
-        means any channel, so a footswitch works wherever it is plugged in. */
-    int getTapTempoCC() const                       { return setup.tapTempoCC; }
+    /** The rig's pedals: one job each, from a footswitch or button that sends
+        a controller, on any input and any channel and in every program --
+        these jobs belong to the rig, not to one sound. Only the press counts
+        (a value of 64 or more). 0 = nothing assigned. One controller, one
+        job: teaching a pedal a controller another pedal had takes it away
+        from that one, and from an output's volume. */
+    enum class Pedal { tapTempo, nextSong, prevSong, transport, section, looper, looperClear, count };
+    static constexpr int numPedals = (int) Pedal::count;
+    static const char* pedalName (Pedal);                   // as the Pedals window says it: "Tap tempo", "Next song"...
+    int  getPedalCC (Pedal) const;
+    void setPedalCC (Pedal, int cc);                        // 0 forgets
+    /** Waits for the next press on any input and makes its controller the
+        pedal's, so you press the pedal rather than look up what it sends; the
+        listeners' statusMessage says so, and tapTempoLearned for the tap. One
+        at a time: arming one lets go of any other waiting. */
+    void armPedalLearn (Pedal);
+    bool isPedalLearnArmed (Pedal p) const          { return pedalLearning.load() == (int) p; }
+    bool isAnyPedalLearnArmed() const               { return pedalLearning.load() >= 0; }
+
+    int getTapTempoCC() const                       { return getPedalCC (Pedal::tapTempo); }
 
     /** Ableton Link: the tempo and the beat shared over the network with
         anything else that has Link -- Live or Bitwig on another laptop, a
@@ -177,13 +193,9 @@ public:
     juce::File getRecordingFolder() const           { return recorder.getFolder(); }
     /** Where takes go: "<setup>.recordings/" beside the setup file. */
     juce::File getRecordingsFolder() const;
-    void setTapTempoCC (int cc);
-
-    /** Waits for the next controller and makes that the tap controller, so you
-        can press the pedal rather than look up what it sends. The listener's
-        tapTempoLearned() fires when one arrives. */
-    void armTapTempoLearn (bool);
-    bool isTapTempoLearnArmed() const               { return tapLearnArmed.load(); }
+    void setTapTempoCC (int cc)                     { setPedalCC (Pedal::tapTempo, cc); }
+    void armTapTempoLearn (bool b)                  { if (b) armPedalLearn (Pedal::tapTempo); else if (isPedalLearnArmed (Pedal::tapTempo)) cancelPedalLearns(); }
+    bool isTapTempoLearnArmed() const               { return isPedalLearnArmed (Pedal::tapTempo); }
 
     /** Lets go of every pedal, button and knob learn that is waiting: the tap,
         the song, transport, section and looper pedals, an output's volume, and
@@ -359,15 +371,14 @@ public:
     void nextSong();
     void previousSong();
 
-    /** Footswitches that step through the set. 0 = none. */
-    int getNextSongCC() const { return setup.nextSongCC; }
-    int getPrevSongCC() const { return setup.prevSongCC; }
-    void setNextSongCC (int cc);
-    void setPrevSongCC (int cc);
-    void armSongLearn (bool forNext);
-    bool isSongLearnArmed() const { return songLearnArmed.load(); }
-    /** Whether the next-song pedal (true) or the previous-song pedal is the one waiting. */
-    bool isSongLearnArmed (bool forNext) const { return songLearnArmed.load() && songLearnForNext.load() == forNext; }
+    /** Footswitches that step through the set: Pedal::nextSong and prevSong. */
+    int  getNextSongCC() const                      { return getPedalCC (Pedal::nextSong); }
+    int  getPrevSongCC() const                      { return getPedalCC (Pedal::prevSong); }
+    void setNextSongCC (int cc)                     { setPedalCC (Pedal::nextSong, cc); }
+    void setPrevSongCC (int cc)                     { setPedalCC (Pedal::prevSong, cc); }
+    void armSongLearn (bool forNext)                { armPedalLearn (forNext ? Pedal::nextSong : Pedal::prevSong); }
+    bool isSongLearnArmed() const                   { return isPedalLearnArmed (Pedal::nextSong) || isPedalLearnArmed (Pedal::prevSong); }
+    bool isSongLearnArmed (bool forNext) const      { return isPedalLearnArmed (forNext ? Pedal::nextSong : Pedal::prevSong); }
 
     //==============================================================================
     // Backing tracks: a song's stems, played from the folder beside the setup.
@@ -447,10 +458,10 @@ public:
     void captureScene (int songIndex, int sceneIndex);
     void moveScene (int songIndex, int from, int to);
 
-    int  getSectionCC() const                       { return setup.sectionCC; }
-    void setSectionCC (int cc);
-    void armSectionLearn()                          { sectionLearnArmed.store (true); }
-    bool isSectionLearnArmed() const                { return sectionLearnArmed.load(); }
+    int  getSectionCC() const                       { return getPedalCC (Pedal::section); }
+    void setSectionCC (int cc)                      { setPedalCC (Pedal::section, cc); }
+    void armSectionLearn()                          { armPedalLearn (Pedal::section); }
+    bool isSectionLearnArmed() const                { return isPedalLearnArmed (Pedal::section); }
 
     /** Looping a passage on a keyboard: record what you play, and it goes
         round in whole bars at the rig's tempo while you play over it. One
@@ -463,12 +474,12 @@ public:
     void loopPedal (int inputIndex);
     void loopClear (int inputIndex);
     void loopStop (int inputIndex);
-    int  getLooperCC() const                        { return setup.looperCC; }
-    int  getLooperClearCC() const                   { return setup.looperClearCC; }
-    void setLooperCC (int cc);
-    void setLooperClearCC (int cc);
-    void armLooperLearn (bool clearPedal)           { (clearPedal ? looperClearLearnArmed : looperLearnArmed).store (true); }
-    bool isLooperLearnArmed (bool clearPedal) const { return (clearPedal ? looperClearLearnArmed : looperLearnArmed).load(); }
+    int  getLooperCC() const                        { return getPedalCC (Pedal::looper); }
+    int  getLooperClearCC() const                   { return getPedalCC (Pedal::looperClear); }
+    void setLooperCC (int cc)                       { setPedalCC (Pedal::looper, cc); }
+    void setLooperClearCC (int cc)                  { setPedalCC (Pedal::looperClear, cc); }
+    void armLooperLearn (bool clearPedal)           { armPedalLearn (clearPedal ? Pedal::looperClear : Pedal::looper); }
+    bool isLooperLearnArmed (bool clearPedal) const { return isPedalLearnArmed (clearPedal ? Pedal::looperClear : Pedal::looper); }
     /** The backing-track input: where the songs' MIDI files play. -1 while none. */
     int  getTrackInput() const                      { return setup.trackInput(); }
     /** Makes the backing-track input if there is none, and returns its index. */
@@ -498,10 +509,10 @@ public:
     juce::File getGmSoundfont() const;
     void setGmSoundfont (const juce::File&);
 
-    int  getTransportCC() const                     { return setup.transportCC; }
-    void setTransportCC (int cc);
-    void armTransportLearn()                        { transportLearnArmed.store (true); }
-    bool isTransportLearnArmed() const              { return transportLearnArmed.load(); }
+    int  getTransportCC() const                     { return getPedalCC (Pedal::transport); }
+    void setTransportCC (int cc)                    { setPedalCC (Pedal::transport, cc); }
+    void armTransportLearn()                        { armPedalLearn (Pedal::transport); }
+    bool isTransportLearnArmed() const              { return isPedalLearnArmed (Pedal::transport); }
     void setProgramName (int inputIndex, int program, const juce::String&);
 
     /** The program's category ("Organs", "Strings"), or empty for ungrouped. */
@@ -710,9 +721,9 @@ private:
 
     struct Event
     {
-        enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
-                    songStep, songLearn, editorClosed, outputVolume, outputLearn,
-                    transport, transportLearn, trackFinished, sectionPedal, sectionLearn, sectionEntered, mappedSwitch, looperLearn,
+        enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, pedalLearn,
+                    songStep, editorClosed, outputVolume, outputLearn,
+                    transport, trackFinished, sectionPedal, sectionEntered, mappedSwitch,
                     linkTempo, linkStartStop, surfaceKnob, surfaceButton, surfaceLearn };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
@@ -840,7 +851,11 @@ private:
         stopped tapping and started again, and averaging across that gap would
         give a tempo nobody asked for. */
     std::vector<double> tapTimes;      // milliseconds, message thread only
-    std::atomic<int> tapCC { 0 };      // read on the audio thread
+    // The rig's pedals (Pedal): the setup's controllers, copied for the MIDI and audio threads, and the one waiting to learn.
+    std::array<std::atomic<int>, numPedals> pedalCC {};
+    std::atomic<int> pedalLearning { -1 };
+    int& pedalField (Pedal);                                    // the setup's field for a pedal
+    void pedalPressed (int inputIndex, InputRuntime&, Pedal);    // MIDI thread: what a press does
 
     juce::CriticalSection lock;          // guards runtimes for audio + midi threads
     juce::CriticalSection eventLock;
@@ -851,7 +866,6 @@ private:
 
     std::atomic<bool> learnArmed { false };
     std::atomic<int> surfaceLearnInput { -1 };
-    std::atomic<bool> tapLearnArmed { false };
     std::atomic<bool> panicRequested { false };
     std::atomic<int> liveTranspose { 0 };
     /** The song last selected, whether from the set list or outside it: the one in play. -1 = none yet. */
@@ -869,9 +883,6 @@ private:
     // prefix's wineserver and services boot on that first start; concurrent Wine
     // start-ups stall), then at most kBridgedParallel at once.
     int bridgedParallel = 2;                      // settings "parallelBridgedLoads"
-    std::atomic<int> nextCC { 0 }, prevCC { 0 };   // read on the MIDI thread
-    std::atomic<bool> songLearnArmed { false };
-    std::atomic<bool> songLearnForNext { true };
 
     // Backing tracks
     juce::AudioFormatManager trackFormats;
@@ -904,7 +915,6 @@ private:
     std::unique_ptr<SongPlayer> player;           // swapped under `lock`
 
     bool trackProblemsReported = true;            // message thread
-    std::atomic<int> sectionCCAtomic { 0 };
 
     // MIDI clock out: the ports (resolved on the message thread), read by the audio thread
     std::atomic<int> clockPorts[MidiOuts::kMaxPorts] {};
@@ -917,14 +927,9 @@ private:
     double clockSamplesToNext = 0.0;              // audio thread
     void resolveClockPorts();                     // message thread
     void sendClock (int numSamples, double chunkStartMs, bool trackStarted, bool trackStopped);   // audio thread
-    std::atomic<bool> sectionLearnArmed { false };
-    std::atomic<int> looperCCAtomic { 0 }, looperClearCCAtomic { 0 };
-    std::atomic<bool> looperLearnArmed { false }, looperClearLearnArmed { false };
     void loopProcess (InputRuntime& in, int numSamples, bool panicNow);   // audio thread
     int trackSong = -1;                           // message thread
     int lastTrackSection = -1;                    // audio thread: to notice the track entering a section
-    std::atomic<int> transportCCAtomic { 0 };     // read on the MIDI thread
-    std::atomic<bool> transportLearnArmed { false };
     void resetPluginPositions();                  // audio thread, under lock
 
     int loaderThreadCount = 4;                    // settings "parallelLoads"

@@ -1893,6 +1893,27 @@ int main()
         MessageManager::getInstance()->runDispatchLoopUntil (40);
         CHECK (engine.getTapTempoCC() == 0 && engine.getNextSongCC() == wasNext && engine.getPrevSongCC() == wasPrev && engine.getTransportCC() == wasTransport);
 
+        // One controller, one job: a pedal taught another pedal's controller takes it; so does an output's volume.
+        engine.setNextSongCC (66);
+        engine.setTapTempoCC (66);
+        CHECK (engine.getTapTempoCC() == 66 && engine.getNextSongCC() == 0);
+        engine.setOutputVolumeCC (0, 66);
+        CHECK (engine.getTapTempoCC() == 0 && engine.getSetup().outputs[0].volumeCC == 66);
+        engine.armPedalLearn (Engine::Pedal::section);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 66, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (40);
+        CHECK (engine.getSectionCC() == 66 && engine.getSetup().outputs[0].volumeCC == 0);
+        // While a mapping is being learned, a pedal's press is reported, not acted on, and the learn keeps waiting.
+        engine.setLearnArmed (true);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 66, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (40);
+        CHECK (engine.isLearnArmed());
+        engine.setLearnArmed (false);
+        engine.setSectionCC (0);
+        engine.setNextSongCC (wasNext);
+        engine.setPrevSongCC (wasPrev);
+        engine.setTransportCC (wasTransport);
+
         // A setup written before tempo existed loads at a sane default.
         auto older = engine.captureSetup().toVar();
         if (auto* o = older.getDynamicObject()) { o->removeProperty ("tempoBpm"); o->removeProperty ("tapTempoCC"); }

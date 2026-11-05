@@ -503,14 +503,13 @@ void Engine::loadSetup (Setup newSetup)
     int outChannels = 0;
     for (auto& o : setup.outputs) outChannels = jmax (outChannels, o.left + 1, o.right + 1);
     if (outChannels > 2) ensureAudioOutputsOpen (outChannels);
-    // The audio thread reads the tap controller from its own copy.
-    tapCC.store (jlimit (0, 127, setup.tapTempoCC), std::memory_order_relaxed);
-    nextCC.store (jlimit (0, 127, setup.nextSongCC), std::memory_order_relaxed);
-    prevCC.store (jlimit (0, 127, setup.prevSongCC), std::memory_order_relaxed);
-    transportCCAtomic.store (jlimit (0, 127, setup.transportCC), std::memory_order_relaxed);
-    sectionCCAtomic.store (jlimit (0, 127, setup.sectionCC), std::memory_order_relaxed);
-    looperCCAtomic.store (jlimit (0, 127, setup.looperCC), std::memory_order_relaxed);
-    looperClearCCAtomic.store (jlimit (0, 127, setup.looperClearCC), std::memory_order_relaxed);
+    // The MIDI and audio threads read the pedals' controllers from their own copies.
+    for (int p = 0; p < numPedals; ++p)
+    {
+        pedalField ((Pedal) p) = jlimit (0, 127, pedalField ((Pedal) p));
+        pedalCC[(size_t) p].store (pedalField ((Pedal) p), std::memory_order_relaxed);
+    }
+    pedalLearning.store (-1);
     tapTimes.clear();
     rebuildRuntimes();
     /* The song the set was on gets its track back once setSetupFile() says
@@ -647,24 +646,91 @@ double Engine::tapTempo()
 
 void Engine::resetTapTempo() { tapTimes.clear(); }
 
-void Engine::armTapTempoLearn (bool b) { tapLearnArmed.store (b); }
+//==============================================================================
+// The rig's pedals: one table, one learn, one press.
+//==============================================================================
+const char* Engine::pedalName (Pedal p)
+{
+    switch (p)
+    {
+        case Pedal::tapTempo:    return "Tap tempo";
+        case Pedal::nextSong:    return "Next song";
+        case Pedal::prevSong:    return "Previous song";
+        case Pedal::transport:   return "Start / stop the track";
+        case Pedal::section:     return "Next section, next scene, or release a vamp";
+        case Pedal::looper:      return "Record, play, stop";
+        case Pedal::looperClear: return "Clear the loop";
+        case Pedal::count:       break;
+    }
+    return "";
+}
+
+int& Engine::pedalField (Pedal p)
+{
+    switch (p)
+    {
+        case Pedal::tapTempo:    return setup.tapTempoCC;
+        case Pedal::nextSong:    return setup.nextSongCC;
+        case Pedal::prevSong:    return setup.prevSongCC;
+        case Pedal::transport:   return setup.transportCC;
+        case Pedal::section:     return setup.sectionCC;
+        case Pedal::looper:      return setup.looperCC;
+        case Pedal::looperClear: return setup.looperClearCC;
+        case Pedal::count:       break;
+    }
+    return setup.tapTempoCC;
+}
+
+int Engine::getPedalCC (Pedal p) const
+{
+    return p < Pedal::count ? pedalCC[(size_t) p].load (std::memory_order_relaxed) : 0;
+}
+
+void Engine::setPedalCC (Pedal p, int cc)
+{
+    if (p >= Pedal::count) return;
+    cc = jlimit (0, 127, cc);
+    // One controller, one job: the pedal or output volume that had it lets go.
+    if (cc > 0)
+    {
+        for (int o = 0; o < numPedals; ++o)
+            if (o != (int) p && pedalCC[(size_t) o].load() == cc) { pedalField ((Pedal) o) = 0; pedalCC[(size_t) o].store (0); }
+        for (int o = 0; o < (int) setup.outputs.size(); ++o)
+            if (setup.outputs[(size_t) o].volumeCC == cc) { setup.outputs[(size_t) o].volumeCC = 0; outputs[(size_t) o]->volumeCC.store (0); }
+    }
+    pedalField (p) = cc;
+    pedalCC[(size_t) p].store (cc, std::memory_order_relaxed);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::armPedalLearn (Pedal p)
+{
+    if (p >= Pedal::count) return;
+    outputLearn.store (-1);
+    pedalLearning.store ((int) p);
+}
 
 void Engine::cancelPedalLearns()
 {
-    tapLearnArmed.store (false);
-    songLearnArmed.store (false);
-    transportLearnArmed.store (false);
-    sectionLearnArmed.store (false);
-    looperLearnArmed.store (false);
-    looperClearLearnArmed.store (false);
+    pedalLearning.store (-1);
     outputLearn.store (-1);
     surfaceLearnInput.store (-1);
 }
 
-void Engine::setTapTempoCC (int cc)
+void Engine::pedalPressed (int i, InputRuntime& in, Pedal p)
 {
-    setup.tapTempoCC = jlimit (0, 127, cc);
-    tapCC.store (setup.tapTempoCC, std::memory_order_relaxed);
+    switch (p)
+    {
+        case Pedal::tapTempo:    postEvent ({ Event::tapTempo, i, 0, 0, 0, 0 }); break;
+        case Pedal::nextSong:    postEvent ({ Event::songStep, i, +1, 0, 0, 0 }); break;
+        case Pedal::prevSong:    postEvent ({ Event::songStep, i, -1, 0, 0, 0 }); break;
+        case Pedal::transport:   postEvent ({ Event::transport, i, 0, 0, 0, 0 }); break;
+        case Pedal::section:     postEvent ({ Event::sectionPedal, i, 0, 0, 0, 0 }); break;
+        // The looper's pedals act on the keyboard they are pressed on, straight away.
+        case Pedal::looper:      in.loop.command.store (1); break;
+        case Pedal::looperClear: in.loop.command.store (2); break;
+        case Pedal::count:       break;
+    }
 }
 
 void Engine::rebuildRuntimes()
@@ -905,13 +971,22 @@ void Engine::setOutputVolumeCC (int output, int cc)
 {
     if (output < 0 || output >= (int) setup.outputs.size()) return;
     cc = jlimit (0, 127, cc);
+    // One controller, one job: a pedal or another output that had it lets go.
+    if (cc > 0)
+    {
+        for (int p = 0; p < numPedals; ++p)
+            if (pedalCC[(size_t) p].load() == cc) { pedalField ((Pedal) p) = 0; pedalCC[(size_t) p].store (0); }
+        for (int o = 0; o < (int) setup.outputs.size(); ++o)
+            if (o != output && setup.outputs[(size_t) o].volumeCC == cc) { setup.outputs[(size_t) o].volumeCC = 0; outputs[(size_t) o]->volumeCC.store (0); }
+    }
     setup.outputs[(size_t) output].volumeCC = cc;
     outputs[(size_t) output]->volumeCC.store (cc);
-    listeners.call ([] (Listener& l) { l.outputsChanged(); });
+    listeners.call ([] (Listener& l) { l.outputsChanged(); l.setupChanged(); });
 }
 
 void Engine::armOutputVolumeLearn (int output)
 {
+    pedalLearning.store (-1);                                   // one learn at a time
     outputLearn.store (output >= 0 && output < (int) setup.outputs.size() ? output : -1);
 }
 
@@ -2106,19 +2181,6 @@ void Engine::loopStop (int i)
     runtimes[(size_t) i]->loop.command.store (3);
 }
 
-void Engine::setLooperCC (int cc)
-{
-    setup.looperCC = jlimit (0, 127, cc);
-    looperCCAtomic.store (setup.looperCC, std::memory_order_relaxed);
-    listeners.call ([] (Listener& l) { l.setupChanged(); });
-}
-
-void Engine::setLooperClearCC (int cc)
-{
-    setup.looperClearCC = jlimit (0, 127, cc);
-    looperClearCCAtomic.store (setup.looperClearCC, std::memory_order_relaxed);
-    listeners.call ([] (Listener& l) { l.setupChanged(); });
-}
 
 void Engine::loopProcess (InputRuntime& in, int numSamples, bool panicNow)
 {
@@ -2233,12 +2295,6 @@ void Engine::loopProcess (InputRuntime& in, int numSamples, bool panicNow)
     }
 }
 
-void Engine::setSectionCC (int cc)
-{
-    setup.sectionCC = jlimit (0, 127, cc);
-    sectionCCAtomic.store (setup.sectionCC, std::memory_order_relaxed);
-    listeners.call ([] (Listener& l) { l.setupChanged(); });
-}
 
 void Engine::armTrack (int songIndex)
 {
@@ -2332,12 +2388,6 @@ void Engine::toggleTrack()
     if (isTrackRunning()) stopTrack(); else startTrack();
 }
 
-void Engine::setTransportCC (int cc)
-{
-    setup.transportCC = jlimit (0, 127, cc);
-    transportCCAtomic.store (setup.transportCC, std::memory_order_relaxed);
-    listeners.call ([] (Listener& l) { l.setupChanged(); });
-}
 
 void Engine::resetPluginPositions()
 {
@@ -2500,25 +2550,7 @@ void Engine::previousSong()
     if (setup.currentSongInSet > 0) selectSongInSet (setup.currentSongInSet - 1);
 }
 
-void Engine::setNextSongCC (int cc)
-{
-    setup.nextSongCC = jlimit (0, 127, cc);
-    nextCC.store (setup.nextSongCC, std::memory_order_relaxed);
-    listeners.call ([] (Listener& l) { l.setupChanged(); });
-}
 
-void Engine::setPrevSongCC (int cc)
-{
-    setup.prevSongCC = jlimit (0, 127, cc);
-    prevCC.store (setup.prevSongCC, std::memory_order_relaxed);
-    listeners.call ([] (Listener& l) { l.setupChanged(); });
-}
-
-void Engine::armSongLearn (bool forNext)
-{
-    songLearnForNext = forNext;
-    songLearnArmed.store (true);
-}
 
 //==============================================================================
 void Engine::selectProgram (int inputIndex, int program)
@@ -3836,10 +3868,21 @@ void Engine::handleAsyncUpdate()
                 selectProgram (e.input, e.a);
                 break;
 
-            case Event::tapLearn:
-                setTapTempoCC (e.a);
-                listeners.call ([cc = e.a] (Listener& l) { l.tapTempoLearned (cc); });
+            case Event::pedalLearn:
+            {
+                // a: the pedal, b: the controller pressed. Say so: a pedal gives no feedback of its own.
+                const auto pedal = (Pedal) e.a;
+                String took;
+                for (int p = 0; p < numPedals; ++p)
+                    if (p != e.a && pedalCC[(size_t) p].load() == e.b) took = String (" (it was ") + pedalName ((Pedal) p) + ")";
+                for (const auto& o : setup.outputs)
+                    if (o.volumeCC == e.b) took = " (it was " + o.name + "'s volume)";
+                setPedalCC (pedal, e.b);
+                const String msg = String (pedalName (pedal)) + ": CC " + String (e.b) + took;
+                listeners.call ([&] (Listener& l) { l.statusMessage (msg); });
+                if (pedal == Pedal::tapTempo) listeners.call ([cc = e.b] (Listener& l) { l.tapTempoLearned (cc); });
                 break;
+            }
 
             case Event::outputLearn:
                 setOutputVolumeCC (e.input, e.a);
@@ -3862,21 +3905,6 @@ void Engine::handleAsyncUpdate()
                         { l.statusMessage ("Tempo " + String (bpm, 1) + " bpm"); });
                 break;
 
-            case Event::songLearn:
-            {
-                if (songLearnForNext) setNextSongCC (e.a);
-                else                  setPrevSongCC (e.a);
-                const String what = songLearnForNext ? "Next song" : "Previous song";
-                listeners.call ([what, cc = e.a] (Listener& l)
-                    { l.statusMessage (what + " pedal learned: controller " + String (cc)); });
-                break;
-            }
-
-            case Event::transportLearn:
-                setTransportCC (e.a);
-                listeners.call ([cc = e.a] (Listener& l) { l.statusMessage ("Backing track start/stop pedal learned: controller " + String (cc)); });
-                break;
-
             case Event::transport:
                 if (! hasTrack())
                     listeners.call ([] (Listener& l) { l.statusMessage ("This song has no backing track."); });
@@ -3895,16 +3923,6 @@ void Engine::handleAsyncUpdate()
                     if (e.a != 0 && ! isTrackRunning()) startTrack();
                     else if (e.a == 0 && isTrackRunning()) stopTrack();
                 }
-                break;
-
-            case Event::looperLearn:
-                if (e.b == 0) setLooperCC (e.a); else setLooperClearCC (e.a);
-                listeners.call ([cc = e.a, clear = e.b != 0] (Listener& l) { l.statusMessage (String (clear ? "Loop clear" : "Loop") + " pedal learned: controller " + String (cc)); });
-                break;
-
-            case Event::sectionLearn:
-                setSectionCC (e.a);
-                listeners.call ([cc = e.a] (Listener& l) { l.statusMessage ("Next section pedal learned: controller " + String (cc)); });
                 break;
 
             case Event::sectionPedal:
@@ -3998,8 +4016,14 @@ void Engine::handleAsyncUpdate()
             }
 
             case Event::learn:
-                if (e.c > 0) listeners.call ([&] (Listener& l) { l.learnedKeyboardKnob (e.input, e.c - 1); });
-                else         listeners.call ([&] (Listener& l) { l.learnReceived (e.input, (MappingDef::Source) e.a, e.b); });
+                // c: 1 + a keyboard knob; d: 1 + a rig pedal -- a controller with a job already, said and not taken.
+                if (e.d > 0)
+                {
+                    const String msg = "CC " + String (e.b) + " is the " + pedalName ((Pedal) (e.d - 1)) + " pedal (Options > Pedals and buttons): press another. Still waiting...";
+                    listeners.call ([&] (Listener& l) { l.statusMessage (msg); });
+                }
+                else if (e.c > 0) listeners.call ([&] (Listener& l) { l.learnedKeyboardKnob (e.input, e.c - 1); });
+                else              listeners.call ([&] (Listener& l) { l.learnReceived (e.input, (MappingDef::Source) e.a, e.b); });
                 break;
 
             case Event::touched:
@@ -4205,74 +4229,36 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exa
        for the same reason the tap itself is: the pedal you press to teach it is
        the pedal you will press to use it, whatever channel it happens to send
        on. Ahead of the tap check so an assigned controller can be reassigned. */
-    if (tapLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
-    {
-        tapLearnArmed.store (false);
-        postEvent ({ Event::tapLearn, i, m.getControllerNumber(), 0, 0, 0 });
-        return;
-    }
-
-    /* Learning the song footswitches, same rule as the tap: the pedal you press
-       to teach it is the pedal you will press to use it. */
-    if (songLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
-    {
-        songLearnArmed.store (false);
-        postEvent ({ Event::songLearn, i, m.getControllerNumber(), 0, 0, 0 });
-        return;
-    }
-    if (transportLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
-    {
-        transportLearnArmed.store (false);
-        postEvent ({ Event::transportLearn, i, m.getControllerNumber(), 0, 0, 0 });
-        return;
-    }
-    if (sectionLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
-    {
-        sectionLearnArmed.store (false);
-        postEvent ({ Event::sectionLearn, i, m.getControllerNumber(), 0, 0, 0 });
-        return;
-    }
-    if (looperLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
-    {
-        looperLearnArmed.store (false);
-        postEvent ({ Event::looperLearn, i, m.getControllerNumber(), 0, 0, 0 });
-        return;
-    }
-    if (looperClearLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
-    {
-        looperClearLearnArmed.store (false);
-        postEvent ({ Event::looperLearn, i, m.getControllerNumber(), 1, 0, 0 });
-        return;
-    }
-
-    /* Stepping through the set, outside the channel filter and whatever is
-       loaded -- a footswitch has to work all night. Only the press counts. */
     if (m.isController() && m.getControllerValue() >= 64)
     {
         const int cc = m.getControllerNumber();
-        if (const int n = nextCC.load (std::memory_order_relaxed); n > 0 && cc == n)
-        { postEvent ({ Event::songStep, i, +1, 0, 0, 0 }); return; }
-        if (const int p = prevCC.load (std::memory_order_relaxed); p > 0 && cc == p)
-        { postEvent ({ Event::songStep, i, -1, 0, 0, 0 }); return; }
-        if (const int t = transportCCAtomic.load (std::memory_order_relaxed); t > 0 && cc == t)
-        { postEvent ({ Event::transport, i, 0, 0, 0, 0 }); return; }
-        if (const int sc = sectionCCAtomic.load (std::memory_order_relaxed); sc > 0 && cc == sc)
-        { postEvent ({ Event::sectionPedal, i, 0, 0, 0, 0 }); return; }
-        // The looper's pedals act on the keyboard they are pressed on, straight away.
-        if (const int lc = looperCCAtomic.load (std::memory_order_relaxed); lc > 0 && cc == lc)
-        { in.loop.command.store (1); return; }
-        if (const int lc = looperClearCCAtomic.load (std::memory_order_relaxed); lc > 0 && cc == lc)
-        { in.loop.command.store (2); return; }
+        if (const int learning = pedalLearning.load(); learning >= 0)
+        {
+            pedalLearning.store (-1);
+            postEvent ({ Event::pedalLearn, i, learning, cc, 0, 0 });
+            return;
+        }
+
+        /* The pedals themselves, outside the channel filter and whatever is
+           loaded -- a footswitch has to work all night. Only the press counts.
+           While a mapping or a keyboard's control is being learned, a pedal's
+           press is reported, not acted on: that controller has a job already. */
+        for (int p = 0; p < numPedals; ++p)
+            if (pedalCC[(size_t) p].load (std::memory_order_relaxed) == cc)
+            {
+                if (learnArmed.load() || surfaceLearnInput.load() == i)
+                    postEvent ({ Event::learn, i, (int) MappingDef::Source::CC, cc, 0, 1 + p });
+                else
+                    pedalPressed (i, in, (Pedal) p);
+                return;
+            }
     }
 
-    /* Tap tempo, outside the channel filter: the tempo belongs to the rig, so a
-       footswitch taps it whatever this input is set to play on and whatever
-       program is loaded. Only the press counts, not the release. */
     if (m.isController())
     {
-        /* An output's volume control, and learning one: like the tap pedal,
-           it works on any input and channel, because a master fader belongs
-           to the rig and not to one sound. */
+        /* An output's volume control, and learning one: like the pedals, it
+           works on any input and channel, because a master fader belongs to
+           the rig and not to one sound. Any value: a fader is not a press. */
         if (const int learn = outputLearn.load (std::memory_order_relaxed); learn >= 0)
         {
             outputLearn.store (-1);
@@ -4288,13 +4274,6 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exa
                 postEvent ({ Event::outputVolume, o, m.getControllerValue(), 0, 0, 0 });
                 return;
             }
-    }
-
-    if (const int tap = tapCC.load (std::memory_order_relaxed);
-        tap > 0 && m.isController() && m.getControllerNumber() == tap && m.getControllerValue() >= 64)
-    {
-        postEvent ({ Event::tapTempo, i, 0, 0, 0, 0 });
-        return;
     }
 
     if (m.isProgramChange())
