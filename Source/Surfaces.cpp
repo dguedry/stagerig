@@ -620,6 +620,7 @@ std::vector<SurfaceHub::KeyboardInfo> SurfaceHub::getKeyboards() const
             {
                 k.name = String ("Komplete Kontrol ") + d.model->name + " MK1";
                 k.plain = ! isKompleteKontrolEnabled();
+                k.knobsSilent = true;    // the MK1's knobs and buttons never reach its MIDI port
                 k.more = "its screens, light guide and knobs (experimental: worked out from the keyboard itself)";
             }
         list.push_back (k);

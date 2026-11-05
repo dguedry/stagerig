@@ -473,11 +473,12 @@ private:
         showSelected();
         showKeys();
 
-        StringArray shown, turned, taught, untaught;
+        StringArray shown, turned, taught, untaught, silent;
         for (const auto& k : hub.getKeyboards())
         {
             if (k.input != input) continue;
-            if (k.plain || ! k.knobsByThemselves) (k.knobsByThemselves ? taught : untaught).add (k.name);
+            if (k.knobsSilent && ! k.knobsByThemselves) silent.add (k.name);
+            else if (k.plain || ! k.knobsByThemselves) (k.knobsByThemselves ? taught : untaught).add (k.name);
             else (k.screen ? shown : turned).add (k.name);
         }
         String text;
@@ -485,6 +486,8 @@ private:
         if (! turned.isEmpty()) text << "Turned by " << turned.joinIntoString (", ") << ", which " << (turned.size() == 1 ? "has" : "have") << " no screen for the names. ";
         if (! taught.isEmpty()) text << "Turned by the taught knobs of " << taught.joinIntoString (", ") << ". ";
         if (! untaught.isEmpty()) text << untaught.joinIntoString (", ") << " plays this input as plain MIDI: teach its knobs in Options > Your keyboards. ";
+        if (! silent.isEmpty()) text << silent.joinIntoString (", ") << " plays this input as plain MIDI, and its knobs send no MIDI at all: "
+                                        "untick Plain MIDI for it in Options > Your keyboards and they turn these. ";
         if (text.isEmpty()) text = "No keyboard plays this input yet: choose its MIDI device in the Inputs list.";
         // The other kind of control, in this program only: a pedal or wheel mapped to this plugin.
         StringArray mapped;
@@ -988,7 +991,9 @@ private:
             else         what.add (k.language);
             if (k.screen) what.add ("names on its screen");
             if (k.lights) what.add ("its keys lit");
-            what.add (k.knobsByThemselves ? "its knobs work by themselves" : "teach its knobs below");
+            what.add (k.knobsByThemselves ? "its knobs work by themselves"
+                      : k.knobsSilent    ? "its knobs send no MIDI, so they cannot be taught"
+                                         : "teach its knobs below");
             if (k.plain && k.more.isNotEmpty()) what.add ("untick Plain MIDI for " + k.more);
             row->detail.setText (what.joinIntoString ("  -  "), dontSendNotification);
             row->plain.setToggleState (k.plain, dontSendNotification);
@@ -1025,16 +1030,28 @@ private:
         const int in = current();
         const bool any = in >= 0 && in < (int) engine.getSetup().inputs.size();
         const auto c = any ? engine.getSetup().inputs[(size_t) in].controls : SurfaceControls();
+        // A keyboard whose knobs never reach MIDI (a Komplete Kontrol MK1 as plain MIDI): Learn would wait for ever.
+        String silent;
+        if (any)
+            for (const auto& k : hub.getKeyboards())
+                if (k.knobsSilent && k.plain && std::find (k.inputs.begin(), k.inputs.end(), in) != k.inputs.end()) silent = k.name;
         for (int i = 0; i < numRows; ++i)
         {
             auto& r = rows[(size_t) i];
             String what = c.knobCC[(size_t) i] > 0 ? "Controller " + String (c.knobCC[(size_t) i]) : String ("not taught");
+            if (silent.isNotEmpty() && c.knobCC[(size_t) i] <= 0) what = "no MIDI from it";
             r.what.setText (learning == i ? String ("Waiting: turn or press it now...") : what, dontSendNotification);
             r.what.setColour (Label::textColourId, learning == i ? Colours::orange : textDim);
             r.learn.setButtonText (learning == i ? "Cancel" : "Learn");
-            r.learn.setEnabled (any);
+            r.learn.setEnabled (any && silent.isEmpty());
             r.forget.setEnabled (any);
         }
+        explain.setText (silent.isNotEmpty()
+            ? silent + "'s knobs send no MIDI while it is plain MIDI, so there is nothing to teach and Learn would wait for ever. "
+              "Untick Plain MIDI for it above: then its knobs work by themselves, named on its screens, and each instrument's Knobs button says what they turn."
+            : "Only for a keyboard whose knobs do not work by themselves: press Learn, then turn the knob. What the knobs turn "
+              "on each instrument is its Knobs button. Pedals and buttons -- programs, pages, the set list, the track, the tempo -- "
+              "are all in Options > Pedals and buttons.", dontSendNotification);
         relativeBtn.setToggleState (c.knobsRelative, dontSendNotification);
         relativeBtn.setEnabled (any);
     }

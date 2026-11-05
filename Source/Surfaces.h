@@ -191,6 +191,7 @@ public:
         juce::String language;          // how StageRig talks to it: "standard MIDI-CI", "plain MIDI"
         bool screen = false, lights = false;
         bool knobsByThemselves = false; // its knobs work without teaching
+        bool knobsSilent = false;       // its knobs never reach MIDI (a Komplete Kontrol MK1's speak only USB HID), so plain they cannot be taught
         bool plain = false;             // set to be a plain MIDI keyboard
         bool experimental = false;      // talked to in a way StageRig worked out itself
         juce::String more;              // what else it could do, when plain ("its screens and lights, experimental")
