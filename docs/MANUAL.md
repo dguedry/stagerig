@@ -844,17 +844,18 @@ Loading a song is a program change on every input it names, so **Tail** and
 held notes apply as they do when you change a program by hand: nothing is cut
 off mid-note. Changing a program on a keyboard does not change the song.
 
-Two footswitches step through the set list. **Pedals...** learns them:
-under **Next song** and **Previous song**, press **Learn: press the
-pedal...**, then the pedal, rather than looking up what it sends. **Stop using
-CC n** unlearns one. They work whatever is loaded and whatever input they
-arrive on, and they say where you are ("2/8 Green Onions") in the status bar,
+Two footswitches step through the set list. **Pedals...** learns them: on
+the **Next song** and **Previous song** rows press **Learn**, then the pedal,
+rather than looking up what it sends (**Cancel** stops waiting; **Forget**
+unlearns one). They work whatever is loaded and whatever input they arrive
+on, and they say where you are ("2/8 Green Onions") in the status bar,
 because a pedal gives no feedback of its own. Stepping stops at the end rather
 than wrapping round to the first number. The same window learns pedals for
-**Backing track: start / stop**, **Next section of the track, or next scene
-/ release vamp** and **Tap tempo**. The section pedal is the one a player
-lives on: it steps the backing track's sections, releases a vamp, and for a
-song played by hand steps its scenes.
+**Start / stop the track**, **Next section, next scene, or release a vamp**
+and **Tap tempo**. The section pedal is the one a player lives on: it steps
+the backing track's sections, releases a vamp, and for a song played by hand
+steps its scenes. One pedal is learned at a time, and closing the window
+stops any learn still waiting.
 
 On the tablet, the Set list tab is the same thing from the stand -- see *The
 tablet*.
@@ -1134,7 +1135,7 @@ short fade:
 - **Play** at the top of the songs panel (it reads **Stop** while playing),
   which also shows where the track is (*0:42 / 3:51*);
 - the Play bar at the top of the tablet's Set list tab;
-- a footswitch: **Pedals... ▸ Backing track: start / stop**, then press
+- a footswitch: **Pedals... ▸ Start / stop the track ▸ Learn**, then press
   the pedal. It works on any keyboard and channel, like the song pedals.
 
 **Next** beside Play does the job of one pedal: during a vamp it lets the
@@ -1441,7 +1442,7 @@ over it. Press again to stop it, again to start it from the top; right-click
 for **Clear**. The button reads *Rec...*, then *2 bars*, then *Loop >*.
 
 A footswitch is the way to do it with your hands on the keys: **Pedals...
-▸ Loop: record / play / stop**, and a second pedal for **Loop: clear**. The
+▸ Record, play, stop**, and a second pedal for **Clear the loop**. The
 pedal loops the keyboard it is pressed on. Press it on the *one*: the loop
 starts the moment you press, and ends on the nearest bar line to your second
 press, so a bar's passage played a little long or short still comes round

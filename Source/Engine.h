@@ -185,6 +185,13 @@ public:
     void armTapTempoLearn (bool);
     bool isTapTempoLearnArmed() const               { return tapLearnArmed.load(); }
 
+    /** Lets go of every pedal, button and knob learn that is waiting: the tap,
+        the song, transport, section and looper pedals, an output's volume, and
+        a keyboard's own controls. One learn at a time, and none once the
+        window that started it is closed. The mappings' Learn MIDI has its own
+        switch and is left alone. */
+    void cancelPedalLearns();
+
     //==============================================================================
     // Inputs
     int  addInput (const juce::String& name, InputDef::Kind kind = InputDef::Kind::midi);
@@ -359,6 +366,8 @@ public:
     void setPrevSongCC (int cc);
     void armSongLearn (bool forNext);
     bool isSongLearnArmed() const { return songLearnArmed.load(); }
+    /** Whether the next-song pedal (true) or the previous-song pedal is the one waiting. */
+    bool isSongLearnArmed (bool forNext) const { return songLearnArmed.load() && songLearnForNext.load() == forNext; }
 
     //==============================================================================
     // Backing tracks: a song's stems, played from the folder beside the setup.
@@ -548,9 +557,6 @@ public:
     void setSlotPatch (int inputIndex, int program, int slot, int bankMsb, int bankLsb, int patch);
     /** The interface inputs the instrument's audio comes back on; -1 = none. */
     void setSlotReturn (int inputIndex, int program, int slot, int left, int right);
-    /** Is the slot's MIDI port there? False for a plugin slot. */
-    bool isSlotPortOpen (int inputIndex, int program, int slot) const;
-
 
     // A slot's MIDI chain: what its notes go through before the sound --------
     //
@@ -798,6 +804,7 @@ private:
     /** The GM player's view of a slot's MIDI: its mixer's choices over the file's. */
     void prepareGmMidi (SlotRuntime&, int numSamples);
     static void applyInputDef (InputRuntime&, const InputDef&);
+    std::unique_ptr<InputRuntime> makeInputRuntime (const InputDef&);    // the one way, at load and when added while running
     /** The program definition an address names: a program's, or an output's master chain. */
     ProgramDef* defFor (int inputIndex, int program);
     const ProgramDef* defFor (int inputIndex, int program) const { return const_cast<Engine*> (this)->defFor (inputIndex, program); }
@@ -864,7 +871,7 @@ private:
     int bridgedParallel = 2;                      // settings "parallelBridgedLoads"
     std::atomic<int> nextCC { 0 }, prevCC { 0 };   // read on the MIDI thread
     std::atomic<bool> songLearnArmed { false };
-    bool songLearnForNext = true;
+    std::atomic<bool> songLearnForNext { true };
 
     // Backing tracks
     juce::AudioFormatManager trackFormats;

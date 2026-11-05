@@ -300,6 +300,23 @@ struct SurfaceControls
         Property Exchange) are told these: 102 to 109, controllers MIDI leaves
         undefined, so no plugin takes them for something else. */
     static constexpr int autoKnobCC = 102;
+    /** The controller each knob is heard on: the one it was taught, else --
+        when the keyboard can be told what to send -- the first spare from
+        autoKnobCC + k that no other knob has, else 0 (nothing). The one
+        answer for the engine that hears it, the hub that tells the keyboard,
+        and the mappings table that names it, so they can never disagree. */
+    std::array<int, numKnobs> heardCC (bool autoKnobs) const
+    {
+        std::array<int, numKnobs> cc {};
+        for (int k = 0; k < numKnobs; ++k) cc[(size_t) k] = knobCC[(size_t) k] > 0 ? knobCC[(size_t) k] : 0;
+        if (! autoKnobs) return cc;
+        auto taken = [&] (int c) { for (int j = 0; j < numKnobs; ++j) if (cc[(size_t) j] == c) return true; return false; };
+        for (int k = 0; k < numKnobs; ++k)
+            if (cc[(size_t) k] == 0)
+                for (int c = autoKnobCC + k; c < 120; ++c)
+                    if (! taken (c)) { cc[(size_t) k] = c; break; }
+        return cc;
+    }
     /** The knobs send steps around 64 (65 = one to the right, 63 = one to
         the left) rather than where they are: endless encoders. */
     bool knobsRelative = false;

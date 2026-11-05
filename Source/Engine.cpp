@@ -270,9 +270,10 @@ struct Engine::InputRuntime
     std::atomic<uint32_t> clipMs { 0 };                      // when the input last touched full scale
     std::atomic<int> output { 0 };                           // which output it lands on
     // The keyboard's taught knobs and buttons (SurfaceControls), read on the MIDI thread.
-    std::array<std::atomic<int>, SurfaceControls::numKnobs> knobCC {};
+    std::array<std::atomic<int>, SurfaceControls::numKnobs> knobCC {};    // taught
+    std::array<std::atomic<int>, SurfaceControls::numKnobs> heardCC {};   // taught, or the spare the keyboard was told: SurfaceControls::heardCC()
     std::atomic<bool> knobsRelative { false };
-    std::atomic<bool> autoKnobs { false };      // untaught knobs answer to SurfaceControls::autoKnobCC + k
+    std::atomic<bool> autoKnobs { false };      // untaught knobs answer to the spares, on a keyboard told what to send
     std::array<std::atomic<int>, SurfaceControls::numActions> buttonCC {};
     ExactValues exact;             // a MIDI 2.0 keyboard's full values
     MidiMessageCollector collector;
@@ -648,6 +649,18 @@ void Engine::resetTapTempo() { tapTimes.clear(); }
 
 void Engine::armTapTempoLearn (bool b) { tapLearnArmed.store (b); }
 
+void Engine::cancelPedalLearns()
+{
+    tapLearnArmed.store (false);
+    songLearnArmed.store (false);
+    transportLearnArmed.store (false);
+    sectionLearnArmed.store (false);
+    looperLearnArmed.store (false);
+    looperClearLearnArmed.store (false);
+    outputLearn.store (-1);
+    surfaceLearnInput.store (-1);
+}
+
 void Engine::setTapTempoCC (int cc)
 {
     setup.tapTempoCC = jlimit (0, 127, cc);
@@ -660,16 +673,7 @@ void Engine::rebuildRuntimes()
     tempoAtomic.store (setup.tempoBpm);
     resolveClockPorts();
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
-    {
-        auto rt = std::make_unique<InputRuntime>();
-        rt->loop.events.reserve (16384);          // a few minutes of playing; sized once, never on the audio thread
-        rt->collector.reset (sampleRate);
-        rt->trackMidi.ensureSize (4096);
-        rt->shifted.ensureSize (4096);
-        rt->block.ensureSize (8192);                  // the keys and a loop playing round them
-        applyInputDef (*rt, setup.inputs[(size_t) i]);
-        runtimes.push_back (std::move (rt));
-    }
+        runtimes.push_back (makeInputRuntime (setup.inputs[(size_t) i]));
 
     openMidiDevices();
 
@@ -741,6 +745,22 @@ void Engine::teardownRuntimes (bool captureFirst, int budgetMs)
 //==============================================================================
 // Inputs
 //==============================================================================
+std::unique_ptr<Engine::InputRuntime> Engine::makeInputRuntime (const InputDef& def)
+{
+    // The one way an input's runtime is made, at load and when one is added
+    // while running: everything the audio thread needs is sized here, never there.
+    auto rt = std::make_unique<InputRuntime>();
+    rt->loop.events.reserve (16384);          // a few minutes of playing
+    rt->collector.reset (sampleRate);
+    rt->trackMidi.ensureSize (4096);
+    rt->shifted.ensureSize (4096);
+    rt->block.ensureSize (8192);              // the keys and a loop playing round them
+    rt->sentMidi.ensureSize (2048);
+    rt->received.ensureSize (2048);
+    applyInputDef (*rt, def);
+    return rt;
+}
+
 void Engine::applyInputDef (InputRuntime& rt, const InputDef& def)
 {
     rt.channel.store (def.channel);
@@ -751,7 +771,12 @@ void Engine::applyInputDef (InputRuntime& rt, const InputDef& def)
     rt.audioLeft.store (def.audioLeft);
     rt.audioRight.store (def.audioRight);
     rt.output.store (def.output);
-    for (int k = 0; k < SurfaceControls::numKnobs; ++k) rt.knobCC[(size_t) k].store (def.controls.knobCC[(size_t) k]);
+    const auto heard = def.controls.heardCC (rt.autoKnobs.load());
+    for (int k = 0; k < SurfaceControls::numKnobs; ++k)
+    {
+        rt.knobCC[(size_t) k].store (def.controls.knobCC[(size_t) k]);
+        rt.heardCC[(size_t) k].store (heard[(size_t) k]);
+    }
     rt.knobsRelative.store (def.controls.knobsRelative);
     for (int a = 0; a < SurfaceControls::numActions; ++a) rt.buttonCC[(size_t) a].store (SurfaceControls::ccOf (def.controls.buttons[(size_t) a]));
 }
@@ -945,12 +970,7 @@ int Engine::addInput (const String& name, InputDef::Kind kind)
     }
     setup.inputs.push_back (def);
 
-    auto rt = std::make_unique<InputRuntime>();
-    rt->collector.reset (sampleRate);
-    rt->trackMidi.ensureSize (4096);
-    rt->sentMidi.ensureSize (2048);
-    rt->received.ensureSize (2048);
-    applyInputDef (*rt, def);
+    auto rt = makeInputRuntime (def);
     {
         const ScopedLock sl (lock);
         runtimes.push_back (std::move (rt));
@@ -1286,7 +1306,10 @@ bool Engine::isInputHeardAsMidi2 (int inputIndex) const
 void Engine::setInputAutoKnobs (int inputIndex, bool b)
 {
     if (! validInput (inputIndex)) return;
-    runtimes[(size_t) inputIndex]->autoKnobs.store (b);
+    auto& rt = *runtimes[(size_t) inputIndex];
+    rt.autoKnobs.store (b);
+    const auto heard = setup.inputs[(size_t) inputIndex].controls.heardCC (b);
+    for (int k = 0; k < SurfaceControls::numKnobs; ++k) rt.heardCC[(size_t) k].store (heard[(size_t) k]);
 }
 
 bool Engine::isInputAutoKnobs (int inputIndex) const
@@ -1297,10 +1320,9 @@ bool Engine::isInputAutoKnobs (int inputIndex) const
 int Engine::keyboardKnobFor (int inputIndex, int cc) const
 {
     if (! validInput (inputIndex) || cc <= 0) return -1;
-    const auto& c = setup.inputs[(size_t) inputIndex].controls;
+    const auto heard = setup.inputs[(size_t) inputIndex].controls.heardCC (isInputAutoKnobs (inputIndex));
     for (int k = 0; k < SurfaceControls::numKnobs; ++k)
-        if (c.knobCC[(size_t) k] == cc || (c.knobCC[(size_t) k] == 0 && cc == SurfaceControls::autoKnobCC + k && isInputAutoKnobs (inputIndex)))
-            return k;
+        if (heard[(size_t) k] == cc) return k;
     return -1;
 }
 
@@ -3401,12 +3423,6 @@ bool Engine::isPluginAlive (int inputIndex, int program, int slot, int effect) c
     return node != nullptr && node->alive();
 }
 
-bool Engine::isSlotPortOpen (int inputIndex, int program, int slot) const
-{
-    auto* node = getNode (inputIndex, program, slot, -1);
-    return node != nullptr && static_cast<SlotRuntime*> (node)->external && midiOuts.isOpen (static_cast<SlotRuntime*> (node)->outPort.load());
-}
-
 //==============================================================================
 // External instruments
 //==============================================================================
@@ -3870,8 +3886,7 @@ void Engine::handleAsyncUpdate()
 
             case Event::linkTempo:
                 // A peer changed the tempo: the rig follows, and tells the plugins.
-                if (const double bpm = linkTempoFromPeer.load(); bpm > 0.0) setTempoBpm (bpm);
-                listeners.call ([] (Listener& l) { l.setupChanged(); });
+                if (const double bpm = linkTempoFromPeer.load(); bpm > 0.0) setTempoBpm (bpm);    // which tells the listeners
                 break;
 
             case Event::linkStartStop:
@@ -4308,7 +4323,7 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exa
         {
             for (int k = 0; k < SurfaceControls::numKnobs; ++k)
                 if (const int taught = in.knobCC[(size_t) k].load (std::memory_order_relaxed);
-                    taught == cc || (taught == 0 && cc == SurfaceControls::autoKnobCC + k && in.autoKnobs.load (std::memory_order_relaxed)))
+                    cc == in.heardCC[(size_t) k].load (std::memory_order_relaxed))
                 {
                     // Waiting to learn a mapping: this is a keyboard knob, which is never one. Said, not taken.
                     if (learnArmed.load()) { learnArmed = false; postEvent ({ Event::learn, i, (int) MappingDef::Source::CC, cc, 1 + k, 0 }); return; }

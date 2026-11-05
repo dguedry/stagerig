@@ -35,7 +35,7 @@ public:
     static constexpr int minimumWidth   = 190;
 
     explicit SongsPanel (Engine&);
-    /** Opens the window of every pedal and button job (MainComponent's); the panel's own menu otherwise. */
+    /** Opens the window of every pedal and button job (MainComponent's). */
     std::function<void()> onShowPedals;
     ~SongsPanel() override;
 
@@ -82,10 +82,8 @@ private:
     void removeFromSet();
     void moveInSet (int delta);
     void moveSongInList (int delta);
-    void chooseSet();
     void newSet();
     void showSetMenu();
-    void showFootswitchMenu();
 
     /** The song a row of the set list refers to, or -1. */
     int songAtSetPosition (int position) const;

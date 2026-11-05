@@ -33,9 +33,6 @@ public:
     std::function<void()> onEdited;                 // a knob moved: the setup has changed
     std::function<void()> onHeightChanged;          // the panel appeared or went: lay the window out again
 
-    /** The parameters shown when nobody chose: see PanelParams.h. */
-    static std::vector<int> pickPanelParams (const ParamInfoList& params, int max) { return perf::pickPanelParams (params, max); }
-
     void paint (juce::Graphics& g) override
     {
         const auto& inputs = engine.getSetup().inputs;
@@ -279,7 +276,7 @@ private:
             if (plugin != nullptr && room > 0)
             {
                 const auto& params = plugin->getParameters();
-                if (sd.panelParams.empty()) p.params = pickPanelParams (params, room);
+                if (sd.panelParams.empty()) p.params = perf::pickPanelParams (params, room);
                 else for (const auto& id : sd.panelParams) if (const int idx = plugin->findParameterIndex (id); idx >= 0 && (int) p.params.size() < room) p.params.push_back (idx);
                 for (size_t k = 0; k < p.params.size(); ++k)
                 {

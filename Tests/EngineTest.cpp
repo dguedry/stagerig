@@ -646,6 +646,23 @@ int main()
         engine.injectMidi (0, MidiMessage::controllerEvent (1, SurfaceControls::autoKnobCC + 2, 90));
         pump (50);
         CHECK (listener.knobTurned == 2 && listener.knobValue == 90);
+
+        // A knob taught a spare controller keeps it; the untaught knob whose spare that was is heard on the
+        // next free one -- the same answer the keyboard is told (SurfaceControls::heardCC), so a turn of it arrives.
+        {
+            auto c = engine.getSetup().inputs[0].controls;
+            c.knobCC[1] = SurfaceControls::autoKnobCC + 2;
+            engine.setInputControls (0, c);
+            CHECK (engine.keyboardKnobFor (0, SurfaceControls::autoKnobCC + 2) == 1);
+            CHECK (engine.keyboardKnobFor (0, SurfaceControls::autoKnobCC + 3) == 2);     // its spare is taken: the next one
+            CHECK (engine.keyboardKnobFor (0, SurfaceControls::autoKnobCC + 4) == 3);     // and the ones after shift along
+            listener.knobTurned = -1;
+            engine.injectMidi (0, MidiMessage::controllerEvent (1, SurfaceControls::autoKnobCC + 3, 70));
+            pump (50);
+            CHECK (listener.knobTurned == 2 && listener.knobValue == 70);
+            c.knobCC[1] = 0;
+            engine.setInputControls (0, c);
+        }
         engine.setInputAutoKnobs (0, false);
 
         // MIDI 2.0: what the plugins get as MIDI 1.0, and the full value beside it.
@@ -845,6 +862,15 @@ int main()
         engine.loopClear (0);
         render (engine, 1);
         CHECK (engine.getLoopState (0) == Engine::LoopState::empty && engine.getLoopBars (0) == 0);
+
+        // An input added while running is made the same way as one loaded: its looper works too.
+        const int added = engine.addInput ("Added while running");
+        engine.loopPedal (added);
+        render (engine, 1);
+        CHECK (engine.getLoopState (added) == Engine::LoopState::recording);
+        engine.loopClear (added);
+        render (engine, 1);
+        engine.removeInput (added);
     }
 
     // --- learn ------------------------------------------------------------------------
@@ -1847,6 +1873,25 @@ int main()
         MessageManager::getInstance()->runDispatchLoopUntil (40);
         CHECK (engine.getTapTempoCC() == 64);
         engine.setTapTempoCC (0);
+
+        // One learn at a time, and none once the window is closed: cancelPedalLearns lets go of every pedal.
+        engine.armTapTempoLearn (true);
+        engine.armSongLearn (true);
+        CHECK (engine.isSongLearnArmed (true) && ! engine.isSongLearnArmed (false));   // the next-song row waits, not the previous
+        engine.armSongLearn (false);
+        CHECK (! engine.isSongLearnArmed (true) && engine.isSongLearnArmed (false));
+        engine.armTransportLearn();
+        engine.armSectionLearn();
+        engine.armLooperLearn (false);
+        engine.armLooperLearn (true);
+        engine.cancelPedalLearns();
+        CHECK (! engine.isTapTempoLearnArmed() && ! engine.isSongLearnArmed() && ! engine.isTransportLearnArmed()
+               && ! engine.isSectionLearnArmed() && ! engine.isLooperLearnArmed (false) && ! engine.isLooperLearnArmed (true)
+               && ! engine.isOutputVolumeLearnArmed());
+        const int wasNext = engine.getNextSongCC(), wasPrev = engine.getPrevSongCC(), wasTransport = engine.getTransportCC();
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 66, 127));      // nothing is waiting: a press teaches nothing
+        MessageManager::getInstance()->runDispatchLoopUntil (40);
+        CHECK (engine.getTapTempoCC() == 0 && engine.getNextSongCC() == wasNext && engine.getPrevSongCC() == wasPrev && engine.getTransportCC() == wasTransport);
 
         // A setup written before tempo existed loads at a sane default.
         auto older = engine.captureSetup().toVar();
@@ -4051,9 +4096,9 @@ int main()
                     { ParamInfo p; p.index = (int) ps.size(); p.id = String (p.index); p.name = n; p.boolean = boolean; p.numSteps = steps; p.midiController = cc; ps.push_back (p); };
                     add ("Master Volume"); add ("Osc 1 Wave", false, 8); add ("Filter Cutoff"); add ("Filter Resonance"); add ("Amp Attack"); add ("Amp Release");
                     add ("Bypass"); add ("Mod Wheel", false, 0, 1); add ("Reverb Mix"); add ("Legato", true); add ("Osc Sync", false, 2);
-                    CHECK (StagePanel::pickPanelParams (ps, 4) == (std::vector<int> { 2, 3, 4, 5 }));
-                    CHECK (StagePanel::pickPanelParams (ps, 8) == (std::vector<int> { 2, 3, 4, 5, 8, 0, 1 }));     // then by order; no bypass, no CC stand-in, no switch
-                    CHECK (StagePanel::pickPanelParams ({}, 4).empty());
+                    CHECK (perf::pickPanelParams (ps, 4) == (std::vector<int> { 2, 3, 4, 5 }));
+                    CHECK (perf::pickPanelParams (ps, 8) == (std::vector<int> { 2, 3, 4, 5, 8, 0, 1 }));     // then by order; no bypass, no CC stand-in, no switch
+                    CHECK (perf::pickPanelParams ({}, 4).empty());
                     engine.setSlotPanelParams (0, 92, 0, { "3", "2" });
                     CHECK (engine.getSetup().inputs[0].programs[92].slots[0].panelParams == (std::vector<String> { "3", "2" }));
                     engine.setSlotPanelParams (0, 92, 0, {});

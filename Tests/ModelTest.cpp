@@ -777,6 +777,15 @@ int main()
         CHECK (back.controls.buttons[SurfaceControls::programUp] == "cc:104" && back.controls.buttons[SurfaceControls::pageDown] == "kk:b12");
         CHECK (back.controls.buttons[SurfaceControls::programDown].isEmpty() && ! back.controls.isEmpty());
         CHECK (SurfaceControls::ccOf ("cc:104") == 104 && SurfaceControls::ccOf ("kk:b12") == 0 && SurfaceControls::ccOf ({}) == 0);
+
+        // What each knob is heard on: taught ones as taught; untaught ones nothing, or on a keyboard told
+        // what to send, the first spare from 102 + k that no knob already has -- one answer for everyone.
+        SurfaceControls sc;
+        CHECK (sc.heardCC (false) == (std::array<int, 8> { 0, 0, 0, 0, 0, 0, 0, 0 }));
+        CHECK (sc.heardCC (true)  == (std::array<int, 8> { 102, 103, 104, 105, 106, 107, 108, 109 }));
+        sc.knobCC = { 21, 104, 0, 0, 0, 0, 0, 0 };
+        CHECK (sc.heardCC (false) == (std::array<int, 8> { 21, 104, 0, 0, 0, 0, 0, 0 }));
+        CHECK (sc.heardCC (true)  == (std::array<int, 8> { 21, 104, 105, 106, 107, 108, 109, 110 }));   // knob 3's spare was taken
     }
 
     std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);

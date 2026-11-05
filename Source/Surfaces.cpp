@@ -195,16 +195,9 @@ SurfaceView SurfaceHub::viewFor (int input)
     for (int p = 0; p < InputDef::numPrograms; ++p)
         if (p == program || ! in.programs[(size_t) p].isEmpty())
             v.programs.emplace_back (p, in.programs[(size_t) p].name.isNotEmpty() ? in.programs[(size_t) p].name : "Program " + String (p).paddedLeft ('0', 3));
-    for (int k = 0; k < SurfaceView::numKnobs; ++k)
-        v.knobControllers[(size_t) k] = in.controls.knobCC[(size_t) k] > 0 ? in.controls.knobCC[(size_t) k] : SurfaceControls::autoKnobCC + k;
-    // A spare controller a knob was taught goes to the taught knob: the untaught one is told the next spare instead.
-    for (int k = 0; k < SurfaceView::numKnobs; ++k)
-    {
-        if (in.controls.knobCC[(size_t) k] > 0) continue;
-        auto taken = [&] (int cc) { for (int j = 0; j < SurfaceView::numKnobs; ++j) if (j != k && v.knobControllers[(size_t) j] == cc) return true; return false; };
-        for (int cc = SurfaceControls::autoKnobCC + k; taken (v.knobControllers[(size_t) k]) && cc < 120; ++cc)
-            if (! taken (cc)) v.knobControllers[(size_t) k] = cc;
-    }
+    // What each knob is heard on -- the same answer the engine listens for (SurfaceControls::heardCC).
+    const auto heard = in.controls.heardCC (true);
+    for (int k = 0; k < SurfaceView::numKnobs; ++k) v.knobControllers[(size_t) k] = heard[(size_t) k];
     v.bankFirst = program - program % SurfaceView::numKnobs;
     for (int i = 0; i < SurfaceView::numKnobs; ++i)
     {
@@ -593,7 +586,6 @@ std::vector<SurfaceHub::KeyboardInfo> SurfaceHub::getKeyboards() const
         k.screen = s->hasScreen();
         k.lights = s->hasLights();
         k.knobsByThemselves = true;
-        k.experimental = dynamic_cast<const KompleteKontrolMk1*> (s.get()) != nullptr;
         list.push_back (k);
     }
     // The rest of the keyboards the inputs play from: plain MIDI.

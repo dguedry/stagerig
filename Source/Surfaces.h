@@ -193,7 +193,6 @@ public:
         bool knobsByThemselves = false; // its knobs work without teaching
         bool knobsSilent = false;       // its knobs never reach MIDI (a Komplete Kontrol MK1's speak only USB HID), so plain they cannot be taught
         bool plain = false;             // set to be a plain MIDI keyboard
-        bool experimental = false;      // talked to in a way StageRig worked out itself
         juce::String more;              // what else it could do, when plain ("its screens and lights, experimental")
     };
     std::vector<KeyboardInfo> getKeyboards() const;
@@ -235,7 +234,11 @@ private:
     juce::uint32 dim (juce::uint32 colour, float amount) const;
 
     // Engine::Listener
-    void setupChanged() override                                    { layouts.clear(); focus.clear(); }
+    /** The setup changed somewhere -- an input, a tempo, a song. The layouts
+        are worked out again; the instrument and page each keyboard is on are
+        kept (getFocusSlot checks they still exist), so a tap of the tempo does
+        not send the knobs back to the first instrument. */
+    void setupChanged() override                                    { layouts.clear(); }
     void programChanged (int, int) override                         { layouts.clear(); }
     void programContentChanged (int, int) override                  { layouts.clear(); }
     void surfaceKnob (int input, int knob, int value, bool relative, float exact) override;

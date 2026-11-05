@@ -1145,7 +1145,15 @@ public:
         startTimer (250);
     }
 
-    ~PedalsView() override { hub.cancelLearn(); }
+    ~PedalsView() override { cancelAll(); }
+
+    /** Nothing waits once the window is closed, or when another row starts: the engine's pedal learns and the hub's. */
+    void cancelAll()
+    {
+        engine.cancelPedalLearns();
+        hub.cancelLearn();
+        for (auto& o : rows) o->learning = false;
+    }
 
     void resized() override
     {
@@ -1204,7 +1212,7 @@ private:
             const auto t = taught();
             what.setText (learning ? String ("Waiting: press it now...") : t.isNotEmpty() ? t : String ("not taught"), dontSendNotification);
             what.setColour (Label::textColourId, learning ? Colours::orange : textDim);
-            learn.setButtonText (learning ? "Waiting..." : "Learn");
+            learn.setButtonText (learning ? "Cancel" : "Learn");
             forgetBtn.setEnabled (t.isNotEmpty());
         }
     };
@@ -1237,8 +1245,8 @@ private:
         };
         auto& e = engine;
         addHeader ("SET LIST");
-        rig ("Next song",     [&e] { return e.getNextSongCC(); }, [&e] { e.armSongLearn (true); },  [&e] { e.setNextSongCC (0); }, [&e] { return e.isSongLearnArmed(); });
-        rig ("Previous song", [&e] { return e.getPrevSongCC(); }, [&e] { e.armSongLearn (false); }, [&e] { e.setPrevSongCC (0); }, [&e] { return e.isSongLearnArmed(); });
+        rig ("Next song",     [&e] { return e.getNextSongCC(); }, [&e] { e.armSongLearn (true); },  [&e] { e.setNextSongCC (0); }, [&e] { return e.isSongLearnArmed (true); });
+        rig ("Previous song", [&e] { return e.getPrevSongCC(); }, [&e] { e.armSongLearn (false); }, [&e] { e.setPrevSongCC (0); }, [&e] { return e.isSongLearnArmed (false); });
         addHeader ("BACKING TRACK");
         rig ("Start / stop the track", [&e] { return e.getTransportCC(); }, [&e] { e.armTransportLearn(); }, [&e] { e.setTransportCC (0); }, [&e] { return e.isTransportLearnArmed(); });
         rig ("Next section, next scene, or release a vamp", [&e] { return e.getSectionCC(); }, [&e] { e.armSectionLearn(); }, [&e] { e.setSectionCC (0); }, [&e] { return e.isSectionLearnArmed(); });
@@ -1300,12 +1308,10 @@ private:
     {
         r.learn.onClick = [this, raw = &r]
         {
-            if (raw->learning) return;
-            // One learn at a time: another row waiting is let go.
-            for (auto& o : rows) o->learning = false;
-            hub.cancelLearn();
-            raw->learning = true;
-            raw->arm();
+            // Click again to stop waiting. One learn at a time: another row waiting is let go.
+            const bool stop = raw->learning;
+            cancelAll();
+            if (! stop) { raw->learning = true; raw->arm(); }
             refresh();
         };
         r.forgetBtn.onClick = [this, raw = &r]

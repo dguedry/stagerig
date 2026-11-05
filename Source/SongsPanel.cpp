@@ -131,7 +131,7 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
 
     addAndMakeVisible (footBtn);
     footBtn.setTooltip ("Every pedal and button job in one list: the set list, the backing track, the tempo, the loop, the outputs' volume, each keyboard's programs and pages");
-    footBtn.onClick = [this] { if (onShowPedals) onShowPedals(); else showFootswitchMenu(); };
+    footBtn.onClick = [this] { if (onShowPedals) onShowPedals(); };
 
     /* The set can move without anyone touching this panel -- a footswitch, the
        tablet, a program change. Polling rather than listening keeps this panel
@@ -666,10 +666,9 @@ void SongsPanel::addToSet()
     if (set < 0 || set >= (int) sets.size()) return;
     if (selectedSong < 0 || selectedSong >= (int) engine.getSongs().size()) return;
 
-    auto songs = sets[(size_t) set].songs;
-    songs.push_back (selectedSong);
-    engine.setSetSongs (set, songs);
-    selectedInSet = (int) songs.size() - 1;
+    // The engine's own edits, the same the tablet makes: they keep the song in play in its place.
+    engine.addSongToSet (set, selectedSong);
+    selectedInSet = (int) engine.getSets()[(size_t) set].songs.size() - 1;
     refresh();
     setList.selectRow (selectedInSet);
 }
@@ -679,13 +678,10 @@ void SongsPanel::removeFromSet()
     const int set = engine.getCurrentSet();
     const auto& sets = engine.getSets();
     if (set < 0 || set >= (int) sets.size()) return;
+    if (selectedInSet < 0 || selectedInSet >= (int) sets[(size_t) set].songs.size()) return;
 
-    auto songs = sets[(size_t) set].songs;
-    if (selectedInSet < 0 || selectedInSet >= (int) songs.size()) return;
-
-    songs.erase (songs.begin() + selectedInSet);
-    engine.setSetSongs (set, songs);
-    selectedInSet = jmin (selectedInSet, (int) songs.size() - 1);
+    engine.removeFromSet (set, selectedInSet);
+    selectedInSet = jmin (selectedInSet, (int) engine.getSets()[(size_t) set].songs.size() - 1);
     refresh();
 }
 
@@ -702,12 +698,10 @@ void SongsPanel::moveInSet (int delta)
     const auto& sets = engine.getSets();
     if (set < 0 || set >= (int) sets.size()) return;
 
-    auto songs = sets[(size_t) set].songs;
     const int to = selectedInSet + delta;
-    if (selectedInSet < 0 || to < 0 || to >= (int) songs.size()) return;
+    if (selectedInSet < 0 || to < 0 || to >= (int) sets[(size_t) set].songs.size()) return;
 
-    std::swap (songs[(size_t) selectedInSet], songs[(size_t) to]);
-    engine.setSetSongs (set, songs);
+    engine.moveInSet (set, selectedInSet, delta);
     selectedInSet = to;
     refresh();
     setList.selectRow (to);
@@ -798,63 +792,6 @@ void SongsPanel::showSetMenu()
             engine.moveSet (set, choice == 4 ? -1 : 1);
             refresh();
         }
-    });
-}
-
-void SongsPanel::showFootswitchMenu()
-{
-    PopupMenu m;
-    const int nextCC = engine.getNextSongCC(), prevCC = engine.getPrevSongCC(), playCC = engine.getTransportCC();
-
-    m.addSectionHeader ("Next song");
-    m.addItem (1, "Learn: press the pedal...");
-    if (nextCC > 0) m.addItem (2, "Stop using CC " + String (nextCC));
-
-    m.addSectionHeader ("Previous song");
-    m.addItem (3, "Learn: press the pedal...");
-    if (prevCC > 0) m.addItem (4, "Stop using CC " + String (prevCC));
-
-    m.addSectionHeader ("Backing track: start / stop");
-    m.addItem (5, "Learn: press the pedal...");
-    if (playCC > 0) m.addItem (6, "Stop using CC " + String (playCC));
-
-    m.addSectionHeader ("Next section of the track, or next scene / release vamp");
-    m.addItem (7, "Learn: press the pedal...");
-    if (engine.getSectionCC() > 0) m.addItem (8, "Stop using CC " + String (engine.getSectionCC()));
-
-    m.addSectionHeader ("Tap tempo");
-    m.addItem (9, "Learn: press the pedal...");
-    if (engine.getTapTempoCC() > 0) m.addItem (10, "Stop using CC " + String (engine.getTapTempoCC()));
-
-    m.addSectionHeader ("Loop: record / play / stop  (on the keyboard the pedal is on)");
-    m.addItem (11, "Learn: press the pedal...");
-    if (engine.getLooperCC() > 0) m.addItem (12, "Stop using CC " + String (engine.getLooperCC()));
-
-    m.addSectionHeader ("Loop: clear");
-    m.addItem (13, "Learn: press the pedal...");
-    if (engine.getLooperClearCC() > 0) m.addItem (14, "Stop using CC " + String (engine.getLooperClearCC()));
-
-    m.showMenuAsync (PopupMenu::Options().withTargetComponent (footBtn), [this] (int choice)
-    {
-        switch (choice)
-        {
-            case 1: engine.armSongLearn (true);  break;
-            case 2: engine.setNextSongCC (0);    break;
-            case 3: engine.armSongLearn (false); break;
-            case 4: engine.setPrevSongCC (0);    break;
-            case 5: engine.armTransportLearn();  break;
-            case 6: engine.setTransportCC (0);   break;
-            case 7: engine.armSectionLearn();    break;
-            case 8: engine.setSectionCC (0);     break;
-            case 9: engine.armTapTempoLearn (true); break;
-            case 10: engine.setTapTempoCC (0);   break;
-            case 11: engine.armLooperLearn (false); break;
-            case 12: engine.setLooperCC (0);     break;
-            case 13: engine.armLooperLearn (true); break;
-            case 14: engine.setLooperClearCC (0); break;
-            default: break;
-        }
-        refresh();
     });
 }
 
@@ -1813,15 +1750,6 @@ private:
     {
         SafePointer<TracksComponent> self (this);
         showMidiEditor (engine, songIndex, stemIndex, [self] { if (self != nullptr) self->rebuild(); });
-    }
-
-    void fillInputs (ComboBox& box, int selected)
-    {
-        box.clear (dontSendNotification);
-        const auto& ins = engine.getSetup().inputs;
-        for (int i = 0; i < (int) ins.size(); ++i)
-            box.addItem ("-> " + ins[(size_t) i].name, i + 1);
-        box.setSelectedId (jlimit (0, jmax (0, (int) ins.size() - 1), selected) + 1, dontSendNotification);
     }
 
     void fillOutputs (ComboBox& box, int selected)

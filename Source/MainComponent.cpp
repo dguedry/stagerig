@@ -3403,8 +3403,20 @@ void MainComponent::programContentChanged (int inputIndex, int program)
     });
 }
 
-void MainComponent::learnReceived (int, MappingDef::Source source, int number)
+void MainComponent::learnReceived (int inputIndex, MappingDef::Source source, int number)
 {
+    // A mapping belongs to the input the controller arrives on. One from another
+    // keyboard would be stored here and never fire: say so, and keep waiting.
+    const auto& inputs = engine.getSetup().inputs;
+    if (inputIndex != selectedInput && inputIndex >= 0 && inputIndex < (int) inputs.size())
+    {
+        MappingDef tmp; tmp.source = source; tmp.number = number;
+        showStatus (tmp.sourceDescription() + " came from " + inputs[(size_t) inputIndex].name + ", not "
+                    + (selectedInput >= 0 && selectedInput < (int) inputs.size() ? inputs[(size_t) selectedInput].name : String ("this input"))
+                    + ": select that input under INPUTS to map it there. Still waiting...");
+        engine.setLearnArmed (true);
+        return;
+    }
     mappingsPanel->onLearn (source, number);
 }
 
