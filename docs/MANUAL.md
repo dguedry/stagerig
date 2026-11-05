@@ -646,9 +646,11 @@ report** puts what StageRig knows about your keyboards and MIDI ports, and
 what they have said to it lately, on the clipboard, to paste into a message
 when something does not work.
 
-**Teaching a keyboard's knobs.** For a keyboard whose knobs do not work by
-themselves, the lower part of **Your keyboards** chooses an input and lists
-its eight knobs. Press **Learn** and turn the knob. Tick **The knobs are
+**Teaching a keyboard's knobs.** Only a plain MIDI keyboard whose knobs send
+controllers needs this; for one StageRig talks to, the knobs already work
+and the lower part of **Your keyboards** says so instead. For the other
+kind it chooses an input and lists its eight knobs. Press **Learn** and
+turn the knob. Tick **The knobs are
 endless** for knobs that turn without stopping and send steps (around 64)
 rather than a position. What you teach is kept with the input, in the setup
 file. A taught knob no longer reaches the instruments as a controller, and

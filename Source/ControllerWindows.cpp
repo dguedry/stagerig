@@ -1042,6 +1042,10 @@ private:
                     else if (! k.plain && k.knobsByThemselves) byItself = k.name;
                 }
         const bool nothingToTeach = silent.isNotEmpty() || byItself.isNotEmpty();
+        // The eight rows are shown only where teaching applies, or where something was taught earlier and can be forgotten.
+        bool anyTaught = false;
+        for (int cc : c.knobCC) if (cc > 0) anyTaught = true;
+        const bool showRows = any && (! nothingToTeach || anyTaught);
         for (int i = 0; i < numRows; ++i)
         {
             auto& r = rows[(size_t) i];
@@ -1053,7 +1057,10 @@ private:
             r.learn.setButtonText (learning == i ? "Cancel" : "Learn");
             r.learn.setEnabled (any && ! nothingToTeach);
             r.forget.setEnabled (any);
+            for (Component* comp : { (Component*) &r.name, (Component*) &r.what, (Component*) &r.learn, (Component*) &r.forget })
+                comp->setVisible (showRows);
         }
+        relativeBtn.setVisible (showRows);
         explain.setText (byItself.isNotEmpty()
             ? "Nothing to teach: StageRig talks to " + byItself + " itself, so its knobs already work -- turn one with an instrument's "
               "Knobs window open and its box lights. What they turn is set there, per instrument. This section is only for a plain MIDI "
