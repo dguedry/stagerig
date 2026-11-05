@@ -3,3 +3,4 @@ build/
 compile_commands.json
 *.stagerig.json.bak
 *.performer.json.bak
+build-agent/
