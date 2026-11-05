@@ -674,7 +674,10 @@ else to the first that does: for a long set list.
 eight knobs as eight boxes, in the order they sit on any keyboard, each
 with the parameter it turns, its value, and a bar of how far up it is; the
 box of a knob you turn on the keyboard lights up. The layout belongs to the
-plugin, so every program with that plugin uses it.
+plugin, so every program with that plugin uses it. It takes a keyboard
+StageRig can talk to: a Komplete Kontrol (S MK1, MK2, MK3, A or M), a
+Launchkey MK4, any MIDI 2.0 keyboard, or one whose eight knobs you taught
+in Options > Your keyboards; those with a screen show the names and values.
 
 - **Layout** says what the knobs follow. **Automatic** is the maker's
   pages, for a plugin that has them, or else StageRig's picks (the front

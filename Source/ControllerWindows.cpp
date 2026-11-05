@@ -68,8 +68,9 @@ public:
         addAndMakeVisible (subtitle);
         subtitle.setColour (Label::textColourId, textDim);
         subtitle.setJustificationType (Justification::topLeft);
-        subtitle.setText ("How it works: turning knob 1 to 8 on your keyboard turns the parameter in box 1 to 8 here, whatever the keyboard. "
-                          "A keyboard with a screen is sent these names and values. The same in every program with " + plugin.name + ".", dontSendNotification);
+        subtitle.setText ("How it works: turning knob 1 to 8 on your keyboard turns the parameter in box 1 to 8 here, the same in every program with " + plugin.name + ". "
+                          "It takes a keyboard StageRig can talk to: a Komplete Kontrol (S MK1, MK2, MK3, A or M), a Launchkey MK4, any MIDI 2.0 keyboard, "
+                          "or one whose eight knobs you taught in Options > Your keyboards. Those with a screen show these names and values.", dontSendNotification);
 
         for (auto* b : { &knobsTab, &keysTab })
         {
@@ -156,7 +157,7 @@ public:
         top.removeFromRight (4);
         knobsTab.setBounds (top.removeFromRight (80));
         title.setBounds (top);
-        subtitle.setBounds (r.removeFromTop (34));
+        subtitle.setBounds (r.removeFromTop (50));
         r.removeFromTop (6);
 
         auto row = r.removeFromTop (26);
@@ -1331,7 +1332,7 @@ Component* showControlMapEditor (Engine& engine, SurfaceHub& hub, ControlMapLibr
     const auto& prog = inputs[(size_t) input].programs[(size_t) program];
     if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return nullptr;
     return launch (new ControlMapEditor (engine, hub, library, input, program, slot, std::move (changed)),
-            "Knobs: " + prog.slots[(size_t) slot].plugin.name, 900, 486);
+            "Knobs: " + prog.slots[(size_t) slot].plugin.name, 900, 502);
 }
 
 Component* showControllers (Engine& engine, SurfaceHub& hub, int selectedInput, std::function<void()> changed)
