@@ -1030,23 +1030,35 @@ private:
         const int in = current();
         const bool any = in >= 0 && in < (int) engine.getSetup().inputs.size();
         const auto c = any ? engine.getSetup().inputs[(size_t) in].controls : SurfaceControls();
-        // A keyboard whose knobs never reach MIDI (a Komplete Kontrol MK1 as plain MIDI): Learn would wait for ever.
-        String silent;
+        // Teaching is for a plain MIDI keyboard whose knobs send controllers. Two kinds have nothing to teach: one
+        // StageRig talks to (its knobs work by themselves), and a Komplete Kontrol MK1 left as plain MIDI, whose
+        // knobs never reach MIDI at all -- Learn would wait for ever.
+        String silent, byItself;
         if (any)
             for (const auto& k : hub.getKeyboards())
-                if (k.knobsSilent && k.plain && std::find (k.inputs.begin(), k.inputs.end(), in) != k.inputs.end()) silent = k.name;
+                if (std::find (k.inputs.begin(), k.inputs.end(), in) != k.inputs.end())
+                {
+                    if (k.knobsSilent && k.plain) silent = k.name;
+                    else if (! k.plain && k.knobsByThemselves) byItself = k.name;
+                }
+        const bool nothingToTeach = silent.isNotEmpty() || byItself.isNotEmpty();
         for (int i = 0; i < numRows; ++i)
         {
             auto& r = rows[(size_t) i];
             String what = c.knobCC[(size_t) i] > 0 ? "Controller " + String (c.knobCC[(size_t) i]) : String ("not taught");
-            if (silent.isNotEmpty() && c.knobCC[(size_t) i] <= 0) what = "no MIDI from it";
+            if (c.knobCC[(size_t) i] <= 0 && silent.isNotEmpty())   what = "no MIDI from it";
+            if (c.knobCC[(size_t) i] <= 0 && byItself.isNotEmpty()) what = "works by itself";
             r.what.setText (learning == i ? String ("Waiting: turn or press it now...") : what, dontSendNotification);
             r.what.setColour (Label::textColourId, learning == i ? Colours::orange : textDim);
             r.learn.setButtonText (learning == i ? "Cancel" : "Learn");
-            r.learn.setEnabled (any && silent.isEmpty());
+            r.learn.setEnabled (any && ! nothingToTeach);
             r.forget.setEnabled (any);
         }
-        explain.setText (silent.isNotEmpty()
+        explain.setText (byItself.isNotEmpty()
+            ? "Nothing to teach: StageRig talks to " + byItself + " itself, so its knobs already work -- turn one with an instrument's "
+              "Knobs window open and its box lights. What they turn is set there, per instrument. This section is only for a plain MIDI "
+              "keyboard whose knobs send controllers."
+            : silent.isNotEmpty()
             ? silent + "'s knobs send no MIDI while it is plain MIDI, so there is nothing to teach and Learn would wait for ever. "
               "Untick Plain MIDI for it above: then its knobs work by themselves, named on its screens, and each instrument's Knobs button says what they turn."
             : "Only for a keyboard whose knobs do not work by themselves: press Learn, then turn the knob. What the knobs turn "
