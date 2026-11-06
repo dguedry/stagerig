@@ -640,14 +640,18 @@ pages wins:
    its pages from the next start. A knob whose parameter cannot be found
    for certain is left out rather than guessed.
 3. **Automatic.** Anything else gets a first page, *Front panel*, of the
-   parameters a player reaches for, found by name in this order -- cutoff,
-   filter freq, frequency, resonance, attack, decay, sustain, release,
-   reverb, delay, chorus, drive, tone, bright, mix, vibrato, tremolo, rate,
-   depth -- made up to eight with the plugin's first continuous parameters;
-   then *Parameters 2, 3...*: every other parameter that can be automated,
-   eight at a time, up to sixteen pages. Switches, two-step parameters,
-   anything called *bypass* and the per-controller stand-in parameters a
-   VST3 publishes are left out.
+   parameters a player reaches for, found by name in this order -- what
+   defines the instrument first: drawbars (as many as fit), cutoff, filter
+   freq, frequency, resonance, Leslie, rotary, percussion; then the
+   envelope: attack, decay, sustain, release; then drive, reverb, delay,
+   chorus, tone, bright, mix, vibrato, tremolo, rate, depth -- made up to
+   eight with the plugin's first continuous parameters; then *Parameters 2,
+   3...*: every other parameter that can be automated, eight at a time, up
+   to sixteen pages. Switches, two-step parameters, anything called
+   *bypass* and the per-controller stand-in parameters a VST3 publishes are
+   left out, and so, from the search by name, are the knobs of a
+   compressor, limiter, EQ or gate section: an effect's *attack* is not the
+   envelope's, and turning it with the effect off changes nothing you hear.
 
 The pages are the plugin's, not the program's: the same in every program
 that has it, on any keyboard, and the Stage view and the tablet show the

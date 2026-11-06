@@ -4121,6 +4121,14 @@ int main()
                     CHECK (perf::pickPanelParams (ps, 4) == (std::vector<int> { 2, 3, 4, 5 }));
                     CHECK (perf::pickPanelParams (ps, 8) == (std::vector<int> { 2, 3, 4, 5, 8, 0, 1 }));     // then by order; no bypass, no CC stand-in, no switch
                     CHECK (perf::pickPanelParams ({}, 4).empty());
+                    // An organ: its drawbars first, as many as fit; an effect section's attack is not the envelope's.
+                    ParamInfoList organ;
+                    auto addO = [&organ] (const char* n) { ParamInfo p; p.index = (int) organ.size(); p.id = String (p.index); p.name = n; organ.push_back (p); };
+                    addO ("Compressor Attack"); addO ("Compressor Release"); addO ("Overscream Drive");
+                    for (const char* d : { "16'", "5 1/3'", "8'", "4'", "2 2/3'", "2'", "1 3/5'", "1 1/3'", "1'" }) addO ((String ("Upper Drawbar ") + d).toRawUTF8());
+                    addO ("Leslie Speed"); addO ("Percussion Level"); addO ("Amp Attack");
+                    CHECK (perf::pickPanelParams (organ, 8) == (std::vector<int> { 3, 4, 5, 6, 7, 8, 9, 10 }));
+                    CHECK (perf::pickPanelParams (organ, 12) == (std::vector<int> { 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 }));   // then the Leslie, percussion, the real attack
                     engine.setSlotPanelParams (0, 92, 0, { "3", "2" });
                     CHECK (engine.getSetup().inputs[0].programs[92].slots[0].panelParams == (std::vector<String> { "3", "2" }));
                     engine.setSlotPanelParams (0, 92, 0, {});
