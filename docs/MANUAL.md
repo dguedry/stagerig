@@ -616,24 +616,52 @@ play what.
 | An instrument's **Knobs** button | What the eight knobs turn on the plugin, in pages | The plugin, in every program that has it, on any keyboard -- and the Stage view and the tablet show the same page |
 | **CONTROLS ▸ This program** | One pedal, wheel or slider to one parameter (a MIDI mapping) | This program only |
 
-**What the knobs turn.** Each instrument has pages of eight knobs. With a
-controller setup (below), they are the setup's pages, with its names.
-Without one, a plugin whose maker laid out its knobs for Native Instruments'
-keyboards ("NKS ready": Super 8, Spitfire's BBC Symphony Orchestra, Audio
-Modeling's SWAM instruments and many more) gets the maker's pages, read
-from its NKS presets wherever the plugin installed them. Anything else gets
-the parameters a player reaches for first, found by name (cutoff, resonance,
-attack, release, reverb...), and then the rest of its parameters, eight at a
-time. In a program of several
-instruments, the knobs start on the one that has a setup, else one with
-the maker's pages, else the first; **Next instrument** moves them on.
+**What the knobs turn.** Each instrument has pages of eight knobs, worked
+out from one of three places, tried in this order; the first that gives
+pages wins:
 
-The maker's pages need no Native Instruments software and no Komplete
-Kontrol keyboard: any keyboard's knobs use them. StageRig looks for them
-when it starts (on Linux, inside the Wine prefixes the Windows plugins run
-in), so a plugin installed later has its pages from the next start. Where a
-knob in the presets cannot be found for certain among the plugin's
-parameters, it is left out rather than guessed.
+1. **Your own layout.** A file in the `Knob layouts` folder beside
+   StageRig's settings, chosen on the instrument (the Knobs window's
+   **Layout: Yours: ...**): pages of eight knobs, each naming a parameter
+   by its id (and by name, so a plugin that renumbers its parameters still
+   matches) with an optional short label for the keyboard's screen. The
+   automatic pages become one of these the moment you change anything in
+   the Knobs window, so most of yours start as 2 or 3 and get edited.
+2. **The maker's pages.** A plugin whose maker laid out its knobs for
+   Native Instruments' keyboards ("NKS ready": Super 8, Spitfire's BBC
+   Symphony Orchestra, Audio Modeling's SWAM instruments, Arturia, u-he and
+   many more) has that layout inside the NKS preset files its installer
+   put on disk. StageRig reads the pages from those files -- their names,
+   parameters and labels -- and matches each knob to the running plugin's
+   parameter by id, then by name. No Native Instruments software and no
+   Komplete Kontrol keyboard are involved: any keyboard's knobs use them.
+   StageRig looks for the presets when it starts (on Linux, inside the Wine
+   prefixes the Windows plugins run in too), so a plugin installed later has
+   its pages from the next start. A knob whose parameter cannot be found
+   for certain is left out rather than guessed.
+3. **Automatic.** Anything else gets a first page, *Front panel*, of the
+   parameters a player reaches for, found by name in this order -- cutoff,
+   filter freq, frequency, resonance, attack, decay, sustain, release,
+   reverb, delay, chorus, drive, tone, bright, mix, vibrato, tremolo, rate,
+   depth -- made up to eight with the plugin's first continuous parameters;
+   then *Parameters 2, 3...*: every other parameter that can be automated,
+   eight at a time, up to sixteen pages. Switches, two-step parameters,
+   anything called *bypass* and the per-controller stand-in parameters a
+   VST3 publishes are left out.
+
+The pages are the plugin's, not the program's: the same in every program
+that has it, on any keyboard, and the Stage view and the tablet show the
+page the keyboard's knobs are on. In a program of several instruments the
+knobs start on the one with a layout of yours, else one with the maker's
+pages, else the first; **Next instrument** (or the Stage view's buttons)
+moves them on.
+
+A plugin that publishes useless parameter names -- some Windows plugins run
+through Wine name every parameter `<unassigned>` -- gets automatic pages
+of eight `<unassigned>` knobs, which is all its list allows. The cure is a
+layout of your own: open its Knobs window, click a knob, press **Pick it in
+the plugin's window** and move the control in the plugin's own window, and
+give it a short name; once is enough, for every program with that plugin.
 
 **Your keyboards.** **Options ▸ Your keyboards...** lists every keyboard
 your inputs play from, with how StageRig talks to it and what that gives:
