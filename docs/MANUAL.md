@@ -606,14 +606,13 @@ program, and two more step through the programs. A keyboard with a screen
 shows the program and what each knob is; one with lights shows which keys
 play what.
 
-**Four kinds of knob, and what each is for:**
+**Three kinds of control, and what each is for:**
 
 | Where | What it says | For |
 |---|---|---|
-| **Options ▸ Your keyboards...** | The keyboards StageRig talks to; which knob and button is which, on one it does not know | That keyboard, in every program |
-| An instrument's **Knobs** button | What the eight knobs turn on the plugin, in pages | The plugin, in every program that has it, on any keyboard |
+| **Options ▸ Pedals and buttons...** | A pedal or button's job; on a plain MIDI keyboard, which controller each knob is | The rig, or that keyboard, in every program |
+| An instrument's **Knobs** button | What the eight knobs turn on the plugin, in pages | The plugin, in every program that has it, on any keyboard -- and the Stage view and the tablet show the same page |
 | **MIDI mappings** | One pedal, wheel or slider to one parameter | This program only |
-| The Stage view's front panel | The knobs on the screen | This instrument, in this program |
 
 **What the knobs turn.** Each instrument has pages of eight knobs. With a
 controller setup (below), they are the setup's pages, with its names.
@@ -621,8 +620,9 @@ Without one, a plugin whose maker laid out its knobs for Native Instruments'
 keyboards ("NKS ready": Super 8, Spitfire's BBC Symphony Orchestra, Audio
 Modeling's SWAM instruments and many more) gets the maker's pages, read
 from its NKS presets wherever the plugin installed them. Anything else gets
-the instrument's front-panel knobs, the ones the Stage view shows, and then
-the rest of its parameters, eight at a time. In a program of several
+the parameters a player reaches for first, found by name (cutoff, resonance,
+attack, release, reverb...), and then the rest of its parameters, eight at a
+time. In a program of several
 instruments, the knobs start on the one that has a setup, else one with
 the maker's pages, else the first; **Next instrument** moves them on.
 
@@ -1173,14 +1173,17 @@ level meter under the program name.
 Under the readout sits a **front panel** for the program's instrument: a row
 of knobs, as on a workstation, so the sound is shaped without opening its
 window. **Level** and **Pan** are the instrument's own (double-click puts
-them back to 0 dB and centre), and after them the plugin's parameters a
-player reaches for -- cutoff, resonance, attack, decay, sustain, release,
-reverb, chorus, drive -- found by name among what the plugin offers, as many
-as the width allows. Right-click a knob to make it any parameter of the
-plugin instead, or to go back to the ones picked by name; the choice is
-saved with the instrument. A program with several instruments shows a
-button for each above the knobs. Moving a knob moves the parameter in the
-plugin at once; a parameter moved in the plugin's own window moves the knob.
+them back to 0 dB and centre), and after them the eight knobs of the page
+the keyboard's knobs are on -- the same names and values the keyboard's
+screens show, from the instrument's one layout (*What the knobs turn*,
+above), with the page name and arrows beside the instrument. There is one
+answer to "which knobs am I looking at", on the laptop, the keyboard and
+the tablet. A program with several instruments shows a button for each
+above the knobs; pressing one gives the knobs to that instrument everywhere.
+Right-click a knob to change what the knobs turn: the instrument's Knobs
+window. When the width will not hold them all, Level and Pan give way
+first. Moving a knob moves the parameter in the plugin at once; a parameter
+moved in the plugin's own window moves the knob.
 
 **Perform** in the toolbar is the Stage view with the editing panes out of
 the way: the inputs, programs, instruments and mappings go, and the window
@@ -1302,12 +1305,13 @@ program switches to it immediately, and the page follows along if you change
 programs at the laptop instead.
 
 Under each keyboard's program list sits its **front panel**: the same knobs
-the Stage view shows on the computer, as sliders a thumb can work. For each
-instrument of the current program, **Level** and **Pan**, then the plugin's
-cutoff, resonance, envelope and effects, picked by name or chosen on the
-computer (right-click a knob there). A slider moved on the stand moves the
-parameter at once; a parameter moved anywhere else moves the slider once a
-second, unless a thumb is on it.
+the Stage view shows on the computer and the keyboard shows on its screens,
+as sliders a thumb can work. The instrument the keyboard's knobs are on
+(buttons when the program has several: tapping one gives the knobs to it
+everywhere), its **Level** and **Pan**, then the page of eight knobs they are
+on, named as the instrument's layout names them, with the page arrows. A
+slider moved on the stand moves the parameter at once; a parameter moved
+anywhere else moves the slider once a second, unless a thumb is on it.
 
 ### Showing a plugin's own window
 

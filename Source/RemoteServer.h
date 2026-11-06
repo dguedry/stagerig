@@ -23,6 +23,8 @@ namespace perf
     someone on the same network changing your sounds by guessing the address.
     It is not protection against someone who can read your screen, which is the
     right level for a stage tool. */
+class SurfaceHub;
+
 class RemoteServer : private juce::Thread,
                      private Engine::Listener
 {
@@ -36,10 +38,6 @@ public:
     static bool isEditingRoute (const juce::String& path);
     /** Something the page shows changed outside the engine (the editing lock): it redraws. */
     void touch()                              { ++revision; }
-    /** The Now page: every input's current program with its instruments
-        (on/off, gain) and effects (bypass), the outputs' volumes and master
-        chains, the transpose and the song in play. */
-    juce::String nowJson() const;
     RemoteServer (Engine&, juce::PropertiesFile&);
     ~RemoteServer() override;
 
@@ -56,6 +54,8 @@ public:
     static juce::String getHostAddress();
 
     juce::String getToken() const          { return token; }
+    /** The hub the front panel is read from and turned through (the page the keyboard's knobs are on); none while it is not there. */
+    void setHub (SurfaceHub* h)            { hub = h; }
 
 
 private:
@@ -69,6 +69,7 @@ private:
         every plugin window would need its own hole in the firewall. */
     bool relayToPluginView (juce::StreamingSocket&, const juce::String& firstChunk, int webPort);
 
+    SurfaceHub* hub = nullptr;
     juce::String stateJson() const;
     /** The audio inputs' meters, for the tablet to poll while a page shows them. */
     juce::String levelsJson() const;
@@ -79,9 +80,6 @@ private:
     struct FilePart { int channel = 1; juce::String name; int program = 0; };
     mutable std::map<juce::String, std::vector<FilePart>> partCache;
     const std::vector<FilePart>& partsOf (const juce::File&) const;
-    /** Where the time goes: blocks the rig missed, and per loaded plugin the
-        blocks it did not answer in time. For finding the plugin that crackles. */
-    juce::String healthJson() const;
     juce::String slotsJson (int inputIndex) const;
     bool authorised (const juce::String& request) const;
 

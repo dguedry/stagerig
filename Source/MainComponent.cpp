@@ -3005,6 +3005,7 @@ MainComponent::~MainComponent()
     for (auto& w : controllerWindows)
         if (w != nullptr) delete w.getComponent();
     if (stagePanel != nullptr) stagePanel->setHub (nullptr);
+    if (remote != nullptr) remote->setHub (nullptr);
     surfaceHub.reset();
     engine.removeListener (this);
 }
@@ -3858,6 +3859,7 @@ bool MainComponent::startRemote()
     if (remote == nullptr)
     {
         remote = std::make_unique<RemoteServer> (engine, settings);
+        remote->setHub (surfaceHub.get());
         remote->onEdited = [this] { markDirty(); };       // a knob or a scene changed on the stand: unsaved, and the autosave takes it
     }
     const int port = settings.getIntValue ("remotePort", 7777);

@@ -1,4 +1,5 @@
 #include "RemoteServer.h"
+#include "Surfaces.h"
 #include "PanelParams.h"
 #include "MidiEditor.h"
 #include "GmMixer.h"
@@ -25,6 +26,31 @@ namespace perf
 {
 
 //==============================================================================
+/* The code and the one way to call the computer, pasted into every page that
+   polls (the main page and the chart) so a wrong code means the same thing on
+   each: the stored code is forgotten and the call throws an error marked
+   `gate`, which the page answers by asking for the code. A macro rather than
+   a served script so each page is still one request. */
+#define STAGERIG_REMOTE_API_JS R"JS(
+/* The code is remembered on this device: add the page to the home screen once
+   and type the six characters StageRig shows, rather than re-scanning a link
+   every time the app restarts. */
+let token = new URLSearchParams(location.search).get("t") || localStorage.getItem("t") || "";
+if (token) localStorage.setItem("t", token);
+async function api(path, opts) {
+  let r;
+  try { r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token), opts); }
+  catch (e) { throw new Error("Can't reach StageRig on the computer. Is this tablet on the same wifi?"); }
+  if (r.status === 403) { localStorage.removeItem("t"); const e = new Error("gate"); e.gate = true; throw e; }
+  if (!r.ok) {
+    let text = "";
+    try { const j = await r.json(); text = j && j.error ? j.error : ""; } catch (e) {}
+    throw new Error(text || ("StageRig answered with an error (" + r.status + "). Try again."));
+  }
+  return r.json();
+}
+)JS"
+
 // The page. Kept in one string so the app is a single binary with nothing to install.
 // Big touch targets, current program first: this is read at arm's length on a stand.
 static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
@@ -102,9 +128,15 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .knob { display:grid; grid-template-columns:96px 1fr 64px; align-items:center; gap:10px; padding:4px 0; }
   .knob .kn { color:#fff; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .knob .kv { color:var(--dim); font-size:13px; text-align:right; font-variant-numeric:tabular-nums; }
+  .knob.off { opacity:.4; }
+  .kname { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .kinst { font:inherit; text-transform:none; letter-spacing:0; padding:3px 10px; border-radius:6px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; }
+  .kinst.on { background:#2f5f9a; border-color:#2f5f9a; }
+  .kinst:disabled { opacity:.4; }
+  .kpage { margin-left:auto; display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:0; }
+  .kpage button { font:inherit; padding:2px 10px; border-radius:6px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; }
+  .kpage button:disabled { opacity:.3; }
   .knob input[type=range] { width:100%; height:34px; margin:0; accent-color:var(--accent); touch-action:pan-y; }
-  /* Group filters. Only drawn when the setup actually uses groups, so someone
-     who has not touched the feature sees exactly what they saw before. */
   /* Tempo lives in the header beside PANIC: it is worth a glance and a tap, not
      a band across the top of the screen. */
   .hdr { display:flex; align-items:center; gap:8px; }
@@ -270,7 +302,6 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 </div>
 <div id="setview"></div>
 <div id="inputs"></div>
-</div>
 <script>
 /* Tapping is timed on the server, where the tempo lives: a few milliseconds of
    network on a local wifi is far below the precision of a finger, and doing the
@@ -287,9 +318,7 @@ function showTempo(bpm) {
     (Math.round(bpm * 10) / 10).toFixed(1) + '<i>bpm</i>';
 }
 
-
-let token = new URLSearchParams(location.search).get("t") || localStorage.getItem("t") || "";
-if (token) localStorage.setItem("t", token);
+)HTML" STAGERIG_REMOTE_API_JS R"HTML(
 let rev = -1;
 
 // Asking for the code beats putting it in the URL: you can add this page to the home
@@ -316,18 +345,6 @@ function askForCode(message) {
   document.getElementById("code").focus();
 }
 
-async function api(path, opts) {
-  let r;
-  try { r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token), opts); }
-  catch (e) { throw new Error("Can't reach StageRig on the computer. Is this tablet on the same wifi?"); }
-  if (r.status === 403) { localStorage.removeItem("t"); const e = new Error("gate"); e.gate = true; throw e; }
-  if (!r.ok) {
-    let text = "";
-    try { const j = await r.json(); text = j && j.error ? j.error : ""; } catch (e) {}
-    throw new Error(text || ("StageRig answered with an error (" + r.status + "). Try again."));
-  }
-  return r.json();
-}
 /* A message stays long enough to be read -- an error six seconds, a
    confirmation two -- rather than being wiped by the next poll. */
 let showTimer = null;
@@ -1031,49 +1048,65 @@ async function loadPanel(i) {
   panelBusy[i] = true;
   let data;
   try { data = await api("/api/panel?input=" + i); } catch (e) { return; } finally { panelBusy[i] = false; }
-  const slots = data.slots || [];
-  const key = JSON.stringify(slots.map(sl => [sl.slot, sl.name, sl.knobs.map(k => k.id + k.name)]));
+  const knobs = data.knobs || [], instruments = data.instruments || [];
+  const key = JSON.stringify([data.slot, instruments.map(s => s.name), data.page, data.pageCount, data.pageName, knobs.map(k => k.id + k.name)]);
   if (host.dataset.key !== key) {
     host.dataset.key = key;
     host.innerHTML = "";
     for (const k in knobTouch) if (k.startsWith(i + "/")) delete knobTouch[k];     // a strip redrawn mid-drag never hears its pointerup
-    slots.forEach(sl => {
-      if (!sl.knobs.length) return;
-      const sec = document.createElement("div"); sec.className = "kslot";
-      const title = document.createElement("div"); title.className = "kname"; title.textContent = sl.name;
-      sec.appendChild(title);
-      sl.knobs.forEach(k => {
-        const row = document.createElement("label"); row.className = "knob";
-        row.innerHTML = '<span class="kn"></span><input type="range" min="0" max="1000"><span class="kv"></span>';
-        row.querySelector(".kn").textContent = k.name;
-        const r = row.querySelector("input");
-        r.dataset.id = k.id; r.dataset.slot = sl.slot;
-        const tkey = i + "/" + sl.slot + "/" + k.id;
-        let timer = null, pending = null;
-        const send = () => {
-          const v = pending; pending = null; timer = null;
-          api("/api/knob?input=" + i + "&program=" + data.program + "&slot=" + sl.slot + "&id=" + encodeURIComponent(k.id) + "&value=" + v, { method: "POST" }).catch(e => { if (!e.gate) show(e.message); });
-        };
-        r.oninput = () => {
-          pending = (r.value / 1000).toFixed(3);
-          row.querySelector(".kv").textContent = k.id === "level" ? dbText(r.value / 1000) : k.id === "pan" ? panText(r.value / 1000) : Math.round(r.value / 10) + "%";
-          if (!timer) timer = setTimeout(send, 60);
-        };
-        r.onpointerdown = () => { knobTouch[tkey] = true; };
-        r.onpointerup = r.onpointercancel = () => { setTimeout(() => { delete knobTouch[tkey]; }, 300); };
-        sec.appendChild(row);
+    if (!knobs.length) return;
+    const sec = document.createElement("div"); sec.className = "kslot";
+    // The instrument the knobs are on -- buttons when the program has more than one -- and the page they are on, with its arrows.
+    const title = document.createElement("div"); title.className = "kname";
+    if (instruments.length > 1) {
+      instruments.forEach(s => {
+        const b = document.createElement("button"); b.className = "kinst" + (s.slot === data.slot ? " on" : "");
+        b.textContent = s.name; b.disabled = !s.plugin;
+        b.onclick = () => api("/api/instrument?input=" + i + "&slot=" + s.slot, { method: "POST" }).then(() => { host.dataset.key = ""; loadPanel(i); }).catch(e => { if (!e.gate) show(e.message); });
+        title.appendChild(b);
       });
-      host.appendChild(sec);
+    } else title.textContent = data.instrument || "";
+    if (data.pageCount > 0) {
+      const pg = document.createElement("span"); pg.className = "kpage";
+      const mk = (txt, dir) => { const b = document.createElement("button"); b.textContent = txt; b.disabled = data.pageCount < 2;
+        b.onclick = () => api("/api/page?input=" + i + "&dir=" + dir, { method: "POST" }).then(() => { host.dataset.key = ""; loadPanel(i); }).catch(e => { if (!e.gate) show(e.message); }); return b; };
+      pg.appendChild(mk("‹", -1));
+      const lbl = document.createElement("span"); lbl.textContent = (data.pageCount > 1 ? "Page " + (data.page + 1) + "/" + data.pageCount + ": " : "") + data.pageName; pg.appendChild(lbl);
+      pg.appendChild(mk("›", 1));
+      title.appendChild(pg);
+    }
+    sec.appendChild(title);
+    knobs.forEach(k => {
+      const row = document.createElement("label"); row.className = "knob" + (k.value < 0 ? " off" : "");
+      row.innerHTML = '<span class="kn"></span><input type="range" min="0" max="1000"><span class="kv"></span>';
+      row.querySelector(".kn").textContent = k.name || "-";
+      const r = row.querySelector("input");
+      r.dataset.id = k.id; r.disabled = k.value < 0;
+      const tkey = i + "/" + k.id;
+      let timer = null, pending = null;
+      const send = () => {
+        const v = pending; pending = null; timer = null;
+        api("/api/knob?input=" + i + "&program=" + data.program + "&slot=" + data.slot + "&id=" + encodeURIComponent(k.id) + "&value=" + v, { method: "POST" }).catch(e => { if (!e.gate) show(e.message); });
+      };
+      r.oninput = () => {
+        pending = (r.value / 1000).toFixed(3);
+        row.querySelector(".kv").textContent = k.id === "level" ? dbText(r.value / 1000) : k.id === "pan" ? panText(r.value / 1000) : Math.round(r.value / 10) + "%";
+        if (!timer) timer = setTimeout(send, 60);
+      };
+      r.onpointerdown = () => { knobTouch[tkey] = true; };
+      r.onpointerup = r.onpointercancel = () => { setTimeout(() => { delete knobTouch[tkey]; }, 300); };
+      sec.appendChild(row);
     });
+    host.appendChild(sec);
   }
-  slots.forEach(sl => sl.knobs.forEach(k => {
-    const tkey = i + "/" + sl.slot + "/" + k.id;
-    if (knobTouch[tkey]) return;
-    const r = host.querySelector('input[data-slot="' + sl.slot + '"][data-id="' + k.id + '"]');
+  knobs.forEach(k => {
+    const tkey = i + "/" + k.id;
+    if (knobTouch[tkey] || k.value < 0) return;
+    const r = host.querySelector('input[data-id="' + k.id + '"]');
     if (!r) return;
     r.value = Math.round(k.value * 1000);
     r.parentElement.querySelector(".kv").textContent = k.text;
-  }));
+  });
 }
 const dbText = v => { const db = -60 + v * 72; return db <= -59.9 ? "off" : (db >= 0 ? "+" : "") + db.toFixed(1) + " dB"; };
 const panText = v => { const p = Math.round((v * 2 - 1) * 50); return p === 0 ? "C" : p < 0 ? "L " + (-p) : "R " + p; };
@@ -1184,15 +1217,14 @@ async function loadSlots(i) {
   syncGuiButton(i);
 }
 
-/* The plugin's own window is where its controls live now, so the page only has
-   to follow the program the keyboard selected. */
+/* The poll: once a second, redrawn only when the revision moved. The meters,
+   the transport and the knobs have their own timers, started and stopped here. */
 async function refresh(force) {
   try {
     const s = await api("/api/state");
     if (force || s.revision !== rev) { rev = s.revision; render(s); if (keySheet) keySheet.draw(); }
     syncLevelPolling();
     syncTransportPolling();
-    if (transportUi) pollTransport();
     pollPanels();
   } catch (e) {
     if (e.gate) askForCode("That code did not match the one in the Tablet control window on the computer. Try again.");
@@ -1237,16 +1269,6 @@ RemoteServer::~RemoteServer()
     stop();
 }
 
-/* Our own page for a plugin window, rather than noVNC's.
-
-   Its vnc_lite has no viewport meta tag, so a tablet lays the page out at
-   desktop width and pinch does nothing; and it can only scale-to-fit, which
-   makes a 1010px Kontakt window unreadable on a tablet. This sets the viewport
-   so the browser's own pinch-zoom works, and shows the plugin at full size in a
-   scrollable box so there is something to zoom into.
-
-   Served from here rather than patched into /usr/share/novnc, which belongs to
-   the distribution and would be overwritten by an update. */
 /* The stand. One song's chart, full screen, following the set: when the
    song changes -- footswitch, tablet, program change -- this page moves to
    the new song's chart by itself, like a stand that turns its own pages.
@@ -1301,14 +1323,8 @@ static const char* kChartHtml = R"HTML(<!DOCTYPE html>
 <div id="page"></div>
 <div id="nav" style="display:none"><button id="prev">&#8249; Prev</button><span id="where"></span><button id="next">Next &#8250;</button></div>
 <script>
-let token = new URLSearchParams(location.search).get("t") || localStorage.getItem("t") || "";
-if (token) localStorage.setItem("t", token);
+)HTML" STAGERIG_REMOTE_API_JS R"HTML(
 document.getElementById("back").href = "/?t=" + encodeURIComponent(token);
-async function api(path) {
-  const r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token));
-  if (!r.ok) throw new Error("Can't reach StageRig on the computer");
-  return r.json();
-}
 const withToken = (u) => u + "?t=" + encodeURIComponent(token);
 const esc = (t) => t.replace(/[&<>]/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[ch]));
 
@@ -1321,14 +1337,6 @@ document.getElementById("follow").onclick = () => {
   follow = !follow;
   document.getElementById("follow").className = follow ? "on" : "";
 };
-
-/* The song in play, as an index into state.songs: the one the rig says, or the set's position. */
-function playingSong(s) {
-  if (s.playingSong >= 0) return s.playingSong;
-  const st = (s.sets || [])[s.currentSet];
-  if (!st || s.currentSong < 0 || s.currentSong >= st.songs.length) return -1;
-  return st.songs[s.currentSong];
-}
 
 /* ChordPro: [C]chords inside the words become a line of chords above them,
    placed by character so a monospace face lines them up. Directives in
@@ -1438,7 +1446,7 @@ async function refresh() {
     /* Follow moves with the set, it does not override a choice: the song
        named in the URL stays until the set actually changes song. Opened
        without one, the playing song is shown. */
-    const now = playingSong(s);
+    const now = s.playingSong >= 0 ? s.playingSong : -1;    // the rig's answer, in or outside the set list
     if (song < 0) song = now;
     else if (follow && lastPlaying !== null && now >= 0 && now !== lastPlaying && now !== song)
     { song = now; chart = 0; pageNo = 1; shownKey = ""; }
@@ -1446,6 +1454,8 @@ async function refresh() {
     if (first || s.revision !== rev) { rev = s.revision; shownKey = ""; }
     await showChart();
   } catch (e) {
+    /* A wrong code: back to the main page, which asks for it. */
+    if (e.gate) { location.replace("/"); return; }
     document.getElementById("title").textContent = e.message;
   }
 }
@@ -1455,6 +1465,16 @@ setInterval(refresh, 1000);
 </body></html>
 )HTML";
 
+/* Our own page for a plugin window, rather than noVNC's.
+
+   Its vnc_lite has no viewport meta tag, so a tablet lays the page out at
+   desktop width and pinch does nothing; and it can only scale-to-fit, which
+   makes a 1010px Kontakt window unreadable on a tablet. This sets the viewport
+   so the browser's own pinch-zoom works, and shows the plugin at full size in a
+   scrollable box so there is something to zoom into.
+
+   Served from here rather than patched into /usr/share/novnc, which belongs to
+   the distribution and would be overwritten by an update. */
 static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -1504,15 +1524,20 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 </head><body>
 <div id="msg">Connecting to the plugin window on the computer…</div>
 <script>
-  /* Before anything else: is this window still being mirrored? The module
-     below imports noVNC from under the mirror, and on a window that has
-     gone the import 404s and the module never runs -- so this check cannot
-     live inside it. The relay answers 404 for a mirror StageRig no longer
-     has (the window was closed on the computer, or its program swapped out). */
-  fetch(location.pathname.replace(/plugin\.html$/, 'vnc.html'), { cache: 'no-store' })
-    .then(r => { if (r.status === 404) { const m = document.getElementById('msg'); m.style.display = 'block';
-                 m.textContent = 'The plugin window was closed. Go back to the StageRig tab and press GUI again.'; } })
-    .catch(() => {});
+  /* Is this window still being mirrored? The relay answers 404 for a mirror
+     StageRig no longer has (the window was closed on the computer, or its
+     program swapped out). Asked before anything else, from this plain script:
+     the module below imports noVNC from under the mirror, and on a window that
+     has gone the import 404s and the module never runs. Asked again by the
+     module before each connection, so a reconnect into nothing says so instead
+     of retrying for two minutes. */
+  const closedMessage = 'The plugin window was closed. Go back to the StageRig tab and press GUI again.';
+  async function windowClosed() {
+    try { return (await fetch(location.pathname.replace(/plugin\.html$/, 'vnc.html'), { cache: 'no-store' })).status === 404; }
+    catch (e) { return false; }           // no answer at all: let the connection find out
+  }
+  function sayClosed() { const m = document.getElementById('msg'); m.style.display = 'block'; m.textContent = closedMessage; }
+  windowClosed().then(gone => { if (gone) sayClosed(); });
 </script>
 <div id="screen"></div>
 <div id="bar"><button id="move">Move view</button><button id="zoomout">-</button><button id="zoomin">+</button><button id="full">Full screen</button><button id="fit">Fit to screen</button></div>
@@ -1547,7 +1572,6 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   }
 
   const canvasOf = () => screen.querySelector('canvas');
-  function releaseAll() {}          // nothing of ours is held any more
 
   /* Zoom through noVNC's own Display scale rather than a CSS transform. absX
      and absY divide by that scale, so a touch or a mouse click at a scaled
@@ -1640,18 +1664,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
      gone, and the main page's GUI button is the way back. */
   let retries = 0;
   async function connect() {
-    releaseAll();
-    /* Still being shown? The relay answers 404 for a window StageRig no
-       longer mirrors -- closed on the computer, or its program swapped out.
-       Saying so beats retrying into nothing for two minutes. */
-    try {
-      const probe = await fetch(location.pathname.replace(/plugin\.html$/, 'vnc.html'), { cache: 'no-store' });
-      if (probe.status === 404) {
-        msg.style.display = 'block';
-        msg.textContent = 'The plugin window was closed. Go back to the StageRig tab and press GUI again.';
-        return;
-      }
-    } catch (e) { /* no answer at all: let the reconnect below find out */ }
+    if (await windowClosed()) { sayClosed(); return; }
     /* noVNC's own viewport, which is what its input path expects: with
        clipping on it sizes the canvas to the container and keeps a viewport
        offset, and absX/absY add that offset to turn a click into a framebuffer
@@ -1670,7 +1683,6 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 
     rfb.addEventListener('connect', () => { retries = 0; msg.style.display = 'none'; reapplyZoomLater(); });
     rfb.addEventListener('disconnect', e => {
-      releaseAll();
       msg.style.display = 'block';
       if (retries < 30) {
         retries++;
@@ -1678,7 +1690,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
         setTimeout(connect, Math.min(5000, 1000 * retries));
       } else {
         msg.textContent = (e.detail && e.detail.clean)
-          ? 'The plugin window was closed. Go back to the StageRig tab and press GUI again.'
+          ? closedMessage
           : 'Lost the connection to the plugin window. Go back to the StageRig tab and press GUI again.';
       }
     });
@@ -1904,11 +1916,6 @@ static bool produceOnMessageThread (std::function<String()> produce, String& out
     return true;
 }
 
-static void sendBusy (StreamingSocket& sock, void (*send) (StreamingSocket&, const String&, const String&, const String&))
-{
-    send (sock, "503 Service Unavailable", "application/json", "{\"error\":\"StageRig is busy; try again.\"}");
-}
-
 String RemoteServer::stateJson() const
 {
     const auto& setup = engine.getSetup();
@@ -2072,53 +2079,56 @@ const std::vector<RemoteServer::FilePart>& RemoteServer::partsOf (const File& f)
 String RemoteServer::panelJson (int input) const
 {
     /* The front panel of an input's current program, as the Stage view shows
-       it: each instrument's level and pan, then the plugin's parameters a
-       player reaches for (or the ones chosen on the computer), with their
-       values as the plugin last reported them -- no round trip here. */
+       it: the instrument the keyboard's knobs are on, its level and pan, and
+       the page of eight knobs they are on -- the same names and values the
+       keyboard's screens show, from the one layout (SurfaceHub). Values as
+       the plugin last reported them: no round trip here. */
     DynamicObject::Ptr o (new DynamicObject());
     const auto& inputs = engine.getSetup().inputs;
-    if (input < 0 || input >= (int) inputs.size()) return JSON::toString (var (o.get()), true);
+    if (input < 0 || input >= (int) inputs.size() || hub == nullptr) return JSON::toString (var (o.get()), true);
     const auto& in = inputs[(size_t) input];
     const int program = in.currentProgram;
     const auto& prog = in.programs[(size_t) program];
     o->setProperty ("input", input);
     o->setProperty ("program", program);
-    Array<var> slots;
+    if (prog.slots.empty()) return JSON::toString (var (o.get()), true);
+    int slot = hub->getFocusSlot (input);
+    if (slot < 0) slot = 0;
+    slot = jlimit (0, (int) prog.slots.size() - 1, slot);
+    const auto& sd = prog.slots[(size_t) slot];
+    const auto view = hub->viewFor (input);
+    auto slotName = [] (const SlotDef& s) { return s.kind == SlotDef::Kind::plugin ? s.plugin.name : s.kind == SlotDef::Kind::gm ? String ("General MIDI")
+                                                 : s.kind == SlotDef::Kind::external ? String ("MIDI device") : s.targetInputName; };
+    o->setProperty ("slot", slot);
+    o->setProperty ("instrument", slotName (sd));
+    Array<var> instruments;
     for (int si = 0; si < (int) prog.slots.size(); ++si)
     {
-        const auto& sd = prog.slots[(size_t) si];
         DynamicObject::Ptr so (new DynamicObject());
         so->setProperty ("slot", si);
-        so->setProperty ("name", sd.kind == SlotDef::Kind::plugin ? sd.plugin.name : sd.kind == SlotDef::Kind::gm ? String ("General MIDI")
-                                 : sd.kind == SlotDef::Kind::external ? String ("MIDI device") : sd.targetInputName);
-        Array<var> knobs;
-        auto knob = [&knobs] (const String& id, const String& name, double value, const String& text)
-        {
-            DynamicObject::Ptr k (new DynamicObject());
-            k->setProperty ("id", id); k->setProperty ("name", name); k->setProperty ("value", value); k->setProperty ("text", text);
-            knobs.add (var (k.get()));
-        };
-        knob ("level", "Level", (sd.gainDb + 60.0) / 72.0, sd.gainDb <= -59.9f ? String ("off") : (sd.gainDb >= 0.0f ? "+" : "") + String (sd.gainDb, 1) + " dB");
-        const int pan = roundToInt (sd.pan * 50.0f);
-        knob ("pan", "Pan", (sd.pan + 1.0) / 2.0, pan == 0 ? String ("C") : pan < 0 ? "L " + String (-pan) : "R " + String (pan));
-        if (sd.kind == SlotDef::Kind::plugin && engine.isPluginAlive (input, program, si))
-            if (auto* plugin = engine.getPlugin (input, program, si))
-            {
-                const auto& params = plugin->getParameters();
-                std::vector<int> picked;
-                if (sd.panelParams.empty()) picked = pickPanelParams (params, 6);
-                else for (const auto& id : sd.panelParams) if (const int idx = plugin->findParameterIndex (id); idx >= 0 && picked.size() < 8) picked.push_back (idx);
-                for (int idx : picked)
-                    if (idx >= 0 && idx < (int) params.size())
-                    {
-                        const float v = plugin->getCachedParameterValue (idx);
-                        knob ("p:" + String (idx), params[(size_t) idx].name, v, String (roundToInt (v * 100.0f)) + "%");
-                    }
-            }
-        so->setProperty ("knobs", knobs);
-        slots.add (var (so.get()));
+        so->setProperty ("name", slotName (prog.slots[(size_t) si]));
+        so->setProperty ("plugin", prog.slots[(size_t) si].isPlugin());
+        instruments.add (var (so.get()));
     }
-    o->setProperty ("slots", slots);
+    o->setProperty ("instruments", instruments);
+    const bool hasPage = sd.isPlugin() && view.knobLevels != SurfaceView().knobLevels;
+    o->setProperty ("page", hasPage ? view.page : -1);
+    o->setProperty ("pageCount", hasPage ? view.pageCount : 0);
+    o->setProperty ("pageName", hasPage ? view.pageName : String());
+    Array<var> knobs;
+    auto knob = [&knobs] (const String& id, const String& name, double value, const String& text)
+    {
+        DynamicObject::Ptr k (new DynamicObject());
+        k->setProperty ("id", id); k->setProperty ("name", name); k->setProperty ("value", value); k->setProperty ("text", text);
+        knobs.add (var (k.get()));
+    };
+    knob ("level", "Level", (sd.gainDb + 60.0) / 72.0, sd.gainDb <= -59.9f ? String ("off") : (sd.gainDb >= 0.0f ? "+" : "") + String (sd.gainDb, 1) + " dB");
+    const int pan = roundToInt (sd.pan * 50.0f);
+    knob ("pan", "Pan", (sd.pan + 1.0) / 2.0, pan == 0 ? String ("C") : pan < 0 ? "L " + String (-pan) : "R " + String (pan));
+    if (hasPage)
+        for (int k = 0; k < SurfaceView::numKnobs; ++k)
+            knob ("k:" + String (k), view.knobNames[(size_t) k], view.knobLevels[(size_t) k], view.knobValues[(size_t) k]);
+    o->setProperty ("knobs", knobs);
     return JSON::toString (var (o.get()), true);
 }
 
@@ -2227,130 +2237,6 @@ String RemoteServer::levelsJson() const
     return JSON::toString (var (root.get()), true);
 }
 
-String RemoteServer::healthJson() const
-{
-    DynamicObject::Ptr root (new DynamicObject());
-    root->setProperty ("lateBlocks", engine.getLateBlockCount());
-    root->setProperty ("blockSize", engine.getLastBlockSize());
-    root->setProperty ("sampleRate", engine.getSampleRate());
-    Array<var> plugins;
-    const auto& setup = engine.getSetup();
-    auto add = [&plugins] (const String& where, RemotePlugin* p)
-    {
-        if (p == nullptr) return;
-        DynamicObject::Ptr o (new DynamicObject());
-        o->setProperty ("where", where);
-        o->setProperty ("plugin", p->getName());
-        o->setProperty ("alive", p->isAlive());
-        o->setProperty ("missedBlocks", p->getMissedBlocks());
-        plugins.add (var (o.get()));
-    };
-    for (int i = 0; i < (int) setup.inputs.size(); ++i)
-    {
-        const auto& in = setup.inputs[(size_t) i];
-        for (int p = 0; p < InputDef::numPrograms; ++p)
-        {
-            if (! engine.isProgramLoaded (i, p)) continue;
-            const auto& def = in.programs[(size_t) p];
-            const auto tag = in.name + " " + String (p).paddedLeft ('0', 3) + (def.name.isNotEmpty() ? " " + def.name : String());
-            for (int s = 0; s < (int) def.slots.size(); ++s)
-            {
-                add (tag, engine.getPlugin (i, p, s, -1));
-                for (int e = 0; e < (int) def.slots[(size_t) s].midiEffects.size(); ++e) add (tag + " > MIDI", engine.getPlugin (i, p, ProgramDef::midiChainOf (s), e));
-                for (int e = 0; e < (int) def.slots[(size_t) s].effects.size(); ++e) add (tag + " > FX", engine.getPlugin (i, p, s, e));
-            }
-            for (int e = 0; e < (int) def.effects.size(); ++e) add (tag + " program FX", engine.getPlugin (i, p, -1, e));
-        }
-    }
-    for (int o = 0; o < (int) setup.outputs.size(); ++o)
-        for (int e = 0; e < (int) setup.outputs[(size_t) o].chain.effects.size(); ++e)
-            add ("Output " + setup.outputs[(size_t) o].name, engine.getPlugin (Engine::outputAddress (o), 0, -1, e));
-    root->setProperty ("plugins", plugins);
-    return JSON::toString (var (root.get()), true);
-}
-
-/** The current program's slots, so the tablet can offer a window onto each one.
-
-    Grouped by slot because that is how the setup is built and how the desktop
-    labels things: "1: Kontakt 8" is the same slot in both views. */
-String RemoteServer::nowJson() const
-{
-    const auto& setup = engine.getSetup();
-    DynamicObject::Ptr root (new DynamicObject());
-    root->setProperty ("revision", revision.load());
-    root->setProperty ("transpose", engine.getTranspose());
-    const int song = engine.currentSongIndex();
-    root->setProperty ("song", song);
-    root->setProperty ("songName", song >= 0 ? setup.songs[(size_t) song].name : String());
-
-    auto fxObject = [] (int slot, int effect, const String& name, bool bypassed)
-    {
-        DynamicObject::Ptr so (new DynamicObject());
-        so->setProperty ("slot", slot);
-        so->setProperty ("effect", effect);
-        so->setProperty ("name", name);
-        so->setProperty ("bypassed", bypassed);
-        return var (so.get());
-    };
-
-    Array<var> inputs;
-    for (int i = 0; i < (int) setup.inputs.size(); ++i)
-    {
-        const auto& in = setup.inputs[(size_t) i];
-        if (in.isTrack()) continue;                 // its parts have their own sheet
-        const int prog = in.currentProgram;
-        const auto& def = in.programs[(size_t) prog];
-        DynamicObject::Ptr o (new DynamicObject());
-        o->setProperty ("index", i);
-        o->setProperty ("name", in.name);
-        o->setProperty ("audio", in.isAudio());
-        o->setProperty ("program", prog);
-        o->setProperty ("programName", def.name);
-        Array<var> instruments, effects;
-        for (int s = 0; s < (int) def.slots.size(); ++s)
-        {
-            const auto& sd = def.slots[(size_t) s];
-            DynamicObject::Ptr so (new DynamicObject());
-            so->setProperty ("slot", s);
-            so->setProperty ("name", sd.displayName());
-            so->setProperty ("enabled", sd.enabled);
-            so->setProperty ("gainDb", sd.gainDb);
-            instruments.add (var (so.get()));
-            // Its MIDI chain and its effects, in signal order, named after it.
-            for (int e = 0; e < (int) sd.midiEffects.size(); ++e)
-            {
-                const auto& md = sd.midiEffects[(size_t) e];
-                effects.add (fxObject (ProgramDef::midiChainOf (s), e, (md.isSend() ? "Send to " + md.portName : md.plugin.name) + " \xe2\x80\x94 MIDI chain of " + sd.displayName(), md.bypassed));
-            }
-            for (int e = 0; e < (int) sd.effects.size(); ++e)
-                effects.add (fxObject (s, e, sd.effects[(size_t) e].plugin.name + " \xe2\x80\x94 effect on " + sd.displayName(), sd.effects[(size_t) e].bypassed));
-        }
-        for (int e = 0; e < (int) def.effects.size(); ++e)
-            effects.add (fxObject (-1, e, def.effects[(size_t) e].plugin.name + (in.isAudio() ? " \xe2\x80\x94 effect on this input" : " \xe2\x80\x94 effect on the whole program"), def.effects[(size_t) e].bypassed));
-        o->setProperty ("instruments", instruments);
-        o->setProperty ("effects", effects);
-        inputs.add (var (o.get()));
-    }
-    root->setProperty ("inputs", inputs);
-
-    Array<var> outputs;
-    for (int k = 0; k < (int) setup.outputs.size(); ++k)
-    {
-        const auto& od = setup.outputs[(size_t) k];
-        DynamicObject::Ptr o (new DynamicObject());
-        o->setProperty ("index", k);
-        o->setProperty ("name", od.name);
-        o->setProperty ("gainDb", od.gainDb);
-        Array<var> effects;
-        for (int e = 0; e < (int) od.chain.effects.size(); ++e)
-            effects.add (fxObject (-1, e, od.chain.effects[(size_t) e].plugin.name + " \xe2\x80\x94 effect on output " + od.name, od.chain.effects[(size_t) e].bypassed));
-        o->setProperty ("effects", effects);
-        outputs.add (var (o.get()));
-    }
-    root->setProperty ("outputs", outputs);
-    return JSON::toString (var (root.get()), true);
-}
-
 String RemoteServer::slotsJson (int inputIndex) const
 {
     DynamicObject::Ptr root (new DynamicObject());
@@ -2434,15 +2320,17 @@ String RemoteServer::slotsJson (int inputIndex) const
 }
 
 //==============================================================================
-/** Writes raw bytes: the body is already UTF-8, and Content-Length counts bytes,
-    not characters. Going through juce::String here once mangled an em-dash in the
-    page, because the literal was reinterpreted rather than passed through. */
-static void sendBytes (StreamingSocket& s, const String& status, const String& type,
-                       const void* body, int len)
+/** The one writer of an answer. The body goes out as the bytes it already is --
+    a page literal, a file, the UTF-8 of a String -- and Content-Length counts
+    those bytes, not characters: going through juce::String here once mangled an
+    em-dash in the page, because the literal was reinterpreted rather than
+    passed through. Every answer closes the connection and is never cached. */
+static void send (StreamingSocket& s, const String& status, const String& contentType,
+                  const void* body, int len)
 {
     String head;
     head << "HTTP/1.1 " << status << "\r\n"
-         << "Content-Type: " << type << "\r\n"
+         << "Content-Type: " << contentType << "\r\n"
          << "Content-Length: " << len << "\r\n"
          << "Cache-Control: no-store\r\n"
          << "Connection: close\r\n\r\n";
@@ -2451,18 +2339,40 @@ static void sendBytes (StreamingSocket& s, const String& status, const String& t
     if (len > 0) s.write (body, len);
 }
 
-static void sendResponse (StreamingSocket& s, const String& status, const String& type, const String& body)
+static void sendText (StreamingSocket& s, const String& status, const String& contentType, const String& body)
 {
     const auto utf8 = body.toRawUTF8();
-    const int len = (int) strlen (utf8);
-    String head;
-    head << "HTTP/1.1 " << status << "\r\n"
-         << "Content-Type: " << type << "\r\n"
-         << "Content-Length: " << len << "\r\n"
-         << "Cache-Control: no-store\r\n"
-         << "Connection: close\r\n\r\n";
-    s.write (head.toRawUTF8(), (int) strlen (head.toRawUTF8()));
-    if (len > 0) s.write (utf8, len);
+    send (s, status, contentType, utf8, (int) strlen (utf8));
+}
+
+static void sendJson (StreamingSocket& s, const String& status, const String& body)
+{
+    sendText (s, status, "application/json", body);
+}
+
+/* The message thread did not answer in time -- a modal dialog, a plugin
+   loading. The page shows this and asks again on its next poll. */
+static void sendBusy (StreamingSocket& s)
+{
+    sendJson (s, "503 Service Unavailable", "{\"error\":\"StageRig is busy; try again.\"}");
+}
+
+/** The request's query, decoded: /api/x?do=rename&name=Set+1 gives do and name.
+    The one reader of a route's arguments, so a value that is missing, escaped
+    or given twice means the same thing on every route (absent, decoded, the
+    first one). A missing key reads as an empty string, which is 0 as a number;
+    a route that wants a different default asks `count` first. */
+static std::map<String, String> parseQuery (const String& path)
+{
+    std::map<String, String> query;
+    for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
+    {
+        if (kv.isEmpty()) continue;
+        const auto key   = kv.upToFirstOccurrenceOf ("=", false, false);
+        const auto value = URL::removeEscapeChars (kv.fromFirstOccurrenceOf ("=", false, false).replace ("+", " "));
+        query.emplace (key, value);
+    }
+    return query;
 }
 
 /* Chrome refuses to offer "install" unless the page registers a service worker
@@ -2506,7 +2416,7 @@ bool RemoteServer::isEditingRoute (const String& path)
     /* Building the show: off when the computer says the stand may not edit.
        Everything else -- songs, programs, keys, scenes chosen, knobs, the
        track, tempo, panic -- is playing it, and always allowed. */
-    static const char* const editing[] = { "/api/setedit", "/api/scene?", "/api/savesong" };
+    static const char* const editing[] = { "/api/setedit", "/api/scene?" };
     const auto route = path.upToFirstOccurrenceOf ("&", false, false);
     for (const char* e : editing)
         if (route.startsWith (e) || route == String (e).trimCharactersAtEnd ("?")) return true;
@@ -2522,16 +2432,18 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     const String request (CharPointer_UTF8 (buf), (size_t) got);
     const String line = request.upToFirstOccurrenceOf ("\r\n", false, false);
     const String path = line.fromFirstOccurrenceOf (" ", false, false).upToFirstOccurrenceOf (" ", false, false);
+    auto query = parseQuery (path);
+    auto arg = [&query] (const char* key, int fallback = 0) { const auto it = query.find (key); return it == query.end() ? fallback : it->second.getIntValue(); };
     // The editing lock, in one place for every route that edits (isEditingRoute).
     if (isEditingRoute (path) && authorised (path) && ! settings.getBoolValue ("remoteEditing", true))
     {
-        sendResponse (sock, "409 Conflict", "application/json", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return;
+        sendJson (sock, "409 Conflict", "{\"error\":\"Editing from the tablet is off (Tablet window on the computer).\"}"); return;
     }
 
-    if (path.startsWith ("/manifest.webmanifest")) { sendBytes (sock, "200 OK", "application/manifest+json", kManifest, (int) strlen (kManifest)); return; }
+    if (path.startsWith ("/manifest.webmanifest")) { send (sock, "200 OK", "application/manifest+json", kManifest, (int) strlen (kManifest)); return; }
     if (path.startsWith ("/sw.js"))
     {
-        sendBytes (sock, "200 OK", "text/javascript; charset=utf-8",
+        send (sock, "200 OK", "text/javascript; charset=utf-8",
                    kServiceWorker, (int) strlen (kServiceWorker));
         return;
     }
@@ -2564,18 +2476,14 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                 img = img.rescaled (resize, resize, Graphics::highResamplingQuality);
             PNGImageFormat().writeImageToStream (img, png);
         }
-        String head;
-        head << "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: " << (int) png.getDataSize()
-             << "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
-        sock.write (head.toRawUTF8(), (int) strlen (head.toRawUTF8()));
-        sock.write (png.getData(), (int) png.getDataSize());
+        send (sock, "200 OK", "image/png", png.getData(), (int) png.getDataSize());
         return;
     }
 
     if (! authorised (path))
     {
         // The page itself is harmless without a token; the API is not.
-        if (path.startsWith ("/api/")) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
+        if (path.startsWith ("/api/")) { sendJson (sock, "403 Forbidden", "{\"error\":\"That code is not valid.\"}"); return; }
     }
 
     /* A plugin window's stream, relayed so it uses this port rather than one of
@@ -2592,7 +2500,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
            to learn whether it is alive. Everything else goes to the bridge. */
         if (rest.fromFirstOccurrenceOf ("/", false, false).startsWith ("plugin.html"))
         {
-            sendBytes (sock, "200 OK", "text/html; charset=utf-8",
+            send (sock, "200 OK", "text/html; charset=utf-8",
                        kPluginViewHtml, (int) strlen (kPluginViewHtml));
             return;
         }
@@ -2603,7 +2511,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
 
         if (! known)
         {
-            sendResponse (sock, "404 Not Found", "text/plain", "This plugin window is no longer being shown. Go back to the StageRig tab and press GUI again.");
+            sendText (sock, "404 Not Found", "text/plain", "This plugin window is no longer being shown. Go back to the StageRig tab and press GUI again.");
             return;
         }
 
@@ -2626,47 +2534,31 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         return;
     }
 
-    
-    if (path.startsWith ("/api/health"))
-    {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        String body;
-        if (produceOnMessageThread ([this] { return healthJson(); }, body, 2000))
-            sendResponse (sock, "200 OK", "application/json", body);
-        else
-            sendBusy (sock, sendResponse);
-        return;
-    }
-
     if (path.startsWith ("/api/levels"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         String body;
         if (produceOnMessageThread ([this] { return levelsJson(); }, body, 500))
-            sendResponse (sock, "200 OK", "application/json", body);
+            sendJson (sock, "200 OK", body);
         else
-            sendBusy (sock, sendResponse);
+            sendBusy (sock);
         return;
     }
 
     if (path.startsWith ("/api/state"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         String body;
         if (produceOnMessageThread ([this] { return stateJson(); }, body, 2000))
-            sendResponse (sock, "200 OK", "application/json", body);
+            sendJson (sock, "200 OK", body);
         else
-            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"StageRig is busy; try again.\"}");
+            sendBusy (sock);
         return;
     }
     if (path.startsWith ("/api/select"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
-        const int prog  = path.fromFirstOccurrenceOf ("program=", false, false).getIntValue();
+        const int input = arg ("input"), prog = arg ("program");
         // the engine is not thread-safe for this: do it on the message thread
         MessageManager::callAsync ([this, input, prog] { engine.selectProgram (input, prog); });
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
     }
     /* Songs and sets. Each one nudges the revision so every other tablet
@@ -2681,20 +2573,8 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                  do=remove&index=&pos=
                  do=move&index=&pos=&delta=
            Set lists built from the stand, each step saved at once. */
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        String what, name;
-        int index = -1, song = -1, pos = -1, delta = 0;
-        for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
-        {
-            const auto key = kv.upToFirstOccurrenceOf ("=", false, false);
-            const auto value = URL::removeEscapeChars (kv.fromFirstOccurrenceOf ("=", false, false).replace ("+", " "));
-            if (key == "do")         what = value;
-            else if (key == "name")  name = value.trim();
-            else if (key == "index") index = value.getIntValue();
-            else if (key == "song")  song = value.getIntValue();
-            else if (key == "pos")   pos = value.getIntValue();
-            else if (key == "delta") delta = value.getIntValue();
-        }
+        const String what = query["do"], name = query["name"].trim();
+        const int index = arg ("index", -1), song = arg ("song", -1), pos = arg ("pos", -1), delta = arg ("delta");
         MessageManager::callAsync ([this, what, name, index, song, pos, delta]
         {
             if (what == "new")            engine.selectSet (engine.addSet (name));
@@ -2706,56 +2586,44 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
             else if (what == "move")      engine.moveInSet (index, pos, delta);
         });
         ++revision;
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
     }
     if (path.startsWith ("/api/songkey"))
     {
         // POST ...?song=<index>&root=<0..11, -1 for none>&mode=<scale>: the song's key, changed from the stand.
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        auto number = [&path] (const char* key, int fallback)
-        {
-            for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
-                if (kv.startsWith (String (key) + "=")) return kv.fromFirstOccurrenceOf ("=", false, false).getIntValue();
-            return fallback;
-        };
-        const int song = number ("song", -1), root = number ("root", -1), mode = number ("mode", 0);
+        const int song = arg ("song", -1), root = arg ("root", -1), mode = arg ("mode");
         MessageManager::callAsync ([this, song, root, mode] { engine.setSongKey (song, root, mode); });
         ++revision;
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
     }
     if (path.startsWith ("/api/song"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const int song = path.fromFirstOccurrenceOf ("index=", false, false).getIntValue();
+        const int song = arg ("index");
         MessageManager::callAsync ([this, song] { engine.selectSong (song); });
         ++revision;
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
     }
     if (path.startsWith ("/api/panel"))
     {
         // GET ...?input=  the knobs of that input's current program, with their values now.
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        const int input = arg ("input");
         String body;
         if (produceOnMessageThread ([this, input] { return panelJson (input); }, body, 2000))
-            sendResponse (sock, "200 OK", "application/json", body);
+            sendJson (sock, "200 OK", body);
         else
-            sendBusy (sock, sendResponse);
+            sendBusy (sock);
         return;
     }
     if (path.startsWith ("/api/knob"))
     {
         /* POST ...?input=&slot=&id=&value=   a knob turned on the stand: level, pan, or p:<index> a plugin parameter, value 0..1.
            The parameter is set with a short timeout, like the Stage view's knobs: a plugin that has stopped answering costs a moment. */
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        auto field = [&path] (const char* name) { return path.fromFirstOccurrenceOf (String (name) + "=", false, false).upToFirstOccurrenceOf ("&", false, false); };
-        const int input = field ("input").getIntValue(), slot = field ("slot").getIntValue();
-        const int forProgram = field ("program").isNotEmpty() ? field ("program").getIntValue() : -1;
-        const String id = URL::removeEscapeChars (field ("id"));
-        const double value = jlimit (0.0, 1.0, field ("value").getDoubleValue());
+        const int input = arg ("input"), slot = arg ("slot"), forProgram = arg ("program", -1);
+        const String id = query["id"];
+        const double value = jlimit (0.0, 1.0, query["value"].getDoubleValue());
         MessageManager::callAsync ([this, input, slot, id, value, forProgram]
         {
             const auto& inputs = engine.getSetup().inputs;
@@ -2766,11 +2634,25 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
             if (onEdited) onEdited();
             if (id == "level")    engine.setSlotGainDb (input, program, slot, (float) (-60.0 + value * 72.0));
             else if (id == "pan") engine.setSlotPan (input, program, slot, (float) (value * 2.0 - 1.0));
-            else if (id.startsWith ("p:") && engine.isPluginAlive (input, program, slot))
-                if (auto* plugin = engine.getPlugin (input, program, slot))
-                    plugin->setParameterValue (id.substring (2).getIntValue(), (float) value, 100);
+            else if (id.startsWith ("k:") && hub != nullptr)
+                hub->setKnob (input, id.substring (2).getIntValue(), (float) value);     // the page's knob: the same the keyboard turns
         });
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/page") || path.startsWith ("/api/instrument"))
+    {
+        /* POST /api/page?input=&dir=-1|1        the keyboard's knobs go to the previous or next page
+           POST /api/instrument?input=&slot=     ...to this instrument of the program: the Stage view's buttons, on the stand */
+        const int input = arg ("input"), dir = arg ("dir", 0), slot = arg ("slot", -1);
+        const bool page = path.startsWith ("/api/page");
+        MessageManager::callAsync ([this, input, dir, slot, page]
+        {
+            if (hub == nullptr) return;
+            if (page) hub->doAction (input, dir < 0 ? SurfaceControls::pageDown : SurfaceControls::pageUp);
+            else      hub->setFocusSlot (input, slot);
+        });
+        sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
     }
     if (path.startsWith ("/api/scene"))
@@ -2778,8 +2660,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         /* POST ...?do=add        a new scene on the song in play, holding what is loaded now
                  do=capture     the scene in play takes what is loaded now
            Only while the computer allows editing from the tablet. */
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const auto what = path.fromFirstOccurrenceOf ("do=", false, false).upToFirstOccurrenceOf ("&", false, false);
+        const String what = query["do"];
         String body;
         if (produceOnMessageThread ([this, what]
             {
@@ -2791,24 +2672,25 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
             }, body, 3000))
         {
             ++revision;
-            sendResponse (sock, "200 OK", "application/json", body);
+            sendJson (sock, "200 OK", body);
         }
         else
-            sendBusy (sock, sendResponse);
+            sendBusy (sock);
         return;
     }
     if (path.startsWith ("/api/transport"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        // POST ...?do=toggle|start|stop changes it; any request answers with where it is.
-        const auto what = path.fromFirstOccurrenceOf ("do=", false, false).upToFirstOccurrenceOf ("&", false, false);
+        /* POST ...?do=toggle          play or stop
+                 do=next            let a vamp through, or the next scene
+                 do=section&index=  start from, or go on to, that section
+                 do=click           the song's metronome on or off
+           Any request answers with where it is. */
+        const String what = query["do"];
+        const int sectionIndex = arg ("index");
         String body;
-        const int sectionIndex = path.fromFirstOccurrenceOf ("index=", false, false).getIntValue();
         if (produceOnMessageThread ([this, what, sectionIndex]
             {
                 if (what == "toggle")       engine.toggleTrack();
-                else if (what == "start")   engine.startTrack();
-                else if (what == "stop")    engine.stopTrack();
                 else if (what == "next")    engine.advanceTrack();
                 else if (what == "section") engine.queueTrackSection (sectionIndex);
                 else if (what == "click")
@@ -2819,18 +2701,17 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                 }
                 return transportJson();
             }, body, 3000))
-            sendResponse (sock, "200 OK", "application/json", body);
+            sendJson (sock, "200 OK", body);
         else
-            sendBusy (sock, sendResponse);
+            sendBusy (sock);
         return;
     }
 
     if (path.startsWith ("/api/part"))
     {
         // POST ...?ch=N&muted=0|1 mutes a part of the armed song's MIDI files; answers with the transport.
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const int ch = path.fromFirstOccurrenceOf ("ch=", false, false).getIntValue();
-        const bool muted = path.fromFirstOccurrenceOf ("muted=", false, false).getIntValue() != 0;
+        const int ch = arg ("ch");
+        const bool muted = arg ("muted") != 0;
         String body;
         if (produceOnMessageThread ([this, ch, muted]
             {
@@ -2840,97 +2721,48 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                         engine.setPartMuted (track, prog, ch, muted);
                 return transportJson();
             }, body, 3000))
-            sendResponse (sock, "200 OK", "application/json", body);
+            sendJson (sock, "200 OK", body);
         else
-            sendBusy (sock, sendResponse);
+            sendBusy (sock);
         return;
     }
 
     if (path.startsWith ("/api/setlist"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const int set = path.fromFirstOccurrenceOf ("index=", false, false).getIntValue();
+        const int set = arg ("index");
         MessageManager::callAsync ([this, set] { engine.selectSet (set); });
         ++revision;
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
     }
     if (path.startsWith ("/api/setsong"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const int pos = path.fromFirstOccurrenceOf ("pos=", false, false).getIntValue();
+        const int pos = arg ("pos");
         MessageManager::callAsync ([this, pos] { engine.selectSongInSet (pos); });
         ++revision;
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
     }
     if (path.startsWith ("/api/step"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const bool back = path.contains ("dir=-1");
+        const bool back = arg ("dir", 1) < 0;
         MessageManager::callAsync ([this, back] { if (back) engine.previousSong(); else engine.nextSong(); });
         ++revision;
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
-    }
-    if (path.startsWith ("/api/now"))
-    {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        String body;
-        if (produceOnMessageThread ([this] { return nowJson(); }, body, 2000))
-            sendResponse (sock, "200 OK", "application/json", body);
-        else
-            sendBusy (sock, sendResponse);
-        return;
-    }
-    {
-        /* Live changes from a client -- an instrument on or off or louder, an
-           effect bypassed, an output's volume, the transpose, the song
-           captured -- each one engine call on the message thread, acknowledged
-           at once. The page itself no longer offers them; the routes stay for
-           anything else on the network that wants them. */
-        auto number = [&path] (const char* key, double fallback = 0.0)
-        {
-            for (const auto& kv : StringArray::fromTokens (path.fromFirstOccurrenceOf ("?", false, false), "&", {}))
-                if (kv.startsWith (String (key) + "=")) return kv.fromFirstOccurrenceOf ("=", false, false).getDoubleValue();
-            return fallback;
-        };
-        auto has = [&path] (const char* key) { return path.contains ("?" + String (key) + "=") || path.contains ("&" + String (key) + "="); };
-        auto post = [&] (const char* route, std::function<void()> change)
-        {
-            if (! path.startsWith (route)) return false;
-            if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return true; }
-            MessageManager::callAsync (std::move (change));
-            ++revision;
-            sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
-            return true;
-        };
-        auto programOf = [this] (int in) { const auto& inputs = engine.getSetup().inputs; return in >= 0 && in < (int) inputs.size() ? inputs[(size_t) in].currentProgram : -1; };
-        const int in = (int) number ("input", -1), slot = (int) number ("slot", -1), effect = (int) number ("effect", -1), output = (int) number ("output", -1);
-        const bool on = number ("on") != 0.0;
-        const float db = (float) number ("db");
-        if (post ("/api/slotenable", [this, programOf, in, slot, on] { engine.setSlotEnabled (in, programOf (in), slot, on); })) return;
-        if (post ("/api/slotgain",   [this, programOf, in, slot, db] { engine.setSlotGainDb (in, programOf (in), slot, db); })) return;
-        if (has ("output") && post ("/api/bypass", [this, output, effect, on] { engine.setEffectBypassed (Engine::outputAddress (output), 0, -1, effect, ! on); })) return;
-        if (post ("/api/bypass",     [this, programOf, in, slot, effect, on] { engine.setEffectBypassed (in, programOf (in), slot, effect, ! on); })) return;
-        if (post ("/api/outgain",    [this, output, db] { engine.setOutputGainDb (output, db); })) return;
-        if (post ("/api/transpose",  [this, st = (int) number ("st")] { engine.setTranspose (st); })) return;
-        if (post ("/api/savesong",   [this] { if (const int s = engine.currentSongIndex(); s >= 0) { engine.captureSong (s); if (onEdited) onEdited(); } })) return;
     }
     if (path.startsWith ("/api/slots"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        const int input = arg ("input");
         String body;
         if (produceOnMessageThread ([this, input] { return slotsJson (input); }, body, 2000))
-            sendResponse (sock, "200 OK", "application/json", body);
+            sendJson (sock, "200 OK", body);
         else
-            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"StageRig is busy; try again.\"}");
+            sendBusy (sock);
         return;
     }
     if (path.startsWith ("/api/tap"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
 
         /* Tapped on the tablet. The tap has to be timed where it happens, and it
            happens here: the round trip from a music stand is a few milliseconds
@@ -2947,32 +2779,19 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         });
         if (! done->wait (500))
         {
-            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"StageRig is busy; try again.\"}");
+            sendBusy (sock);
             return;
         }
         ++revision;
 
         DynamicObject::Ptr o (new DynamicObject());
         o->setProperty ("tempo", *bpm);
-        sendResponse (sock, "200 OK", "application/json", JSON::toString (var (o.get()), true));
-        return;
-    }
-    if (path.startsWith ("/api/settempo"))
-    {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const double bpm = path.fromFirstOccurrenceOf ("bpm=", false, false).getDoubleValue();
-        MessageManager::callAsync ([this, bpm] { engine.setTempoBpm (bpm); engine.resetTapTempo(); });
-        ++revision;
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", JSON::toString (var (o.get()), true));
         return;
     }
     if (path.startsWith ("/api/pluginview"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
-        const int input  = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
-        const int slot   = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
-        const int effect = path.contains ("effect=") ? path.fromFirstOccurrenceOf ("effect=", false, false).getIntValue() : -1;
-        const int bus    = path.contains ("bus=")    ? path.fromFirstOccurrenceOf ("bus=", false, false).getIntValue()    : -1;
+        const int input = arg ("input"), slot = arg ("slot"), effect = arg ("effect", -1), bus = arg ("bus", -1);
 
         /* Mirrors the plugin's own window. Needed because some plugins cannot be
            followed any other way: Kontakt's host-visible parameters are MIDI
@@ -3039,12 +2858,12 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
             if (! session.isValid()) o->setProperty ("error", startError);
             else                     o->setProperty ("port", session.webPort);
         }
-        sendResponse (sock, "200 OK", "application/json", JSON::toString (var (o.get()), true));
+        sendJson (sock, "200 OK", JSON::toString (var (o.get()), true));
         return;
     }
     if (path.startsWith ("/chart.html"))
     {
-        sendBytes (sock, "200 OK", "text/html; charset=utf-8", kChartHtml, (int) strlen (kChartHtml));
+        send (sock, "200 OK", "text/html; charset=utf-8", kChartHtml, (int) strlen (kChartHtml));
         return;
     }
     if (path.startsWith ("/chart/"))
@@ -3053,7 +2872,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
            /chart/<song>/<n>/page/<p>   one rendered page of a PDF, from 1
            Everything is resolved through the model by index; the only file
            name used is the one the setup recorded, inside the charts folder. */
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "text/plain", "bad token"); return; }
+        if (! authorised (path)) { sendText (sock, "403 Forbidden", "text/plain", "bad token"); return; }
         const auto parts = StringArray::fromTokens (path.upToFirstOccurrenceOf ("?", false, false).fromFirstOccurrenceOf ("/chart/", false, false), "/", {});
         const int song = parts.size() > 0 ? parts[0].getIntValue() : -1;
         const int n    = parts.size() > 1 ? parts[1].getIntValue() : -1;
@@ -3081,31 +2900,30 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         }
         if (file == File() || ! file.existsAsFile())
         {
-            sendResponse (sock, "404 Not Found", "text/plain", "No such chart.");
+            sendText (sock, "404 Not Found", "text/plain", "No such chart.");
             return;
         }
         // A chord chart that names its key is shown in the song's, when the song has one.
         if (page == 0 && chartKindFor (file) == "chordpro")
             if (const auto& sg = engine.getSongs()[(size_t) song]; sg.hasKey())
             {
-                sendResponse (sock, "200 OK", chartContentTypeFor (file),
+                sendText (sock, "200 OK", chartContentTypeFor (file),
                               transposeChordPro (file.loadFileAsString(), sg.keyRoot, MidiFx::keyPrefersFlats (sg.keyRoot, sg.keyMode)));
                 return;
             }
         MemoryBlock data;
-        if (! file.loadFileAsData (data)) { sendResponse (sock, "500 Internal Server Error", "text/plain", "Could not read the chart."); return; }
-        sendBytes (sock, "200 OK", chartContentTypeFor (file), static_cast<const char*> (data.getData()), (int) data.getSize());
+        if (! file.loadFileAsData (data)) { sendText (sock, "500 Internal Server Error", "text/plain", "Could not read the chart."); return; }
+        send (sock, "200 OK", chartContentTypeFor (file), static_cast<const char*> (data.getData()), (int) data.getSize());
         return;
     }
     if (path.startsWith ("/api/panic"))
     {
-        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"That code is not valid.\"}"); return; }
         // Everything stops: every note, and the backing track -- a song stopped mid-way needs both at once.
         MessageManager::callAsync ([this] { engine.panic(); engine.stopTrack(); });
-        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
     }
-    sendBytes (sock, "200 OK", "text/html; charset=utf-8", kIndexHtml, (int) strlen (kIndexHtml));
+    send (sock, "200 OK", "text/html; charset=utf-8", kIndexHtml, (int) strlen (kIndexHtml));
 }
 
 void RemoteServer::run()

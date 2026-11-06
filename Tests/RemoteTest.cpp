@@ -208,17 +208,6 @@ int main()
         engine.setProgramName (0, 1, "Second");
 
         perf::RemoteServer rs (engine, props);
-        {
-            // The Now page's JSON: the inputs with their instruments and effects, the outputs, the transpose.
-            engine.setTranspose (-2);
-            const auto now = JSON::parse (rs.nowJson());
-            check (now.getProperty ("transpose", 0) == var (-2), "the Now page carries the transpose");
-            check (now.getProperty ("inputs", var()).size() == (int) engine.getSetup().inputs.size(), "the Now page lists every input");
-            const auto first = now.getProperty ("inputs", var())[0];
-            check (first.hasProperty ("instruments") && first.hasProperty ("effects") && first.hasProperty ("programName"), "each input has its instruments, effects and program");
-            check (now.getProperty ("outputs", var()).size() >= 1 && now.getProperty ("outputs", var())[0].hasProperty ("gainDb"), "the outputs come with their volume");
-            engine.setTranspose (0);
-        }
         if (rs.start (0) || rs.start (7791))
         {
             const auto before = engine.getSetup().inputs[0].currentProgram;
@@ -328,7 +317,7 @@ int main()
     // The editing lock's one list: building the show is locked, playing it never is.
     {
         using perf::RemoteServer;
-        for (const char* e : { "/api/setedit?do=new&name=x&t=c", "/api/scene?do=add&t=c", "/api/scene?do=capture", "/api/savesong?t=c" })
+        for (const char* e : { "/api/setedit?do=new&name=x&t=c", "/api/scene?do=add&t=c", "/api/scene?do=capture", "/api/setedit?do=move&index=0&pos=2&delta=-1&t=c" })
             check (RemoteServer::isEditingRoute (e), String ("editing: ") + e);
         for (const char* p : { "/api/select?input=0&program=3", "/api/transport?do=section&index=2", "/api/knob?input=0&slot=0&id=level&value=0.5",
                                "/api/songkey?song=1&root=2&mode=0", "/api/song?index=1", "/api/panic", "/api/state", "/api/panel?input=0", "/api/setlist?index=1" })
