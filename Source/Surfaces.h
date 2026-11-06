@@ -362,6 +362,11 @@ public:
         and the knob pages in the plugin view. */
     struct Heard { int version = 0; bool banksForPrograms = true; };
 
+    /** What the keyboard is told once it has answered the hello, before the
+        screen: that the tracks run across (the 4D encoder's left and right
+        step through them), and, from version 4, to send the knobs' turns at
+        high resolution. */
+    static std::vector<juce::MidiMessage> connectedMessages (int protocolVersion);
     /** What tells the keyboard the screen is `now`, given it showed `before` (nullptr: nothing yet). */
     static std::vector<juce::MidiMessage> screenMessages (const SurfaceView& now, const SurfaceView* before, const Heard&);
     /** What a message from the DAW port means. The hello's answer and the view's change set `heard` and are no touch. */
@@ -376,7 +381,10 @@ private:
     std::unique_ptr<juce::MidiOutput> output;
     std::atomic<int> version { 0 };
     std::atomic<bool> banksForPrograms { true };
+    std::atomic<bool> greeted { false };   // the hello was answered since the screen was last sent whole
     Heard shownFor;
+    juce::uint32 helloAt = 0;              // when the hello was last sent, for saying it again unanswered
+    int hellos = 0;
     std::mutex touchMutex;
     std::vector<Touch> touches;
     SurfaceView last;
