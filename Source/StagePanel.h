@@ -49,7 +49,7 @@ public:
     {
         if (e.mods.isPopupMenu() || e.getPosition().getY() >= readoutArea()) return;
         for (const auto& [i, column] : columns())
-            if (column.contains (e.getPosition()) && onSelectInput) onSelectInput ((int) i);
+            if (column.contains (e.getPosition()) && onSelectInput) { onSelectInput ((int) i); repaint(); }
     }
 
     void paint (juce::Graphics& g) override
@@ -422,6 +422,7 @@ private:
         const auto& inputs = engine.getSetup().inputs;
         // Repaint the readout only when something visible changed: this runs all night.
         juce::String now;
+        now << (selectedInput ? selectedInput() : -1) << ";";    // the mark on the input the on-screen keys play
         for (size_t i = 0; i < inputs.size(); ++i)
         {
             const int p = inputs[i].currentProgram;
