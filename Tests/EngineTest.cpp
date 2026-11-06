@@ -68,7 +68,8 @@ namespace
         void programChanged (int i, int p) override { programChangedInput = i; programChangedTo = p; }
         void statusMessage (const String& s) override { std::printf ("     [status] %s\n", s.toRawUTF8()); }
         int knobTurned = -1, knobValue = -1;
-        void surfaceKnob (int, int knob, int value, bool, float) override { knobTurned = knob; knobValue = value; }
+        float knobExact = -2.0f;
+        void surfaceKnob (int, int knob, int value, bool, float exact) override { knobTurned = knob; knobValue = value; knobExact = exact; }
     };
 }
 
@@ -684,6 +685,252 @@ int main()
             const auto note = ump::Factory::makeNoteOnV2 (0, 0, 60, ump::Factory::NoteAttributeKind::none, 0x8000, 0);
             Midi2Inputs::translate (ump::View (note.data()), 0.0, translator, keep);
             CHECK (got.size() == 1 && got[0].first.isNoteOn() && got[0].first.getVelocity() == 64 && got[0].second == -1);
+        }
+
+        /* MIDI 2.0, packet by packet, with the words written out: everything a
+           keyboard sends, checked against the UMP specification's default
+           translation (JUCE's Conversion::midi2ToMidi1DefaultTranslation, the
+           same as the Linux kernel's ump_convert.c). A MIDI 2.0 channel voice
+           word is 0x4 (type), group, status, channel, then two bytes (note or
+           controller index, and a flag or attribute byte); the second word is
+           the value. Narrowing to 7 or 14 bits is a shift: the top bits. */
+        {
+            namespace ump = juce::universal_midi_packets;
+            ump::SingleGroupMidi1ToBytestreamTranslator translator (64);
+            std::vector<std::pair<MidiMessage, int64>> got;
+            auto keep = [&got] (const MidiMessage& mm, int64 exact) { got.emplace_back (mm, exact); };
+            auto feed = [&] (std::vector<uint32> words) { got.clear(); Midi2Inputs::translate (ump::View (words.data()), 0.0, translator, keep); };
+            auto exactOf = [] (int64 e) { return (float) ((double) e / 4294967295.0); };
+
+            // Pitch bend, status 0xe: the centre 0x80000000 is 8192 and 0.5 to the digit, the ends are the ends.
+            feed ({ 0x40E00000,       // type 4, group 0, pitch bend, channel 1, no index
+                    0x80000000 });    // centre
+            CHECK (got.size() == 1 && got[0].first.isPitchWheel() && got[0].first.getPitchWheelValue() == 8192 && got[0].second == 0x80000000 && exactOf (got[0].second) == 0.5f);
+            feed ({ 0x40E00000, 0xFFFFFFFF });    // all the way up
+            CHECK (got.size() == 1 && got[0].first.getPitchWheelValue() == 16383 && exactOf (got[0].second) == 1.0f);
+            feed ({ 0x40E00000, 0x00000000 });    // all the way down
+            CHECK (got.size() == 1 && got[0].first.getPitchWheelValue() == 0 && got[0].second == 0 && exactOf (got[0].second) == 0.0f);
+
+            // A controller, status 0xb, index in the third byte: 32 bits to 7.
+            feed ({ 0x40B04A00,       // CC 74 (0x4a) on channel 1
+                    0xFFFFFFFF });
+            CHECK (got.size() == 1 && got[0].first.isController() && got[0].first.getControllerNumber() == 74 && got[0].first.getControllerValue() == 127 && exactOf (got[0].second) == 1.0f);
+            feed ({ 0x40B04A00, 0x80000000 });
+            CHECK (got.size() == 1 && got[0].first.getControllerValue() == 64 && exactOf (got[0].second) == 0.5f);
+            feed ({ 0x40B04A00, 0x00000000 });
+            CHECK (got.size() == 1 && got[0].first.getControllerValue() == 0 && got[0].second == 0);
+            // On another channel, group and controller: the channel is the low nibble of the second byte.
+            feed ({ 0x43BF0100,       // group 3, CC 1 (mod wheel) on channel 16
+                    0x12345678 });
+            CHECK (got.size() == 1 && got[0].first.getChannel() == 16 && got[0].first.getControllerNumber() == 1 && got[0].first.getControllerValue() == (0x12345678 >> 25) && got[0].second == 0x12345678);
+
+            // Channel pressure, status 0xd: the value is the second word, with its exact value.
+            feed ({ 0x40D00000,       // channel pressure, channel 1
+                    0xFFFFFFFF });
+            CHECK (got.size() == 1 && got[0].first.isChannelPressure() && got[0].first.getChannelPressureValue() == 127 && exactOf (got[0].second) == 1.0f);
+            feed ({ 0x40D00000, 0x80000000 });
+            CHECK (got.size() == 1 && got[0].first.getChannelPressureValue() == 64 && exactOf (got[0].second) == 0.5f);
+
+            // Note on, status 0x9, 16-bit velocity in the top half of the second word: no exact value, velocity to 7 bits.
+            feed ({ 0x40903C00,       // note 60 (0x3c), attribute type 0 (none)
+                    0xFFFF0000 });    // velocity 0xffff, no attribute
+            CHECK (got.size() == 1 && got[0].first.isNoteOn() && got[0].first.getNoteNumber() == 60 && got[0].first.getVelocity() == 127 && got[0].second == -1);
+            // In MIDI 2.0 a note on at velocity 0 is a note on, so it becomes velocity 1 and not a note off.
+            feed ({ 0x40903C00, 0x00000000 });
+            CHECK (got.size() == 1 && got[0].first.isNoteOn() && got[0].first.getVelocity() == 1);
+            feed ({ 0x40903C00, 0x01FF0000 });    // velocity 0x01ff, under one 7-bit step: still a note on
+            CHECK (got.size() == 1 && got[0].first.isNoteOn() && got[0].first.getVelocity() == 1);
+            // Attribute type 3 (pitch 7.9) and type 1 (manufacturer specific): the note and velocity, the attribute set aside.
+            feed ({ 0x40903C03,       // note 60, attribute type 3
+                    0x80007A00 });    // velocity 0x8000, attribute 0x7a00 (pitch 61.0)
+            CHECK (got.size() == 1 && got[0].first.isNoteOn() && got[0].first.getNoteNumber() == 60 && got[0].first.getVelocity() == 64 && got[0].first.getRawDataSize() == 3);
+            feed ({ 0x40903C01, 0x4000ABCD });
+            CHECK (got.size() == 1 && got[0].first.isNoteOn() && got[0].first.getVelocity() == 32);
+            // Note off, status 0x8: release velocity scaled the same way.
+            feed ({ 0x40803C00,       // note off 60
+                    0x80000000 });    // release velocity 0x8000
+            CHECK (got.size() == 1 && got[0].first.isNoteOff() && got[0].first.getNoteNumber() == 60 && got[0].first.getVelocity() == 64 && got[0].second == -1);
+
+            // Poly pressure, status 0xa: 32 bits to 7, and nothing exact (StageRig keeps exact values per channel, not per note).
+            feed ({ 0x40A03C00,       // poly pressure on note 60
+                    0x80000000 });
+            CHECK (got.size() == 1 && got[0].first.isAftertouch() && got[0].first.getNoteNumber() == 60 && got[0].first.getAfterTouchValue() == 64 && got[0].second == -1);
+
+            // Registered controller (RPN), status 0x2: bank and index in the first word, 32-bit data in the second;
+            // as MIDI 1.0 it is the four controllers 101, 100, 6, 38, in that order, none of them with an exact value.
+            feed ({ 0x40200001,       // RPN bank 0, index 1 (fine tuning), channel 1
+                    0x80000000 });    // 14-bit data 8192 = MSB 64, LSB 0
+            CHECK (got.size() == 4 && got[0].first.getControllerNumber() == 101 && got[0].first.getControllerValue() == 0
+                                   && got[1].first.getControllerNumber() == 100 && got[1].first.getControllerValue() == 1
+                                   && got[2].first.getControllerNumber() == 6   && got[2].first.getControllerValue() == 64
+                                   && got[3].first.getControllerNumber() == 38  && got[3].first.getControllerValue() == 0
+                                   && got[0].second == -1 && got[1].second == -1 && got[2].second == -1 && got[3].second == -1);
+            // Assignable controller (NRPN), status 0x3: controllers 99, 98, 6, 38.
+            feed ({ 0x40300102,       // NRPN bank 1, index 2
+                    0xFFFFFFFF });    // 14-bit data 16383
+            CHECK (got.size() == 4 && got[0].first.getControllerNumber() == 99 && got[0].first.getControllerValue() == 1
+                                   && got[1].first.getControllerNumber() == 98 && got[1].first.getControllerValue() == 2
+                                   && got[2].first.getControllerNumber() == 6  && got[2].first.getControllerValue() == 127
+                                   && got[3].first.getControllerNumber() == 38 && got[3].first.getControllerValue() == 127);
+            // Relative registered and assignable controllers, status 0x4 and 0x5: nothing in MIDI 1.0 says this, so nothing is sent.
+            feed ({ 0x40400001, 0x00000100 });
+            CHECK (got.empty());
+            feed ({ 0x40500102, 0xFFFFFF00 });
+            CHECK (got.empty());
+            // Per-note controllers (status 0x0 registered, 0x1 assignable), per-note pitch bend (0x6) and per-note
+            // management (0xf): per note, which MIDI 1.0 has no words for; dropped, and never a channel controller.
+            feed ({ 0x40003C01,       // registered per-note controller 1 on note 60
+                    0x80000000 });
+            CHECK (got.empty());
+            feed ({ 0x40103C4A,       // assignable per-note controller 74 on note 60: not CC 74
+                    0xFFFFFFFF });
+            CHECK (got.empty());
+            feed ({ 0x40603C00,       // per-note pitch bend on note 60
+                    0x80000000 });
+            CHECK (got.empty());
+            feed ({ 0x40F03C01,       // per-note management, note 60, detach flag
+                    0x00000000 });
+            CHECK (got.empty());
+
+            // Program change, status 0xc: with the bank valid flag (bit 0 of the first word) it is
+            // Bank Select MSB (CC 0), LSB (CC 32), then the program; without, the program alone.
+            feed ({ 0x40C00001,       // program change, channel 1, bank valid
+                    0x05000102 });    // program 5, bank MSB 1, LSB 2
+            CHECK (got.size() == 3 && got[0].first.isController() && got[0].first.getControllerNumber() == 0  && got[0].first.getControllerValue() == 1
+                                   && got[1].first.isController() && got[1].first.getControllerNumber() == 32 && got[1].first.getControllerValue() == 2
+                                   && got[2].first.isProgramChange() && got[2].first.getProgramChangeNumber() == 5 && got[2].second == -1);
+            feed ({ 0x40C10000,       // program change, channel 2, no bank
+                    0x07000000 });    // program 7
+            CHECK (got.size() == 1 && got[0].first.isProgramChange() && got[0].first.getChannel() == 2 && got[0].first.getProgramChangeNumber() == 7);
+            // The controllers MIDI 2.0 replaces with its own messages (0, 6, 32, 38, 98-101) are not passed on as controllers.
+            feed ({ 0x40B00000, 0xFFFFFFFF });    // CC 0 as a plain controller
+            CHECK (got.empty());
+            feed ({ 0x40B00600, 0xFFFFFFFF });    // CC 6
+            CHECK (got.empty());
+            feed ({ 0x40B06500, 0xFFFFFFFF });    // CC 101
+            CHECK (got.empty());
+            // A malformed packet, its controller index with the top bit set: not MIDI, and goes no further.
+            feed ({ 0x40B0CA00,       // CC "202"
+                    0x12345678 });
+            CHECK (got.empty());
+            feed ({ 0x4090C000, 0xFFFF0000 });    // note "192"
+            CHECK (got.empty());
+
+            // MIDI 1.0 channel voice on a MIDI 2.0 endpoint, type 2: the bytes as they are, with no exact value.
+            feed ({ 0x20B04A20 });    // type 2, group 0, CC 74 = 32
+            CHECK (got.size() == 1 && got[0].first.isController() && got[0].first.getControllerNumber() == 74 && got[0].first.getControllerValue() == 32 && got[0].second == -1);
+            feed ({ 0x20E00040 });    // pitch bend LSB 0, MSB 64: centre
+            CHECK (got.size() == 1 && got[0].first.isPitchWheel() && got[0].first.getPitchWheelValue() == 8192 && got[0].second == -1);
+            feed ({ 0x20903C64 });    // note on 60, velocity 100
+            CHECK (got.size() == 1 && got[0].first.isNoteOn() && got[0].first.getVelocity() == 100 && got[0].second == -1);
+            feed ({ 0x20D07F00 });    // channel pressure 127
+            CHECK (got.size() == 1 && got[0].first.isChannelPressure() && got[0].first.getChannelPressureValue() == 127 && got[0].second == -1);
+
+            // System real time, type 1: clock, start and stop come out as themselves (the engine, hearing no clock, lets them go).
+            feed ({ 0x10F80000 });
+            CHECK (got.size() == 1 && got[0].first.isMidiClock() && got[0].second == -1);
+            feed ({ 0x10FA0000 });
+            CHECK (got.size() == 1 && got[0].first.isMidiStart());
+            feed ({ 0x10FC0000 });
+            CHECK (got.size() == 1 && got[0].first.isMidiStop());
+            // System exclusive, type 3: status (complete / begin / continue / end) and byte count in the third nibbles,
+            // the data in the bytes after. One in a packet, then one over two packets, each a whole message.
+            feed ({ 0x30047E7F,       // complete, 4 bytes: 7e 7f
+                    0x09010000 });    //                    09 01
+            CHECK (got.size() == 1 && got[0].first.isSysEx() && got[0].first.getSysExDataSize() == 4 && got[0].first.getSysExData()[2] == 0x09);
+            feed ({ 0x30167E7F,       // begin, 6 bytes: 7e 7f
+                    0x0D710100 });    //                 0d 71 01 00
+            CHECK (got.empty());
+            feed ({ 0x30320102,       // end, 2 bytes: 01 02
+                    0x00000000 });
+            CHECK (got.size() == 1 && got[0].first.isSysEx() && got[0].first.getSysExDataSize() == 8 && got[0].first.getSysExData()[7] == 0x02);
+            // What has no MIDI 1.0 form at all: a utility NOOP (type 0), SysEx8 (type 5), flex data (type 0xd) and a stream message (type 0xf).
+            feed ({ 0x00000000 });
+            CHECK (got.empty());
+            feed ({ 0x50030100, 0x7E7F0900, 0, 0 });
+            CHECK (got.empty());
+            feed ({ 0xD0100000, 0, 0, 0 });
+            CHECK (got.empty());
+            feed ({ 0xF0000000, 0, 0, 0 });
+            CHECK (got.empty());
+        }
+
+        /* The same through the engine: the exact value reaches the keyboard's
+           knobs, a mapping on pressure and on pitch bend, and what cannot be
+           played stops short of the plugins. */
+        {
+            namespace ump = juce::universal_midi_packets;
+            auto inject = [&] (std::vector<uint32> words) { engine.injectMidi2 (0, ump::View (words.data())); };
+
+            // A knob the keyboard is told to send as a spare controller: its place in 24 bits, 0..1, beside the 7-bit value.
+            engine.setInputAutoKnobs (0, true);
+            listener.knobTurned = -1; listener.knobExact = -2.0f;
+            inject ({ 0x40B00000u | (uint32) (SurfaceControls::autoKnobCC + 2) << 8, 0xFFFFFFFF });    // CC of knob 3 on channel 1, all the way up
+            pump (50);
+            CHECK (listener.knobTurned == 2 && listener.knobValue == 127 && listener.knobExact == 1.0f);
+            inject ({ 0x40B00000u | (uint32) (SurfaceControls::autoKnobCC + 2) << 8, 0x80000000 });    // half way
+            pump (50);
+            CHECK (listener.knobValue == 64 && std::abs (listener.knobExact - 0.5f) < 1e-6f);
+            inject ({ 0x40B00000u | (uint32) (SurfaceControls::autoKnobCC + 2) << 8, 0x00000000 });    // down
+            pump (50);
+            CHECK (listener.knobValue == 0 && listener.knobExact == 0.0f);
+            // From MIDI 1.0 there is nothing exact to give.
+            engine.injectMidi (0, MidiMessage::controllerEvent (1, SurfaceControls::autoKnobCC + 2, 90));
+            pump (50);
+            CHECK (listener.knobValue == 90 && listener.knobExact < 0.0f);
+            engine.setInputAutoKnobs (0, false);
+
+            // Channel pressure mapped to the parameter: a slow press within one 7-bit step still moves it.
+            {
+                MappingDef pm;
+                pm.source = MappingDef::Source::ChannelPressure; pm.slot = 0; pm.paramId = target->id;
+                pm.minValue = 0.25f; pm.maxValue = 0.75f;
+                engine.addMapping (0, 0, pm);
+                auto press = [&] (uint32 value)
+                {
+                    inject ({ 0x40D00000, value });    // channel pressure, channel 1
+                    render (engine, 2);
+                    float now = -1.0f;
+                    CHECK (inst->fetchParameterValue (target->index, now));
+                    return now;
+                };
+                const float low = press (0x41000000u), high = press (0x41ffffffu);
+                const float wantLow = 0.25f + 0.5f * (float) (0x41000000u / 4294967295.0), wantHigh = 0.25f + 0.5f * (float) (0x41ffffffu / 4294967295.0);
+                std::printf ("     MIDI 2.0 pressure: within one MIDI 1.0 step the parameter went %.5f -> %.5f (wanted %.5f -> %.5f)\n", low, high, wantLow, wantHigh);
+                CHECK (std::abs (low - wantLow) < 2e-4f && std::abs (high - wantHigh) < 2e-4f && high > low + 0.001f);
+                engine.removeMapping (0, 0, (int) engine.getSetup().inputs[0].programs[0].mappings.size() - 1);
+            }
+            // Pitch bend mapped to the parameter, 0..1: MIDI 1.0's centre is 8192 of 16383, a hair over half; MIDI 2.0's is half to the digit.
+            {
+                MappingDef bm;
+                bm.source = MappingDef::Source::PitchBend; bm.slot = 0; bm.paramId = target->id;
+                bm.minValue = 0.0f; bm.maxValue = 1.0f;
+                engine.addMapping (0, 0, bm);
+                auto read = [&] { render (engine, 2); float now = -1.0f; CHECK (inst->fetchParameterValue (target->index, now)); return now; };
+                engine.injectMidi (0, MidiMessage::pitchWheel (1, 8192));
+                const float centre1 = read();
+                inject ({ 0x40E00000, 0x80000000 });    // pitch bend, channel 1, centre
+                const float centre2 = read();
+                inject ({ 0x40E00000, 0xC0000000 });    // three quarters up
+                const float threeQuarters = read();
+                std::printf ("     pitch bend centre: MIDI 1.0 %.6f, MIDI 2.0 %.6f; three quarters %.6f\n", centre1, centre2, threeQuarters);
+                CHECK (std::abs (centre1 - 8192.0f / 16383.0f) < 1e-5f && std::abs (centre2 - 0.5f) < 1e-5f && std::abs (threeQuarters - 0.75f) < 1e-5f);
+                engine.removeMapping (0, 0, (int) engine.getSetup().inputs[0].programs[0].mappings.size() - 1);
+            }
+
+            // Clock, a system exclusive, a per-note controller and a malformed controller: taken in, nothing to show for them.
+            render (engine, 1);
+            float before = -1.0f;
+            CHECK (inst->fetchParameterValue (target->index, before));
+            inject ({ 0x10F80000 });                    // clock
+            inject ({ 0x10FA0000 });                    // start
+            inject ({ 0x30047E7F, 0x09010000 });        // sysex
+            inject ({ 0x40103C4A, 0xFFFFFFFF });        // per-note controller 74: not CC 74
+            inject ({ 0x40B0CA00, 0x12345678 });        // CC "202"
+            inject ({ 0x50030100, 0x7E7F0900, 0, 0 });  // sysex8
+            render (engine, 2);
+            float still = -1.0f;
+            CHECK (inst->fetchParameterValue (target->index, still) && still == before);    // CC 74's mapping, untouched by any of them
         }
 
         /* A slow turn on a MIDI 2.0 keyboard, within one of MIDI 1.0's 128
@@ -2491,6 +2738,25 @@ int main()
         pump (60);
         CHECK (levels (4)[2] > 0.02f);
         CHECK (std::abs (engine.getSetup().outputs[(size_t) mon].gainDb) < 0.01f);     // the model followed the pedal
+
+        /* From a MIDI 2.0 keyboard the fader lands exactly where the pedal is,
+           and the model (what is saved, and what the fader shows) with it,
+           not at the nearest of MIDI 1.0's 128 steps. */
+        {
+            namespace ump = juce::universal_midi_packets;
+            const uint32 words[] = { 0x40B20700,       // type 4, group 0, control change, channel 3, CC 7
+                                     0x41800000 };     // 0x41800000: 32 of 127 in MIDI 1.0, a little over a third of the way to 33
+            engine.injectMidi2 (1, ump::View (words));
+            pump (60);
+            const float exact = (float) (0x418000 / 16777215.0), seven = 32.0f / 127.0f;
+            const float gotDb = engine.getSetup().outputs[(size_t) mon].gainDb;
+            std::printf ("     MIDI 2.0 volume: model %.3f dB, exact %.3f dB, MIDI 1.0 would be %.3f dB\n", gotDb,
+                         Decibels::gainToDecibels (exact * exact, -60.0f), Decibels::gainToDecibels (seven * seven, -60.0f));
+            CHECK (std::abs (gotDb - Decibels::gainToDecibels (exact * exact, -60.0f)) < 0.01f);
+            CHECK (std::abs (gotDb - Decibels::gainToDecibels (seven * seven, -60.0f)) > 0.1f);
+            engine.injectMidi (1, MidiMessage::controllerEvent (3, 7, 127));
+            pump (60);
+        }
 
         // Removing the output puts its input back on Main (1+2).
         engine.removeOutput (mon); settle();

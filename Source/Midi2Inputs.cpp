@@ -128,6 +128,10 @@ void Midi2Inputs::translate (const ump::View& v, double time, ump::SingleGroupMi
         translator.dispatch (midi1, time, [&] (const ump::BytesOnGroup& bytes, double t)
         {
             const MidiMessage m (bytes.bytes.data(), (int) bytes.bytes.size(), t);
+            // A channel message's data bytes are 7 bits; a malformed packet's go no further.
+            if (m.getChannel() != 0)
+                for (int i = 1; i < m.getRawDataSize(); ++i)
+                    if ((m.getRawData()[i] & 0x80) != 0) return;
             const bool same = (status == 0xb && m.isController()) || (status == 0xd && m.isChannelPressure()) || (status == 0xe && m.isPitchWheel());
             out (m, same ? exact : -1);
         });

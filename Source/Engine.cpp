@@ -159,7 +159,12 @@ struct ExactValues
     {
         const int ch = m.getChannel() - 1;
         if (ch < 0 || ch > 15) return nullptr;
-        if (m.isController())       return &cc[(size_t) (ch * 128 + m.getControllerNumber())];
+        if (m.isController())
+        {
+            // A controller number is 7 bits; a malformed packet's is not a slot.
+            const int n = m.getControllerNumber();
+            return n >= 0 && n < 128 ? &cc[(size_t) (ch * 128 + n)] : nullptr;
+        }
         if (m.isChannelPressure())  return &pressure[(size_t) ch];
         if (m.isPitchWheel())       return &bend[(size_t) ch];
         return nullptr;
@@ -1388,6 +1393,13 @@ void Engine::openMidiDevices()
             if (def.midiDeviceIdentifier == id && def.midi1Only) midi1 = true;
         if (! midi1) asMidi2.add (id);
     }
+    /* Its MIDI 1.0 port is closed before the MIDI 2.0 connection opens, so
+       nothing arrives twice in between; a keyboard the MIDI 2.0 path then
+       declines gets it back below. */
+    if (midi2 != nullptr)
+        for (auto& d : available)
+            if (asMidi2.contains (d.identifier) && Midi2Inputs::isMidi2 (d.identifier))
+                deviceManager.setMidiInputDeviceEnabled (d.identifier, false);
     const auto heard = midi2 != nullptr ? midi2->open (asMidi2) : StringArray();
     if (heard != heardAsMidi2)
     {
@@ -3920,7 +3932,8 @@ void Engine::handleAsyncUpdate()
                 // The audio thread already moved the gain; this keeps the model and the fader with it.
                 if (e.input >= 0 && e.input < (int) setup.outputs.size())
                 {
-                    const float f = (float) e.a / 127.0f;
+                    // b: the exact place from a MIDI 2.0 keyboard, in 24 bits plus one, so the model lands where the gain did.
+                    const float f = e.b > 0 ? (float) (e.b - 1) / 16777215.0f : (float) e.a / 127.0f;
                     setup.outputs[(size_t) e.input].gainDb = Decibels::gainToDecibels (f * f, -60.0f);
                     listeners.call ([] (Listener& l) { l.outputsChanged(); });
                 }
@@ -4298,7 +4311,7 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exa
             {
                 const float f = exactValue >= 0.0f ? exactValue : (float) m.getControllerValue() / 127.0f;
                 outputs[(size_t) o]->gain.store (f * f);          // a fader's taper: half way is -12 dB
-                postEvent ({ Event::outputVolume, o, m.getControllerValue(), 0, 0, 0 });
+                postEvent ({ Event::outputVolume, o, m.getControllerValue(), exact >= 0 ? (int) (exact >> 8) + 1 : 0, 0, 0 });
                 return;
             }
     }
