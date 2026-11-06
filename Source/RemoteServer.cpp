@@ -153,6 +153,13 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .tabs button { flex:1; background:var(--panel); color:var(--dim); border:0; border-radius:10px 10px 0 0;
                  padding:12px; font-size:14px; font-weight:800; letter-spacing:.04em; }
   .tabs button.on { background:var(--row); color:#fff; }
+  #controls { padding:8px 12px 24px; }
+  #controls .csec { margin-top:14px; }
+  #controls .cname { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin:0 0 4px; }
+  #controls .crow { display:grid; grid-template-columns:1fr auto; gap:12px; padding:7px 10px; background:var(--row); border-radius:8px; margin-bottom:4px; font-size:14px; }
+  #controls .crow .what { color:var(--dim); text-align:right; }
+  #controls .crow.unset .what { opacity:.5; }
+  #controls .hint { color:var(--dim); font-size:12px; margin:8px 0 0; }
 
   /* The set list. The current song is the thing you must be able to read at a
      glance from a stand, so it is the one that is big. */
@@ -299,9 +306,11 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 <div class="tabs">
   <button id="tabSongs" class="on">Set list</button>
   <button id="tabProgs">Programs</button>
+  <button id="tabCtrl">Controls</button>
 </div>
 <div id="setview"></div>
 <div id="inputs"></div>
+<div id="controls"></div>
 <script>
 /* Tapping is timed on the server, where the tempo lives: a few milliseconds of
    network on a local wifi is far below the precision of a finger, and doing the
@@ -364,20 +373,51 @@ const filters = {};          // input index -> chosen group, "" for all
 let tab = localStorage.getItem("tab") || "songs";
 /* ?tab=songs or ?tab=programs opens on that page: a home-screen shortcut
    straight to the one a player always wants. */
-{ const want = new URLSearchParams(location.search).get("tab"); if (want === "songs" || want === "programs") { tab = want; localStorage.setItem("tab", tab); } }
-if (tab !== "songs" && tab !== "programs") tab = "songs";
+{ const want = new URLSearchParams(location.search).get("tab"); if (want === "songs" || want === "programs" || want === "controls") { tab = want; localStorage.setItem("tab", tab); } }
+if (tab !== "songs" && tab !== "programs" && tab !== "controls") tab = "songs";
 let songFilter = "";          // what is typed in the song search, if anything
 
 function syncTabs() {
   const t = tab;
   document.getElementById("tabSongs").className = t === "songs" ? "on" : "";
   document.getElementById("tabProgs").className = t === "programs" ? "on" : "";
+  document.getElementById("tabCtrl").className = t === "controls" ? "on" : "";
   document.getElementById("setview").style.display = t === "songs" ? "" : "none";
   document.getElementById("inputs").style.display  = t === "programs" ? "" : "none";
+  document.getElementById("controls").style.display = t === "controls" ? "" : "none";
+  if (t === "controls") loadControls();
+}
+
+/* The Controls panel, to read from the stand: what every pedal, knob and
+   button does, in the laptop's sections. Read-only: Learn needs a hand on
+   the keyboard, which is at the laptop. */
+let controlsKey = "";
+async function loadControls() {
+  let data;
+  try { data = await api("/api/controls"); } catch (e) { return; }
+  const key = JSON.stringify(data);
+  if (key === controlsKey) return;
+  controlsKey = key;
+  const host = document.getElementById("controls");
+  host.innerHTML = "";
+  (data.sections || []).forEach(sec => {
+    const d = document.createElement("div"); d.className = "csec";
+    const n = document.createElement("div"); n.className = "cname"; n.textContent = sec.name; d.appendChild(n);
+    (sec.rows || []).forEach(r => {
+      const row = document.createElement("div"); row.className = "crow" + (r.what ? "" : " unset");
+      const job = document.createElement("span"); job.textContent = r.job;
+      const what = document.createElement("span"); what.className = "what"; what.textContent = r.what || "not taught";
+      row.appendChild(job); row.appendChild(what); d.appendChild(row);
+    });
+    host.appendChild(d);
+  });
+  const h = document.createElement("p"); h.className = "hint"; h.textContent = "To teach or change one: the Controls panel on the computer, under the instruments.";
+  host.appendChild(h);
 }
 
 document.getElementById("tabSongs").onclick = () => { tab = "songs";    localStorage.setItem("tab", tab); syncTabs(); };
 document.getElementById("tabProgs").onclick = () => { tab = "programs"; localStorage.setItem("tab", tab); syncTabs(); };
+document.getElementById("tabCtrl").onclick  = () => { tab = "controls"; localStorage.setItem("tab", tab); syncTabs(); };
 
 /* The backing track's button and clock, kept current twice a second while the
    song in play has a track and the page is showing. */
@@ -1226,6 +1266,7 @@ async function refresh(force) {
     syncLevelPolling();
     syncTransportPolling();
     pollPanels();
+    if (tab === "controls") loadControls();
   } catch (e) {
     if (e.gate) askForCode("That code did not match the one in the Tablet control window on the computer. Try again.");
     else show(e.message);
@@ -2076,6 +2117,75 @@ const std::vector<RemoteServer::FilePart>& RemoteServer::partsOf (const File& f)
     return partCache[key] = std::move (parts);
 }
 
+String RemoteServer::controlsJson() const
+{
+    /* The Controls panel, to read from the stand: what every pedal, knob and
+       button does, in the same sections the laptop shows. Read-only here --
+       Learn needs a hand on the keyboard, which is at the laptop. */
+    DynamicObject::Ptr o (new DynamicObject());
+    const auto& setup = engine.getSetup();
+    auto section = [] (const String& name)
+    {
+        DynamicObject::Ptr sec (new DynamicObject());
+        sec->setProperty ("name", name);
+        sec->setProperty ("rows", Array<var>());
+        return sec;
+    };
+    auto row = [] (DynamicObject::Ptr& sec, const String& job, const String& what)
+    {
+        DynamicObject::Ptr r (new DynamicObject());
+        r->setProperty ("job", job); r->setProperty ("what", what);
+        auto rows = sec->getProperty ("rows");
+        rows.getArray()->add (var (r.get()));
+        sec->setProperty ("rows", rows);
+    };
+    Array<var> sections;
+    {
+        // The rig's pedals and each output's volume: from any keyboard, in every program.
+        auto sec = section ("Everywhere");
+        for (int p = 0; p < Engine::numPedals; ++p)
+        {
+            const int cc = engine.getPedalCC ((Engine::Pedal) p);
+            row (sec, Engine::pedalName ((Engine::Pedal) p), cc > 0 ? "CC " + String (cc) : String());
+        }
+        for (const auto& out : setup.outputs)
+            row (sec, out.name + " volume", out.volumeCC > 0 ? "CC " + String (out.volumeCC) : String());
+        sections.add (var (sec.get()));
+    }
+    for (int i = 0; i < (int) setup.inputs.size(); ++i)
+    {
+        const auto& in = setup.inputs[(size_t) i];
+        if (in.kind != InputDef::Kind::midi) continue;
+        // Its own jobs and taught knobs, then this program's mappings.
+        auto sec = section ("On " + in.name + (in.midiDeviceName.isNotEmpty() ? "  (" + in.midiDeviceName + ")" : String()));
+        for (int k = 0; k < SurfaceControls::numKnobs; ++k)
+            if (in.controls.knobCC[(size_t) k] > 0) row (sec, "Knob " + String (k + 1), "CC " + String (in.controls.knobCC[(size_t) k]));
+        for (int a = 0; a < SurfaceControls::numActions; ++a)
+        {
+            const auto& id = in.controls.buttons[(size_t) a];
+            row (sec, SurfaceControls::actionName (a), id.isNotEmpty() ? SurfaceHub::describeControl (id) : String());
+        }
+        sections.add (var (sec.get()));
+        const auto& prog = in.programs[(size_t) in.currentProgram];
+        auto mapped = section ("In " + in.name + "'s program " + String (in.currentProgram).paddedLeft ('0', 3) + (prog.name.isNotEmpty() ? "  " + prog.name : String()));
+        for (const auto& m : prog.mappings)
+        {
+            String target;
+            if (m.slot < 0) target = "program effect " + String (m.effect + 1);
+            else if (m.slot < (int) prog.slots.size())
+            {
+                target = prog.slots[(size_t) m.slot].displayName();
+                if (m.effect >= 0) target << " > effect " << (m.effect + 1);
+            }
+            row (mapped, m.sourceDescription(), (m.paramName.isNotEmpty() ? m.paramName : m.paramId) + (target.isNotEmpty() ? "  on " + target : String()));
+        }
+        if (prog.mappings.empty()) row (mapped, "No mappings in this program", String());
+        sections.add (var (mapped.get()));
+    }
+    o->setProperty ("sections", sections);
+    return JSON::toString (var (o.get()), true);
+}
+
 String RemoteServer::panelJson (int input) const
 {
     /* The front panel of an input's current program, as the Stage view shows
@@ -2604,6 +2714,14 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         MessageManager::callAsync ([this, song] { engine.selectSong (song); });
         ++revision;
         sendJson (sock, "200 OK", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/controls"))
+    {
+        // GET  what every pedal, knob and button does, to read from the stand.
+        String body;
+        if (produceOnMessageThread ([this] { return controlsJson(); }, body, 2000)) sendJson (sock, "200 OK", body);
+        else sendBusy (sock);
         return;
     }
     if (path.startsWith ("/api/panel"))

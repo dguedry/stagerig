@@ -1199,10 +1199,12 @@ toolbar; **Perform** again brings the panes back.
 
 **Tablet** in the toolbar starts a small web app on your network. Nothing is
 installed on the tablet: it is a web page, and a laptop or phone on the same
-network does the same job. It has two tabs: **Set list** (the running order
-and the backing track) and **Programs** (every program on every keyboard, with
-what each keyboard is on now at the top). **TAP TEMPO** and **PANIC** are in
-the header.
+network does the same job. It has three tabs: **Set list** (the running order
+and the backing track), **Programs** (every program on every keyboard, with
+what each keyboard is on now at the top, and its front panel) and
+**Controls** (what every pedal, knob and button does, in the laptop's
+Controls panel's sections, to check from the stand; teaching is done at the
+laptop). **TAP TEMPO** and **PANIC** are in the header.
 
 ![The tablet set list: the song you are on in large type, the running order, and a search](images/tablet-setlist.png)
 
