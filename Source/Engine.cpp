@@ -4270,7 +4270,7 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exa
            loaded -- a footswitch has to work all night. Only the press counts.
            While a mapping or a keyboard's control is being learned, a pedal's
            press is reported, not acted on: that controller has a job already. */
-        for (int p = 0; p < numPedals; ++p)
+        for (int p = 0; p < numPedals && cc > 0; ++p)      // CC 0 is bank select, never a pedal
             if (pedalCC[(size_t) p].load (std::memory_order_relaxed) == cc)
             {
                 if (learnArmed.load() || surfaceLearnInput.load() == i)
