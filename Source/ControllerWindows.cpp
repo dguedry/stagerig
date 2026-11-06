@@ -62,7 +62,7 @@ public:
         subtitle.setJustificationType (Justification::topLeft);
         subtitle.setText ("How it works: turning knob 1 to 8 on your keyboard turns the parameter in box 1 to 8 here, the same in every program with " + plugin.name + ". "
                           "It takes a keyboard StageRig can talk to: a Komplete Kontrol (S MK1, MK2, MK3, A or M), a Launchkey MK4, any MIDI 2.0 keyboard, "
-                          "or one whose eight knobs you taught in Options > Your keyboards. Those with a screen show these names and values.", dontSendNotification);
+                          "or one whose eight knobs you taught in the Controls panel. Those with a screen show these names and values.", dontSendNotification);
 
         for (auto* b : { &knobsTab, &keysTab })
         {

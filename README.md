@@ -63,8 +63,8 @@ other plugin.
 - **Loop a passage** on a keyboard from a footswitch, in whole bars at the rig's tempo, and play over it.
 - **Sections carry a cue sheet**: entering the chorus can change a keyboard's program, mute a part, bypass an effect or cue the lights. A song played by hand has **scenes** instead, stepped from a footswitch or the tablet.
 - **Built-in MIDI effects**: an arpeggiator, a chord, a scale, a run and a big band (each key plays the chord on that step of the key, voiced as you set it), following the song's key; a humanizer; and a phrase player that plays a short MIDI file from each key. Nothing to install.
-- **A performance view**: each keyboard's program in large type, with a front panel of knobs under it -- level, pan, and the plugin's cutoff, resonance, envelope and effects, picked by name or chosen by hand. **Perform** gives it the whole window; the same knobs are on the tablet.
-- **The keyboard's knobs follow what you play**: eight knobs turn the instrument in play, in pages, with buttons for the next page, instrument and program, taught by turning and pressing them. NKS-ready plugins (SWAM, Super 8, BBC Symphony Orchestra and the like) bring their makers' knob pages, read from their NKS presets, on any keyboard. **Controller setups** name a plugin's knob pages and colour its keys (keyswitches, a kit's pads) and are files you can share. A Novation Launchkey MK4's screen shows the program and the knobs; a Komplete Kontrol S MK2/MK3, A or M names the programs on its screen and chooses them with its track buttons; a Komplete Kontrol MK1's light guide shows each instrument's keys and its small screens the program and knobs (experimental, Linux).
+- **A performance view**: each keyboard's program in large type, with a front panel under it -- level, pan, and the page of eight knobs the keyboard's own knobs are on, the same names and values as on the keyboard's screens and the tablet, with the page arrows.
+- **The keyboard's knobs follow what you play**: eight knobs turn the instrument in play, in pages, with buttons for the next page, instrument and program, taught by turning and pressing them. NKS-ready plugins (SWAM, Super 8, BBC Symphony Orchestra and the like) bring their makers' knob pages, read from their NKS presets, on any keyboard. **Knob layouts** name a plugin's knob pages and colour its keys (keyswitches, a kit's pads) and are files you can share. A Novation Launchkey MK4's screen shows the program and the knobs; a Komplete Kontrol S MK2/MK3, A or M names the programs on its screen and chooses them with its track buttons; a Komplete Kontrol S-series MK1's light guide shows each instrument's keys and its nine screens the program and the knobs, on Linux, with nothing from Native Instruments installed.
 - **MIDI 2.0 keyboards at full resolution**: a keyboard that speaks MIDI 2.0 is heard as MIDI 2.0, so mapped knobs and pedals move plugins smoothly rather than in 128 steps; the plugins still get MIDI 1.0. A keyboard that speaks MIDI-CI Property Exchange (a Korg Keystage, say) shows the program and knob names on its screen.
 - **A pedal for a layer or an effect**: mappings can switch an instrument or an effect, or be its level; one knob can move several things.
 - **Backing tracks follow the song's tempo and key**: find the tempo in the audio, and the files stretch and transpose with the song.
@@ -210,6 +210,26 @@ uses.
 The short version: **Audio...** to pick an output, **Plugins...** to scan for
 plugins, select an input and give it a MIDI device, click a program, press
 **+ Add instrument...**, then **Save As...**.
+
+**Perform** gives the window to the performance view: each keyboard's program
+in letters a foot high, and under it the page of knobs the keyboard's own knobs
+are on.
+
+![Perform: three inputs' programs in large type, and under each the knobs page the keyboard is on -- a Hammond's drawbars, a SWAM violin's expression and vibrato](docs/images/perform-view.png)
+
+With the editing panes shown, **Stage** keeps the performance view above them.
+
+![The Stage view above the editing panes: songs and the set list, inputs, programs, an instrument with its MIDI effects, and the Controls panel](docs/images/stage-view.png)
+
+An instrument's **Knobs** window is what the keyboard's eight knobs turn on it,
+in pages; the layout is the plugin's, so it is the same in every program.
+
+![The Knobs window for a Hammond plugin: eight knob boxes named Reverb Size, Vibrato and Chorus, Leslie Drive and the drawbars, on a page called Sound](docs/images/knobs-window.png)
+
+**Your keyboards** lists each keyboard an input plays from and how StageRig
+talks to it.
+
+![Your keyboards: a Komplete Kontrol S88 MK1 over its USB connection with names on its screen, its keys lit and its knobs working by themselves; a Saffire's MIDI port as plain MIDI](docs/images/your-keyboards.png)
 
 ## Tablet control
 
