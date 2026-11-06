@@ -37,6 +37,20 @@ public:
     std::function<void()> onEdited;                 // a knob moved: the setup has changed
     std::function<void()> onHeightChanged;          // the panel appeared or went: lay the window out again
     std::function<void (int input, int program, int slot)> onOpenKnobs;   // right-click on a knob: the instrument's Knobs window
+    std::function<void (int input)> onSelectInput;  // a click on an input's readout: the on-screen keys play it (and the editing panes show it)
+    std::function<int()> selectedInput;             // which input that is now, for the readout to mark
+
+    /** The front panel grows with the window: in Perform, with the window to
+        itself, the knobs are made to be read and reached from a stand. */
+    int panelHeightNow() const                      { return getHeight() >= 560 ? 300 : panelHeight; }
+    bool isBig() const                              { return panelHeightNow() > panelHeight; }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() || e.getPosition().getY() >= readoutArea()) return;
+        for (const auto& [i, column] : columns())
+            if (column.contains (e.getPosition()) && onSelectInput) onSelectInput ((int) i);
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -55,10 +69,13 @@ public:
             const bool empty = def.isAudio() ? prog.name.isEmpty() && prog.effects.empty() : prog.isEmpty();
 
             // input name, small and dim: you know which manual is which, it is
-            // the program that needs reading
+            // the program that needs reading. The one the on-screen keys play is marked, and says so.
+            const bool chosen = selectedInput && selectedInput() == (int) i;
             g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-            g.setColour (juce::Colour (0xff9aa0ab));
-            g.drawText (def.name.toUpperCase(), cell.removeFromTop (16), juce::Justification::centredLeft, true);
+            g.setColour (chosen ? juce::Colour (0xff5aa9ff) : juce::Colour (0xff9aa0ab));
+            auto nameRow = cell.removeFromTop (16);
+            g.drawText (def.name.toUpperCase() + (chosen ? "   -  THE ON-SCREEN KEYS PLAY THIS ONE" : ""), nameRow, juce::Justification::centredLeft, true);
+            if (chosen) g.fillRect (column.withHeight (3).reduced (6, 0));
 
             // The number's size: as tall as the cell allows, and no wider than two fifths of it, three digits and all.
             const int big = juce::jmin (cell.getHeight() - 4, 190, (int) (cell.getWidth() * 0.22f));
@@ -138,11 +155,17 @@ private:
             set (level >= 0.0f ? level : 0.0);
         }
         void showValue()                            { value.setText (format ? format (slider.getValue()) : text, juce::dontSendNotification); }
+        void setBig (bool big)
+        {
+            name.setFont (juce::FontOptions (big ? 16.0f : 11.0f, juce::Font::bold));
+            value.setFont (juce::FontOptions (big ? 15.0f : 11.0f));
+        }
         void resized() override
         {
             auto r = getLocalBounds();
-            name.setBounds (r.removeFromTop (14));
-            value.setBounds (r.removeFromBottom (14));
+            const bool big = r.getHeight() >= 96;
+            name.setBounds (r.removeFromTop (big ? 22 : 14));
+            value.setBounds (r.removeFromBottom (big ? 20 : 14));
             slider.setBounds (r);
         }
         KnobSlider slider;
@@ -174,20 +197,41 @@ private:
         }
         void resized() override
         {
+            const bool big = getHeight() > 120;
+            pageLabel.setFont (juce::FontOptions (big ? 15.0f : 11.0f, juce::Font::bold));
+            slotLabel.setFont (juce::FontOptions (big ? 15.0f : 11.0f, juce::Font::bold));
+            for (auto& k : knobs) k->setBig (big);
             auto r = getLocalBounds().reduced (6, 2);
-            auto top = r.removeFromTop (18);
+            auto top = r.removeFromTop (big ? 30 : 18);
             if (pageLabel.isVisible())
             {
-                auto pages = top.removeFromRight (juce::jmin (220, top.getWidth() / 2));
-                pagePrev.setBounds (pages.removeFromLeft (22));
-                pageNext.setBounds (pages.removeFromRight (22));
+                auto pages = top.removeFromRight (juce::jmin (big ? 340 : 220, top.getWidth() / 2));
+                pagePrev.setBounds (pages.removeFromLeft (big ? 36 : 22));
+                pageNext.setBounds (pages.removeFromRight (big ? 36 : 22));
                 pageLabel.setBounds (pages);
                 top.removeFromRight (8);
             }
-            const int bw = juce::jmin (120, top.getWidth() / juce::jmax (1, (int) slotButtons.size()) - 4);    // each the same width
+            const int bw = juce::jmin (big ? 200 : 120, top.getWidth() / juce::jmax (1, (int) slotButtons.size()) - 4);    // each the same width
             for (auto& b : slotButtons) { b->setBounds (top.removeFromLeft (bw)); top.removeFromLeft (4); }
             slotLabel.setBounds (top);
-            r.removeFromTop (2);
+            r.removeFromTop (big ? 6 : 2);
+            if (big && knobs.size() > 2)
+            {
+                /* Made to be read from a stand: the page's eight knobs in two rows
+                   of four, as wide as the column allows. Level and pan step aside
+                   here; they are a knob's turn away on the small panel. */
+                knobs[0]->setVisible (false);
+                knobs[1]->setVisible (false);
+                const int rows = 2, perRow = 4;
+                const int rowH = r.getHeight() / rows, each = juce::jmin (220, r.getWidth() / perRow);
+                for (size_t k = 2; k < knobs.size(); ++k)
+                {
+                    const int n = (int) k - 2;
+                    knobs[k]->setVisible (true);
+                    knobs[k]->setBounds (r.getX() + (n % perRow) * each, r.getY() + (n / perRow) * rowH, each, rowH);
+                }
+                return;
+            }
             // The page's knobs come first; level and pan give way when the width will not hold them all.
             int shown = (int) knobs.size();
             while (shown > 2 && r.getWidth() / shown < 52) --shown;
@@ -208,7 +252,7 @@ private:
         juce::Label pageLabel, slotLabel;
     };
 
-    int readoutArea() const                         { return juce::jmax (readoutHeight, getHeight() - (anyPanel ? panelHeight : 0)); }
+    int readoutArea() const                         { return juce::jmax (readoutHeight, getHeight() - (anyPanel ? panelHeightNow() : 0)); }
 
     bool isLoading (int input, int program) const
     {
@@ -249,7 +293,7 @@ private:
         {
             bool placed = false;
             for (const auto& [i, column] : cols)
-                if ((int) i == p->input) { p->setBounds (column.withTop (readoutArea()).withHeight (panelHeight)); placed = true; }
+                if ((int) i == p->input) { p->setBounds (column.withTop (readoutArea()).withHeight (panelHeightNow())); placed = true; }
             p->setVisible (placed && anyPanel);
         }
         for (auto& p : panels) p->resized();

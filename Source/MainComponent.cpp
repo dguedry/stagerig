@@ -2836,6 +2836,8 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     // Stage display: the active program per input, big enough to read from a stand.
     stagePanel = std::make_unique<StagePanel> (engine);
     stagePanel->onEdited = [this] { markDirty(); };
+    stagePanel->onSelectInput = [this] (int i) { selectInput (i); };
+    stagePanel->selectedInput = [this] { return selectedInput; };
     stagePanel->onOpenKnobs = [this] (int in, int prog, int slot) { showKnobsFor (in, prog, slot); };
     stagePanel->onHeightChanged = [this] { resized(); };
     addChildComponent (stagePanel.get());

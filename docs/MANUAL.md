@@ -1217,10 +1217,13 @@ first. Moving a knob moves the parameter in the plugin at once; a parameter
 moved in the plugin's own window moves the knob.
 
 **Perform** in the toolbar is the Stage view with the editing panes out of
-the way: the inputs, programs, instruments and mappings go, and the window
+the way: the inputs, programs, instruments and controls go, and the window
 is the readout -- the program in letters a foot high -- with the knobs under
-it and the set list beside it when **Songs** is on. For the laptop on a
-stand behind you, read from the keys. Everything is still there under the
+it, grown to be read and reached from a stand (the page's eight knobs in two
+rows of four; level and pan step aside here) and the set list beside it when
+**Songs** is on. The on-screen keys play one input: click an input's readout
+to make it that one -- it says *the on-screen keys play this one* -- since
+the Inputs list is out of the way. Everything is still there under the
 toolbar; **Perform** again brings the panes back.
 
 ## The tablet
