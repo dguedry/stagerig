@@ -4444,11 +4444,23 @@ int main()
             CHECK (KompleteKontrolDaw::modelFor ("Komplete Kontrol DAW - 1", keys) == "Komplete Kontrol (DAW)" && keys == "KOMPLETE KONTROL");
             CHECK (KompleteKontrolDaw::modelFor ("Native Instruments - KONTROL S61 MK3 - DAW", keys) == "Komplete Kontrol S61 MK3" && keys == "S61 MK3");
             CHECK (KompleteKontrolDaw::modelFor ("MIDIIN2 (KONTROL S49 MK3)", keys) == "Komplete Kontrol S49 MK3");
+            CHECK (KompleteKontrolDaw::modelFor ("MIDIOUT2 (KONTROL S49 MK3)", keys) == "Komplete Kontrol S49 MK3");
+            CHECK (KompleteKontrolDaw::modelFor ("Komplete Kontrol A DAW", keys) == "Komplete Kontrol A" && KompleteKontrolDaw::modelFor ("Komplete Kontrol M DAW", keys) == "Komplete Kontrol M");
+            CHECK (KompleteKontrolDaw::modelFor ("KOMPLETE KONTROL - 1", keys).isEmpty());      // an MK2's keys, beside its DAW port
             CHECK (KompleteKontrolDaw::modelFor ("KONTROL S88 MK3", keys).isEmpty());          // its keys, not its DAW port
             CHECK (KompleteKontrolDaw::modelFor ("KOMPLETE KONTROL S88", keys).isEmpty());     // an MK1
             const auto h = KompleteKontrolDaw::hello();
             CHECK (h.getRawDataSize() == 3 && h.getRawData()[0] == 0xbf && h.getRawData()[1] == 0x01 && h.getRawData()[2] == 4);
             CHECK (KompleteKontrolDaw::goodbye().getRawData()[1] == 0x02);
+            // Answered, the keyboard is told the tracks run across; an S MK3 (version 4) is asked for high-resolution knob turns too.
+            {
+                const uint8 orientation[] = { 0xf0, 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00, 0x03, 0x01, 0x00,
+                                              't', 'r', 'a', 'c', 'k', '_', 'o', 'r', 'i', 'e', 'n', 't', 'a', 't', 'i', 'o', 'n', 0xf7 };
+                const auto mk2 = KompleteKontrolDaw::connectedMessages (2), mk3 = KompleteKontrolDaw::connectedMessages (4);
+                CHECK (mk2.size() == 1 && mk2[0].getRawDataSize() == (int) sizeof (orientation) && std::memcmp (mk2[0].getRawData(), orientation, sizeof (orientation)) == 0);
+                CHECK (mk3.size() == 2 && std::memcmp (mk3[0].getRawData(), orientation, sizeof (orientation)) == 0
+                       && mk3[1].getRawDataSize() == 3 && mk3[1].getRawData()[0] == 0xbf && mk3[1].getRawData()[1] == 0x06 && mk3[1].getRawData()[2] == 1);
+            }
 
             SurfaceView v; v.program = 9; v.programName = "Strings"; v.bankFirst = 8;
             v.bankNames[0] = "Piano"; v.bankNames[1] = "Strings"; v.programBefore = true; v.bankAfter = true;
@@ -4468,8 +4480,16 @@ int main()
             CHECK (find (first, 0x40, 2) != nullptr && find (first, 0x40, 2)->getSysExData()[10] == 0);          // an empty one: no track
             const auto* sel = find (first, 0x42, 1);
             CHECK (sel != nullptr && sel->getSysExData()[10] == 1);
-            CHECK (text (find (first, 0x76, 0)) == "Strings" && text (find (first, 0x72, 0)) == "Cutoff" && text (find (first, 0x73, 0)) == "50%");
-            CHECK (find (first, 0x71, 0) == nullptr);                                                            // plugin names: an S MK3's only
+            CHECK (text (find (first, 0x72, 0)) == "Cutoff" && text (find (first, 0x73, 0)) == "50%" && text (find (first, 0x75, 0)) == "Sound");
+            CHECK (find (first, 0x72, 1) != nullptr && find (first, 0x72, 1)->getSysExDataSize() == 12 && find (first, 0x75, 1) == nullptr);   // an empty knob: no name, no section
+            CHECK (find (first, 0x71, 0) == nullptr && find (first, 0x76, 0) == nullptr);                        // plugin names and the preset: an S MK3's only
+            bool presetLit = false;
+            for (const auto& m : first) presetLit = presetLit || (m.isController() && m.getControllerNumber() == 0x36);
+            CHECK (! presetLit);
+            const auto mk3 = KompleteKontrolDaw::screenMessages (v, nullptr, { 4, true });
+            CHECK (text (find (mk3, 0x76, 0)) == "Strings" && text (find (mk3, 0x71, 0)) == "Synth" && find (mk3, 0x70, 0) != nullptr);
+            for (const auto& m : mk3) presetLit = presetLit || (m.isController() && m.getControllerNumber() == 0x36 && m.getControllerValue() == 1);
+            CHECK (presetLit);
             bool navTracks = false;
             for (const auto& m : first)
                 if (m.isController() && m.getChannel() == 16 && m.getControllerNumber() == 0x30) navTracks = m.getControllerValue() == 1;   // previous only
@@ -4504,11 +4524,31 @@ int main()
             CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x42, 3), t, heard) && t.type == ControlSurface::Touch::program && t.index == 3);
             CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x52, 125), t, heard) && t.type == ControlSurface::Touch::knob && t.index == 2
                    && std::abs (t.amount + 3.0f / 1016.0f) < 1e-6f);
-            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x10, 1), t, heard) && t.type == ControlSurface::Touch::button && t.id == "ni:16");
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x10, 1), t, heard) && t.type == ControlSurface::Touch::button && t.id == "ni:16" && t.down);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x14, 0), t, heard) && t.id == "ni:20" && t.down);   // a press whatever the value: no release is sent
+            // The mute and solo buttons say which track in the value; the 4D encoder's up, down and turns say a direction.
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x43, 0), t, heard) && t.type == ControlSurface::Touch::button && t.id == "ni:mute0" && t.down);
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x44, 3), t, heard) && t.id == "ni:solo3");
+            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x44, 8), t, heard));
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x32, 1), t, heard) && t.id == "ni:50+");
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x32, 127), t, heard) && t.id == "ni:50-");
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x34, 1), t, heard) && t.id == "ni:52+");
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x64, 127), t, heard) && t.id == "ni:100-");
+            CHECK (SurfaceHub::describeControl ("ni:mute0") == "Komplete Kontrol mute button 1 (DAW)" && SurfaceHub::describeControl ("ni:solo3") == "Komplete Kontrol solo button 4 (DAW)"
+                   && SurfaceHub::describeControl ("ni:50-") == "Komplete Kontrol wheel 50 back (DAW)" && SurfaceHub::describeControl ("ni:16") == "Komplete Kontrol button 16 (DAW)");
+            CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (16, 0x58, 1), t, heard));        // shift and a knob: a pan, not the knobs'
             CHECK (! KompleteKontrolDaw::parse (MidiMessage::controllerEvent (1, 0x30, 1), t, heard));         // another channel: not the protocol
+            // A knob's turn at high resolution: the value says what it was over (0 a volume, 1 a pan, 2 a plugin's parameter).
             const uint8 hi[] = { 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00, 0x7f, 0x02, 0x05, 0x7f, 0x7f };   // knob 6, one step back
             CHECK (KompleteKontrolDaw::parse (MidiMessage::createSysExMessage (hi, (int) sizeof (hi)), t, heard) && t.type == ControlSurface::Touch::knob
                    && t.index == 5 && t.amount < 0.0f && t.amount > -0.001f);
+            const uint8 hiVolume[] = { 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00, 0x7f, 0x00, 0x03, 0x01, 0x00 };   // knob 4 in the mixer view, one step on
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::createSysExMessage (hiVolume, (int) sizeof (hiVolume)), t, heard) && t.type == ControlSurface::Touch::knob
+                   && t.index == 3 && std::abs (t.amount - 1.0f / 8191.0f) < 1e-7f);
+            const uint8 hiPan[] = { 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00, 0x7f, 0x01, 0x03, 0x01, 0x00 };      // its pan: not the knobs'
+            CHECK (! KompleteKontrolDaw::parse (MidiMessage::createSysExMessage (hiPan, (int) sizeof (hiPan)), t, heard));
+            const uint8 plugin[] = { 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00, 0x70, 0x00, 0x02 };                 // the third plugin chosen
+            CHECK (KompleteKontrolDaw::parse (MidiMessage::createSysExMessage (plugin, (int) sizeof (plugin)), t, heard) && t.type == ControlSurface::Touch::instrument && t.index == 2);
         }
 
         // The Komplete Kontrol MK1's light guide and controls, as the keyboard showed them.

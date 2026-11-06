@@ -399,6 +399,10 @@ String SurfaceHub::describeControl (const String& id)
     if (id.startsWith ("kk:b"))  return "Komplete Kontrol button " + id.substring (4);
     if (id.startsWith ("lk:n"))  return "Launchkey pad " + id.substring (4);
     if (id.startsWith ("lk:"))   return "Launchkey button " + id.substring (3);
+    if (id.startsWith ("ni:mute")) return "Komplete Kontrol mute button " + String (id.substring (7).getIntValue() + 1) + " (DAW)";
+    if (id.startsWith ("ni:solo")) return "Komplete Kontrol solo button " + String (id.substring (7).getIntValue() + 1) + " (DAW)";
+    if (id.startsWith ("ni:") && (id.endsWith ("+") || id.endsWith ("-")))
+        return "Komplete Kontrol wheel " + id.substring (3, id.length() - 1) + (id.endsWith ("+") ? " forward" : " back") + " (DAW)";
     if (id.startsWith ("ni:"))   return "Komplete Kontrol button " + id.substring (3) + " (DAW)";
     return id;
 }
@@ -1021,12 +1025,12 @@ void LaunchkeyMk4::show (const SurfaceView& v)
 //==============================================================================
 namespace
 {
-    // From ReaKontrol (github.com/jcsteh/reaKontrol, src/niMidi.cpp).
+    // From ReaKontrol (github.com/jcsteh/reaKontrol, src/niMidi.cpp and src/main.cpp).
     constexpr uint8 niHeader[] = { 0x00, 0x21, 0x09, 0x00, 0x00, 0x44, 0x43, 0x01, 0x00 };    // after F0
     enum : uint8
     {
-        niHello = 0x01, niGoodbye = 0x02, niBankMapping = 0x05,
-        niNavTracks = 0x30, niNavBanks = 0x31, niNavPreset = 0x36,
+        niHello = 0x01, niGoodbye = 0x02, niSurfaceConfig = 0x03, niBankMapping = 0x05, niUseSysExParam = 0x06,
+        niNavTracks = 0x30, niNavBanks = 0x31, niNavClips = 0x32, niMoveTransport = 0x34, niMoveLoop = 0x35, niNavPreset = 0x36,
         niTrackAvail = 0x40, niSelTrackParamsChanged = 0x41, niTrackSelected = 0x42, niTrackMuted = 0x43,
         niTrackSoloed = 0x44, niTrackArmed = 0x45, niTrackVolumeText = 0x46, niTrackPanText = 0x47, niTrackName = 0x48,
         niKnobVolume0 = 0x50, niKnobPan0 = 0x58, niChangeVolume = 0x64, niChangePan = 0x65,
@@ -1120,6 +1124,8 @@ KompleteKontrolDaw::KompleteKontrolDaw (const Ports& p) : ports (p)
     if (! opened()) { input.reset(); output.reset(); return; }
     input->start();
     send ({ hello() });
+    helloAt = Time::getMillisecondCounter();
+    hellos = 1;
 }
 
 KompleteKontrolDaw::~KompleteKontrolDaw()
@@ -1145,6 +1151,17 @@ void KompleteKontrolDaw::send (const std::vector<MidiMessage>& messages)
 MidiMessage KompleteKontrolDaw::hello()     { return niCc (niHello, 4); }
 MidiMessage KompleteKontrolDaw::goodbye()   { return niCc (niGoodbye, 0); }
 
+std::vector<MidiMessage> KompleteKontrolDaw::connectedMessages (int protocolVersion)
+{
+    /* As ReaKontrol answers the hello's answer: the tracks run across, so the
+       4D encoder's left and right step through them; and an S MK3 is asked
+       for the knobs' turns as fourteen-bit SysEx (0x7f) rather than
+       controllers, which it sends only when asked. */
+    std::vector<MidiMessage> m { niSysEx (niSurfaceConfig, 1, 0, String ("track_orientation")) };
+    if (protocolVersion >= 4) m.push_back (niCc (niUseSysExParam, 1));
+    return m;
+}
+
 std::vector<MidiMessage> KompleteKontrolDaw::screenMessages (const SurfaceView& now, const SurfaceView* before, const Heard& heard)
 {
     const int protocolVersion = heard.version;
@@ -1169,10 +1186,14 @@ std::vector<MidiMessage> KompleteKontrolDaw::screenMessages (const SurfaceView& 
             m.push_back (niSysEx (niTrackArmed, 0, i));
         }
         m.push_back (niSysEx (niTrackSelected, 1, selected));
-        m.push_back (niSysEx (niSelTrackParamsChanged, 0, 0));
+        m.push_back (niSysEx (niSelTrackParamsChanged, 0, 0));      // no Komplete Kontrol instance has the screen
         m.push_back (niCc (niNavTracks, lights (now.programBefore, now.programAfter)));
-        m.push_back (niCc (niNavPreset, lights (now.programBefore, now.programAfter)));
-        m.push_back (niSysEx (niPresetName, 0, 0, now.programName));
+        // The preset arrows and name: an S MK3's (ReaKontrol sends them from version 4 only).
+        if (protocolVersion >= 4)
+        {
+            m.push_back (niCc (niNavPreset, lights (now.programBefore, now.programAfter)));
+            m.push_back (niSysEx (niPresetName, 0, 0, now.programName));
+        }
     }
 
     // The instrument and its page of knobs.
@@ -1195,8 +1216,9 @@ std::vector<MidiMessage> KompleteKontrolDaw::screenMessages (const SurfaceView& 
         m.push_back (niSysEx (niParamPage, jmax (1, now.pageCount), now.page));
         for (int k = 0; k < SurfaceView::numKnobs; ++k)
         {
+            // A knob with nothing on it is named with no text, and has no section.
             m.push_back (niSysEx (niParamName, 0, k, now.knobNames[(size_t) k]));
-            m.push_back (niSysEx (niParamSection, 0, k, now.knobNames[(size_t) k].isNotEmpty() ? now.pageName : String()));
+            if (now.knobNames[(size_t) k].isNotEmpty()) m.push_back (niSysEx (niParamSection, 0, k, now.pageName));
         }
     }
     // The bank arrows: lit for where they go, whichever they are for.
@@ -1229,10 +1251,14 @@ bool KompleteKontrolDaw::parse (const MidiMessage& m, Touch& t, Heard& heard)
         const uint8 command = d[h], value = d[h + 1], index = d[h + 2];
         if (command == niParamHighRes && n >= h + 5 && index < SurfaceView::numKnobs)
         {
-            // A turn as fourteen bits, signed (an S MK3): a fraction of the range, as ReaKontrol takes it.
+            /* A turn as fourteen bits, signed (an S MK3): a fraction of the
+               range, as ReaKontrol takes it. The value says what the knob was
+               over: 0 a track's volume, 1 its pan, 2 a plugin's parameter. The
+               knobs turn the instrument's knobs in both views; a pan is not
+               theirs. */
+            if (value == 1) return false;
             int change = d[h + 3] | (d[h + 4] << 7);
             if (change > 8192) change -= 16384;
-            juce::ignoreUnused (value);
             t = { Touch::knob, index, (float) change / 8191.0f, false, {} };
             return true;
         }
@@ -1264,8 +1290,20 @@ bool KompleteKontrolDaw::parse (const MidiMessage& m, Touch& t, Heard& heard)
             if (value >= SurfaceView::numKnobs) return false;
             t = { Touch::program, value, 0.0f, true, {} };
             return true;
+        // The mute and solo buttons over the tracks say which track: a button each, to be taught.
+        case niTrackMuted:
+        case niTrackSoloed:
+            if (value >= SurfaceView::numKnobs) return false;
+            t = { Touch::button, 0, 0.0f, true, String (command == niTrackMuted ? "ni:mute" : "ni:solo") + String (value) };
+            return true;
+        // The 4D encoder's up and down, and its turns: a direction each (1 or -1), to be taught.
+        case niNavClips:
+        case niMoveTransport:
+        case niMoveLoop:
         case niChangeVolume:
-        case niChangePan:   return false;
+        case niChangePan:
+            t = { Touch::button, 0, 0.0f, true, "ni:" + String (command) + (signedValue (value) < 0 ? "-" : "+") };
+            return true;
         default: break;
     }
     const bool volume = command >= niKnobVolume0 && command < niKnobVolume0 + SurfaceView::numKnobs;
@@ -1276,7 +1314,7 @@ bool KompleteKontrolDaw::parse (const MidiMessage& m, Touch& t, Heard& heard)
         return true;
     }
     if (command >= niKnobPan0 && command < niKnobPan0 + SurfaceView::numKnobs) return false;
-    if (value == 0) return false;      // a button's release, where it sends one
+    // Any other controller is a button pressed, whatever its value: the keyboard says nothing of a release.
     t = { Touch::button, 0, 0.0f, true, "ni:" + String (command) };
     return true;
 }
@@ -1286,6 +1324,7 @@ void KompleteKontrolDaw::handleIncomingMidiMessage (MidiInput*, const MidiMessag
     Touch t;
     Heard h { version.load(), banksForPrograms.load() };
     const bool touched = parse (m, t, h);
+    if (m.isController() && m.getChannel() == 16 && m.getControllerNumber() == niHello && m.getControllerValue() > 0) greeted = true;
     version = h.version;
     banksForPrograms = h.banksForPrograms;
     if (! touched) return;
@@ -1300,10 +1339,24 @@ void KompleteKontrolDaw::takeTouches (std::vector<Touch>& out)
         out.insert (out.end(), touches.begin(), touches.end());
         touches.clear();
     }
-    // The keyboard answered the hello (or said it again, after Host Integration restarted), or changed view: all of it, afresh.
     const Heard h { version.load(), banksForPrograms.load() };
-    if ((h.version != shownFor.version || h.banksForPrograms != shownFor.banksForPrograms) && haveView && h.version != 0)
+    /* Unanswered, the hello is said again after three seconds, twice, as
+       ReaKontrol does: Host Integration is not always listening when the port
+       appears. */
+    if (h.version == 0 && opened() && hellos < 3 && Time::getMillisecondCounter() - helloAt >= 3000)
     {
+        send ({ hello() });
+        helloAt = Time::getMillisecondCounter();
+        ++hellos;
+    }
+    if (! haveView || h.version == 0) return;      // nothing to show yet, or not yet answered: all of it goes when it is
+    /* The keyboard answered the hello (or said it again, after Host Integration
+       restarted): what it is told once, then all of it afresh. Or it changed
+       view: all of it afresh. */
+    const bool again = greeted.exchange (false);
+    if (again || h.banksForPrograms != shownFor.banksForPrograms)
+    {
+        if (again) send (connectedMessages (h.version));
         shownFor = h;
         send (screenMessages (last, nullptr, h));
         shownOnce = true;
@@ -1318,8 +1371,10 @@ void KompleteKontrolDaw::show (const SurfaceView& v)
     haveView = true;
     const Heard h { version.load(), banksForPrograms.load() };
     if (h.version == 0) return;      // not yet answered: all of it goes when it does
-    if (shownOnce && had && v.sameText (before)) return;
-    send (screenMessages (v, shownOnce && had ? &before : nullptr, h));
+    const bool again = greeted.exchange (false);      // answered since the last tick, before any view
+    if (! again && shownOnce && had && v.sameText (before)) return;
+    if (again) send (connectedMessages (h.version));
+    send (screenMessages (v, ! again && shownOnce && had ? &before : nullptr, h));
     shownFor = h;
     shownOnce = true;
 }
