@@ -341,14 +341,18 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
         std::unique_ptr<XmlElement> savedAudio (settings.getXmlValue ("audioDeviceState"));
         deviceManager.initialise (0, 2, savedAudio.get(), true);
 
-        // First run (or a saved setup that still uses the old ALSA-emulation
-        // default): prefer the JACK type (PipeWire's graph, no resampling, small
-        // quantum) at 48 kHz. Any explicit later choice in Audio Settings sticks.
-        const bool oldDefault = savedAudio != nullptr
-                                && savedAudio->getStringAttribute ("deviceType") == "ALSA"
-                                && savedAudio->getStringAttribute ("audioOutputDeviceName").contains ("PipeWire")
-                                && ! settings.getBoolValue ("jackMigrated", false);
-        if (savedAudio == nullptr || oldDefault)
+        /* First run, or a saved state on PipeWire's ALSA emulation ("Default
+           ALSA Output (currently PipeWire Media Server)"): prefer the JACK type
+           (PipeWire's graph, no resampling, small quantum) at 48 kHz. The
+           emulation is never kept while JACK has devices: its input has been
+           seen to crash inside libasound on the first read (snd_pcm_mmap_readi),
+           and a rig that crashed into it would crash on every start after. A
+           real ALSA device chosen by hand (a card by name) is left alone. */
+        const bool pipewireAlsa = savedAudio != nullptr
+                                  && savedAudio->getStringAttribute ("deviceType") == "ALSA"
+                                  && (savedAudio->getStringAttribute ("audioOutputDeviceName").contains ("PipeWire")
+                                      || savedAudio->getStringAttribute ("audioInputDeviceName").contains ("PipeWire"));
+        if (savedAudio == nullptr || pipewireAlsa)
             for (auto* type : deviceManager.getAvailableDeviceTypes())
                 if (type->getTypeName() == "JACK")
                 {
