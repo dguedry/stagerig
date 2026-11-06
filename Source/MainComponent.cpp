@@ -2754,6 +2754,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     // Stage display: the active program per input, big enough to read from a stand.
     stagePanel = std::make_unique<StagePanel> (engine);
     stagePanel->onEdited = [this] { markDirty(); };
+    stagePanel->onOpenKnobs = [this] (int in, int prog, int slot) { showKnobsFor (in, prog, slot); };
     stagePanel->onHeightChanged = [this] { resized(); };
     addChildComponent (stagePanel.get());
     addAndMakeVisible (stageBtn);
@@ -2937,6 +2938,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     controlMaps = std::make_unique<ControlMapLibrary> (settings.getFile().getParentDirectory().getChildFile ("Controller setups"));
     controlMaps->startNksSearch (ControlMapLibrary::defaultNksFolders());
     surfaceHub = std::make_unique<SurfaceHub> (engine, *controlMaps, settings);
+    stagePanel->setHub (surfaceHub.get());
     surfaceHub->onEdited = [this] { markDirty(); };
     surfaceHub->onSurfacesChanged = [this]
     {
@@ -3002,6 +3004,7 @@ MainComponent::~MainComponent()
     // Their windows hold on to the hub: they go first. Then the keyboards are put back as they were, while the engine is still here.
     for (auto& w : controllerWindows)
         if (w != nullptr) delete w.getComponent();
+    if (stagePanel != nullptr) stagePanel->setHub (nullptr);
     surfaceHub.reset();
     engine.removeListener (this);
 }
@@ -3019,14 +3022,16 @@ bool MainComponent::raiseWindow (const String& title)
     return false;
 }
 
-void MainComponent::showKnobsFor (int slot)
+void MainComponent::showKnobsFor (int slot)                       { showKnobsFor (selectedInput, getEditedProgram(), slot); }
+
+void MainComponent::showKnobsFor (int input, int program, int slot)
 {
     if (surfaceHub == nullptr) return;
     const auto& inputs = engine.getSetup().inputs;
-    const int program = getEditedProgram();
-    if (selectedInput >= 0 && selectedInput < (int) inputs.size() && slot >= 0 && slot < (int) inputs[(size_t) selectedInput].programs[(size_t) program].slots.size()
-        && raiseWindow ("Knobs: " + inputs[(size_t) selectedInput].programs[(size_t) program].slots[(size_t) slot].plugin.name)) return;
-    controllerWindows.push_back (showControlMapEditor (engine, *surfaceHub, *controlMaps, selectedInput, program, slot, [this] { markDirty(); }));
+    if (input >= 0 && input < (int) inputs.size() && program >= 0 && program < InputDef::numPrograms
+        && slot >= 0 && slot < (int) inputs[(size_t) input].programs[(size_t) program].slots.size()
+        && raiseWindow ("Knobs: " + inputs[(size_t) input].programs[(size_t) program].slots[(size_t) slot].plugin.name)) return;
+    controllerWindows.push_back (showControlMapEditor (engine, *surfaceHub, *controlMaps, input, program, slot, [this] { markDirty(); }));
 }
 
 void MainComponent::showPedals()

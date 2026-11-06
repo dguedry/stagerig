@@ -13,6 +13,7 @@
 #include "GmSynth.h"
 #include "MidiEditor.h"
 #include "StagePanel.h"
+#include "PanelParams.h"
 #include "PropertyExchange.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>

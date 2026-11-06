@@ -49,6 +49,7 @@ public:
     void playInstrumentFromKeyboard (int slot);
     /** The controller setup of an instrument of the program being edited: its knobs, screen and lights. */
     void showKnobsFor (int slot);
+    void showKnobsFor (int input, int program, int slot);
     void showPedals();
     /** The Knobs window for the instrument the input's knobs are on, in the edited program. */
     void showKnobsForFocus();

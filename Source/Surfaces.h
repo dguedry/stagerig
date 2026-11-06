@@ -145,6 +145,9 @@ public:
     /** The instrument of the input's program the knobs turn (-1 for none), and their page. */
     int getFocusSlot (int input);
     int getFocusPage (int input);
+    /** Gives the knobs to this instrument of the input's program (a plugin slot), on its first page:
+        what a press of Next instrument does, from the Stage panel's buttons. The keyboard follows. */
+    void setFocusSlot (int input, int slot);
     SurfaceView viewFor (int input);
 
     /** A colour for each instrument of a program, in order, for its keys. */

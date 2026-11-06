@@ -180,6 +180,19 @@ const SurfaceHub::Layout& SurfaceHub::currentLayout (int input)
     return it->second;
 }
 
+void SurfaceHub::setFocusSlot (int input, int slot)
+{
+    const auto& inputs = engine.getSetup().inputs;
+    if (input < 0 || input >= (int) inputs.size()) return;
+    const auto& in = inputs[(size_t) input];
+    const auto& prog = in.programs[(size_t) in.currentProgram];
+    if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return;
+    auto& f = focus[input];
+    if (f.program == in.currentProgram && f.slot == slot) return;
+    f = { in.currentProgram, slot, 0 };
+    layouts.erase (input);
+}
+
 SurfaceView SurfaceHub::viewFor (int input)
 {
     SurfaceView v;
