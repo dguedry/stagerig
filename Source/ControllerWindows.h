@@ -15,7 +15,8 @@ juce::Component* showControlMapEditor (Engine&, SurfaceHub&, ControlMapLibrary&,
 /** Every pedal and button job of the rig in one list -- the set list, the backing
     track, the tempo, the loop, each output's volume, and each keyboard's program and
     page buttons -- each with Learn and Forget. */
-juce::Component* showPedals (Engine&, SurfaceHub&, std::function<void()> changed);
+/** Every pedal and button job, as a component to host (the Controls panel's Everywhere tab). */
+juce::Component* createPedalsView (Engine&, SurfaceHub&, std::function<void()> changed);
 
 /** The keyboards StageRig talks to, and what each input's knobs and
     buttons do: taught by turning or pressing them. Returns the window, as above. */

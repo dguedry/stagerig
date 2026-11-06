@@ -2245,6 +2245,8 @@ public:
         passToggle.onClick      = applyEdit;
     }
 
+    void hideHeader()                       { header.setVisible (false); }
+
     void refresh()
     {
         Target prev;
@@ -2331,7 +2333,7 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced (6);
-        header.setBounds (r.removeFromTop (22));
+        if (header.isVisible()) header.setBounds (r.removeFromTop (22));
         auto knobsRow = r.removeFromTop (22);
         knobsBtn.setBounds (knobsRow.removeFromRight (80).reduced (0, 1));
         knobsRow.removeFromRight (6);
@@ -2610,6 +2612,84 @@ private:
 };
 
 //==============================================================================
+/** The one table of what every control does, in two tabs: This program (a
+    pedal, wheel or slider moves one parameter: the mappings) and Everywhere
+    (the rig's pedals, each output's volume, and each keyboard's own jobs and
+    taught knobs). One question, one place: "what does this pedal do?" is
+    answered here, whichever kind of job it has. */
+class ControlsPanel : public Component
+{
+public:
+    ControlsPanel (Engine& e, MainComponent& o) : engine (e), mappings (e, o)
+    {
+        styleHeader (header);
+        addAndMakeVisible (header);
+        for (auto* b : { &programTab, &everywhereTab })
+        {
+            addAndMakeVisible (b);
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (77);
+            b->setColour (TextButton::buttonOnColourId, accentDim);
+            b->onClick = [this] { showTab(); };
+        }
+        programTab.setTooltip ("A pedal, wheel or slider that moves one parameter, in this program only");
+        everywhereTab.setTooltip ("The set list, the track, the tempo, the loop and the outputs' volume from a pedal on any keyboard; and each keyboard's own jobs and knobs");
+        programTab.setToggleState (true, dontSendNotification);
+        mappings.hideHeader();
+        addAndMakeVisible (mappings);
+        addChildComponent (noHub);
+        noHub.setColour (Label::textColourId, textDim);
+        noHub.setJustificationType (Justification::centred);
+    }
+
+    /** The hub the Everywhere tab is built on; none while it is not there. */
+    void setHub (SurfaceHub* h)
+    {
+        pedals.reset();
+        if (h != nullptr)
+        {
+            pedals.reset (createPedalsView (engine, *h, [this] { if (onEdited) onEdited(); }));
+            addChildComponent (*pedals);
+        }
+        showTab();
+    }
+    void showEverywhere()                   { everywhereTab.setToggleState (true, dontSendNotification); showTab(); }
+    void showThisProgram()                  { programTab.setToggleState (true, dontSendNotification); showTab(); }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (6);
+        auto top = r.removeFromTop (22);
+        everywhereTab.setBounds (top.removeFromRight (220).reduced (0, 1)); top.removeFromRight (4);
+        programTab.setBounds (top.removeFromRight (110).reduced (0, 1)); top.removeFromRight (8);
+        header.setBounds (top);
+        const auto body = getLocalBounds().withTrimmedTop (30);
+        mappings.setBounds (body);
+        if (pedals != nullptr) pedals->setBounds (body);
+        noHub.setBounds (body);
+    }
+
+    std::function<void()> onEdited;
+    MappingsPanel mappings;
+
+private:
+    void showTab()
+    {
+        const bool program = programTab.getToggleState();
+        mappings.setVisible (program);
+        if (pedals != nullptr) pedals->setVisible (! program);
+        noHub.setVisible (! program && pedals == nullptr);
+        resized();
+    }
+
+    Engine& engine;
+    Label header { {}, "CONTROLS" };
+    TextButton programTab { "This program" }, everywhereTab { "Everywhere, and each keyboard" };
+    std::unique_ptr<Component> pedals;
+    Label noHub { {}, "Starting up..." };
+};
+
+//==============================================================================
 //  MainComponent
 //==============================================================================
 bool MainComponent::looksLikeAraPlugin (const PluginDescription& d)
@@ -2623,8 +2703,10 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     inputsPanel   = std::make_unique<InputsPanel> (engine, *this);
     programsPanel = std::make_unique<ProgramsPanel> (engine, *this);
     slotsPanel    = std::make_unique<SlotsPanel> (engine, *this);
-    mappingsPanel = std::make_unique<MappingsPanel> (engine, *this);
-    for (auto* c : std::initializer_list<Component*> { inputsPanel.get(), programsPanel.get(), slotsPanel.get(), mappingsPanel.get() })
+    controlsPanel = std::make_unique<ControlsPanel> (engine, *this);
+    controlsPanel->onEdited = [this] { markDirty(); };
+    mappingsPanel = &controlsPanel->mappings;
+    for (auto* c : std::initializer_list<Component*> { inputsPanel.get(), programsPanel.get(), slotsPanel.get(), controlsPanel.get() })
         addAndMakeVisible (c);
 
     for (auto* b : { &newBtn, &openBtn, &saveBtn, &saveAsBtn, &audioBtn, &pluginsBtn, &panicBtn })
@@ -2659,7 +2741,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
            how it plays, where the sound goes, and the show itself. */
         m.addSectionHeader ("Keyboards and pedals");
         m.addItem (12, "Your keyboards...  (what is connected, and how StageRig talks to each)");
-        m.addItem (13, "Pedals and buttons...  (every pedal and button job, in one list)");
+        m.addItem (13, "Pedals and buttons  (the Controls panel, Everywhere)");
         m.addItem (3, "Rescan MIDI devices");
         m.addSectionHeader ("Playing");
         m.addItem (1, "Preload all programs  (instant changes; uses more memory)", true, setup.preloadAllPrograms);
@@ -2939,6 +3021,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     controlMaps->startNksSearch (ControlMapLibrary::defaultNksFolders());
     surfaceHub = std::make_unique<SurfaceHub> (engine, *controlMaps, settings);
     stagePanel->setHub (surfaceHub.get());
+    controlsPanel->setHub (surfaceHub.get());
     surfaceHub->onEdited = [this] { markDirty(); };
     surfaceHub->onSurfacesChanged = [this]
     {
@@ -3005,6 +3088,7 @@ MainComponent::~MainComponent()
     for (auto& w : controllerWindows)
         if (w != nullptr) delete w.getComponent();
     if (stagePanel != nullptr) stagePanel->setHub (nullptr);
+    if (controlsPanel != nullptr) controlsPanel->setHub (nullptr);
     if (remote != nullptr) remote->setHub (nullptr);
     surfaceHub.reset();
     engine.removeListener (this);
@@ -3037,8 +3121,10 @@ void MainComponent::showKnobsFor (int input, int program, int slot)
 
 void MainComponent::showPedals()
 {
-    if (surfaceHub == nullptr || raiseWindow ("Pedals and buttons")) return;
-    controllerWindows.push_back (perf::showPedals (engine, *surfaceHub, [this] { markDirty(); }));
+    // The Everywhere tab of the Controls panel, in the main window: Perform hides the panes, so it comes off first.
+    if (performBtn.getToggleState()) performBtn.setToggleState (false, sendNotification);
+    controlsPanel->showEverywhere();
+    showStatus ("Controls, Everywhere: every pedal and button job, below.");
 }
 
 void MainComponent::showControllers()
@@ -3064,7 +3150,7 @@ void MainComponent::paint (Graphics& g)
     g.fillRect (inputsPanel->getBounds());
     g.fillRect (programsPanel->getBounds());
     g.fillRect (slotsPanel->getBounds());
-    g.fillRect (mappingsPanel->getBounds());
+    g.fillRect (controlsPanel->getBounds());
 }
 
 void MainComponent::resized()
@@ -3103,7 +3189,7 @@ void MainComponent::resized()
         r.removeFromBottom (8);
     }
     const bool perform = performBtn.getToggleState();
-    for (auto* c : std::initializer_list<Component*> { inputsPanel.get(), programsPanel.get(), slotsPanel.get(), mappingsPanel.get(), &inputsDivider, &programsDivider })
+    for (auto* c : std::initializer_list<Component*> { inputsPanel.get(), programsPanel.get(), slotsPanel.get(), controlsPanel.get(), &inputsDivider, &programsDivider })
         if (c != nullptr) c->setVisible (! perform);
     if (perform)
     {
@@ -3165,7 +3251,7 @@ void MainComponent::resized()
     inputsDivider.setBounds (r.removeFromLeft (gap));
     programsPanel->setBounds (r.removeFromLeft (programsW));
     programsDivider.setBounds (r.removeFromLeft (gap));
-    mappingsPanel->setBounds (r.removeFromBottom (jmax (200, r.getHeight() * 40 / 100)));
+    controlsPanel->setBounds (r.removeFromBottom (jmax (200, r.getHeight() * 40 / 100)));
     r.removeFromBottom (8);
     slotsPanel->setBounds (r);
 }
@@ -3897,7 +3983,7 @@ void MainComponent::showTempoMenu()
     const int tapCC = engine.getTapTempoCC();
     m.addSectionHeader (tapCC > 0 ? "Tap from a pedal: CC " + String (tapCC) : String ("Tap from a pedal"));
     // Taught where every pedal is, by pressing it; typing the number is for a pedal that is not to hand.
-    m.addItem (5, "Pedals and buttons...");
+    m.addItem (5, "Pedals and buttons  (the Controls panel)");
     m.addItem (2, "Type a controller number...");
 
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (tapButton), [this] (int choice)

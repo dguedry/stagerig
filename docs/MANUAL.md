@@ -152,21 +152,23 @@ changes. **Open...** opens a setup file.
 
 **Options** holds the things set once, in four groups. *Keyboards and
 pedals*: **Your keyboards...** (what is connected and how StageRig talks to
-each), **Pedals and buttons...** (every pedal and button job in one list)
-and **Rescan MIDI devices**. *Playing*: **Preload all programs** and **Let
+each), **Pedals and buttons** (the Controls panel's Everywhere tab, below
+the instruments) and **Rescan MIDI devices**. *Playing*: **Preload all programs** and **Let
 held notes ring through a program change**. *Sound and sync*: **Outputs &
 master effects...**, **General MIDI sounds...**, **Send MIDI clock to** and
-**Ableton Link**. *The show*: **Pre-show check...**, **Show songs and set
-lists**, **Print the program list...** and **Record the gig**. Each is
+**Ableton Link**. *The show*: **Pre-show check...**, **Print the program
+list...** and **Record the gig**. Each is
 explained where it matters below.
 
-Where a control is set, in one line: a pedal or button that does a job of
-the rig -- the set list, the track, the tempo, the loop, an output's volume,
-a keyboard's programs and knob pages -- is in **Pedals and buttons**. A
-pedal, wheel or slider that moves one plugin parameter in one program is a
-**MIDI mapping**, in that program. What the keyboard's eight knobs turn on
-an instrument is its **Knobs** button. Which keyboards are connected, and
-their knobs on one StageRig does not know, is **Your keyboards**.
+Where a control is set, in one line: every pedal, wheel, knob and button
+is in the **CONTROLS** panel, under the instruments. Its **This program**
+tab is a pedal, wheel or slider that moves one plugin parameter in this
+program (a MIDI mapping); its **Everywhere, and each keyboard** tab is the
+jobs of the rig -- the set list, the track, the tempo, the loop, an
+output's volume -- and, under each keyboard's name, its programs, knob pages
+and, on a plain MIDI keyboard, its knobs. What the keyboard's eight knobs
+turn on an instrument is its **Knobs** button. Which keyboards are
+connected and how StageRig talks to each is **Your keyboards**.
 
 **Tail** is how many seconds the previous program keeps sounding after a
 program change, so releases and reverbs fade instead of being cut. Set it in
@@ -610,9 +612,9 @@ play what.
 
 | Where | What it says | For |
 |---|---|---|
-| **Options ▸ Pedals and buttons...** | A pedal or button's job; on a plain MIDI keyboard, which controller each knob is | The rig, or that keyboard, in every program |
+| **CONTROLS ▸ Everywhere, and each keyboard** | A pedal or button's job; on a plain MIDI keyboard, which controller each knob is | The rig, or that keyboard, in every program |
 | An instrument's **Knobs** button | What the eight knobs turn on the plugin, in pages | The plugin, in every program that has it, on any keyboard -- and the Stage view and the tablet show the same page |
-| **MIDI mappings** | One pedal, wheel or slider to one parameter | This program only |
+| **CONTROLS ▸ This program** | One pedal, wheel or slider to one parameter (a MIDI mapping) | This program only |
 
 **What the knobs turn.** Each instrument has pages of eight knobs. With a
 controller setup (below), they are the setup's pages, with its names.
@@ -652,18 +654,19 @@ on the clipboard, to paste into a message when something does not work.
 
 **Teaching a keyboard's knobs.** Only a plain MIDI keyboard whose knobs send
 controllers needs this; for one StageRig talks to, the knobs already work
-and **Pedals and buttons** says so under the keyboard's name instead. For
-the other kind, the keyboard's section there lists its eight knobs above
-its button jobs. Press **Learn** and turn the knob. Tick **The knobs are
+and the Controls panel's Everywhere tab says so under the keyboard's name
+instead. For the other kind, the keyboard's section there lists its eight
+knobs above its button jobs. Press **Learn** and turn the knob. Tick **The knobs are
 endless** for knobs that turn without stopping and send steps (around 64)
 rather than a position. What you teach is kept with the input, in the setup
 file. A taught knob no longer reaches the instruments as a controller, and
 is never a MIDI mapping: **Learn MIDI** in the mappings says so if you turn
 one.
 
-**Pedals and buttons.** **Options ▸ Pedals and buttons...** (also
-**Pedals...** in the songs panel) is every pedal and button job in one
-list, each with **Learn** and **Forget**: the set list's **Next song** and
+**Everywhere, and each keyboard.** The Controls panel's second tab (also
+**Options ▸ Pedals and buttons** and **Pedals...** in the songs panel, which
+go to it) is every pedal and button job in one list, each with **Learn**
+and **Forget**: the set list's **Next song** and
 **Previous song**; the backing track's **Start / stop** and **Next section,
 next scene, or release a vamp**; **Tap tempo**; the loop's **Record, play,
 stop** and **Clear**; each output's volume; and, for each keyboard, **Next

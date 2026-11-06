@@ -4042,7 +4042,7 @@ void Engine::handleAsyncUpdate()
                 // c: 1 + a keyboard knob; d: 1 + a rig pedal -- a controller with a job already, said and not taken.
                 if (e.d > 0)
                 {
-                    const String msg = "CC " + String (e.b) + " is the " + pedalName ((Pedal) (e.d - 1)) + " pedal (Options > Pedals and buttons): press another. Still waiting...";
+                    const String msg = "CC " + String (e.b) + " is the " + pedalName ((Pedal) (e.d - 1)) + " pedal (Controls, Everywhere): press another. Still waiting...";
                     listeners.call ([&] (Listener& l) { l.statusMessage (msg); });
                 }
                 else if (e.c > 0) listeners.call ([&] (Listener& l) { l.learnedKeyboardKnob (e.input, e.c - 1); });

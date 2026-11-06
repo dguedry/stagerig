@@ -17,6 +17,7 @@ class InputsPanel;
 class ProgramsPanel;
 class SlotsPanel;
 class MappingsPanel;
+class ControlsPanel;
 
 class MainComponent : public juce::Component,
                       private Engine::Listener,
@@ -165,7 +166,8 @@ private:
     std::unique_ptr<InputsPanel> inputsPanel;
     std::unique_ptr<ProgramsPanel> programsPanel;
     std::unique_ptr<SlotsPanel> slotsPanel;
-    std::unique_ptr<MappingsPanel> mappingsPanel;
+    std::unique_ptr<ControlsPanel> controlsPanel;     // the one table of what every control does
+    MappingsPanel* mappingsPanel = nullptr;           // its This program tab, owned by it
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::String statusText;

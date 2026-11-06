@@ -837,7 +837,7 @@ private:
     it, and the two switches that are about the device rather than a program:
     Plain MIDI, and for one that speaks MIDI 2.0, hearing it as MIDI 1.0. What
     its knobs and buttons do is elsewhere, on purpose: the rig's and the
-    keyboard's own jobs in Pedals and buttons, what the knobs turn in each
+    keyboard's own jobs in the Controls panel, what the knobs turn in each
     instrument's Knobs window. */
 class ControllersView : public Component, private Timer
 {
@@ -864,7 +864,7 @@ public:
         explain.setColour (Label::textColourId, textDim);
         explain.setJustificationType (Justification::topLeft);
         explain.setText ("StageRig talks to a keyboard the most standard way it knows -- MIDI-CI, else its maker's own protocol -- and plays any other "
-                         "as plain MIDI. What a keyboard's pedals, buttons and knobs do is set in Options > Pedals and buttons, where its own jobs "
+                         "as plain MIDI. What a keyboard's pedals, buttons and knobs do is set in the Controls panel of the main window, where its own jobs "
                          "are listed under its name; what its knobs turn on an instrument is that instrument's Knobs window.", dontSendNotification);
         showKeyboards();
         startTimer (500);
@@ -961,7 +961,7 @@ private:
             if (k.lights) what.add ("its keys lit");
             what.add (k.knobsByThemselves ? "its knobs work by themselves"
                       : k.knobsSilent    ? "its knobs send no MIDI, so they cannot be taught"
-                                         : "teach its knobs in Pedals and buttons");
+                                         : "teach its knobs in the Controls panel");
             if (k.plain && k.more.isNotEmpty()) what.add ("untick Plain MIDI for " + k.more);
             row->detail.setText (what.joinIntoString ("  -  "), dontSendNotification);
             row->plain.setToggleState (k.plain, dontSendNotification);
@@ -1028,9 +1028,8 @@ public:
         addAndMakeVisible (explain);
         explain.setColour (Label::textColourId, textDim);
         explain.setJustificationType (Justification::topLeft);
-        explain.setText ("Press Learn, then press the pedal or button. The jobs at the top work from a pedal on any keyboard, in every program; "
-                         "a keyboard's own jobs are per keyboard, and on a keyboard StageRig talks to can be one of its buttons. "
-                         "A pedal or knob that should move one parameter in one program is a MIDI mapping instead.", dontSendNotification);
+        explain.setText ("Press Learn, then press the pedal or button. The jobs at the top work from any keyboard, in every program; "
+                         "a keyboard's own jobs are under its name, and on a keyboard StageRig talks to can be one of its buttons.", dontSendNotification);
         addAndMakeVisible (view);
         view.setViewedComponent (&list, false);
         view.setScrollBarsShown (true, false);
@@ -1051,8 +1050,8 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced (12);
-        explain.setBounds (r.removeFromTop (54));
-        r.removeFromTop (6);
+        explain.setBounds (r.removeFromTop (34));
+        r.removeFromTop (4);
         view.setBounds (r);
         layoutRows();
     }
@@ -1345,9 +1344,9 @@ Component* showControllers (Engine& engine, SurfaceHub& hub, std::function<void(
     return launch (new ControllersView (engine, hub, std::move (changed)), "Your keyboards", 860, 340);
 }
 
-Component* showPedals (Engine& engine, SurfaceHub& hub, std::function<void()> changed)
+Component* createPedalsView (Engine& engine, SurfaceHub& hub, std::function<void()> changed)
 {
-    return launch (new PedalsView (engine, hub, std::move (changed)), "Pedals and buttons", 760, 620);
+    return new PedalsView (engine, hub, std::move (changed));
 }
 
 } // namespace perf
