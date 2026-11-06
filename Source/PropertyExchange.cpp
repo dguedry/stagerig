@@ -62,10 +62,12 @@ PropertyResponder::PropertyResponder (Send s) : send (std::move (s))
         .withProductInstanceId (ci::DeviceOptions::makeProductInstanceId (random))
         .withPropertyDelegate (this);
     device = std::make_unique<ci::Device> (options);
+    device->addListener (*this);
 }
 
 PropertyResponder::~PropertyResponder()
 {
+    device->removeListener (*this);
     device.reset();     // says goodbye (Invalidate MUID) while `send` still works
 }
 
@@ -109,15 +111,21 @@ String PropertyResponder::getRemoteName() const
 //==============================================================================
 var PropertyResponder::channelList (const SurfaceView& v)
 {
-    if (v.program < 0) return Array<var>();
-    return Array<var> { object ({
-        { "title", v.inputName.isNotEmpty() ? v.inputName : String ("StageRig") },
-        { "channel", v.channel > 0 ? v.channel : 1 },
-        { "programTitle", v.programName },
-        { "bankPC", bankPC (v.program) },
-        { "links", Array<var> { object ({ { "resource", "ProgramList" }, { "resId", programListId }, { "title", "Programs" } }),
-                                object ({ { "resource", "X-ParameterList" } }),
-                                object ({ { "resource", "X-ProgramEdit" } }) } } }) };
+    /* One entry, the input (M2-105 4.3: title and channel are required, the
+       program is not): with no program in play it is still there, so the
+       keyboard knows the channel and where the programs are. */
+    auto* entry = new DynamicObject();
+    entry->setProperty ("title", v.inputName.isNotEmpty() ? v.inputName : String ("StageRig"));
+    entry->setProperty ("channel", jlimit (1, 256, v.channel > 0 ? v.channel : 1));
+    if (v.program >= 0)
+    {
+        entry->setProperty ("programTitle", v.programName);
+        entry->setProperty ("bankPC", bankPC (v.program));
+    }
+    entry->setProperty ("links", Array<var> { object ({ { "resource", "ProgramList" }, { "resId", programListId }, { "title", "Programs" } }),
+                                              object ({ { "resource", "X-ParameterList" } }),
+                                              object ({ { "resource", "X-ProgramEdit" } }) });
+    return Array<var> { var (entry) };
 }
 
 var PropertyResponder::programList (const SurfaceView& v)
@@ -156,14 +164,18 @@ var PropertyResponder::contentOf (const String& resource, const String& resId) c
 {
     if (resource == "ResourceList")
     {
-        // Only what differs from each resource's defaults is said (M2-103).
+        /* Only what differs from each resource's defaults is said (M2-103
+           14.3), except that ProgramList's paging, its default (M2-107 2.4),
+           is spelt out for a keyboard that does not know that default. Korg's
+           two resources carry a schema, as a maker's resource must (14.4):
+           a title, the type, and where to ask for the whole schema. */
         return Array<var> {
             object ({ { "resource", "DeviceInfo" } }),
             object ({ { "resource", "ChannelList" }, { "canSubscribe", true } }),
-            object ({ { "resource", "ProgramList" }, { "canSubscribe", true } }),
+            object ({ { "resource", "ProgramList" }, { "canSubscribe", true }, { "canPaginate", true } }),
             object ({ { "resource", "JSONSchema" } }),
             object ({ { "resource", "X-ParameterList" }, { "canSubscribe", true },
-                      { "schema", object ({ { "title", "Parameter List" }, { "type", "object" }, { "$ref", "midi+jsonschema://parameterListSchema" } }) } }),
+                      { "schema", object ({ { "title", "Parameter List" }, { "type", "array" }, { "$ref", "midi+jsonschema://parameterListSchema" } }) } }),
             object ({ { "resource", "X-ProgramEdit" }, { "canSubscribe", true },
                       { "schema", object ({ { "title", "Program Edit" }, { "type", "object" }, { "$ref", "midi+jsonschema://programEditSchema" } }) } }) };
     }
@@ -179,11 +191,13 @@ var PropertyResponder::contentOf (const String& resource, const String& resId) c
         if (resId == "programEditSchema")   return programEditSchema();
         return {};
     }
-    if (! haveView) return {};
-    if (resource == "ChannelList")      return channelList (view);
-    if (resource == "ProgramList")      return programList (view);       // whatever resId: a Keystage sends none
-    if (resource == "X-ParameterList")  return parameterList (view);
-    if (resource == "X-ProgramEdit")    return programEdit (view);
+    /* A keyboard found just now may ask before StageRig has shown this
+       responder anything: the resource is there, so it is answered, empty,
+       rather than said not to exist (404), and a subscriber hears the rest. */
+    if (resource == "ChannelList")      return haveView ? channelList (view) : var (Array<var>());
+    if (resource == "ProgramList")      return haveView ? programList (view) : var (Array<var>());       // whatever resId: a Keystage sends none
+    if (resource == "X-ParameterList")  return haveView ? parameterList (view) : var (Array<var>());
+    if (resource == "X-ProgramEdit")    return haveView ? programEdit (view) : object ({ { "currentValues", Array<var>() } });
     return {};
 }
 
@@ -201,16 +215,20 @@ ci::PropertyReplyData PropertyResponder::propertyGetDataRequested (ci::MUID, con
         reply.header.message = "StageRig has no " + header.resource + (header.resId.isNotEmpty() ? " " + header.resId : String());
         return reply;
     }
-    // A list asked for a page at a time: that page, and how many there are in all.
-    if (header.pagination.has_value())
-        if (const auto* all = content.getArray())
+    /* A list that can be paged says how many there are in all, in every
+       reply (M2-103 8.6.2), and asked for a page (offset from 0, limit at
+       least 1) gives that page. */
+    if (const auto* all = content.getArray())
+    {
+        if (header.resource == "ProgramList") reply.header.extended[Identifier ("totalCount")] = all->size();
+        if (header.pagination.has_value())
         {
             const int from = jmax (0, header.pagination->offset), count = jmax (1, header.pagination->limit);
             Array<var> page;
             for (int i = from; i < jmin (all->size(), from + count); ++i) page.add ((*all)[i]);
-            reply.header.extended[Identifier ("totalCount")] = all->size();
             content = page;
         }
+    }
     const auto text = ci::Encodings::jsonTo7BitText (content);
     if (auto encoded = header.mutualEncoding != ci::Encoding::ascii ? ci::Encodings::tryEncode (text, header.mutualEncoding) : std::nullopt)
     {
@@ -243,7 +261,7 @@ void PropertyResponder::subscriptionDidStart (ci::MUID m, const String& subId, c
 {
     subscribers[header.resource].insert ({ m, subId });
     // What it is told from now on is measured against what it has: what it is asking about now.
-    if (haveView) sent[header.resource] = json (contentOf (header.resource, {}));
+    sent[header.resource] = json (contentOf (header.resource, {}));
 }
 
 void PropertyResponder::subscriptionWillEnd (ci::MUID m, const ci::Subscription& sub)
@@ -252,7 +270,18 @@ void PropertyResponder::subscriptionWillEnd (ci::MUID m, const ci::Subscription&
     note ("no longer told of " + sub.resource);
 }
 
-void PropertyResponder::tell (const String& resource, bool whole)
+void PropertyResponder::deviceRemoved (ci::MUID m)
+{
+    // The keyboard gave up its MUID (Invalidate MUID): its subscriptions end with it (M2-103 11.5).
+    bool had = false;
+    for (auto& [resource, subs] : subscribers)
+        for (auto it = subs.begin(); it != subs.end();)
+            if (it->muid == m) { it = subs.erase (it); had = true; }
+            else ++it;
+    if (had) note ("the keyboard left: no longer told of anything");
+}
+
+void PropertyResponder::tell (const String& resource)
 {
     auto it = subscribers.find (resource);
     if (it == subscribers.end() || it->second.empty()) return;
@@ -261,16 +290,28 @@ void PropertyResponder::tell (const String& resource, bool whole)
     if (sent[resource] == text) return;
     sent[resource] = text;
     const auto body = ci::Encodings::jsonTo7BitText (content);
-    note ("told of " + resource + (whole ? String() : String (" (to ask again)")));
+    auto* host = device->getPropertyHost();
     for (const auto& s : it->second)
     {
         ci::PropertySubscriptionHeader h;
         h.resource = resource;
         h.subscribeId = s.id;
-        // A long list is only said to have changed (notify), for the keyboard to ask again; the rest goes whole.
-        h.command = whole ? ci::PropertySubscriptionCommand::full : ci::PropertySubscriptionCommand::notify;
-        if (auto* host = device->getPropertyHost())
-            host->sendSubscriptionUpdate (s.muid, h, whole ? Span<const std::byte> (body.data(), body.size()) : Span<const std::byte>(), {});
+        h.command = ci::PropertySubscriptionCommand::full;
+        /* The new contents go whole (full) when they fit the keyboard's one
+           SysEx message; a longer change, and the program list (which the
+           keyboard reads a page at a time), are only said to have changed
+           (notify), for it to ask again (M2-103 11.1.1). The message carries
+           its header and 22 bytes besides, in JUCE's counting, and F0 and F7. */
+        const auto discovery = device->getDiscoveryInfoForMuid (s.muid);
+        const auto room = discovery.has_value() ? (int) jmin ((uint32) 65536, discovery->maximumSysexSize) : 512;
+        const auto header = ci::Encodings::jsonTo7BitText (h.toVarCondensed());
+        if (resource == "ProgramList" || (int) (header.size() + body.size()) + 24 > room)
+            h.command = ci::PropertySubscriptionCommand::notify;
+        const bool whole = h.command == ci::PropertySubscriptionCommand::full;
+        note ("told of " + resource + (whole ? String() : String (" (to ask again)")));
+        if (host == nullptr
+            || ! host->sendSubscriptionUpdate (s.muid, h, whole ? Span<const std::byte> (body.data(), body.size()) : Span<const std::byte>(), {}).has_value())
+            note ("could not tell " + String::toHexString ((int) s.muid.get()) + " of " + resource + " (subscription " + s.id + ")");
     }
 }
 
@@ -283,10 +324,10 @@ void PropertyResponder::show (const SurfaceView& v)
     haveView = true;
     if (! knobsOnly)
     {
-        tell ("ChannelList", true);
-        tell ("ProgramList", false);
-        tell ("X-ParameterList", true);
-        tell ("X-ProgramEdit", true);
+        tell ("ChannelList");
+        tell ("ProgramList");
+        tell ("X-ParameterList");
+        tell ("X-ProgramEdit");
     }
     else
     {
@@ -296,7 +337,7 @@ void PropertyResponder::show (const SurfaceView& v)
         for (int k = 0; k < SurfaceView::numKnobs; ++k)
             if (v.knobValues[(size_t) k] != before.knobValues[(size_t) k] && now - turnedAt[(size_t) k] > 500)
                 fromElsewhere = true;
-        if (fromElsewhere) tell ("X-ProgramEdit", true);
+        if (fromElsewhere) tell ("X-ProgramEdit");
         else               sent["X-ProgramEdit"] = json (programEdit (view));
     }
     device->sendPendingMessages();

@@ -23,7 +23,8 @@ namespace perf
     messages are here; MidiCiKeyboard (below) carries them over a MIDI port,
     and the tests carry them to a keyboard made in software. Message thread. */
 class PropertyResponder : private juce::midi_ci::PropertyDelegate,
-                          private juce::midi_ci::DeviceMessageHandler
+                          private juce::midi_ci::DeviceMessageHandler,
+                          private juce::midi_ci::DeviceListener
 {
 public:
     /** Where outgoing SysEx goes, without its F0 and F7. */
@@ -60,9 +61,10 @@ private:
     void subscriptionDidStart (juce::midi_ci::MUID, const juce::String& subId, const juce::midi_ci::PropertySubscriptionHeader&) override;
     void subscriptionWillEnd (juce::midi_ci::MUID, const juce::midi_ci::Subscription&) override;
     void processMessage (juce::universal_midi_packets::BytesOnGroup) override;
+    void deviceRemoved (juce::midi_ci::MUID) override;
 
     juce::var contentOf (const juce::String& resource, const juce::String& resId) const;
-    void tell (const juce::String& resource, bool whole);
+    void tell (const juce::String& resource);
 
     Send send;
     std::unique_ptr<juce::midi_ci::Device> device;

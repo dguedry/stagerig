@@ -199,8 +199,11 @@ static int probeNks (const String& wanted)
 
 /* A keyboard speaking MIDI-CI Property Exchange, played by JUCE's own
    MIDI-CI: it finds StageRig, reads the program in play, the programs and the
-   knobs, and is told when the program changes. STAGERIG_TEST_MIDICI=1 runs
-   only this. Returns the failures. */
+   knobs, and is told when the program changes. Each answer is checked against
+   what the specifications say -- M2-101 MIDI-CI 1.2, M2-103 Common Rules for
+   Property Exchange 1.2, M2-105 Foundational Resources, M2-107 ProgramList,
+   and Korg's Keystage Property Exchange Resource List 1.0.
+   STAGERIG_TEST_MIDICI=1 runs only this. Returns the failures. */
 static int checkMidiCi()
 {
     const int before = failures;
@@ -215,109 +218,272 @@ static int checkMidiCi()
         } keyboardOut (toRig);
         struct Heard : ci::DeviceListener
         {
-            std::vector<std::pair<String, var>> updates;     // resource's subscribeId's command, body
+            struct Update { String command, subscribeId; var body; };
+            std::vector<Update> updates;
             void propertySubscriptionDataReceived (ci::MUID, const ci::PropertySubscriptionData& d) override
             {
-                updates.emplace_back (String (ci::PropertySubscriptionCommandUtils::toString (d.header.command)),
-                                      d.body.empty() ? var() : ci::Encodings::jsonFrom7BitText (d.body));
+                updates.push_back ({ ci::PropertySubscriptionCommandUtils::toString (d.header.command), d.header.subscribeId,
+                                     d.body.empty() ? var() : ci::Encodings::jsonFrom7BitText (d.body) });
             }
         } heard;
         Random random;
-        ci::Device keyboard (ci::DeviceOptions().withOutputs ({ &keyboardOut })
+        // A keyboard whose SysEx messages hold 1024 bytes (one that asks must take 512 at least, M2-101 5.5.3).
+        auto keyboard = std::make_unique<ci::Device> (ci::DeviceOptions().withOutputs ({ &keyboardOut })
                                  .withDeviceInfo ({ { std::byte { 0x42 }, std::byte {}, std::byte {} }, {}, {}, {} })
                                  .withFeatures (ci::DeviceFeatures().withPropertyExchangeSupported())
-                                 .withMaxSysExSize (512)
+                                 .withMaxSysExSize (1024)
                                  .withProductInstanceId (ci::DeviceOptions::makeProductInstanceId (random)));
-        keyboard.addListener (heard);
+        keyboard->addListener (heard);
         PropertyResponder rig ([&toKeyboard] (Span<const std::byte> b) { toKeyboard.emplace_back (b.begin(), b.end()); });
         auto settleCi = [&]
         {
             for (int i = 0; i < 1000 && (! toKeyboard.empty() || ! toRig.empty()); ++i)
             {
                 if (! toRig.empty())      { auto m = std::move (toRig.front()); toRig.pop_front(); rig.receive (Span<const std::byte> (m.data(), m.size())); }
-                if (! toKeyboard.empty()) { auto m = std::move (toKeyboard.front()); toKeyboard.pop_front(); keyboard.processMessage ({ 0, m }); }
+                if (! toKeyboard.empty()) { auto m = std::move (toKeyboard.front()); toKeyboard.pop_front(); if (keyboard != nullptr) keyboard->processMessage ({ 0, m }); }
             }
         };
+        auto entry = [] (const var& list, const String& resource) -> var
+        {
+            if (const auto* a = list.getArray())
+                for (const auto& e : *a)
+                    if (e.getProperty ("resource", {}) == var (resource)) return e;
+            return {};
+        };
+
+        // The keyboard finds StageRig before StageRig has shown it anything, as one found at start-up does.
+        CHECK (! rig.isAskedFor());
+        keyboard->sendDiscovery();
+        settleCi();
+        const auto muids = keyboard->getDiscoveredMuids();
+        CHECK (muids.size() == 1);
+        if (muids.size() != 1) return failures - before;
+        const auto m = muids[0];
+        // As a keyboard does next: what can you tell me? Then JUCE reads ResourceList, DeviceInfo and ChannelList.
+        keyboard->sendPropertyCapabilitiesInquiry (m);
+        settleCi();
+        const auto resources = keyboard->getResourceListForMuid (m);
+        const auto info = keyboard->getDeviceInfoForMuid (m);
+        std::printf ("     MIDI-CI: resources %s, device %s\n", JSON::toString (resources, true).toRawUTF8(), JSON::toString (info, true).toRawUTF8());
+        CHECK (rig.isAskedFor());
+
+        // ResourceList (M2-103 14): every resource but itself; a maker's resource with its schema's title, type and where to ask for the rest (14.4).
+        CHECK (resources.size() == 6 && entry (resources, "ResourceList").isVoid());
+        CHECK (entry (resources, "DeviceInfo").isObject() && entry (resources, "JSONSchema").isObject());
+        CHECK (entry (resources, "ChannelList").getProperty ("canSubscribe", {}) == var (true));
+        CHECK (entry (resources, "ProgramList").getProperty ("canSubscribe", {}) == var (true) && entry (resources, "ProgramList").getProperty ("canPaginate", {}) == var (true));
+        for (const auto* x : { "X-ParameterList", "X-ProgramEdit" })
+        {
+            const auto schema = entry (resources, x).getProperty ("schema", {});
+            CHECK (entry (resources, x).getProperty ("canSubscribe", {}) == var (true) && schema.hasProperty ("title") && schema.hasProperty ("type")
+                   && schema.getProperty ("$ref", {}).toString().startsWith ("midi+jsonschema://"));
+        }
+        CHECK (entry (resources, "X-ParameterList").getProperty ("schema", {}).getProperty ("type", {}) == var ("array"));
+        CHECK (entry (resources, "X-ProgramEdit").getProperty ("schema", {}).getProperty ("type", {}) == var ("object"));
+
+        // DeviceInfo (M2-105 3.2): the ids as in the Discovery reply, 7D (125) being MIDI's non-commercial maker, and every required name.
+        const auto discovery = keyboard->getDiscoveryInfoForMuid (m);
+        CHECK (discovery.has_value() && discovery->maximumSysexSize >= 512);
+        auto ids = [] (const var& a) { StringArray s; for (int i = 0; i < a.size(); ++i) s.add (a[i].toString()); return s.joinIntoString (","); };
+        auto bytes = [] (const auto& arr) { StringArray s; for (auto b : arr) s.add (String ((int) b)); return s.joinIntoString (","); };
+        CHECK (ids (info.getProperty ("manufacturerId", {})) == "125,0,0" && discovery.has_value() && ids (info.getProperty ("manufacturerId", {})) == bytes (discovery->device.manufacturer));
+        CHECK (discovery.has_value() && ids (info.getProperty ("familyId", {})) == bytes (discovery->device.family) && ids (info.getProperty ("modelId", {})) == bytes (discovery->device.modelNumber)
+               && ids (info.getProperty ("versionId", {})) == bytes (discovery->device.revision));
+        for (const auto* field : { "manufacturer", "family", "model", "version" })
+            CHECK (info.getProperty (field, {}).toString().isNotEmpty());
+        CHECK (info.getProperty ("model", {}) == var ("StageRig"));
+
+        // Asked before StageRig has anything to show: the resources are there, empty, not missing (404).
+        const auto channelsBefore = keyboard->getChannelListForMuid (m);
+        CHECK (channelsBefore.isArray() && channelsBefore.size() == 0);
+
+        int status = 0; String message; var body; int total = 0;
+        auto get = [&] (const String& resource, const String& resId, std::optional<ci::Pagination> page)
+        {
+            ci::PropertyRequestHeader h;
+            h.resource = resource;
+            h.resId = resId;
+            h.pagination = page;
+            status = 0; message.clear(); body = var(); total = -1;
+            keyboard->sendPropertyGetInquiry (m, h, [&] (const ci::PropertyExchangeResult& r)
+            {
+                if (r.getError().has_value()) return;
+                const auto reply = r.getHeaderAsReplyHeader();
+                status = reply.status;
+                message = reply.message;
+                body = ci::Encodings::jsonFrom7BitText (r.getBody());
+                const auto it = reply.extended.find (Identifier ("totalCount"));
+                total = it != reply.extended.end() ? (int) it->second : -1;
+            });
+            settleCi();
+            return status == 200;
+        };
+        CHECK (get ("X-ProgramEdit", {}, std::nullopt) && body.getProperty ("currentValues", {}).isArray() && body.getProperty ("currentValues", {}).size() == 0);
+        CHECK (get ("ProgramList", {}, std::nullopt) && body.isArray() && body.size() == 0 && total == 0);
+
+        // Now StageRig shows it something.
         SurfaceView pv;
         pv.inputName = "Upper"; pv.channel = 2; pv.program = 3; pv.programName = "Grand Piano";
         pv.programs = { { 0, "Organ" }, { 3, "Grand Piano" }, { 9, "Strings" } };
         pv.knobNames[0] = "Cutoff"; pv.knobValues[0] = "40%"; pv.knobLevels[0] = 0.4f;
         for (int k = 0; k < SurfaceView::numKnobs; ++k) pv.knobControllers[(size_t) k] = SurfaceControls::autoKnobCC + k;
         rig.show (pv);
-        CHECK (! rig.isAskedFor());
-        keyboard.sendDiscovery();
         settleCi();
-        const auto muids = keyboard.getDiscoveredMuids();
-        CHECK (muids.size() == 1);
-        if (muids.size() == 1)
+
+        // ChannelList (M2-105 4.3): the input, its channel (from 1), the program's name and [bank MSB, bank LSB, program], and links to the programs and to Korg's knobs.
+        CHECK (get ("ChannelList", {}, std::nullopt) && body.size() == 1 && total == -1);
+        std::printf ("     MIDI-CI: a keyboard found StageRig, read %s\n", JSON::toString (body, true).toRawUTF8());
+        const auto ch = body[0];
+        CHECK (ch.getProperty ("title", {}) == var ("Upper") && ch.getProperty ("channel", {}) == var (2) && ch.getProperty ("programTitle", {}) == var ("Grand Piano"));
+        CHECK (ch.getProperty ("bankPC", {}).size() == 3 && ch.getProperty ("bankPC", {})[0] == var (0) && ch.getProperty ("bankPC", {})[2] == var (3));
+        CHECK (entry (ch.getProperty ("links", {}), "ProgramList").getProperty ("resId", {}).toString().isNotEmpty()
+               && entry (ch.getProperty ("links", {}), "X-ParameterList").isObject() && entry (ch.getProperty ("links", {}), "X-ProgramEdit").isObject());
         {
-            const auto m = muids[0];
-            // As a keyboard does next: what can you tell me? Then JUCE reads ResourceList, DeviceInfo and ChannelList.
-            keyboard.sendPropertyCapabilitiesInquiry (m);
-            settleCi();
-            const auto channels = keyboard.getChannelListForMuid (m);
-            std::printf ("     MIDI-CI: resources %s, device %s\n", JSON::toString (keyboard.getResourceListForMuid (m), true).toRawUTF8(),
-                         JSON::toString (keyboard.getDeviceInfoForMuid (m), true).toRawUTF8());
-            if (! channels.isArray() || channels.size() == 0) { CHECK (channels.size() == 1); return failures - before; }
-            std::printf ("     MIDI-CI: a keyboard found StageRig, read %s\n", JSON::toString (channels, true).toRawUTF8());
-            CHECK (rig.isAskedFor() && keyboard.getDeviceInfoForMuid (m).getProperty ("model", {}) == var ("StageRig"));
-            CHECK (channels[0].getProperty ("programTitle", {}) == var ("Grand Piano") && channels[0].getProperty ("channel", {}) == var (2)
-                   && channels[0].getProperty ("bankPC", {})[2] == var (3));
-            CHECK (keyboard.getResourceListForMuid (m).size() == 6);
-
-            auto get = [&] (const String& resource, std::optional<ci::Pagination> page, var& body, int& total)
-            {
-                ci::PropertyRequestHeader h;
-                h.resource = resource;
-                h.pagination = page;
-                bool done = false;
-                keyboard.sendPropertyGetInquiry (m, h, [&] (const ci::PropertyExchangeResult& r)
-                {
-                    done = ! r.getError().has_value() && r.getHeaderAsReplyHeader().status == 200;
-                    body = ci::Encodings::jsonFrom7BitText (r.getBody());
-                    const auto ext = r.getHeaderAsReplyHeader().extended;
-                    const auto it = ext.find (Identifier ("totalCount"));
-                    total = it != ext.end() ? (int) it->second : -1;
-                });
-                settleCi();
-                return done;
-            };
-            var body; int total = 0;
-            CHECK (get ("ProgramList", ci::Pagination { 1, 5 }, body, total) && total == 3 && body.size() == 2
-                   && body[0].getProperty ("title", {}) == var ("Grand Piano") && body[1].getProperty ("bankPC", {})[2] == var (9));
-            CHECK (get ("X-ParameterList", std::nullopt, body, total) && body.size() == 8
-                   && body[0].getProperty ("name", {}) == var ("Cutoff") && body[7].getProperty ("controlcc", {}) == var (109));
-            CHECK (get ("X-ProgramEdit", std::nullopt, body, total) && body.getProperty ("currentValues", {})[0].getProperty ("value", {}) == var (51));
-            CHECK (! get ("X-Nothing", std::nullopt, body, total));
-
-            // Told when the program changes, and when a knob moves -- unless the keyboard's own knob moved it.
-            for (const auto* resource : { "ChannelList", "X-ProgramEdit" })
-            {
-                ci::PropertySubscriptionHeader h;
-                h.resource = resource;
-                h.command = ci::PropertySubscriptionCommand::start;
-                keyboard.beginSubscription (m, h);
-                settleCi();
-            }
-            pv.program = 9; pv.programName = "Strings";
-            rig.show (pv);
-            settleCi();
-            bool toldProgram = false;
-            for (const auto& [command, b] : heard.updates)
-                toldProgram = toldProgram || (command == "full" && b[0].getProperty ("programTitle", {}) == var ("Strings"));
-            std::printf ("     MIDI-CI: %d updates after a program change\n", (int) heard.updates.size());
-            CHECK (toldProgram);
-            heard.updates.clear();
-            rig.knobTurnedOnKeyboard (0);
-            pv.knobValues[0] = "45%"; pv.knobLevels[0] = 0.45f;
-            rig.show (pv);
-            settleCi();
-            CHECK (heard.updates.empty());
-            pv.knobValues[1] = "70%"; pv.knobLevels[1] = 0.7f; pv.knobNames[1] = "Res";
-            rig.show (pv);                       // a new knob name: the knobs are told again
-            settleCi();
-            CHECK (! heard.updates.empty());
+            // No program in play: the entry is still there, without one.
+            SurfaceView none = pv; none.program = -1; none.programName.clear();
+            const auto c = PropertyResponder::channelList (none);
+            CHECK (c.size() == 1 && c[0].getProperty ("title", {}) == var ("Upper") && c[0].getProperty ("channel", {}) == var (2)
+                   && ! c[0].hasProperty ("programTitle") && ! c[0].hasProperty ("bankPC") && c[0].hasProperty ("links"));
         }
+
+        // ProgramList (M2-107; M2-103 8.6.2): every program with something in it; totalCount in every reply; a page from a 0-based offset; with or without a resId (a Keystage sends none).
+        CHECK (get ("ProgramList", {}, std::nullopt) && body.size() == 3 && total == 3 && body[0].getProperty ("title", {}) == var ("Organ"));
+        CHECK (get ("ProgramList", "all", ci::Pagination { 1, 5 }) && total == 3 && body.size() == 2
+               && body[0].getProperty ("title", {}) == var ("Grand Piano") && body[1].getProperty ("bankPC", {})[2] == var (9));
+        CHECK (get ("ProgramList", {}, ci::Pagination { 0, 1 }) && total == 3 && body.size() == 1 && body[0].getProperty ("title", {}) == var ("Organ"));
+        CHECK (get ("ProgramList", {}, ci::Pagination { 5, 2 }) && total == 3 && body.size() == 0);
+
+        // Korg's resources, as the Keystage Property Exchange Resource List has them: name, controlcc, default; currentValues of name, value, displayValue, displayUnit.
+        CHECK (get ("X-ParameterList", {}, std::nullopt) && body.size() == 8 && total == -1
+               && body[0].getProperty ("name", {}) == var ("Cutoff") && body[0].getProperty ("controlcc", {}) == var (102) && body[0].getProperty ("default", {}) == var (0)
+               && body[7].getProperty ("controlcc", {}) == var (109));
+        CHECK (get ("X-ProgramEdit", {}, std::nullopt) && body.getProperty ("currentValues", {}).size() == 8);
+        {
+            const auto v0 = body.getProperty ("currentValues", {})[0];
+            CHECK (v0.getProperty ("name", {}) == var ("Cutoff") && v0.getProperty ("value", {}) == var (51)
+                   && v0.getProperty ("displayValue", {}) == var ("40%") && v0.hasProperty ("displayUnit"));
+        }
+        // JSONSchema (M2-105 5): the schemas the ResourceList refers to, by resId.
+        CHECK (get ("JSONSchema", "parameterListSchema", std::nullopt) && body.getProperty ("type", {}) == var ("array")
+               && body.getProperty ("items", {}).getProperty ("properties", {}).hasProperty ("controlcc"));
+        CHECK (get ("JSONSchema", "programEditSchema", std::nullopt) && body.getProperty ("properties", {}).hasProperty ("currentValues"));
+        // Not there: 404, with a word of why (M2-103 7.4).
+        CHECK (! get ("JSONSchema", "nothing", std::nullopt) && status == 404 && message.isNotEmpty());
+        CHECK (! get ("X-Nothing", {}, std::nullopt) && status == 404 && message.isNotEmpty());
+        {
+            // StageRig's properties are not the keyboard's to set.
+            ci::PropertyRequestHeader h;
+            h.resource = "ChannelList";
+            const auto text = ci::Encodings::jsonTo7BitText (PropertyResponder::channelList (pv));
+            int setStatus = 0;
+            keyboard->sendPropertySetInquiry (m, h, text, [&] (const ci::PropertyExchangeResult& r) { if (! r.getError().has_value()) setStatus = r.getHeaderAsReplyHeader().status; });
+            settleCi();
+            CHECK (setStatus == 405);
+        }
+
+        // Subscriptions (M2-103 11): each gets its subscribeId (8 characters at most), which names it in every update.
+        std::map<String, ci::SubscriptionKey> keys;
+        std::map<String, String> subIds;
+        for (const auto* resource : { "ChannelList", "ProgramList", "X-ParameterList", "X-ProgramEdit" })
+        {
+            ci::PropertySubscriptionHeader h;
+            h.resource = resource;
+            h.command = ci::PropertySubscriptionCommand::start;
+            keys.emplace (resource, keyboard->beginSubscription (m, h));
+            settleCi();
+            const auto id = keyboard->getSubscribeIdForKey (keys.at (resource));
+            CHECK (id.has_value() && id->isNotEmpty() && id->length() <= 8);
+            subIds[resource] = id.value_or (String());
+        }
+        CHECK (subIds["ChannelList"] != subIds["X-ProgramEdit"]);
+        {
+            // One not said to be subscribable is refused: no subscribeId.
+            ci::PropertySubscriptionHeader h;
+            h.resource = "DeviceInfo";
+            h.command = ci::PropertySubscriptionCommand::start;
+            const auto key = keyboard->beginSubscription (m, h);
+            settleCi();
+            CHECK (keyboard->getSubscribeIdForKey (key).value_or (String()).isEmpty());
+        }
+        auto updatesOf = [&] (const String& command, const String& id)
+        {
+            std::vector<var> bodies;
+            for (const auto& u : heard.updates)
+                if (u.command == command && u.subscribeId == id) bodies.push_back (u.body);
+            return bodies;
+        };
+        auto countOf = [&] (const String& id) { int n = 0; for (const auto& u : heard.updates) n += u.subscribeId == id; return n; };
+
+        // A program change goes whole (full) to the ChannelList's subscriber; the program list, read a page at a time, is only said to have changed (notify); the knobs, unchanged, are not mentioned.
+        heard.updates.clear();
+        pv.program = 9; pv.programName = "Strings";
+        pv.programs = { { 0, "Organ" }, { 9, "Strings" } };
+        rig.show (pv);
+        settleCi();
+        std::printf ("     MIDI-CI: %d updates after a program change\n", (int) heard.updates.size());
+        {
+            const auto full = updatesOf ("full", subIds["ChannelList"]);
+            CHECK (full.size() == 1 && countOf (subIds["ChannelList"]) == 1
+                   && full[0][0].getProperty ("programTitle", {}) == var ("Strings") && full[0][0].getProperty ("bankPC", {})[2] == var (9));
+            CHECK (updatesOf ("notify", subIds["ProgramList"]).size() == 1 && countOf (subIds["ProgramList"]) == 1);
+            CHECK (countOf (subIds["X-ParameterList"]) == 0 && countOf (subIds["X-ProgramEdit"]) == 0);
+        }
+
+        // A knob the keyboard itself turned is not echoed (its screen shows it already) ...
+        heard.updates.clear();
+        rig.knobTurnedOnKeyboard (0);
+        pv.knobValues[0] = "45%"; pv.knobLevels[0] = 0.45f;
+        rig.show (pv);
+        settleCi();
+        CHECK (heard.updates.empty());
+        // ... one moved elsewhere is told, whole, since the eight knobs fit the keyboard's SysEx ...
+        pv.knobValues[1] = "70%"; pv.knobLevels[1] = 0.7f;
+        rig.show (pv);
+        settleCi();
+        {
+            const auto full = updatesOf ("full", subIds["X-ProgramEdit"]);
+            CHECK (full.size() == 1 && heard.updates.size() == 1 && full[0].getProperty ("currentValues", {})[1].getProperty ("value", {}) == var (89));
+        }
+        // ... a new knob name tells the knobs again, whole ...
+        heard.updates.clear();
+        pv.knobNames[1] = "Res";
+        rig.show (pv);
+        settleCi();
+        {
+            const auto full = updatesOf ("full", subIds["X-ParameterList"]);
+            CHECK (full.size() == 1 && full[0][1].getProperty ("name", {}) == var ("Res") && full[0][1].getProperty ("controlcc", {}) == var (103));
+            CHECK (updatesOf ("full", subIds["X-ProgramEdit"]).size() == 1 && countOf (subIds["ChannelList"]) == 0 && countOf (subIds["ProgramList"]) == 0);
+        }
+        // ... and names too long for one SysEx message are only said to have changed (notify), for the keyboard to ask again (M2-103 11.1.1).
+        heard.updates.clear();
+        for (int k = 0; k < SurfaceView::numKnobs; ++k) pv.knobNames[(size_t) k] = String::repeatedString ("Resonance ", 12).trim() + String (k);
+        rig.show (pv);
+        settleCi();
+        CHECK (updatesOf ("notify", subIds["X-ParameterList"]).size() == 1 && updatesOf ("full", subIds["X-ParameterList"]).empty());
+        CHECK (updatesOf ("notify", subIds["X-ProgramEdit"]).size() == 1 && updatesOf ("full", subIds["X-ProgramEdit"]).empty());
+        CHECK (get ("X-ParameterList", {}, std::nullopt) && body[7].getProperty ("name", {}).toString().endsWith ("Resonance7"));
+
+        // The keyboard ends one subscription (M2-103 11.5): that resource is no longer told, the others still are.
+        keyboard->endSubscription (keys.at ("X-ProgramEdit"));
+        settleCi();
+        heard.updates.clear();
+        pv.knobValues[2] = "10%"; pv.knobLevels[2] = 0.1f;
+        rig.show (pv);
+        settleCi();
+        CHECK (heard.updates.empty());
+        pv.program = 0; pv.programName = "Organ";
+        rig.show (pv);
+        settleCi();
+        CHECK (countOf (subIds["ChannelList"]) == 1 && countOf (subIds["X-ProgramEdit"]) == 0);
+        CHECK (rig.getLog().joinIntoString ("\n").contains ("no longer told of X-ProgramEdit"));
+
+        // The keyboard goes away (Invalidate MUID): every subscription ends with it, and nothing more is sent its way.
+        keyboard.reset();
+        settleCi();
+        CHECK (rig.getLog().joinIntoString ("\n").contains ("the keyboard left"));
+        pv.program = 9; pv.programName = "Strings";
+        rig.show (pv);
+        CHECK (toKeyboard.empty());
     }
     return failures - before;
 }
