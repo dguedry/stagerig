@@ -83,7 +83,7 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
 
     addAndMakeVisible (loopBtn);
     loopBtn.setTooltip ("Loop a passage on the selected keyboard: press to record, press again to play it round (whole bars at the rig's tempo), "
-                        "press to stop, press to play again. Right-click clears. A footswitch can do the same (Pedals...).");
+                        "press to stop, press to play again. Right-click clears. A pedal can do the same (Controls, Everywhere).");
     loopBtn.onClick = [this]
     {
         const int input = selectedInputProvider ? selectedInputProvider() : 0;
@@ -92,11 +92,11 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     };
     addAndMakeVisible (playBtn);
     playBtn.setTooltip ("Start or stop the backing track of the song in play, after its count-in. "
-                        "A footswitch can do the same (Pedals...).");
+                        "A pedal can do the same (Controls, Everywhere).");
     playBtn.onClick = [this] { engine.toggleTrack(); refreshTransport(); };
     addAndMakeVisible (nextBtn);
     nextBtn.setTooltip ("Releases a vamp at the end of its pass, or queues the next section of the backing track; "
-                        "for a song played by hand, its next scene. A footswitch can do the same (Pedals...).");
+                        "for a song played by hand, its next scene. A pedal can do the same (Controls, Everywhere).");
     nextBtn.onClick = [this] { engine.advanceTrack(); refreshTransport(); };
     addAndMakeVisible (trackLabel);
     trackLabel.setFont (FontOptions (12.0f));

@@ -1383,7 +1383,7 @@ public:
                 c->setJustificationType (Justification::bottomLeft);
                 c->setBorderSize ({ 0, 3, 0, 0 });
             }
-            gainCap.setText ("GAIN", dontSendNotification);
+            gainCap.setText ("LEVEL", dontSendNotification);
             transposeCap.setText ("TRANSPOSE", dontSendNotification);
             chCap.setText ("TO CHANNEL", dontSendNotification);
             inChCap.setText ("FROM CHANNEL", dontSendNotification);
@@ -2169,7 +2169,7 @@ public:
         th.addColumn ("Parameter", colParam, 220);
         th.addColumn ("Min", colMin, 50);
         th.addColumn ("Max", colMax, 50);
-        th.addColumn ("Pass on", colPass, 44);
+        th.addColumn ("Pass through", colPass, 70);
         th.setStretchToFitActive (true);
 
         // Editor row 1: target
@@ -2593,7 +2593,7 @@ private:
     MainComponent& owner;
     Label header { {}, "MIDI MAPPINGS  (this program only: a pedal, wheel or slider moves one parameter)" };
     Label knobsLine;
-    TextButton knobsBtn { "Knobs..." };
+    TextButton knobsBtn { "Knobs" };
     TableListBox table;
     ComboBox targetBox;
     ParamPicker paramBox;
@@ -2940,7 +2940,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     addAndMakeVisible (tempoLabel);
     tempoLabel.setColour (Label::textColourId, Colours::white);
     tempoLabel.setJustificationType (Justification::centredRight);
-    tempoLabel.setTooltip ("The tempo every plugin is told. Click to type one; right-click to assign a footswitch.");
+    tempoLabel.setTooltip ("The tempo every plugin is told. Click to type one; right-click for the pedal that taps it.");
     tempoLabel.setEditable (true, true, false);
 
     /* Editing shows a box round the number, so it is obvious it can be typed
@@ -2983,7 +2983,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
        tablet is saved promptly. */
 
     addAndMakeVisible (tapButton);
-    tapButton.setTooltip ("Tap four times in time. Click the number to type a tempo; right-click for a footswitch.");
+    tapButton.setTooltip ("Tap four times in time. Click the number to type a tempo; right-click for the pedal that taps it.");
     tapButton.onClick = [this]
     {
         // A right-click arrives here too; treat it as "configure", not a tap,
@@ -3015,9 +3015,13 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
 
     engine.addListener (this);
 
-    /* Keyboards' knobs, screens and lights. The setups are files beside the
-       settings, so they belong to the computer and every setup file uses them. */
-    controlMaps = std::make_unique<ControlMapLibrary> (settings.getFile().getParentDirectory().getChildFile ("Controller setups"));
+    /* Keyboards' knobs, screens and lights. The layouts are files beside the
+       settings, so they belong to the computer and every setup file uses them.
+       The folder was "Controller setups" before the window called them layouts: an old one is renamed, once. */
+    const auto layoutsFolder = settings.getFile().getParentDirectory().getChildFile ("Knob layouts");
+    if (const auto old = settings.getFile().getParentDirectory().getChildFile ("Controller setups"); old.isDirectory() && ! layoutsFolder.exists())
+        old.moveFileTo (layoutsFolder);
+    controlMaps = std::make_unique<ControlMapLibrary> (layoutsFolder);
     controlMaps->startNksSearch (ControlMapLibrary::defaultNksFolders());
     surfaceHub = std::make_unique<SurfaceHub> (engine, *controlMaps, settings);
     stagePanel->setHub (surfaceHub.get());
@@ -3991,7 +3995,7 @@ void MainComponent::showTempoMenu()
         if (choice == 2)
         {
             auto* w = new AlertWindow ("Tap tempo",
-                                       "Which controller taps the tempo? A footswitch usually sends "
+                                       "Which controller taps the tempo? A pedal usually sends "
                                        "CC 64 (sustain) or CC 80.\n\nIt works on any input and in any "
                                        "program, and only the press counts.",
                                        MessageBoxIconType::NoIcon);

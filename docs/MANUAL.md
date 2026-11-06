@@ -546,7 +546,7 @@ A mapping sends a controller message to one plugin parameter. A CC is a MIDI
 controller number: what a pedal or knob sends, so "controller 74" means CC 74.
 Mappings belong to the program, so the same knob can do different things in
 different sounds. The table's columns are **Controller**, **Instrument /
-effect**, **Parameter**, **Min**, **Max** and **Pass on**.
+effect**, **Parameter**, **Min**, **Max** and **Pass through**.
 
 **To make one:**
 
@@ -558,7 +558,7 @@ effect**, **Parameter**, **Min**, **Max** and **Pass on**.
    appears next to the button.
 4. Set **Min** and **Max** if you want to limit the range. Reversing them
    (min above max) inverts the control.
-5. Tick **Pass on** to *also* send the original message to the plugin.
+5. Tick **Pass through** to *also* send the original message to the plugin.
 6. Press **Add**.
 
 **Use last moved** is often faster: open the plugin's own window, move the knob
@@ -713,7 +713,7 @@ in Options > Your keyboards; those with a screen show the names and values.
 (`*.stagerig-controls`). Anyone with the same plugin can bring it in with
 **Share... ▸ Import**. The file names the plugin's parameters as well as
 their ids, so it works on another computer. Your layouts are files in the
-`Controller setups` folder beside StageRig's settings, and a file dropped in
+`Knob layouts` folder beside StageRig's settings, and a file dropped in
 there is a layout.
 
 **The lights.** On a keyboard with a light guide, each instrument's keys are
@@ -1788,7 +1788,7 @@ switching the plugin off; scan again once the install has finished.
 | `~/.config/StageRig/StageRig.settings` | Window, audio device, scan folders, known plugins, tuning options. |
 | `~/.config/StageRig/autosave.stagerig.json` | The rolling autosave. |
 | `~/.config/StageRig/mapping-templates.json` | Your saved per-plugin mapping templates. |
-| `~/.config/StageRig/Controller setups/` | Your knob layouts, one `*.stagerig-controls` file each: import and export them from an instrument's **Knobs** button. |
+| `~/.config/StageRig/Knob layouts/` | Your knob layouts, one `*.stagerig-controls` file each: import and export them from an instrument's **Knobs** button. |
 | `~/.config/StageRig/icons/` | Cached plugin icons. |
 | `~/.config/StageRig/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |
 | your `*.stagerig.json` | Your setup. Keep it wherever you like. |
