@@ -129,6 +129,8 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .knob .kn { color:#fff; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .knob .kv { color:var(--dim); font-size:13px; text-align:right; font-variant-numeric:tabular-nums; }
   .knob.off { opacity:.4; }
+  .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:8px 0; border-radius:8px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; width:100%; }
+  .knob .ksw.on { background:#2f5f9a; border-color:#2f5f9a; }
   .kname { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
   .kinst { font:inherit; text-transform:none; letter-spacing:0; padding:3px 10px; border-radius:6px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; }
   .kinst.on { background:#2f5f9a; border-color:#2f5f9a; }
@@ -1118,6 +1120,16 @@ async function loadPanel(i) {
     sec.appendChild(title);
     knobs.forEach(k => {
       const row = document.createElement("label"); row.className = "knob" + (k.value < 0 ? " off" : "");
+      if (k.switch) {
+        // A two-state parameter (a Leslie's slow/fast) is a button, not a slider: one tap flips it.
+        row.innerHTML = '<span class="kn"></span><button class="ksw"></button><span class="kv"></span>';
+        row.querySelector(".kn").textContent = k.name || "-";
+        const b = row.querySelector(".ksw"); b.dataset.id = k.id;
+        b.onclick = (e) => { e.preventDefault(); const on = b.classList.contains("on");
+          api("/api/knob?input=" + i + "&program=" + data.program + "&slot=" + data.slot + "&id=" + encodeURIComponent(k.id) + "&value=" + (on ? "0" : "1"), { method: "POST" })
+            .then(() => { b.classList.toggle("on", !on); b.textContent = on ? "Off" : "On"; }).catch(e => { if (!e.gate) show(e.message); }); };
+        sec.appendChild(row); return;
+      }
       row.innerHTML = '<span class="kn"></span><input type="range" min="0" max="1000"><span class="kv"></span>';
       row.querySelector(".kn").textContent = k.name || "-";
       const r = row.querySelector("input");
@@ -1142,6 +1154,11 @@ async function loadPanel(i) {
   knobs.forEach(k => {
     const tkey = i + "/" + k.id;
     if (knobTouch[tkey] || k.value < 0) return;
+    if (k.switch) {
+      const b = host.querySelector('button[data-id="' + k.id + '"]');
+      if (b) { b.classList.toggle("on", k.value >= 0.5); b.textContent = k.text || (k.value >= 0.5 ? "On" : "Off"); }
+      return;
+    }
     const r = host.querySelector('input[data-id="' + k.id + '"]');
     if (!r) return;
     r.value = Math.round(k.value * 1000);
@@ -2226,10 +2243,11 @@ String RemoteServer::panelJson (int input) const
     o->setProperty ("pageCount", hasPage ? view.pageCount : 0);
     o->setProperty ("pageName", hasPage ? view.pageName : String());
     Array<var> knobs;
-    auto knob = [&knobs] (const String& id, const String& name, double value, const String& text)
+    auto knob = [&knobs] (const String& id, const String& name, double value, const String& text, bool isSwitch = false)
     {
         DynamicObject::Ptr k (new DynamicObject());
         k->setProperty ("id", id); k->setProperty ("name", name); k->setProperty ("value", value); k->setProperty ("text", text);
+        if (isSwitch) k->setProperty ("switch", true);
         knobs.add (var (k.get()));
     };
     knob ("level", "Level", (sd.gainDb + 60.0) / 72.0, sd.gainDb <= -59.9f ? String ("off") : (sd.gainDb >= 0.0f ? "+" : "") + String (sd.gainDb, 1) + " dB");
@@ -2237,7 +2255,7 @@ String RemoteServer::panelJson (int input) const
     knob ("pan", "Pan", (sd.pan + 1.0) / 2.0, pan == 0 ? String ("C") : pan < 0 ? "L " + String (-pan) : "R " + String (pan));
     if (hasPage)
         for (int k = 0; k < SurfaceView::numKnobs; ++k)
-            knob ("k:" + String (k), view.knobNames[(size_t) k], view.knobLevels[(size_t) k], view.knobValues[(size_t) k]);
+            knob ("k:" + String (k), view.knobNames[(size_t) k], view.knobLevels[(size_t) k], view.knobValues[(size_t) k], view.knobSwitches[(size_t) k]);
     o->setProperty ("knobs", knobs);
     return JSON::toString (var (o.get()), true);
 }

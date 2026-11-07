@@ -257,7 +257,8 @@ SurfaceView SurfaceHub::viewFor (int input)
                 const float value = plugin->getCachedParameterValue (knob.paramIndex);
                 const auto& p = plugin->getParameters()[(size_t) knob.paramIndex];
                 v.knobLevels[(size_t) k] = jlimit (0.0f, 1.0f, value);
-                v.knobValues[(size_t) k] = p.boolean || p.numSteps == 2 ? String (value >= 0.5f ? "On" : "Off")
+                v.knobSwitches[(size_t) k] = p.boolean || p.numSteps == 2;
+                v.knobValues[(size_t) k] = v.knobSwitches[(size_t) k] ? String (value >= 0.5f ? "On" : "Off")
                                                                         : String (roundToInt (value * 100.0f)) + "%";
             }
         }

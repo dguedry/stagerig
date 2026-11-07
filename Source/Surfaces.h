@@ -31,6 +31,7 @@ struct SurfaceView
     int page = 0, pageCount = 0;
     std::array<juce::String, numKnobs> knobNames, knobValues;
     std::array<float, numKnobs> knobLevels;        // 0..1, or -1 for no parameter
+    std::array<bool, numKnobs> knobSwitches {};     // a two-state parameter (a Leslie's slow/fast): shown as a switch, not a dial
     std::array<juce::uint32, 128> keyColours {};    // per note, 0xRRGGBB; 0 = dark
 
     /** The eight programs this one is among (bankFirst..bankFirst + 7), by
@@ -56,7 +57,7 @@ struct SurfaceView
     {
         return inputName == o.inputName && program == o.program && programName == o.programName && instrument == o.instrument
             && pageName == o.pageName && page == o.page && pageCount == o.pageCount && knobNames == o.knobNames && knobValues == o.knobValues
-            && knobLevels == o.knobLevels && bankFirst == o.bankFirst && bankNames == o.bankNames && programBefore == o.programBefore
+            && knobLevels == o.knobLevels && knobSwitches == o.knobSwitches && bankFirst == o.bankFirst && bankNames == o.bankNames && programBefore == o.programBefore
             && programAfter == o.programAfter && bankBefore == o.bankBefore && bankAfter == o.bankAfter && pluginNames == o.pluginNames && focusPlugin == o.focusPlugin
             && programs == o.programs && channel == o.channel && knobControllers == o.knobControllers;
     }

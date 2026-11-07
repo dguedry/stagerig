@@ -125,6 +125,10 @@ private:
             slider.onDragStart = [this] { dragging = true; };
             slider.onDragEnd = [this] { dragging = false; };
             addAndMakeVisible (slider);
+            addChildComponent (sw);
+            sw.setClickingTogglesState (false);
+            sw.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2f5f9a));
+            sw.onClick = [this] { if (onMove) onMove (sw.getToggleState() ? 0.0 : 1.0); };
             for (auto* l : { &name, &value })
             {
                 addAndMakeVisible (*l);
@@ -145,11 +149,21 @@ private:
             silent = false;
             showValue();
         }
-        /** A knob of the keyboard's page: its name and value as the keyboard shows them, and where it is. */
-        void show (const juce::String& n, const juce::String& v, float level)
+        /** A knob of the keyboard's page: its name and value as the keyboard shows them, and where it is.
+            A two-state parameter (a Leslie's slow/fast) is a switch: one click flips it. */
+        void show (const juce::String& n, const juce::String& v, float level, bool isSwitch = false)
         {
             name.setText (n.isNotEmpty() ? n : juce::String ("-"), juce::dontSendNotification);
             text = v;
+            sw.setVisible (isSwitch);
+            slider.setVisible (! isSwitch);
+            value.setVisible (! isSwitch);
+            if (isSwitch)
+            {
+                sw.setToggleState (level >= 0.5f, juce::dontSendNotification);
+                sw.setButtonText (v.isNotEmpty() ? v : juce::String (level >= 0.5f ? "On" : "Off"));
+                return;
+            }
             slider.setEnabled (level >= 0.0f);
             slider.setAlpha (level >= 0.0f ? 1.0f : 0.35f);
             set (level >= 0.0f ? level : 0.0);
@@ -167,8 +181,10 @@ private:
             name.setBounds (r.removeFromTop (big ? 22 : 14));
             value.setBounds (r.removeFromBottom (big ? 20 : 14));
             slider.setBounds (r);
+            sw.setBounds (r.withSizeKeepingCentre (juce::jmin (r.getWidth() - 8, big ? 120 : 64), big ? 44 : 24));
         }
         KnobSlider slider;
+        juce::TextButton sw;
         juce::Label name, value;
         juce::String text;                          // the value in the keyboard's words, when there is no format
         std::function<void (double)> onMove;
@@ -423,7 +439,7 @@ private:
         if (hasPage)
         {
             for (int k = 0; k < SurfaceView::numKnobs && (size_t) k + 2 < p.knobs.size(); ++k)
-                p.knobs[(size_t) k + 2]->show (view.knobNames[(size_t) k], view.knobValues[(size_t) k], view.knobLevels[(size_t) k]);
+                p.knobs[(size_t) k + 2]->show (view.knobNames[(size_t) k], view.knobValues[(size_t) k], view.knobLevels[(size_t) k], view.knobSwitches[(size_t) k]);
             p.pageLabel.setText (view.pageCount > 1 ? "Page " + juce::String (view.page + 1) + "/" + juce::String (view.pageCount) + ": " + view.pageName : view.pageName,
                                  juce::dontSendNotification);
             for (auto* b : { &p.pagePrev, &p.pageNext }) b->setVisible (view.pageCount > 1);

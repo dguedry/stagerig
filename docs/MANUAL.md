@@ -1217,8 +1217,10 @@ answer to "which knobs am I looking at", on the laptop, the keyboard and
 the tablet. A program with several instruments shows a button for each
 above the knobs; pressing one gives the knobs to that instrument everywhere.
 Right-click a knob to change what the knobs turn: the instrument's Knobs
-window. When the width will not hold them all, Level and Pan give way
-first. Moving a knob moves the parameter in the plugin at once; a parameter
+window. A two-state parameter -- a Leslie's slow/fast, percussion on/off --
+is a switch here, on the tablet and on the keyboard's screen, flipped by a
+click or a tap; on the keyboard's own knob it flips past the middle. When
+the width will not hold them all, Level and Pan give way first. Moving a knob moves the parameter in the plugin at once; a parameter
 moved in the plugin's own window moves the knob.
 
 **Perform** in the toolbar is the Stage view with the editing panes out of
