@@ -842,7 +842,13 @@ private:
     //==============================================================================
     PluginHost& host;
     juce::PropertiesFile& settings;
-    juce::AudioDeviceManager deviceManager;
+    /** JUCE's device manager, with ALSA's inputs limited to real sound cards
+        (see createAudioDeviceTypes in Engine.cpp). */
+    struct DeviceManager : juce::AudioDeviceManager
+    {
+        void createAudioDeviceTypes (juce::OwnedArray<juce::AudioIODeviceType>&) override;
+    };
+    DeviceManager deviceManager;
 
     Setup setup;
     juce::File setupFile;             // see setSetupFile

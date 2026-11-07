@@ -1,4 +1,7 @@
 #include "Engine.h"
+#if JUCE_LINUX
+ #include <alsa/asoundlib.h>
+#endif
 #include "LowLatency.h"
 #include <pthread.h>
 #include <cstring>
@@ -442,6 +445,114 @@ void Engine::restartAudioDevice()
     deviceManager.setAudioDeviceSetup (setup, true);
     if (deviceManager.getCurrentAudioDevice() == nullptr)
         deviceManager.restartLastAudioDevice();
+}
+
+#if JUCE_LINUX
+namespace
+{
+    /** ALSA as JUCE has it, less the inputs that are not a sound card: "default",
+        "pipewire", "pulse", "jack" and the rate and mix plugins all lead into
+        PipeWire's ALSA emulation, whose input crashes inside libasound on its first
+        read (snd_pcm_mmap_readi). Choosing ALSA in the Audio window with inputs in
+        use picked "default" as the input and took StageRig down with it. Outputs
+        are left as they are. */
+    class CardInputsAlsa : public AudioIODeviceType
+    {
+    public:
+        explicit CardInputsAlsa (std::unique_ptr<AudioIODeviceType> real)
+            : AudioIODeviceType (real->getTypeName()), alsa (std::move (real)) {}
+
+        void scanForDevices() override
+        {
+            alsa->scanForDevices();
+            const auto cards = cardDescriptions();
+            inputs.clear();
+            for (const auto& name : alsa->getDeviceNames (true))
+                if (cards.contains (withoutDuplicateNumber (name)))
+                    inputs.add (name);
+        }
+
+        StringArray getDeviceNames (bool wantInputNames) const override
+        {
+            return wantInputNames ? inputs : alsa->getDeviceNames (false);
+        }
+
+        int getDefaultDeviceIndex (bool forInput) const override
+        {
+            return forInput ? 0 : alsa->getDefaultDeviceIndex (false);
+        }
+
+        int getIndexOfDevice (AudioIODevice* device, bool asInput) const override
+        {
+            const int i = alsa->getIndexOfDevice (device, asInput);
+            if (! asInput || i < 0) return i;
+            return inputs.indexOf (alsa->getDeviceNames (true)[i]);
+        }
+
+        bool hasSeparateInputsAndOutputs() const override { return true; }
+
+        AudioIODevice* createDevice (const String& outputName, const String& inputName) override
+        {
+            if (inputName.isNotEmpty() && ! inputs.contains (inputName))
+                return nullptr;
+            return alsa->createDevice (outputName, inputName);
+        }
+
+    private:
+        /** The descriptions JUCE names ALSA devices by, for those on a card
+            ("hw:CARD=USB,DEV=0", "front:CARD=...", "dsnoop:CARD=..."). */
+        static StringArray cardDescriptions()
+        {
+            StringArray out;
+            void** hints = nullptr;
+            if (snd_device_name_hint (-1, "pcm", &hints) != 0) return out;
+            for (auto** h = hints; *h != nullptr; ++h)
+            {
+                auto text = [h] (const char* key)
+                {
+                    char* v = snd_device_name_get_hint (*h, key);
+                    const String r (CharPointer_UTF8 (v != nullptr ? v : ""));
+                    ::free (v);
+                    return r;
+                };
+                const auto id = text ("NAME");
+                if (! id.contains ("CARD=") || id.startsWith ("default:") || id.startsWith ("sysdefault:") || id.startsWith ("plughw:"))
+                    continue;
+                if (const auto desc = text ("DESC").replace ("\n", "; "); desc.isNotEmpty())
+                    out.addIfNotAlreadyThere (desc);
+            }
+            snd_device_name_free_hint (hints);
+            return out;
+        }
+
+        /** JUCE adds " (2)" and so on to repeated names. */
+        static String withoutDuplicateNumber (const String& name)
+        {
+            if (name.endsWithChar (')'))
+                if (const int open = name.lastIndexOf (" ("); open > 0
+                    && name.substring (open + 2, name.length() - 1).containsOnly ("0123456789"))
+                    return name.substring (0, open);
+            return name;
+        }
+
+        std::unique_ptr<AudioIODeviceType> alsa;
+        StringArray inputs;
+    };
+}
+#endif
+
+void Engine::DeviceManager::createAudioDeviceTypes (OwnedArray<AudioIODeviceType>& types)
+{
+    AudioDeviceManager::createAudioDeviceTypes (types);
+   #if JUCE_LINUX
+    for (int i = 0; i < types.size(); ++i)
+        if (types[i]->getTypeName() == "ALSA")
+        {
+            std::unique_ptr<AudioIODeviceType> real (types.removeAndReturn (i));
+            types.insert (i, new CardInputsAlsa (std::move (real)));
+            break;
+        }
+   #endif
 }
 
 void Engine::changeListenerCallback (ChangeBroadcaster*)
@@ -5234,7 +5345,7 @@ std::vector<Engine::CheckItem> Engine::showCheck() const
     auto add = [&items] (CheckItem::Level l, const String& t) { items.push_back ({ l, t }); };
 
     // The audio interface, first: nothing else matters without it.
-    auto* dev = const_cast<AudioDeviceManager&> (deviceManager).getCurrentAudioDevice();
+    auto* dev = const_cast<DeviceManager&> (deviceManager).getCurrentAudioDevice();
     if (dev == nullptr)
         add (CheckItem::problem, "No audio interface is open. Open Audio... and choose one.");
     else
