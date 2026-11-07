@@ -440,18 +440,32 @@ private:
 
     void showAll()
     {
-        // Page tabs.
-        pageTabs.clear();
+        // Page tabs: made again only when the pages change, never from inside a tab's own click.
+        StringArray tabNames;
         for (int i = 0; i < (int) edit.pages.size(); ++i)
+            tabNames.add (edit.pages[(size_t) i].name.isNotEmpty() ? edit.pages[(size_t) i].name : "Page " + String (i + 1));
+        bool sameTabs = tabNames.size() == (int) pageTabs.size();
+        for (int i = 0; sameTabs && i < tabNames.size(); ++i)
+            sameTabs = pageTabs[(size_t) i]->getButtonText() == tabNames[i];
+        if (! sameTabs)
         {
-            auto b = std::make_unique<TextButton> (edit.pages[(size_t) i].name.isNotEmpty() ? edit.pages[(size_t) i].name : "Page " + String (i + 1));
-            b->setClickingTogglesState (true);
-            b->setRadioGroupId (2);
-            b->setToggleState (i == page, dontSendNotification);
-            b->onClick = [this, i] { page = i; showAll(); };
-            addAndMakeVisible (*b);
-            pageTabs.push_back (std::move (b));
+            pageTabs.clear();
+            for (int i = 0; i < tabNames.size(); ++i)
+            {
+                auto b = std::make_unique<TextButton> (tabNames[i]);
+                b->setRadioGroupId (2);
+                b->onClick = [this, i]
+                {
+                    if (i == page) { showTabStates(); return; }
+                    page = i;
+                    MessageManager::callAsync ([sp = SafePointer<ControlMapEditor> (this)] { if (sp != nullptr) sp->showAll(); });
+                    showTabStates();
+                };
+                addAndMakeVisible (*b);
+                pageTabs.push_back (std::move (b));
+            }
         }
+        showTabStates();
         pageBox.clear (dontSendNotification);
         for (int i = 0; i < (int) edit.pages.size(); ++i)
             pageBox.addItem ("Page " + String (i + 1) + " of " + String ((int) edit.pages.size()) + ": " + edit.pages[(size_t) i].name, i + 1);
@@ -489,6 +503,12 @@ private:
         if (! mapped.isEmpty()) text << " In this program " << mapped.joinIntoString (", ") << " (MIDI mappings).";
         where.setText (text, dontSendNotification);
         if (livePlugin() == nullptr) status.setText ("The plugin is not running, so its parameters cannot be listed. Load the program first.", dontSendNotification);
+    }
+
+    void showTabStates()
+    {
+        for (int i = 0; i < (int) pageTabs.size(); ++i)
+            pageTabs[(size_t) i]->setToggleState (i == page, dontSendNotification);
     }
 
     /** The pages as tabs while they fit across; a list when there are too many (an automatic layout can have dozens). */
@@ -630,7 +650,9 @@ private:
     void timerCallback() override
     {
         if (! stillHere()) return;
-        if (params.empty() && livePlugin() != nullptr) { fillParams(); load(); }
+        // A plugin that has just come up: list its parameters, and show them once there are some
+        // (reloading every tick for a plugin with none would remake the page tabs under the mouse).
+        if (params.empty() && livePlugin() != nullptr) { fillParams(); if (! params.empty()) load(); }
         // The knob just turned on the keyboard lights up; the values follow the plugin.
         const auto turn = hub.getLastTurn (input);
         const bool recent = turn.knob >= 0 && Time::getMillisecondCounter() - turn.at < 700;
