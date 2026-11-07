@@ -1179,6 +1179,30 @@ int main()
         }
     }
 
+    // --- a MIDI device is known by its name, and followed as it comes and goes ---------------
+    {
+        auto infoOf = [] (const String& name) { for (const auto& d : MidiInput::getAvailableDevices()) if (d.name == name) return d; return MidiDeviceInfo(); };
+        auto waitFor = [] (std::function<bool()> done) { for (int i = 0; i < 40 && ! done(); ++i) MessageManager::getInstance()->runDispatchLoopUntil (50); return done(); };
+        const auto before = engine.getSetup().inputs[0];
+        auto a = MidiOutput::createNewDevice ("StageRig Test Keys A"), b = MidiOutput::createNewDevice ("StageRig Test Keys B");
+        if (a != nullptr && b != nullptr && waitFor ([&] { return infoOf ("StageRig Test Keys B").identifier.isNotEmpty(); }))
+        {
+            const auto infoA = infoOf ("StageRig Test Keys A"), infoB = infoOf ("StageRig Test Keys B");
+            // An old port number now belonging to another device: the name decides.
+            engine.setInputMidiDevice (0, MidiDeviceInfo ("StageRig Test Keys A", infoB.identifier));
+            engine.refreshMidiDevices();
+            CHECK (engine.getSetup().inputs[0].midiDeviceIdentifier == infoA.identifier);
+            // Switched on after the input was set up: found with nobody pressing Rescan.
+            engine.setInputMidiDevice (0, MidiDeviceInfo ("StageRig Test Keys C", "no-such-port"));
+            auto c = MidiOutput::createNewDevice ("StageRig Test Keys C");
+            CHECK (c != nullptr);
+            String idC;
+            CHECK (waitFor ([&] { idC = infoOf ("StageRig Test Keys C").identifier; return idC.isNotEmpty() && engine.getSetup().inputs[0].midiDeviceIdentifier == idC; }));
+        }
+        else std::printf ("     no virtual MIDI devices here; device following skipped\n");
+        engine.setInputMidiDevice (0, MidiDeviceInfo (before.midiDeviceName, before.midiDeviceIdentifier));
+    }
+
     // --- a pedal on the instrument itself: on / off, toggled, and a level ------------------
     {
         MappingDef onOff;

@@ -160,6 +160,12 @@ master effects...**, **General MIDI sounds...**, **Send MIDI clock to** and
 list...** and **Record the gig**. Each is
 explained where it matters below.
 
+Starting up is simple: StageRig comes back on the same song, scene, programs,
+tempo, chosen input and knob page, in the same window, and a keyboard switched on
+late or plugged back in is picked up by itself and named in the status bar;
+**Rescan MIDI devices** is only a fallback. A backing track comes back armed, never
+running. [The boot playbook](BOOT_PLAYBOOK.md) has the full checklist.
+
 Where a control is set, in one line: every pedal, wheel, knob and button
 is in the **CONTROLS** panel, under the instruments. Its **This program**
 tab is a pedal, wheel or slider that moves one plugin parameter in this

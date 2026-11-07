@@ -376,6 +376,7 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     }
     deviceManager.addMidiInputDeviceCallback ({}, this);
     midi2 = std::make_unique<Midi2Inputs> ([this] (const String& id, const MidiMessage& m, int64 exact) { receiveMidi (id, m, exact); });
+    midiDeviceList = MidiDeviceListConnection::make ([this] { midiDevicesChanged(); });
 
     // Backing tracks: WAV, AIFF, FLAC, Ogg and MP3, read ahead on their own thread.
     trackFormats.registerBasicFormats();
@@ -405,6 +406,7 @@ Engine::~Engine()
 {
     stopTimer();
     cancelPendingUpdate();
+    midiDeviceList.reset();
     midi2.reset();
     deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
@@ -1349,6 +1351,41 @@ void Engine::sendClock (int numSamples, double chunkStartMs, bool trackStarted, 
         for (int i = 0; i < n; ++i) midiOuts.push (clockPorts[i].load (std::memory_order_relaxed), MidiMessage::midiStop(), chunkStartMs + numSamples * 1000.0 / sampleRate);
 }
 
+void Engine::midiDevicesChanged()
+{
+    StringArray now;
+    const auto ins = MidiInput::getAvailableDevices();
+    for (const auto& d : ins) now.add ("i " + d.name + "|" + d.identifier);
+    for (const auto& d : MidiOutput::getAvailableDevices()) now.add ("o " + d.name + "|" + d.identifier);
+    if (now == knownMidiDevices) return;
+
+    /* One back under the identifier it had still has a dead connection on the books,
+       which enabling would take for a live one: let go of it, and it opens afresh. */
+    for (const auto& d : ins)
+        if (! knownMidiDevices.contains ("i " + d.name + "|" + d.identifier))
+            deviceManager.setMidiInputDeviceEnabled (d.identifier, false);
+    knownMidiDevices = now;
+
+    std::vector<bool> had;
+    for (const auto& rt : runtimes) had.push_back (rt->deviceIdentifier.isNotEmpty());
+    refreshMidiDevices();
+
+    // A device gives no sign of its own: say what changed, once for each.
+    StringArray back, gone;
+    for (int i = 0; i < (int) setup.inputs.size() && i < (int) had.size(); ++i)
+    {
+        const auto& def = setup.inputs[(size_t) i];
+        if (def.midiDeviceName.isEmpty()) continue;
+        const bool has = runtimes[(size_t) i]->deviceIdentifier.isNotEmpty();
+        if (has && ! had[(size_t) i])      back.addIfNotAlreadyThere (def.midiDeviceName);
+        else if (! has && had[(size_t) i]) gone.addIfNotAlreadyThere (def.midiDeviceName);
+    }
+    String msg;
+    if (! back.isEmpty()) msg << back.joinIntoString (", ") << (back.size() == 1 ? " is" : " are") << " connected. ";
+    if (! gone.isEmpty()) msg << gone.joinIntoString (", ") << (gone.size() == 1 ? " has" : " have") << " gone: plug it back in and it is picked up.";
+    if (msg.isNotEmpty()) listeners.call ([&msg] (Listener& l) { l.statusMessage (msg.trim()); });
+}
+
 void Engine::refreshMidiDevices()
 {
     openMidiDevices();
@@ -1366,10 +1403,14 @@ void Engine::openMidiDevices()
     {
         auto& def = setup.inputs[(size_t) i];
 
-        // Re-find the device by identifier, then by name (identifiers can change on re-plug).
+        /* The name says which keyboard; the identifier only separates two of the same
+           name. An identifier is a port number that changes between plug-ins and boots,
+           and the old one can belong to another device by now, so alone it counts only
+           for an input that has no name. */
         bool found = false;
         for (auto& d : available)
-            if (d.identifier == def.midiDeviceIdentifier && def.midiDeviceIdentifier.isNotEmpty())
+            if (d.identifier == def.midiDeviceIdentifier && def.midiDeviceIdentifier.isNotEmpty()
+                && (d.name == def.midiDeviceName || def.midiDeviceName.isEmpty()))
                 found = true;
         if (! found && def.midiDeviceName.isNotEmpty())
             for (auto& d : available)
@@ -5219,7 +5260,7 @@ std::vector<Engine::CheckItem> Engine::showCheck() const
     const auto available = MidiInput::getAvailableDevices();
     auto present = [&available] (const String& id, const String& name)
     {
-        for (auto& d : available) if (d.identifier == id || (name.isNotEmpty() && d.name == name)) return true;
+        for (auto& d : available) if (name.isNotEmpty() ? d.name == name : d.identifier == id) return true;    // as openMidiDevices finds it
         return false;
     };
     int keyboardsOk = 0;
@@ -5228,7 +5269,7 @@ std::vector<Engine::CheckItem> Engine::showCheck() const
         if (in.isTrack() || in.midiDeviceIdentifier.isEmpty()) continue;
         if (present (in.midiDeviceIdentifier, in.midiDeviceName)) ++keyboardsOk;
         else add (CheckItem::problem, in.name + ": its MIDI device, " + (in.midiDeviceName.isNotEmpty() ? in.midiDeviceName : in.midiDeviceIdentifier)
-                                      + ", is not connected. Plug it in, then Options > Rescan MIDI devices.");
+                                      + ", is not connected. Plug it in or switch it on: StageRig picks it up by itself.");
     }
     if (keyboardsOk > 0)
         add (CheckItem::good, String (keyboardsOk) + (keyboardsOk == 1 ? " MIDI device" : " MIDI devices") + " connected");

@@ -898,6 +898,10 @@ private:
     MidiOuts midiOuts;
     // Keyboards speaking MIDI 2.0, and the inputs (identifiers) heard through it.
     std::unique_ptr<Midi2Inputs> midi2;
+    /** A MIDI device came or went: the inputs and outputs follow by themselves, and say so. */
+    void midiDevicesChanged();
+    juce::MidiDeviceListConnection midiDeviceList;
+    juce::StringArray knownMidiDevices;
     juce::StringArray heardAsMidi2;           // message thread
     /** Every loaded Scale and Run that follows the song's key is told the key in play. */
     void applySongKey();

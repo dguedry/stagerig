@@ -217,14 +217,16 @@ public:
     {
     public:
         MainWindow (const juce::String& name, perf::Engine& engine, juce::PropertiesFile& settings, const juce::File& initialSetup)
-            : DocumentWindow (name, juce::Colour (0xff1e1f24), DocumentWindow::allButtons)
+            : DocumentWindow (name, juce::Colour (0xff1e1f24), DocumentWindow::allButtons), appSettings (settings)
         {
             setUsingNativeTitleBar (true);
             content = new perf::MainComponent (engine, settings, initialSetup);
             setContentOwned (content, true);
             setResizable (true, false);
             setResizeLimits (960, 600, 10000, 10000);
-            centreWithSize (getWidth(), getHeight());
+            // Where it was left, or the middle of the screen the first time.
+            if (const auto state = settings.getValue ("windowState"); state.isEmpty() || ! restoreWindowStateFromString (state))
+                centreWithSize (getWidth(), getHeight());
 
             /* The X11 window icon (_NET_WM_ICON, what the panel shows) has to be
                on the window BEFORE it is mapped. Cinnamon's window list reads
@@ -243,6 +245,8 @@ public:
 
         ~MainWindow() override
         {
+            appSettings.setValue ("windowState", getWindowStateAsString());
+            appSettings.saveIfNeeded();
             if (content != nullptr) content->saveOnQuit();
         }
 
@@ -252,6 +256,7 @@ public:
         }
 
     private:
+        juce::PropertiesFile& appSettings;
         perf::MainComponent* content = nullptr;
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
     };

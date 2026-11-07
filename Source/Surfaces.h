@@ -149,6 +149,10 @@ public:
     /** Gives the knobs to this instrument of the input's program (a plugin slot), on its first page:
         what a press of Next instrument does, from the Stage panel's buttons. The keyboard follows. */
     void setFocusSlot (int input, int slot);
+    /** The instrument and page each input's knobs are on, as text to keep between runs, and back. The page
+        waits for the plugin to load, since until then there are no pages to be on. */
+    juce::String getFocusState() const;
+    void restoreFocusState (const juce::String&);
     SurfaceView viewFor (int input);
 
     /** A colour for each instrument of a program, in order, for its keys. */
@@ -261,6 +265,7 @@ private:
     std::vector<std::unique_ptr<ControlSurface>> surfaces;
     std::map<ControlSurface*, SurfaceView> shown;
     std::map<int, Focus> focus;
+    std::map<int, int> restoredPage;     // a page to go back to, once the plugin has loaded and it exists
     std::map<int, Layout> layouts;
     int nksGeneration = 0;                 // the library's, when the layouts were made
     std::map<std::pair<int, int>, Pending> pending;

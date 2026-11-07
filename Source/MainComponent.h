@@ -173,6 +173,7 @@ private:
     juce::String statusText;
     double statusTime = 0;
     bool dirty = false;
+    juce::String lastViewState;      // the input chosen and the knobs' place, as last kept
     double lastAutosaveTime = 0;
     static constexpr double autosaveIntervalMs = 60000.0;
 

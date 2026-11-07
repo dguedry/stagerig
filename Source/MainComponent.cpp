@@ -384,6 +384,16 @@ private:
     }
     std::vector<int> meterKeys;
 
+public:
+    /** The input was chosen elsewhere (the Stage view's readout): the list and its editor show that one too. */
+    void followSelection (int row)
+    {
+        lastNotified = row;
+        list.selectRow (row);
+        refreshEditor();
+    }
+
+private:
     void owner_select (int row)
     {
         if (row < 0 || row == lastNotified) return;
@@ -3044,14 +3054,37 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     else if (getAutosaveFile().existsAsFile())  loadSetupFile (getAutosaveFile());
     else                                        refreshAll();
 
+    /* A copy with a settings folder of its own (STAGERIG_SETTINGS_DIR, beside a running
+       rig) may read the setup its settings name, but it is not that setup's owner:
+       saving goes to its own autosave, never over the rig's file. */
+    if (std::getenv ("STAGERIG_SETTINGS_DIR") != nullptr && currentFile != File()
+        && ! currentFile.isAChildOf (settings.getFile().getParentDirectory()))
+        setCurrentFile ({});
+
     /* Started again by the watchman after a crash (see Main.cpp): back to the
        song, scene and programs the show was on, which the timer below keeps
        in the settings as they change. The track is armed, not started --
        the band decides when it comes back in. */
-    if (const char* rec = std::getenv ("STAGERIG_RECOVERED"); rec != nullptr && *rec != 0)
+    const char* rec = std::getenv ("STAGERIG_RECOVERED");
+    const bool recovered = rec != nullptr && *rec != 0;
+    const auto pos = Engine::LivePosition::fromString (settings.getValue ("livePosition"));
+    /* Any start without a file named on the command line comes back where it
+       was: the same song, scene, programs and tempo, the same input chosen, the
+       knobs on the same instrument and page. */
+    if (! recovered && ! initialSetup.existsAsFile())
     {
-        const auto pos = Engine::LivePosition::fromString (settings.getValue ("livePosition"));
         engine.restoreLivePosition (pos);
+        refreshAll();
+    }
+    if (recovered || ! initialSetup.existsAsFile())
+    {
+        if (settings.containsKey ("selectedInput")) selectInput (settings.getIntValue ("selectedInput"));
+        surfaceHub->restoreFocusState (settings.getValue ("knobFocus"));
+    }
+    if (recovered)
+    {
+        engine.restoreLivePosition (pos);
+        surfaceHub->restoreFocusState (settings.getValue ("knobFocus"));
         const auto& songs = engine.getSetup().songs;
         showStatus ("StageRig stopped and restarted itself" + (pos.song >= 0 && pos.song < (int) songs.size()
                         ? ". Back on " + songs[(size_t) pos.song].name + "; the plugins are loading."
@@ -3324,6 +3357,14 @@ void MainComponent::timerCallback()
         settings.setValue ("livePosition", live);
         settings.saveIfNeeded();
     }
+    if (surfaceHub != nullptr)
+        if (auto view = String (selectedInput) + "/" + surfaceHub->getFocusState(); view != lastViewState)
+        {
+            lastViewState = view;
+            settings.setValue ("selectedInput", selectedInput);
+            settings.setValue ("knobFocus", surfaceHub->getFocusState());
+            settings.saveIfNeeded();
+        }
 
     const auto now = Time::getMillisecondCounterHiRes();
     if (keyboardPanel != nullptr && keyboardPanel->isVisible()) keyboardPanel->refreshLabel();   // input name/channel may have been edited
@@ -3395,6 +3436,7 @@ void MainComponent::selectInput (int idx)
     const auto& inputs = engine.getSetup().inputs;
     selectedInput = jlimit (0, jmax (0, (int) inputs.size() - 1), idx);
     if (keyboardPanel != nullptr) keyboardPanel->setTargetInput (inputs.empty() ? -1 : selectedInput);
+    if (inputsPanel != nullptr) inputsPanel->followSelection (selectedInput);
     refreshProgramView();
 }
 

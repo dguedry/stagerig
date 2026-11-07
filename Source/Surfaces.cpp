@@ -176,8 +176,37 @@ const SurfaceHub::Layout& SurfaceHub::currentLayout (int input)
         it = layouts.emplace (input, layoutFor (input, inputs[(size_t) input].currentProgram, slot)).first;
         auto& f = focus[input];
         f.page = jlimit (0, jmax (0, (int) it->second.pages.size() - 1), f.page);
+        if (auto r = restoredPage.find (input); r != restoredPage.end() && ! it->second.pages.empty())
+        {
+            f.page = jlimit (0, (int) it->second.pages.size() - 1, r->second);
+            restoredPage.erase (r);
+        }
     }
     return it->second;
+}
+
+String SurfaceHub::getFocusState() const
+{
+    String s;
+    for (const auto& [input, f] : focus) s << input << ":" << f.program << ":" << f.slot << ":" << f.page << ";";
+    return s;
+}
+
+void SurfaceHub::restoreFocusState (const String& state)
+{
+    const auto& inputs = engine.getSetup().inputs;
+    for (const auto& one : StringArray::fromTokens (state, ";", {}))
+    {
+        const auto n = StringArray::fromTokens (one, ":", {});
+        if (n.size() != 4) continue;
+        const int input = n[0].getIntValue(), program = n[1].getIntValue(), slot = n[2].getIntValue();
+        if (input < 0 || input >= (int) inputs.size() || inputs[(size_t) input].currentProgram != program) continue;
+        const auto& prog = inputs[(size_t) input].programs[(size_t) program];
+        if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) continue;
+        focus[input] = { program, slot, 0 };
+        restoredPage[input] = n[3].getIntValue();
+        layouts.erase (input);
+    }
 }
 
 void SurfaceHub::setFocusSlot (int input, int slot)

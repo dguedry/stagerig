@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Is this machine ready, and is StageRig up as it should be? Read-only: it changes
+# nothing, opens no device, and never prints the tablet code. Exit 0 = nothing wrong.
+#   scripts/stagerig-check        from the source tree (compares against build/)
+set -u
+conf="${STAGERIG_SETTINGS_DIR:-$HOME/.config/StageRig}/StageRig.settings"
+here="$(cd "$(dirname "$0")/.." && pwd)"
+bad=0; warn=0
+ok()   { printf '  ok    %s\n' "$*"; }
+look() { printf '  LOOK  %s\n' "$*"; warn=$((warn+1)); }
+fix()  { printf '  FIX   %s\n' "$*"; bad=$((bad+1)); }
+val()  { grep -o "<VALUE name=\"$1\" val=\"[^\"]*\"" "$conf" 2>/dev/null | sed 's/.*val="//; s/"$//' | head -1; }
+
+echo "StageRig"
+rig=""
+for p in $(pgrep -x StageRig); do
+    tr '\0' '\n' </proc/"$p"/environ 2>/dev/null | grep -q '^STAGERIG_SETTINGS_DIR=' || rig=$p
+done
+if [ -n "$rig" ]; then
+    exe=$(readlink /proc/"$rig"/exe)
+    case "$exe" in
+        *" (deleted)") look "running (pid $rig) an older build: restart it to get the newest" ;;
+        *) if [ "$(stat -c %Y "$exe" 2>/dev/null || echo 0)" -gt "$(stat -c %Y /proc/"$rig" 2>/dev/null || echo 0)" ]
+           then look "running (pid $rig), but built again since it started: restart it to get the newest"
+           else ok "running (pid $rig), the newest build"; fi ;;
+    esac
+    pgrep -x stagerig-watch >/dev/null && ok "the watchman is there: a crash restarts it where it was" || look "no watchman: a crash will not restart it"
+else
+    look "not running: start it with $here/build/StageRig_artefacts/Release/StageRig"
+fi
+copies=0
+for p in $(pgrep -x StageRig); do tr '\0' '\n' </proc/"$p"/environ 2>/dev/null | grep -q '^STAGERIG_SETTINGS_DIR=' && copies=$((copies+1)); done
+[ "$copies" -gt 0 ] && look "$copies review copy/copies with their own settings still running"
+
+echo "Setup"
+setup=$(val lastSetup)
+if [ -z "$setup" ]; then look "no setup file named: it opens the autosave"
+elif [ -f "$setup" ]; then ok "$setup"
+else fix "the last setup is missing: $setup"; fi
+
+echo "Keyboards and MIDI"
+ports=$(aconnect -l 2>/dev/null | grep -E "^ +[0-9]+ '" | sed "s/^ *[0-9]* '//; s/ *'.*//")
+if [ -f "$setup" ]; then
+    while IFS=$'\t' read -r name dev; do
+        [ -z "$dev" ] && continue
+        if printf '%s\n' "$ports" | grep -qxF "$dev"; then ok "$name: $dev"
+        else fix "$name: $dev is not connected. Switch it on or plug it in; StageRig picks it up by itself"; fi
+    done < <(python3 -I -c '
+import json,sys
+for i in json.load(open(sys.argv[1])).get("inputs",[]): print(i.get("name",""),i.get("midiDeviceName",""),sep="\t")' "$setup" 2>/dev/null)
+fi
+if [ -d /sys/bus/usb/devices ] && grep -qsl '^17cc$' /sys/bus/usb/devices/*/idVendor; then
+    d=$(dirname "$(grep -sl '^17cc$' /sys/bus/usb/devices/*/idVendor | head -1)")
+    ok "Native Instruments keyboard on USB port $(basename "$d") at $(cat "$d/speed") Mb/s"
+    for h in /sys/class/hidraw/hidraw*; do
+        grep -qs 'HID_NAME=Native Instruments' "$h/device/uevent" || continue
+        n=/dev/$(basename "$h")
+        [ -r "$n" ] && [ -w "$n" ] && ok "$n can be opened for its lights, screens and knobs" || fix "$n cannot be opened: install Resources/70-stagerig-komplete-kontrol.rules in /etc/udev/rules.d, then replug"
+    done
+    [ "$(val surfaceKompleteKontrol)" = "1" ] && ok "StageRig drives it (Plain MIDI is off)" || look "it is set to Plain MIDI: its knobs and screens stay dark (Options > Your keyboards)"
+fi
+
+echo "Audio"
+line=$(grep -A1 'name="audioDeviceState"' "$conf" 2>/dev/null | tail -1)
+type=$(printf '%s' "$line" | grep -o 'deviceType="[^"]*"' | cut -d'"' -f2)
+out=$(printf '%s' "$line" | grep -o 'audioOutputDeviceName="[^"]*"' | cut -d'"' -f2)
+in=$(printf '%s' "$line" | grep -o 'audioInputDeviceName="[^"]*"' | cut -d'"' -f2)
+[ -n "$type" ] && ok "$type, out: ${out:-(default)}, in: ${in:-(none)}" || look "no audio device saved yet: Audio... in the toolbar"
+pactl info >/dev/null 2>&1 && ok "PipeWire is answering" || fix "PipeWire / PulseAudio is not answering"
+
+echo "Tablet"
+if [ "$(val remoteOn)" = "1" ]; then
+    port=$(val remotePort); port=${port:-7777}
+    if ss -ltn 2>/dev/null | grep -q ":$port "; then ok "listening on port $port at http://$(hostname -I | awk '{print $1}'):$port"
+    elif [ -n "$rig" ]; then fix "set to be on, but nothing is listening on port $port"
+    else look "will start with StageRig, on port $port"; fi
+else ok "off (Tablet in the toolbar turns it on)"; fi
+
+echo "Recent crashes"
+n=$(coredumpctl list --no-pager --no-legend --since "-1h" 2>/dev/null | grep -c 'StageRig$' || true)
+[ "${n:-0}" -gt 0 ] && look "$n in the last hour: coredumpctl list | grep StageRig" || ok "none in the last hour"
+
+echo
+if [ "$bad" -gt 0 ]; then echo "$bad to fix, $warn to look at."; exit 1; fi
+echo "Nothing to fix; $warn to look at."
