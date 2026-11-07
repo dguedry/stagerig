@@ -1222,12 +1222,13 @@ moved in the plugin's own window moves the knob.
 
 **Perform** in the toolbar is the Stage view with the editing panes out of
 the way: the inputs, programs, instruments and controls go, and the window
-is the readout -- the program in letters a foot high -- with the knobs under
-it, grown to be read and reached from a stand (the page's eight knobs in two
-rows of four; level and pan step aside here) and the set list beside it when
-**Songs** is on. The on-screen keys play one input: click an input's readout
-to make it that one -- it says *the on-screen keys play this one* -- since
-the Inputs list is out of the way. Everything is still there under the
+is the readout -- the program in letters a foot high -- with one front
+panel under it, across the whole width, grown to be read and reached from a
+stand: level, pan and the page's eight knobs in a row (two rows of four,
+without level and pan, on a narrow window). The panel is the chosen input's,
+and so are the on-screen keys: click an input's readout to make it that one
+-- it says *the on-screen keys play this one* -- since the Inputs list is
+out of the way. Everything is still there under the
 toolbar; **Perform** again brings the panes back.
 
 ## The tablet

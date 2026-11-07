@@ -217,18 +217,31 @@ private:
             r.removeFromTop (big ? 6 : 2);
             if (big && knobs.size() > 2)
             {
-                /* Made to be read from a stand: the page's eight knobs in two rows
-                   of four, as wide as the column allows. Level and pan step aside
-                   here; they are a knob's turn away on the small panel. */
+                /* Made to be read from a stand, with the whole width: level, pan and the
+                   page's eight knobs in one row when it holds them, else the eight in two
+                   rows of four with level and pan stepping aside. */
+                const int minEach = 110;
+                if (r.getWidth() >= (int) knobs.size() * minEach)
+                {
+                    const int each = juce::jmin (220, r.getWidth() / (int) knobs.size());
+                    const int x0 = r.getX() + (r.getWidth() - each * (int) knobs.size()) / 2;
+                    for (size_t k = 0; k < knobs.size(); ++k)
+                    {
+                        knobs[k]->setVisible (true);
+                        knobs[k]->setBounds (x0 + (int) k * each, r.getY(), each, r.getHeight());
+                    }
+                    return;
+                }
                 knobs[0]->setVisible (false);
                 knobs[1]->setVisible (false);
                 const int rows = 2, perRow = 4;
                 const int rowH = r.getHeight() / rows, each = juce::jmin (220, r.getWidth() / perRow);
+                const int x0 = r.getX() + (r.getWidth() - each * perRow) / 2;
                 for (size_t k = 2; k < knobs.size(); ++k)
                 {
                     const int n = (int) k - 2;
                     knobs[k]->setVisible (true);
-                    knobs[k]->setBounds (r.getX() + (n % perRow) * each, r.getY() + (n / perRow) * rowH, each, rowH);
+                    knobs[k]->setBounds (x0 + (n % perRow) * each, r.getY() + (n / perRow) * rowH, each, rowH);
                 }
                 return;
             }
@@ -286,15 +299,27 @@ private:
         return p == 0 ? juce::String ("C") : p < 0 ? "L " + juce::String (-p) : "R " + juce::String (p);
     }
 
+    /** The input whose panel is shown: the one chosen (the on-screen keys play it), else the first with a panel. */
+    int shownInput() const
+    {
+        const auto& inputs = engine.getSetup().inputs;
+        auto hasPanel = [&] (int i) { return ! inputs[(size_t) i].programs[(size_t) inputs[(size_t) i].currentProgram].slots.empty(); };
+        const int chosen = selectedInput ? selectedInput() : -1;
+        for (const auto& [i, column] : columns()) if ((int) i == chosen && hasPanel ((int) i)) return chosen;
+        for (const auto& [i, column] : columns()) if (hasPanel ((int) i)) return (int) i;
+        return -1;
+    }
+
     void layoutPanels()
     {
-        const auto cols = columns();
+        // One front panel, the chosen input's, across the whole width: click another input's readout and it is that one's.
+        const int shown = shownInput();
+        auto area = getLocalBounds().reduced (10, 0).withTop (readoutArea()).withHeight (panelHeightNow());
         for (auto& p : panels)
         {
-            bool placed = false;
-            for (const auto& [i, column] : cols)
-                if ((int) i == p->input) { p->setBounds (column.withTop (readoutArea()).withHeight (panelHeightNow())); placed = true; }
-            p->setVisible (placed && anyPanel);
+            const bool placed = p->input == shown && anyPanel;
+            if (placed) p->setBounds (area);
+            p->setVisible (placed);
         }
         for (auto& p : panels) p->resized();
     }
@@ -434,7 +459,7 @@ private:
             }
             now << ";";
         }
-        if (now != shown) { shown = now; repaint(); }
+        if (now != shown) { shown = now; repaint(); layoutPanels(); }
 
         // The front panels: one per input shown, made as inputs come and go.
         const auto cols = columns();
