@@ -8,7 +8,7 @@ What should happen every time, and what to do when it doesn't.
    one switched on late is picked up by itself.
 2. Start StageRig:
    - from a source build: `build/StageRig_artefacts/Release/StageRig`
-   - from a package: `stagerig`
+   - from a package: `StageRig`, or from the applications menu
 3. Run `scripts/stagerig-check`. It only looks, changes nothing, and lists anything
    marked **FIX** or **LOOK**.
 4. Before a show, also run **Options ▸ Pre-show check...**, which knows about the
