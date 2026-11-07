@@ -196,8 +196,24 @@ ControlMapLibrary::ControlMapLibrary (const File& f) : folder (f)
     reload();
 }
 
+static String signatureOf (const File& folder)
+{
+    String s;
+    for (const auto& f : folder.findChildFiles (File::findFiles, false, String ("*") + ControlMap::fileExtension))
+        s << f.getFileName() << "|" << f.getLastModificationTime().toMilliseconds() << ";";
+    return s;
+}
+
+bool ControlMapLibrary::reloadIfChanged()
+{
+    if (signatureOf (folder) == folderSignature) return false;
+    reload();
+    return true;
+}
+
 void ControlMapLibrary::reload()
 {
+    folderSignature = signatureOf (folder);
     maps.clear();
     for (const auto& f : folder.findChildFiles (File::findFiles, false, String ("*") + ControlMap::fileExtension))
     {

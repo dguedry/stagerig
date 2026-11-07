@@ -268,7 +268,7 @@ private:
     std::map<int, Turn> lastTurn;
     juce::StringArray problems;
     std::map<ControlSurface*, juce::String> reportedProblems;
-    juce::uint32 lastSearch = 0;
+    juce::uint32 lastSearch = 0, lastLibraryLook = 0;
     bool editedSinceTick = false;
 };
 

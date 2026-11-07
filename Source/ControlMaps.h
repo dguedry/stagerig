@@ -128,6 +128,9 @@ public:
     const juce::File& getFolder() const                     { return folder; }
     /** Reads the folder again. Files that are not setups are passed over. */
     void reload();
+    /** Reloads when a file in the folder came, went or changed since the last look (a layout dropped in, or
+        edited by hand, shows without a restart); true when it did. Cheap: one directory listing. */
+    bool reloadIfChanged();
 
     int size() const                                        { return (int) maps.size(); }
     const ControlMap& get (int i) const                     { return maps[(size_t) i].map; }
@@ -169,6 +172,7 @@ public:
 private:
     struct Entry { juce::File file; ControlMap map; };
     juce::File folder;
+    juce::String folderSignature;      // names and modification times, as last loaded
     std::vector<Entry> maps;
 
     std::vector<NksPreset> nks;            // written once, by the search, before nksGeneration goes up

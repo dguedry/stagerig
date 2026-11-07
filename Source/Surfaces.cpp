@@ -783,6 +783,12 @@ void SurfaceHub::tick()
         lastSearch = Time::getMillisecondCounter();
         lookForKeyboards();
     }
+    // A layout file that came, went or changed on disk: the pages are made again from it.
+    if (Time::getMillisecondCounter() - lastLibraryLook > 2000)
+    {
+        lastLibraryLook = Time::getMillisecondCounter();
+        if (library.reloadIfChanged()) layouts.clear();
+    }
 
     std::vector<ControlSurface::Touch> touches;
     for (size_t i = 0; i < surfaces.size(); ++i)

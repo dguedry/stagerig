@@ -4685,6 +4685,19 @@ int main()
             void takeTouches (std::vector<Touch>& out) override { out.insert (out.end(), queued.begin(), queued.end()); queued.clear(); }
         };
         ControlMapLibrary library (scratchDir.getChildFile ("Controller setups"));
+        {
+            // A layout file that arrives in the folder from elsewhere (dropped in, edited by hand) is seen without a restart.
+            ControlMap dropped;
+            dropped.name = "Dropped in"; dropped.pluginName = synth.name; dropped.pluginManufacturer = synth.manufacturerName;
+            ControlPage pg; pg.name = "Only"; dropped.pages.push_back (pg);
+            CHECK (! library.reloadIfChanged());                                      // nothing changed since it was loaded
+            CHECK (dropped.saveToFile (library.getFolder().getChildFile ("Dropped in.stagerig-controls")).wasOk());
+            CHECK (library.find (synth, "Dropped in") == nullptr);                   // not until it looks
+            CHECK (library.reloadIfChanged() && library.find (synth, "Dropped in") != nullptr);
+            CHECK (! library.reloadIfChanged());
+            library.getFolder().getChildFile ("Dropped in.stagerig-controls").deleteFile();
+            CHECK (library.reloadIfChanged() && library.find (synth, "Dropped in") == nullptr);
+        }
         SurfaceHub hub (engine, library, settings, /*lookForKeyboards*/ false);
         auto owned = std::make_unique<FakeSurface>();
         auto* fake = owned.get();

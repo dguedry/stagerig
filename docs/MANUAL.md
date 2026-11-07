@@ -746,7 +746,8 @@ in Options > Your keyboards; those with a screen show the names and values.
 **Share... ▸ Import**. The file names the plugin's parameters as well as
 their ids, so it works on another computer. Your layouts are files in the
 `Knob layouts` folder beside StageRig's settings, and a file dropped in
-there is a layout.
+there is a layout within a couple of seconds, no restart needed; one edited
+by hand is read again the same way.
 
 **The lights.** On a keyboard with a light guide, each instrument's keys are
 lit dimly in its own colour: a split shows as two colours, and keys that
