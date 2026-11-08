@@ -33,6 +33,20 @@ public:
         takeover.setToggleState (settings.getBoolValue ("pipewireTakeover", true), juce::dontSendNotification);
         takeover.setTooltip ("Every audio app on this computer is held at this buffer size and 48 kHz while StageRig is open, and put back when it quits. Turn this on when another app has forced a big buffer and StageRig cannot get a small one.");
 
+        addAndMakeVisible (performance);
+        performance.setToggleState (settings.getBoolValue ("performanceMode", true), juce::dontSendNotification);
+        performance.setTooltip ("Holds the computer in its performance power mode while StageRig runs, so the processor "
+                                "does not slow down between notes and answer late (a cause of crackle). Put back when StageRig quits.");
+        performance.onClick = [this]
+        {
+            const bool on = performance.getToggleState();
+            settings.setValue ("performanceMode", on);
+            settings.saveIfNeeded();
+            const bool ok = LowLatency::holdPerformanceMode (on);
+            if (on && ! ok && onStatus) onStatus ("This computer has no performance power mode to hold (power-profiles-daemon).");
+            refreshStatus();
+        };
+
         addAndMakeVisible (volumeLabel);
         addAndMakeVisible (volumeSlider);
         volumeSlider.setRange (0.0, 100.0, 1.0);
@@ -82,6 +96,7 @@ public:
         quantumBox.setBounds (row.removeFromLeft (260));
         r.removeFromTop (6);
         takeover.setBounds (r.removeFromTop (24));
+        performance.setBounds (r.removeFromTop (24));
         r.removeFromTop (4);
         auto vol = r.removeFromTop (26);
         volumeLabel.setBounds (vol.removeFromLeft (120));
@@ -156,6 +171,9 @@ private:
         else txt << "no audio device open";
         for (const auto& w : engine.deviceWarnings()) txt << "\nWARNING: " << w;
         txt << "\n" << LowLatency::realtimeSchedulingHint();
+        if (settings.getBoolValue ("performanceMode", true))
+            txt << (LowLatency::performanceModeHeld() ? "\nProcessor held at full speed (performance power mode)"
+                                                      : "\nWARNING: the processor could not be held at full speed: no performance power mode here");
         const auto clock = LowLatency::readClock();
         if (clock.forceQuantum.isNotEmpty() && clock.forceQuantum != "0")
             txt << "\nSystem buffer forced to " << clock.forceQuantum << " samples" << (clock.forceRate.isNotEmpty() && clock.forceRate != "0" ? " at " + clock.forceRate + " Hz" : juce::String());
@@ -266,6 +284,7 @@ private:
     std::function<void (const juce::String&)> onStatus;
     juce::Label title { {}, "LEVEL AND LATENCY" }, quantumLabel { {}, "Buffer size" }, status;
     juce::ComboBox quantumBox;
+    juce::ToggleButton performance { "Keep the processor at full speed while StageRig runs" };
     juce::ToggleButton takeover { "Make the whole system use this buffer size while StageRig runs" };
     juce::TextButton applyBtn { "Reopen audio" }, fullBtn { "100%" };
     juce::Label volumeLabel { {}, "Computer volume" }, volumeNote,

@@ -127,6 +127,9 @@ public:
             }
             clockTakenOver = perf::LowLatency::forceClock (quantum, 48000);
         }
+        if (settings->getBoolValue ("performanceMode", true))
+            std::fprintf (stderr, "[audio] performance power mode %s\n",
+                          perf::LowLatency::holdPerformanceMode (true) ? "held while StageRig runs" : "not available");
         std::fprintf (stderr, "[audio] pipewire-jack %s, requested quantum %d @ 48 kHz, clock takeover %s%s\n",
                       pwJack ? "loaded" : "not found", quantum, takeover ? (clockTakenOver ? "applied" : "FAILED") : "off",
                       takeover ? (" (was force-quantum '" + previousClock.forceQuantum + "')").toRawUTF8() : "");

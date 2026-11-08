@@ -859,6 +859,7 @@ private:
     pthread_t callbackThread {};
     bool callbackThreadKnown = false;              // audio thread only
     std::atomic<bool> audioThreadRealtime { true };
+    uint32_t realtimeRecheck = 0;      // audio thread only
 
     /** Tap tempo. Only the recent taps count: a pause means the player has
         stopped tapping and started again, and averaging across that gap would

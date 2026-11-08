@@ -573,6 +573,20 @@ void Engine::changeListenerCallback (ChangeBroadcaster*)
     }
 }
 
+/** Whether two of PipeWire's device names are the same card: "Saffire 6 Analog
+    Stereo" and "Saffire 6 Analog Surround 4.0" are, the name less its last
+    "Analog ..." or "Digital ..." part being the card. */
+static bool sameCard (const String& a, const String& b)
+{
+    auto card = [] (const String& n)
+    {
+        for (auto* kind : { " Analog ", " Digital ", " Pro " })
+            if (const int i = n.lastIndexOf (kind); i > 0) return n.substring (0, i);
+        return n;
+    };
+    return card (a) == card (b);
+}
+
 StringArray Engine::deviceWarnings() const
 {
     StringArray out;
@@ -587,13 +601,21 @@ StringArray Engine::deviceWarnings() const
        the two drift and the stream resyncs with a crackle. */
     if (! audioThreadRealtime.load())
         out.add ("the audio thread could not be made realtime: " + LowLatency::realtimeSchedulingHint());
-    if (d->getTypeName() == "ALSA")
-    {
-        if (d->getCurrentBufferSizeSamples() < 128)
-            out.add (String (d->getCurrentBufferSizeSamples()) + "-sample buffer on a direct ALSA device: expect dropouts and crackle. 256 is safe on a USB interface, 128 on a good PCI one.");
-        if (s.inputDeviceName.isNotEmpty() && s.inputDeviceName != s.outputDeviceName && s.inputChannels.countNumberOfSetBits() > 0)
-            out.add ("input (" + s.inputDeviceName + ") and output (" + s.outputDeviceName + ") are different devices, so their clocks drift and the audio crackles. Use the same interface for both, or untick the input channels.");
-    }
+    if (d->getTypeName() == "ALSA" && d->getCurrentBufferSizeSamples() < 128)
+        out.add (String (d->getCurrentBufferSizeSamples()) + "-sample buffer on a direct ALSA device: expect dropouts and crackle. 256 is safe on a USB interface, 128 on a good PCI one.");
+
+    /* Two devices are two clocks. Directly on ALSA they drift apart; through
+       PipeWire (JACK) one drives and the other is resampled to follow it, which a
+       USB device, a keyboard's audio above all, does with crackles at small
+       buffers. Both names are a whole device ("Saffire 6 Analog Stereo" and
+       "... Analog Surround 4.0" are the same card's two sides, so compare the
+       card part too). */
+    if (s.inputDeviceName.isNotEmpty() && s.inputChannels.countNumberOfSetBits() > 0
+        && s.inputDeviceName != s.outputDeviceName
+        && ! (d->getTypeName() == "JACK" && sameCard (s.inputDeviceName, s.outputDeviceName)))
+        out.add ("input (" + s.inputDeviceName + ") and output (" + s.outputDeviceName + ") are different devices, so two clocks "
+                 "have to be kept together and the audio can crackle. Use one interface for both, or choose no input "
+                 "if no audio input is used.");
     return out;
 }
 
@@ -4591,7 +4613,13 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
         callbackThread = pthread_self();
         callbackThreadKnown = true;
         audioThreadRealtime.store (LowLatency::currentThreadIsRealtime() || LowLatency::makeCurrentThreadRealtime (85));
+        realtimeRecheck = 0;
     }
+    /* PipeWire raises its thread to realtime a moment after the first cycles,
+       through its own realtime module: asked again now and then while the answer
+       is no, or the warning would stay up for a thread that is realtime. */
+    else if (! audioThreadRealtime.load (std::memory_order_relaxed) && ++realtimeRecheck % 512 == 0)
+        audioThreadRealtime.store (LowLatency::currentThreadIsRealtime());
 
     for (int c = 0; c < numOut; ++c)
         if (out[c] != nullptr)

@@ -4,6 +4,8 @@
 #include <dlfcn.h>
 #include <sys/resource.h>
 #include <cstdlib>
+#include <unistd.h>
+#include <memory>
 
 using namespace juce;
 
@@ -114,5 +116,32 @@ bool restoreClock (const ClockState& previous)
     pwMetadata ({ "0", "clock.force-rate", previous.forceRate.isEmpty() ? "0" : previous.forceRate });
     return true;
 }
+
+static std::unique_ptr<ChildProcess> performanceHold;
+
+bool holdPerformanceMode (bool hold)
+{
+    if (! hold)
+    {
+        if (performanceHold != nullptr) performanceHold->kill();   // ending it releases the hold
+        performanceHold.reset();
+        return true;
+    }
+    if (performanceHold != nullptr && performanceHold->isRunning()) return true;
+
+    /* powerprofilesctl holds the mode for as long as the command it launches runs;
+       that command waits for StageRig to end. */
+    auto p = std::make_unique<ChildProcess>();
+    if (! p->start (StringArray { "powerprofilesctl", "launch", "--profile", "performance",
+                                  "--reason", "StageRig is playing live", "--appid", "stagerig",
+                                  "tail", "--pid=" + String ((int) getpid()), "-f", "/dev/null" }, 0))
+        return false;
+    Thread::sleep (300);    // an unknown profile or a missing service ends it at once
+    if (! p->isRunning()) return false;
+    performanceHold = std::move (p);
+    return true;
+}
+
+bool performanceModeHeld() { return performanceHold != nullptr && performanceHold->isRunning(); }
 
 } // namespace perf::LowLatency

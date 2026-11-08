@@ -35,4 +35,12 @@ bool forceClock (int quantum, int sampleRate);
 /** Restores the force settings captured by readClock() (clears them if they were unset). */
 bool restoreClock (const ClockState& previous);
 
+/** Holds the computer in its performance power mode (power-profiles-daemon) while
+    StageRig runs, so the processor does not slow down between notes and wake late.
+    The hold belongs to a helper that ends with StageRig, a crash included, and the
+    computer then goes back to the mode it was in. False when there is no such
+    service (no powerprofilesctl, or no performance mode on this machine). */
+bool holdPerformanceMode (bool hold);
+bool performanceModeHeld();
+
 } // namespace perf::LowLatency
