@@ -1254,6 +1254,40 @@ int main()
         engine.setInputMidiDevice (1, MidiDeviceInfo (before1.midiDeviceName, before1.midiDeviceIdentifier));
     }
 
+    // --- MIDI sent to a device follows it when it comes back under another port number -------
+    {
+        struct Counter : MidiInputCallback
+        {
+            std::atomic<int> got { 0 };
+            void handleIncomingMidiMessage (MidiInput*, const MidiMessage& m) override { if (m.isController()) got++; }
+        };
+        auto outIdOf = [] (const String& name) { for (const auto& d : MidiOutput::getAvailableDevices()) if (d.name == name) return d.identifier; return String(); };
+        auto waitFor = [] (std::function<bool()> done) { for (int i = 0; i < 60 && ! done(); ++i) MessageManager::getInstance()->runDispatchLoopUntil (50); return done(); };
+        Counter first, second;
+        auto synth = MidiInput::createNewDevice ("StageRig Test Synth", &first);
+        String oldId;
+        if (synth != nullptr && waitFor ([&] { oldId = outIdOf ("StageRig Test Synth"); return oldId.isNotEmpty(); }))
+        {
+            synth->start();
+            engine.sendMidiToDevice (oldId, "StageRig Test Synth", MidiMessage::controllerEvent (1, 7, 100));
+            CHECK (waitFor ([&] { return first.got.load() > 0; }));
+            // A placeholder takes its old number, then the synth comes back under a new one.
+            synth.reset();
+            CHECK (waitFor ([&] { return outIdOf ("StageRig Test Synth").isEmpty(); }));
+            auto stand = MidiInput::createNewDevice ("StageRig Placeholder", &first);
+            synth = MidiInput::createNewDevice ("StageRig Test Synth", &second);
+            synth->start();
+            String newId;
+            CHECK (waitFor ([&] { newId = outIdOf ("StageRig Test Synth"); return newId.isNotEmpty() && newId != oldId; }));
+            engine.refreshMidiDevices();
+            engine.sendMidiToDevice (oldId, "StageRig Test Synth", MidiMessage::controllerEvent (1, 7, 90));    // as a saved cue has it
+            const bool followed = waitFor ([&] { return second.got.load() > 0; });
+            std::printf ("     MIDI to a synth back under %s (was %s): %s\n", newId.toRawUTF8(), oldId.toRawUTF8(), followed ? "arrives" : "LOST");
+            CHECK (followed);
+        }
+        else std::printf ("     no virtual MIDI devices here; output following skipped\n");
+    }
+
     // --- a pedal on the instrument itself: on / off, toggled, and a level ------------------
     {
         MappingDef onOff;

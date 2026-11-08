@@ -1737,7 +1737,9 @@ void Engine::watchUsbReconnects()
     if (again.isEmpty()) return;
 
     StringArray reconnected, names;
-    for (const auto& d : MidiInput::getAvailableDevices())
+    auto ports = MidiInput::getAvailableDevices();
+    ports.addArray (MidiOutput::getAvailableDevices());
+    for (const auto& d : ports)
     {
         const int client = d.identifier.upToFirstOccurrenceOf ("-", false, false).getIntValue();
         if (client >= 16 && client < 128 && again.contains (String ((client - 16) / 4)))
@@ -1770,7 +1772,13 @@ void Engine::midiDevicesChanged (const StringArray& reconnected)
     std::vector<bool> had;
     for (const auto& rt : runtimes) had.push_back (rt->deviceIdentifier.isNotEmpty());
     openMidiDevices (reconnected);
-    midiOuts.refresh();
+    // The same cards' output ports, back under their old numbers too.
+    StringArray outsAgain;
+    for (const auto& d : MidiOutput::getAvailableDevices())
+        for (const auto& id : reconnected)
+            if (d.identifier.upToFirstOccurrenceOf ("-", false, false) == id.upToFirstOccurrenceOf ("-", false, false))
+                outsAgain.addIfNotAlreadyThere (d.identifier);
+    midiOuts.refresh (outsAgain);
     resolveClockPorts();
     if (! reconnected.isEmpty())
         listeners.call ([] (Listener& l) { l.midiDevicesReconnected(); });

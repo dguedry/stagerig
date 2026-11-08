@@ -24,16 +24,31 @@ int MidiOuts::portFor (const String& identifier, const String& name)
 {
     const ScopedLock sl (deviceLock);
     const int n = numPorts.load();
+    // The same device as one known: by number and name, or by name when the number has moved on.
     for (int i = 0; i < n; ++i)
-        if (ports[i].identifier == identifier)
+        if (ports[i].identifier == identifier && (name.isEmpty() || ports[i].name == name))
         {
             if (ports[i].device == nullptr) ports[i].device = MidiOutput::openDevice (identifier);
             return i;
         }
+    if (name.isNotEmpty())
+        for (int i = 0; i < n; ++i)
+            if (ports[i].name == name) return i;
     if (n >= kMaxPorts) return -1;
-    ports[n].identifier = identifier;
+
+    // New: under its number if that is still the device of this name, otherwise wherever that name is now.
+    String id = identifier;
+    if (name.isNotEmpty())
+    {
+        const auto available = MidiOutput::getAvailableDevices();
+        bool there = false;
+        for (const auto& d : available) if (d.identifier == identifier && d.name == name) there = true;
+        if (! there)
+            for (const auto& d : available) if (d.name == name) { id = d.identifier; break; }
+    }
+    ports[n].identifier = id;
     ports[n].name = name;
-    ports[n].device = MidiOutput::openDevice (identifier);
+    ports[n].device = MidiOutput::openDevice (id);
     numPorts.store (n + 1);
     return n;
 }
@@ -50,17 +65,35 @@ String MidiOuts::getName (int port) const
     return port >= 0 && port < numPorts.load() ? ports[port].name : String();
 }
 
-void MidiOuts::refresh()
+void MidiOuts::refresh (const StringArray& reconnected)
 {
     const auto available = MidiOutput::getAvailableDevices();
     const ScopedLock sl (deviceLock);
-    for (int i = 0; i < numPorts.load(); ++i)
+    const int n = numPorts.load();
+    for (int i = 0; i < n; ++i)
     {
-        bool present = false;
+        auto& p = ports[i];
+        bool there = false;
         for (const auto& d : available)
-            if (d.identifier == ports[i].identifier) present = true;
-        if (! present)                          ports[i].device.reset();
-        else if (ports[i].device == nullptr)    ports[i].device = MidiOutput::openDevice (ports[i].identifier);
+            if (d.identifier == p.identifier && (p.name.isEmpty() || d.name == p.name)) there = true;
+        if (! there && p.name.isNotEmpty())
+        {
+            // Back under another number: followed there, unless another known port has that one.
+            for (const auto& d : available)
+            {
+                if (d.name != p.name) continue;
+                bool taken = false;
+                for (int j = 0; j < n; ++j) if (j != i && ports[j].identifier == d.identifier) taken = true;
+                if (taken) continue;
+                p.identifier = d.identifier;
+                p.device.reset();
+                there = true;
+                break;
+            }
+        }
+        if (! there)                               p.device.reset();
+        else if (reconnected.contains (p.identifier)) { p.device.reset(); p.device = MidiOutput::openDevice (p.identifier); }
+        else if (p.device == nullptr)               p.device = MidiOutput::openDevice (p.identifier);
     }
 }
 

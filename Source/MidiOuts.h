@@ -33,8 +33,11 @@ public:
     juce::String getName (int port) const;
 
     /** Message thread: re-opens every known port that has come back, closes
-        those that have gone (a hot-plug, a Rescan). */
-    void refresh();
+        those that have gone (a hot-plug, a Rescan). A port is known by its
+        device's name: one back under another port number is followed there,
+        and those in `reconnected` (back under their old number, their old
+        connection dead) are opened afresh. */
+    void refresh (const juce::StringArray& reconnected = {});
 
     /** Audio thread: queue `m` for `port`, to leave at `timeMs` on the
         Time::getMillisecondCounterHiRes() clock. False when the queue is full. */
