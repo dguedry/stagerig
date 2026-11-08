@@ -33,8 +33,25 @@ public:
         takeover.setToggleState (settings.getBoolValue ("pipewireTakeover", true), juce::dontSendNotification);
         takeover.setTooltip ("Every audio app on this computer is held at this buffer size and 48 kHz while StageRig is open, and put back when it quits. Turn this on when another app has forced a big buffer and StageRig cannot get a small one.");
 
+        addAndMakeVisible (volumeLabel);
+        addAndMakeVisible (volumeSlider);
+        volumeSlider.setRange (0.0, 100.0, 1.0);
+        volumeSlider.setTextValueSuffix ("%");
+        volumeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+        volumeSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 22);
+        volumeSlider.setTooltip ("The computer's own volume for this output, applied after StageRig's levels. "
+                                 "100% passes StageRig through untouched: set loudness with StageRig and your amplifier.");
+        volumeSlider.onValueChange = [this] { volumeWanted (juce::roundToInt (volumeSlider.getValue())); };
+        addAndMakeVisible (fullBtn);
+        fullBtn.setTooltip ("Pass StageRig's sound through at full level. Turn your speakers or headphones down first: this can be a big jump.");
+        fullBtn.onClick = [this] { volumeSlider.setValue (100.0, juce::sendNotificationSync); };
+        addAndMakeVisible (volumeNote);
+        volumeNote.setFont (juce::FontOptions (12.0f));
+        volumeNote.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
+
         addAndMakeVisible (applyBtn);
-        applyBtn.setTooltip ("Reopen the audio device at this buffer size");
+        applyBtn.setTooltip ("Close and reopen the audio device: applies the buffer size above, and reconnects StageRig "
+                             "when the sound has stopped (after the computer's sound system restarted, or a device came back).");
         applyBtn.onClick = [this] { apply(); };
 
         addAndMakeVisible (status);
@@ -45,6 +62,7 @@ public:
         addAndMakeVisible (selector);
         engine.getDeviceManager().addChangeListener (this);
         refreshStatus();
+        refreshVolume();
         startTimer (1000);
     }
 
@@ -57,9 +75,15 @@ public:
         auto row = r.removeFromTop (26);
         quantumLabel.setBounds (row.removeFromLeft (120));
         quantumBox.setBounds (row.removeFromLeft (260)); row.removeFromLeft (10);
-        applyBtn.setBounds (row.removeFromLeft (90));
+        applyBtn.setBounds (row.removeFromLeft (juce::jmin (150, row.getWidth())));
         r.removeFromTop (6);
         takeover.setBounds (r.removeFromTop (24));
+        r.removeFromTop (4);
+        auto vol = r.removeFromTop (26);
+        volumeLabel.setBounds (vol.removeFromLeft (120));
+        fullBtn.setBounds (vol.removeFromRight (70)); vol.removeFromRight (8);
+        volumeSlider.setBounds (vol);
+        volumeNote.setBounds (r.removeFromTop (18).withTrimmedLeft (120));
         r.removeFromTop (4);
         status.setBounds (r.removeFromTop (118));
         r.removeFromTop (8);
@@ -77,7 +101,7 @@ private:
         if (takeover.getToggleState()) LowLatency::forceClock (q, 48000);
         engine.restartAudioDevice();
         refreshStatus();
-        if (onStatus) onStatus ("Audio reopened at " + juce::String (q) + " samples");
+        if (onStatus) onStatus ("Audio reopened, at " + juce::String (q) + " samples.");
     }
 
     void refreshStatus()
@@ -111,16 +135,111 @@ private:
         status.setColour (juce::Label::textColourId, LowLatency::realtimeSchedulingAvailable() ? juce::Colour (0xff9aa0ab) : juce::Colours::orange);
     }
 
-    void timerCallback() override { refreshStatus(); }
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { refreshStatus(); }
+    //==============================================================================
+    /* The computer's volume for the chosen output (PipeWire's, through pactl): the
+       JACK output's name is the output's description there, and ALSA's default
+       device is the system's default output. Anything else has no such volume. */
+    static juce::String runPactl (const juce::StringArray& args)
+    {
+        juce::ChildProcess p;
+        juce::StringArray cmd { "pactl" };
+        cmd.addArray (args);
+        if (! p.start (cmd)) return {};
+        auto out = p.readAllProcessOutput();
+        return p.getExitCode() == 0 ? out : juce::String();
+    }
+
+    /** The system output StageRig plays into, as { name, description }, or empty. */
+    std::pair<juce::String, juce::String> systemOutput() const
+    {
+        auto& dm = engine.getDeviceManager();
+        const auto type = dm.getCurrentAudioDeviceType();
+        const auto out = dm.getAudioDeviceSetup().outputDeviceName;
+        juce::String wantName, wantDesc;
+        if (type == "JACK") wantDesc = out;
+        else if (type == "ALSA" && out.contains ("PipeWire")) wantName = runPactl ({ "get-default-sink" }).trim();
+        else return {};
+        if (wantDesc.isEmpty() && wantName.isEmpty()) return {};
+        for (const auto& sink : sinks)
+            if ((wantDesc.isNotEmpty() && sink.second == wantDesc) || (wantName.isNotEmpty() && sink.first == wantName))
+                return sink;
+        return {};
+    }
+
+    void refreshVolume()
+    {
+        sinks.clear();
+        volumes.clear();
+        const auto parsed = juce::JSON::parse (runPactl ({ "-f", "json", "list", "sinks" }));
+        if (auto* arr = parsed.getArray())
+            for (const auto& s : *arr)
+            {
+                const juce::String name = s["name"].toString(), desc = s["description"].toString();
+                int percent = -1;
+                if (auto* chans = s["volume"].getDynamicObject())
+                    for (const auto& ch : chans->getProperties())
+                    {
+                        percent = ch.value["value_percent"].toString().upToFirstOccurrenceOf ("%", false, false).getIntValue();
+                        break;
+                    }
+                sinks.push_back ({ name, desc });
+                volumes.push_back (percent);
+            }
+
+        const auto out = systemOutput();
+        sinkName = out.first;
+        int percent = -1;
+        for (size_t i = 0; i < sinks.size(); ++i)
+            if (sinks[i].first == sinkName) percent = volumes[i];
+
+        const bool known = sinkName.isNotEmpty() && percent >= 0;
+        volumeSlider.setEnabled (known);
+        fullBtn.setEnabled (known && percent != 100);
+        if (! known)
+        {
+            volumeNote.setText ("This output has no computer volume of its own.", juce::dontSendNotification);
+            return;
+        }
+        if (! volumeSlider.isMouseButtonDown() && pendingVolume < 0)
+            volumeSlider.setValue (juce::jmin (100, percent), juce::dontSendNotification);
+        volumeNote.setText (percent >= 100 ? out.second + ": full level, StageRig's sound untouched."
+                                           : out.second + ": turned down by the computer. 100% is best for a stage rig.",
+                            juce::dontSendNotification);
+    }
+
+    void volumeWanted (int percent)
+    {
+        if (sinkName.isEmpty()) return;
+        const bool waiting = pendingVolume >= 0;
+        pendingVolume = percent;
+        if (waiting) return;        // one pactl at a time while the slider moves
+        juce::Timer::callAfterDelay (60, [sp = juce::Component::SafePointer<AudioSettingsComponent> (this)]
+        {
+            if (sp == nullptr) return;
+            const int v = sp->pendingVolume;
+            runPactl ({ "set-sink-volume", sp->sinkName, juce::String (v) + "%" });
+            sp->pendingVolume = -1;
+            if (juce::roundToInt (sp->volumeSlider.getValue()) != v) sp->volumeWanted (juce::roundToInt (sp->volumeSlider.getValue()));
+            else sp->refreshVolume();
+        });
+    }
+
+    void timerCallback() override { refreshStatus(); refreshVolume(); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { refreshStatus(); refreshVolume(); }
 
     Engine& engine;
     juce::PropertiesFile& settings;
     std::function<void (const juce::String&)> onStatus;
-    juce::Label title { {}, "LATENCY" }, quantumLabel { {}, "Buffer size" }, status;
+    juce::Label title { {}, "LEVEL AND LATENCY" }, quantumLabel { {}, "Buffer size" }, status;
     juce::ComboBox quantumBox;
     juce::ToggleButton takeover { "Make the whole system use this buffer size while StageRig runs" };
-    juce::TextButton applyBtn { "Apply" };
+    juce::TextButton applyBtn { "Reopen audio" }, fullBtn { "100%" };
+    juce::Label volumeLabel { {}, "Computer volume" }, volumeNote;
+    juce::Slider volumeSlider;
+    std::vector<std::pair<juce::String, juce::String>> sinks;   // { name, description }
+    std::vector<int> volumes;
+    juce::String sinkName;
+    int pendingVolume = -1;
     juce::AudioDeviceSelectorComponent selector;
 };
 
