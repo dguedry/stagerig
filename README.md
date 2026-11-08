@@ -402,14 +402,17 @@ StageRig is meant to be played live, so it goes for the smallest safe block:
   `pw-jack`, and it defaults to the **JACK** device type at 48 kHz. That makes
   StageRig a direct node in the PipeWire graph; the ALSA type goes through
   PipeWire's ALSA emulation with its own buffering and resampling.
-* **Audio...** has a **LATENCY** section: the buffer size to ask
-  for (default 128 samples = 2.7 ms at 48 kHz; 64 if the machine is quiet) and
-  **Make the whole system use this buffer size while StageRig runs**. With that on,
-  StageRig forces the PipeWire graph to that quantum at start
-  (`clock.force-quantum`) and restores the previous value when it quits, so
+* **Audio...** has a **LEVEL AND LATENCY** section: the buffer size to ask
+  for (default 128 samples = 2.7 ms at 48 kHz; 64 if the machine is quiet),
+  **Make the whole system use this buffer size while StageRig runs**, and the
+  **Computer volume** of the chosen output (PipeWire's own volume for it, which
+  a new USB device often starts well below 100%). With the whole-system box on,
+  StageRig forces the PipeWire graph to that quantum (`clock.force-quantum`)
+  and restores the previous value when it quits or the box is unticked, so
   the desktop's `min-quantum`/`default.clock.quantum` settings do not get in
-  the way. The status bar shows the block size actually delivered and the
-  resulting latency.
+  the way. Every change applies at once; **Reopen audio** reconnects after the
+  sound system restarts. The status bar shows the block size actually
+  delivered and the resulting latency.
 * **Another application can hold the clock.** Bitwig Studio, for example,
   forces `clock.force-quantum` to its own block size every few seconds while
   it runs; StageRig then reports *clock held by another app* in the status

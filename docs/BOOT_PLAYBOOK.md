@@ -39,7 +39,7 @@ setup file named on the command line opens that file at its saved programs inste
 | **Knobs, lights and screens are dead, keys play** | Options ▸ Your keyboards. An MK1 set to Plain MIDI stays dark on purpose. Otherwise unplug it for ten seconds. If that fails, power it off at its switch. |
 | **The S88 isn't on USB at all** | Check its power and cable, and use a port on the computer itself: the rear port works, the internal hub has failed before. |
 | **Knob moves but you hear nothing** | Its parameter may belong to an effect that's switched off. See what it turns in the Knobs window. |
-| **No sound at all** | Audio... in the toolbar: the right device? Then PANIC, then the check. |
+| **No sound at all** | Audio... in the toolbar: the right device, and Computer volume up? Then Reopen audio at its bottom, then PANIC, then the check. |
 | **Crashes at every start** | After five in two minutes the watchman stops. Note the last line it printed, then `coredumpctl list`. |
 | **Tablet says "That code did not match"** | Type the code from the Tablet window on the computer. |
 | **Tablet says "Can't reach StageRig"** | Same network? Is the address the one the check prints? Is a firewall in the way? |

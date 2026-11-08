@@ -211,9 +211,11 @@ Each keyboard input has, below the list:
 - **Name** -- what the input is called everywhere: in the songs, on the
   tablet, on the printed list. Type in the box.
 - **MIDI device** -- any MIDI device the system can see (USB or DIN).
-  **Options ▸ Rescan MIDI devices** picks up a keyboard you plugged in after
-  starting. If a saved device is missing, the list shows it as
-  *(disconnected)* and reconnects when it returns.
+  A keyboard plugged in after starting is picked up by itself. A device is
+  known by its name, so if a saved device is missing, the list shows it as
+  *(disconnected)* -- even when another keyboard has since taken its place in
+  the system -- and the input reconnects when it returns. To play another
+  keyboard on that input, choose it in the list.
 - **Channel** -- **All channels** takes everything the device sends, or pick
   one. Two inputs can share one physical keyboard by taking different
   channels, which is how a single controller drives both a left-hand and a
@@ -1589,20 +1591,34 @@ samples. A smaller buffer means less delay between a key and the sound, and
 less room for a slow plugin; 128 samples is 2.7 ms at 48 kHz and a good live
 default.
 
-**Audio...** has two parts. The top is StageRig's own **LATENCY** section:
+**Audio...** has two parts. Every change in it takes effect at once and is
+kept: there is nothing to apply or save. The top is StageRig's own **LEVEL AND
+LATENCY** section:
 
 - **Buffer size** -- the buffer StageRig asks for. 128 is the live default; 64
   if the machine is quiet and has realtime scheduling (see below).
-- **Make the whole system use this buffer size while StageRig runs** -- forces
-  the whole audio system to that buffer size at start and restores the previous
-  value on quit. Turn it on when another app has forced a big buffer and
-  StageRig cannot get a small one.
+- **Make the whole system use this buffer size while StageRig runs** -- holds
+  the whole audio system at that buffer size while StageRig runs, and puts the
+  previous value back on quit or as soon as you untick it. Turn it on when
+  another app has forced a big buffer and StageRig cannot get a small one.
+- **Computer volume** -- the computer's own volume for the chosen output,
+  applied after StageRig's levels. A newly plugged-in USB device often starts
+  well below full, which makes everything quiet. **100%** passes StageRig
+  through untouched, which is best on stage: set loudness with StageRig and
+  your amplifier. Turn your speakers down before you press it, as the jump can
+  be large. An output without a computer volume of its own says so.
 - A status line shows the device, the buffer size actually delivered, the
   resulting latency, whether realtime scheduling is available, and warnings.
 
 The lower part is the device chooser: device type, output device and
 channels, sample rate and, for audio inputs, the input device and which of its
-channels to open. Only open channels are offered to an audio input.
+channels to open. Only open channels are offered to an audio input. On the
+ALSA type only sound cards are offered as inputs: the system's default and
+sound-server entries are left out, as reading from them can crash.
+
+**Reopen audio**, at the bottom, closes and reopens the audio device. Use it
+when the sound has stopped, for example after the computer's sound system was
+restarted or an audio device came back.
 
 **For the lowest latency:**
 
@@ -1815,7 +1831,9 @@ switching the plugin off; scan again once the install has finished.
 | Static or crackle on a USB interface under the ALSA type | The buffer is below 128 samples, or the input is on a different device from the output. | Set 256 (or 128) in **Audio...**, and the same interface for input and output; the status line says which it is. |
 | A few seconds of static about once a minute | Autosave reading a plugin's state. | Press **Save** between songs rather than mid-song. |
 | No sound, plugin loaded | Instrument turned off, key or velocity range excludes what you play, gain at minimum, or wrong MIDI channel. | Check the instrument's controls; the on-screen keyboard rules out the controller. |
-| The keyboard is silent after plugging it in | StageRig has not seen the device yet. | **Options ▸ Rescan MIDI devices**, then check the input's **MIDI device** and **Channel**. |
+| The keyboard is silent after plugging it in | The input is set to another device, often one shown as *(disconnected)*, or to the wrong channel. | Check the input's **MIDI device** and **Channel**. A keyboard can have several ports: play on the one for its keys (on a Studiologic SL, *SL CTRL*). **Options ▸ Rescan MIDI devices** is only a fallback. |
+| No sound at all, even from **Test** in **Audio...** | The computer's volume for that output is down, or the sound system has stalled: a stuck input on the same device holds the output too. | Raise **Computer volume** in **Audio...**. If that is not it, press **Reopen audio**; if still silent, choose another input (or none) for StageRig. A reboot clears a stuck device. |
+| A keyboard with its own USB audio keeps disconnecting every few seconds | Its digital (IEC958) output was chosen, which some keyboards cannot play. | Choose its analog output instead (for example *SL Analog Stereo*), in **Audio...** and in the system's sound settings. |
 | Program changes from the keyboard do nothing | They arrive on a channel the input is not watching, or **Respond to Program Change** is off. | Set **Arrive on** to *Any channel*; tick **Respond to Program Change**. |
 | A note hangs | A plugin missed a note-off. | Press **PANIC**. |
 | *Made by a newer StageRig* when opening a setup | The file was saved by a newer version. What this version does not know -- a newer effect, a newer setting -- was not loaded. | Update StageRig. Meanwhile **Save** asks before writing over the file, quitting keeps your changes in the autosave instead, and **Save As...** keeps a separate copy. |
