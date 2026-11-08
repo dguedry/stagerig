@@ -3887,7 +3887,7 @@ void MainComponent::outputsChanged()
 void MainComponent::showAudioSettings()
 {
     auto* content = new AudioSettingsComponent (engine, settings, [this] (const String& s) { showStatus (s); });
-    content->setSize (640, 714);
+    content->setSize (640, 782);
     perf::theme::launchDialog (content, "Audio settings", 0, 0);
 }
 

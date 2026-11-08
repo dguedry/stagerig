@@ -70,6 +70,10 @@ public:
         takeover.onClick = [this] { holdSystem (takeover.getToggleState()); apply(); };
         addAndMakeVisible (keptNote);
         keptNote.setFont (juce::FontOptions (12.0f));
+        addAndMakeVisible (typeNote);
+        typeNote.setFont (juce::FontOptions (12.5f));
+        typeNote.setJustificationType (juce::Justification::topLeft);
+        typeNote.setColour (juce::Label::textColourId, juce::Colour (0xffc8ccd4));
         keptNote.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
         applyBtn.onClick = [this] { apply(); };
 
@@ -106,6 +110,8 @@ public:
         r.removeFromTop (4);
         status.setBounds (r.removeFromTop (118));
         r.removeFromTop (8);
+        typeNote.setBounds (r.removeFromTop (64));
+        r.removeFromTop (4);
         auto bottom = r.removeFromBottom (28);
         applyBtn.setBounds (bottom.removeFromRight (150));
         bottom.removeFromRight (10);
@@ -288,7 +294,11 @@ private:
     juce::ToggleButton takeover { "Make the whole system use this buffer size while StageRig runs" };
     juce::TextButton applyBtn { "Reopen audio" }, fullBtn { "100%" };
     juce::Label volumeLabel { {}, "Computer volume" }, volumeNote,
-                keptNote { {}, "Every change here takes effect at once and is kept." };
+                keptNote { {}, "Every change here takes effect at once and is kept." },
+                typeNote { {}, "Device type: use JACK. On this computer it is the sound system's direct path: StageRig "
+                               "shares it with every other app, gets the buffer it asks for, and reconnects by itself when "
+                               "a device is switched off and on. ALSA is only for a computer without it, or a machine where "
+                               "StageRig should take an interface for itself; it does not reconnect a device that comes back." };
     juce::Slider volumeSlider;
     std::vector<std::pair<juce::String, juce::String>> sinks;   // { name, description }
     std::vector<int> volumes;

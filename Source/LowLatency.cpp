@@ -58,6 +58,11 @@ bool currentThreadIsRealtime()
     int policy = 0;
     sched_param sp {};
     if (::pthread_getschedparam (::pthread_self(), &policy, &sp) != 0) return false;
+    /* A thread made realtime by RTKit (PipeWire's own audio thread, say) carries
+       SCHED_RESET_ON_FORK in its policy, so the plain comparison said no. */
+   #ifdef SCHED_RESET_ON_FORK
+    policy &= ~SCHED_RESET_ON_FORK;
+   #endif
     return policy == SCHED_FIFO || policy == SCHED_RR;
 }
 
