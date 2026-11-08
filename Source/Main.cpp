@@ -23,6 +23,9 @@
  #include <vector>
  #include <sys/mman.h>
  #include <new>
+ #include <fcntl.h>
+ #include <thread>
+ #include <sys/stat.h>
 #endif
 
 namespace
@@ -312,6 +315,61 @@ namespace
         if (watchedChild > 0) ::kill (watchedChild, sig);
     }
 
+    /** Everything StageRig and its plugins print also goes to stagerig.log in the
+        settings folder, so what happened at a show can be read afterwards, however
+        it was started (from the menu, nothing else keeps it). The watchman reads
+        it from a pipe and copies it to the file and to wherever its own output
+        goes. The copying never waits: the terminal is written without blocking
+        (a line can be lost there, never in the file), so a stalled terminal
+        cannot hold up a plugin that prints. The file starts afresh past 10 MB,
+        the last one kept beside it. */
+    int logReadEnd = -1;     // the watchman's; closed in StageRig, so a lost watchman means lost lines, never blocked ones
+
+    void startLog()
+    {
+        const char* dirEnv = std::getenv ("STAGERIG_SETTINGS_DIR");
+        const char* home = std::getenv ("HOME");
+        std::string dir = dirEnv != nullptr && *dirEnv != 0 ? std::string (dirEnv)
+                        : std::string (home != nullptr ? home : ".") + "/.config/StageRig";
+        ::mkdir (dir.c_str(), 0755);
+        const std::string path = dir + "/stagerig.log";
+        struct stat st {};
+        if (::stat (path.c_str(), &st) == 0 && st.st_size > 10 * 1024 * 1024)
+            ::rename (path.c_str(), (path + ".1").c_str());
+        const int file = ::open (path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+        if (file < 0) return;
+
+        int fds[2];
+        if (::pipe2 (fds, O_CLOEXEC) != 0) { ::close (file); return; }
+        const int terminal = ::fcntl (2, F_DUPFD_CLOEXEC, 3);
+        if (terminal >= 0) ::fcntl (terminal, F_SETFL, ::fcntl (terminal, F_GETFL) | O_NONBLOCK);
+
+        const auto now = std::time (nullptr);
+        char stamp[64];
+        std::strftime (stamp, sizeof (stamp), "%Y-%m-%d %H:%M:%S", std::localtime (&now));
+        const std::string head = std::string ("\n=== StageRig started ") + stamp + " ===\n";
+        (void) ! ::write (file, head.data(), head.size());
+
+        logReadEnd = fds[0];
+        std::thread ([in = fds[0], file, terminal]
+        {
+            char buf[8192];
+            for (;;)
+            {
+                const ssize_t n = ::read (in, buf, sizeof (buf));
+                if (n == 0) break;
+                if (n < 0) { if (errno == EINTR) continue; break; }
+                (void) ! ::write (file, buf, (size_t) n);
+                if (terminal >= 0) (void) ! ::write (terminal, buf, (size_t) n);
+            }
+        }).detach();
+
+        // StageRig, its plugin hosts and the watchman itself all print into the pipe from here.
+        ::dup2 (fds[1], 1);
+        ::dup2 (fds[1], 2);
+        ::close (fds[1]);
+    }
+
     /** -1 in the process that goes on to be StageRig; otherwise the exit code
         the watchman finishes with. */
     int superviseLaunch (int argc, char* argv[])
@@ -323,6 +381,8 @@ namespace
         std::signal (SIGTERM, forwardToChild);
         std::signal (SIGINT,  forwardToChild);
         std::signal (SIGHUP,  forwardToChild);
+        std::signal (SIGPIPE, SIG_IGN);
+        startLog();
 
         // The page StageRig says it is alive on, shared across the fork.
         if (void* page = ::mmap (nullptr, sizeof (perf::Liveness), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0); page != MAP_FAILED)
@@ -336,6 +396,7 @@ namespace
             if (pid == 0)
             {
                 ::prctl (PR_SET_NAME, "StageRig", 0, 0, 0);    // not the watchman's name, after a restart
+                if (logReadEnd >= 0) ::close (logReadEnd);
                 std::signal (SIGTERM, SIG_DFL);
                 std::signal (SIGINT,  SIG_DFL);
                 std::signal (SIGHUP,  SIG_DFL);
