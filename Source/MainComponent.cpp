@@ -256,12 +256,20 @@ public:
             deviceBox.addItem ("No MIDI device connected: plug one in, then Options > Rescan MIDI devices", 999);
             deviceBox.setItemEnabled (999, false);
         }
+        /* Shown the way the engine opens it (Engine::openMidiDevices): the name says
+           which keyboard, the port number only separates two of the same name. A port
+           number now taken by another keyboard must not show that keyboard as chosen. */
         int selectedId = 1;
         for (int i = 0; i < devices.size(); ++i)
         {
             deviceBox.addItem (devices[i].name, i + 2);
-            if (devices[i].identifier == def.midiDeviceIdentifier) selectedId = i + 2;
+            if (devices[i].identifier == def.midiDeviceIdentifier && def.midiDeviceIdentifier.isNotEmpty()
+                && (devices[i].name == def.midiDeviceName || def.midiDeviceName.isEmpty()))
+                selectedId = i + 2;
         }
+        if (selectedId == 1 && def.midiDeviceName.isNotEmpty())
+            for (int i = 0; i < devices.size(); ++i)
+                if (devices[i].name == def.midiDeviceName) { selectedId = i + 2; break; }
         if (selectedId == 1 && def.midiDeviceName.isNotEmpty())
         {
             deviceBox.addItem (def.midiDeviceName + " (disconnected)", 1000);
