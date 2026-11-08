@@ -84,12 +84,17 @@ public:
 
         addAndMakeVisible (selector);
         engine.getDeviceManager().addChangeListener (this);
+        engine.setAudioWindowOpen (true);
         refreshStatus();
         refreshVolume();
         startTimer (1000);
     }
 
-    ~AudioSettingsComponent() override { engine.getDeviceManager().removeChangeListener (this); }
+    ~AudioSettingsComponent() override
+    {
+        engine.getDeviceManager().removeChangeListener (this);
+        engine.setAudioWindowOpen (false);
+    }
 
     void resized() override
     {

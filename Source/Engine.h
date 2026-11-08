@@ -97,6 +97,8 @@ public:
 
     /** Closes and reopens the current audio device (picks up a new PIPEWIRE_LATENCY). */
     void restartAudioDevice();
+    /** Audio... open or closed: while it is open the device chosen there is the choice. */
+    void setAudioWindowOpen (bool isOpen)                { audioWindowOpen = isOpen; if (! isOpen) changeListenerCallback (nullptr); }
 
     //==============================================================================
     // Setup document
@@ -861,6 +863,7 @@ private:
     std::atomic<bool> audioThreadRealtime { true };
     uint32_t realtimeRecheck = 0;      // audio thread only
     void watchAudioDevice();
+    bool audioWindowOpen = false;      // Audio... is open: the choice is being made there
     juce::uint32 lastAudioWatch = 0;
     juce::String audioGone;            // the audio device waited for, said once
 

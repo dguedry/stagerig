@@ -575,12 +575,17 @@ void Engine::watchAudioDevice()
     const auto inName  = saved->getStringAttribute ("audioInputDeviceName");
     const bool wantsInput = inName.isNotEmpty() && saved->getStringAttribute ("audioDeviceInChans", "1") != "0";
 
+    if (audioWindowOpen) return;        // being chosen right now
+
+    /* Missing: nothing open, or a chosen device's channels gone, or JUCE having
+       fallen back to other devices while the chosen ones were away. */
     auto* d = deviceManager.getCurrentAudioDevice();
+    const auto open = deviceManager.getAudioDeviceSetup();
     String missing;
     if (d == nullptr || ! d->isOpen() || ! d->isPlaying())          missing = outName.isNotEmpty() ? outName : String ("the sound system");
-    else if (d->getTypeName() != "JACK")                            return;     // chosen since, in Audio...
-    else if (outName.isNotEmpty() && d->getActiveOutputChannels().isZero()) missing = outName;
-    else if (wantsInput && d->getActiveInputChannels().isZero())    missing = inName;
+    else if (d->getTypeName() != "JACK")                            missing = outName;
+    else if (outName.isNotEmpty() && (open.outputDeviceName != outName || d->getActiveOutputChannels().isZero())) missing = outName;
+    else if (wantsInput && (open.inputDeviceName != inName || d->getActiveInputChannels().isZero()))            missing = inName;
 
     if (missing.isEmpty())
     {
@@ -630,21 +635,34 @@ void Engine::watchAudioDevice()
 
 void Engine::changeListenerCallback (ChangeBroadcaster*)
 {
-    /* Kept only while the chosen devices are all there: one that has gone leaves
-       the open device with no channels, and saving that would forget the choice
-       (and the reconnection, above, would have nothing to go back to). */
+    /* The choice is kept as made. Saved while Audio... is open (it is being
+       made), or when StageRig opens channels for an input or output itself with
+       the chosen devices all there. Never while one has gone: the open device
+       has lost those channels, or JUCE has fallen back to other devices, and
+       saving either would forget the choice the watchdog goes back to. */
     bool complete = deviceManager.getCurrentAudioDevice() != nullptr;
-    if (complete && deviceManager.getCurrentAudioDeviceType() == "JACK")
+    if (complete && ! audioWindowOpen)
     {
+        std::unique_ptr<XmlElement> saved (settings.getXmlValue ("audioDeviceState"));
         const auto s = deviceManager.getAudioDeviceSetup();
-        for (auto* type : deviceManager.getAvailableDeviceTypes())
-            if (type->getTypeName() == "JACK")
-            {
-                type->scanForDevices();
-                if ((s.outputDeviceName.isNotEmpty() && ! type->getDeviceNames (false).contains (s.outputDeviceName))
-                    || (s.inputDeviceName.isNotEmpty() && ! type->getDeviceNames (true).contains (s.inputDeviceName)))
-                    complete = false;
-            }
+        if (saved != nullptr)
+        {
+            const auto type = saved->getStringAttribute ("deviceType");
+            if (type != deviceManager.getCurrentAudioDeviceType()
+                || saved->getStringAttribute ("audioOutputDeviceName") != s.outputDeviceName
+                || (saved->getStringAttribute ("audioInputDeviceName").isNotEmpty()
+                    && saved->getStringAttribute ("audioInputDeviceName") != s.inputDeviceName))
+                complete = false;       // other devices than the chosen ones: a fallback
+        }
+        if (complete && deviceManager.getCurrentAudioDeviceType() == "JACK")
+            for (auto* t : deviceManager.getAvailableDeviceTypes())
+                if (t->getTypeName() == "JACK")
+                {
+                    t->scanForDevices();
+                    if ((s.outputDeviceName.isNotEmpty() && ! t->getDeviceNames (false).contains (s.outputDeviceName))
+                        || (s.inputDeviceName.isNotEmpty() && ! t->getDeviceNames (true).contains (s.inputDeviceName)))
+                        complete = false;
+                }
     }
     if (complete)
         if (auto xml = deviceManager.createStateXml())
