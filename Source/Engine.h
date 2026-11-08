@@ -860,6 +860,9 @@ private:
     bool callbackThreadKnown = false;              // audio thread only
     std::atomic<bool> audioThreadRealtime { true };
     uint32_t realtimeRecheck = 0;      // audio thread only
+    void watchAudioDevice();
+    juce::uint32 lastAudioWatch = 0;
+    juce::String audioGone;            // the audio device waited for, said once
 
     /** Tap tempo. Only the recent taps count: a pause means the player has
         stopped tapping and started again, and averaging across that gap would

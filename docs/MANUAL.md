@@ -1601,6 +1601,11 @@ LATENCY** section:
   the whole audio system at that buffer size while StageRig runs, and puts the
   previous value back on quit or as soon as you untick it. Turn it on when
   another app has forced a big buffer and StageRig cannot get a small one.
+- **Keep the processor at full speed while StageRig runs** -- on by default.
+  Holds the computer in its performance power mode, so the processor does not
+  slow down between notes and answer late, a common cause of crackle. The
+  computer goes back to its usual mode when StageRig quits, or crashes. Needs
+  the system's power-profiles service, which Ubuntu, Mint and Fedora have.
 - **Computer volume** -- the computer's own volume for the chosen output,
   applied after StageRig's levels. A newly plugged-in USB device often starts
   well below full, which makes everything quiet. **100%** passes StageRig
@@ -1615,6 +1620,12 @@ channels, sample rate and, for audio inputs, the input device and which of its
 channels to open. Only open channels are offered to an audio input. On the
 ALSA type only sound cards are offered as inputs: the system's default and
 sound-server entries are left out, as reading from them can crash.
+
+**An audio device switched off and on again** -- a keyboard with its own USB
+audio, an interface that loses power -- is reconnected by itself on the JACK
+type, usually within two seconds of coming back; the status bar says when it
+goes and when it is back, and the choice in **Audio...** is kept meanwhile.
+The same happens after the computer's sound system restarts.
 
 **Reopen audio**, at the bottom, closes and reopens the audio device. Use it
 when the sound has stopped, for example after the computer's sound system was
@@ -1633,11 +1644,22 @@ restarted or an audio device came back.
   system to its own buffer size every few seconds; StageRig then shows *clock
   held by another app* in the status bar and cannot get its own buffer size.
 
-**A USB interface on the ALSA type** is driven by StageRig directly. Two
-settings there sound like a broken cable, and the status line warns about
-them: a buffer below 128 samples (256 is safe, 128 often works), and an input
-device different from the output device (two clocks drift and crackle -- use
-the same interface for both, or untick the input channels).
+**One device for input and output.** An input on another device than the
+output is a second clock that has to be kept in step, and a USB device,
+a keyboard's own audio above all, crackles doing it at small buffers. The
+status line warns about it: use one interface for both, or choose no input if
+no audio input is used.
+
+**A USB interface on the ALSA type** is driven by StageRig directly. A buffer
+below 128 samples sounds like a broken cable there (256 is safe, 128 often
+works), and the status line warns about it.
+
+**JACK or ALSA?** Use **JACK**. On a PipeWire system it is the direct way in:
+StageRig shares the sound system with every other app, follows devices as they
+come and go, and gets the buffer it asks for. The **ALSA** type is for a
+computer without PipeWire's JACK library, or for a dedicated machine where
+StageRig should take an interface for itself; it does not reconnect a device
+that comes back.
 
 *late N* in the status bar counts buffers where a plugin did not answer in
 time. A few during loading are normal. A number that climbs while you play

@@ -27,6 +27,8 @@ running one is out of date.
 | Perform, Stage, Songs and Keys | As they were |
 | The window's size and place | As at the last normal quit |
 | Audio device, tablet, how each keyboard is driven | As set |
+| An audio device switched off and on (a keyboard's own USB audio, say) | Reconnected by itself within about two seconds (JACK type) |
+| The processor's speed | Held at full speed while StageRig runs, put back when it quits |
 
 A crash restarts StageRig by itself, up to five times in two minutes. Starting with a
 setup file named on the command line opens that file at its saved programs instead.

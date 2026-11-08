@@ -555,12 +555,100 @@ void Engine::DeviceManager::createAudioDeviceTypes (OwnedArray<AudioIODeviceType
    #endif
 }
 
+/* An audio device switched off and on again, or the sound system restarted:
+   StageRig keeps its choice and reopens the audio as soon as what it plays
+   into, and listens to, is there again. Through PipeWire (JACK) a device that
+   goes away takes StageRig's connections with it, and nothing makes them again
+   when it returns: the rig played on into nothing until Reopen audio. Checked
+   every second and a half while something is missing, and not at all
+   otherwise; only the JACK type can be asked what is there without
+   disturbing the open device. */
+void Engine::watchAudioDevice()
+{
+    const auto now = Time::getMillisecondCounter();
+    if (now - lastAudioWatch < 1500) return;
+    lastAudioWatch = now;
+
+    std::unique_ptr<XmlElement> saved (settings.getXmlValue ("audioDeviceState"));
+    if (saved == nullptr || saved->getStringAttribute ("deviceType") != "JACK") return;
+    const auto outName = saved->getStringAttribute ("audioOutputDeviceName");
+    const auto inName  = saved->getStringAttribute ("audioInputDeviceName");
+    const bool wantsInput = inName.isNotEmpty() && saved->getStringAttribute ("audioDeviceInChans", "1") != "0";
+
+    auto* d = deviceManager.getCurrentAudioDevice();
+    String missing;
+    if (d == nullptr || ! d->isOpen() || ! d->isPlaying())          missing = outName.isNotEmpty() ? outName : String ("the sound system");
+    else if (d->getTypeName() != "JACK")                            return;     // chosen since, in Audio...
+    else if (outName.isNotEmpty() && d->getActiveOutputChannels().isZero()) missing = outName;
+    else if (wantsInput && d->getActiveInputChannels().isZero())    missing = inName;
+
+    if (missing.isEmpty())
+    {
+        if (audioGone.isNotEmpty())
+            listeners.call ([n = audioGone] (Listener& l) { l.statusMessage (n + " is back: sound restored."); });
+        audioGone = {};
+        return;
+    }
+    if (audioGone != missing)
+    {
+        audioGone = missing;
+        listeners.call ([missing] (Listener& l) { l.statusMessage ("Audio: " + missing + " has gone. Switch it back on: StageRig reconnects by itself."); });
+    }
+
+    for (auto* type : deviceManager.getAvailableDeviceTypes())
+    {
+        if (type->getTypeName() != "JACK") continue;
+        type->scanForDevices();
+        const bool outThere = outName.isEmpty() || type->getDeviceNames (false).contains (outName);
+        const bool inThere  = ! wantsInput || type->getDeviceNames (true).contains (inName);
+        if (! outThere || ! inThere) return;
+
+        // As chosen, channels included: the open device's own have gone with the ports.
+        auto setup = deviceManager.getAudioDeviceSetup();
+        setup.outputDeviceName = outName;
+        setup.inputDeviceName = inName;
+        if (saved->hasAttribute ("audioDeviceInChans"))
+        {
+            setup.inputChannels.parseString (saved->getStringAttribute ("audioDeviceInChans"), 2);
+            setup.useDefaultInputChannels = false;
+        }
+        if (saved->hasAttribute ("audioDeviceOutChans"))
+        {
+            setup.outputChannels.parseString (saved->getStringAttribute ("audioDeviceOutChans"), 2);
+            setup.useDefaultOutputChannels = false;
+        }
+        else
+            setup.useDefaultOutputChannels = true;
+        if (deviceManager.getCurrentAudioDeviceType() != "JACK")
+            deviceManager.setCurrentAudioDeviceType ("JACK", true);
+        deviceManager.closeAudioDevice();
+        deviceManager.setAudioDeviceSetup (setup, true);
+        lastAudioWatch = Time::getMillisecondCounter();
+        return;
+    }
+}
+
 void Engine::changeListenerCallback (ChangeBroadcaster*)
 {
-    if (auto xml = deviceManager.createStateXml())
-        settings.setValue ("audioDeviceState", xml.get());
-    else
-        settings.removeValue ("audioDeviceState");
+    /* Kept only while the chosen devices are all there: one that has gone leaves
+       the open device with no channels, and saving that would forget the choice
+       (and the reconnection, above, would have nothing to go back to). */
+    bool complete = deviceManager.getCurrentAudioDevice() != nullptr;
+    if (complete && deviceManager.getCurrentAudioDeviceType() == "JACK")
+    {
+        const auto s = deviceManager.getAudioDeviceSetup();
+        for (auto* type : deviceManager.getAvailableDeviceTypes())
+            if (type->getTypeName() == "JACK")
+            {
+                type->scanForDevices();
+                if ((s.outputDeviceName.isNotEmpty() && ! type->getDeviceNames (false).contains (s.outputDeviceName))
+                    || (s.inputDeviceName.isNotEmpty() && ! type->getDeviceNames (true).contains (s.inputDeviceName)))
+                    complete = false;
+            }
+    }
+    if (complete)
+        if (auto xml = deviceManager.createStateXml())
+            settings.setValue ("audioDeviceState", xml.get());
     settings.saveIfNeeded();
 
     // Said once, where it will be seen: the Audio window repeats it for as long as it is true.
@@ -4310,6 +4398,7 @@ void Engine::timerCallback() { housekeeping(); }
 void Engine::housekeeping()
 {
     watchForStalls();
+    watchAudioDevice();
     {
         // A minute of late-block counts, for the pre-show check.
         const auto now = Time::getMillisecondCounter();
