@@ -50,8 +50,13 @@ public:
         volumeNote.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
 
         addAndMakeVisible (applyBtn);
-        applyBtn.setTooltip ("Close and reopen the audio device: applies the buffer size above, and reconnects StageRig "
-                             "when the sound has stopped (after the computer's sound system restarted, or a device came back).");
+        applyBtn.setTooltip ("Close and reopen the audio device. Use it when the sound has stopped: after the computer's "
+                             "sound system restarted, or an audio device came back.");
+        quantumBox.onChange = [this] { apply(); };
+        takeover.onClick = [this] { holdSystem (takeover.getToggleState()); apply(); };
+        addAndMakeVisible (keptNote);
+        keptNote.setFont (juce::FontOptions (12.0f));
+        keptNote.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
         applyBtn.onClick = [this] { apply(); };
 
         addAndMakeVisible (status);
@@ -74,8 +79,7 @@ public:
         title.setBounds (r.removeFromTop (22));
         auto row = r.removeFromTop (26);
         quantumLabel.setBounds (row.removeFromLeft (120));
-        quantumBox.setBounds (row.removeFromLeft (260)); row.removeFromLeft (10);
-        applyBtn.setBounds (row.removeFromLeft (juce::jmin (150, row.getWidth())));
+        quantumBox.setBounds (row.removeFromLeft (260));
         r.removeFromTop (6);
         takeover.setBounds (r.removeFromTop (24));
         r.removeFromTop (4);
@@ -87,10 +91,40 @@ public:
         r.removeFromTop (4);
         status.setBounds (r.removeFromTop (118));
         r.removeFromTop (8);
+        auto bottom = r.removeFromBottom (28);
+        applyBtn.setBounds (bottom.removeFromRight (150));
+        bottom.removeFromRight (10);
+        keptNote.setBounds (bottom);
+        r.removeFromBottom (6);
         selector.setBounds (r);
     }
 
 private:
+    /** Ticked: the whole computer is held at StageRig's buffer size, the clock as it was
+        kept until StageRig quits (Main puts it back). Unticked: put back now. */
+    void holdSystem (bool hold)
+    {
+        if (hold)
+        {
+            if (! settings.getBoolValue ("clockSaved", false))
+            {
+                const auto was = LowLatency::readClock();
+                settings.setValue ("clockForceQuantum", was.forceQuantum);
+                settings.setValue ("clockForceRate", was.forceRate);
+                settings.setValue ("clockQuantum", was.quantum);
+                settings.setValue ("clockRate", was.rate);
+                settings.setValue ("clockSaved", true);
+            }
+        }
+        else if (settings.getBoolValue ("clockSaved", false))
+        {
+            LowLatency::restoreClock ({ settings.getValue ("clockForceQuantum"), settings.getValue ("clockForceRate"),
+                                        settings.getValue ("clockQuantum"), settings.getValue ("clockRate") });
+            settings.removeValue ("clockSaved");
+        }
+        settings.saveIfNeeded();
+    }
+
     void apply()
     {
         const int q = quantumBox.getSelectedId();
@@ -234,7 +268,8 @@ private:
     juce::ComboBox quantumBox;
     juce::ToggleButton takeover { "Make the whole system use this buffer size while StageRig runs" };
     juce::TextButton applyBtn { "Reopen audio" }, fullBtn { "100%" };
-    juce::Label volumeLabel { {}, "Computer volume" }, volumeNote;
+    juce::Label volumeLabel { {}, "Computer volume" }, volumeNote,
+                keptNote { {}, "Every change here takes effect at once and is kept." };
     juce::Slider volumeSlider;
     std::vector<std::pair<juce::String, juce::String>> sinks;   // { name, description }
     std::vector<int> volumes;

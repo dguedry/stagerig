@@ -202,7 +202,13 @@ public:
         mainWindow.reset();     // closes plugin editors and autosaves
         engine.reset();
         host.reset();
-        if (clockTakenOver) perf::LowLatency::restoreClock (previousClock);
+        /* Put back whatever is held now: taken at start, or ticked in the Audio window
+           since (which saved the clock as it was); unticked there, it is back already. */
+        if (settings != nullptr && settings->getBoolValue ("clockSaved", false))
+            perf::LowLatency::restoreClock ({ settings->getValue ("clockForceQuantum"), settings->getValue ("clockForceRate"),
+                                              settings->getValue ("clockQuantum"), settings->getValue ("clockRate") });
+        else if (settings == nullptr && clockTakenOver)
+            perf::LowLatency::restoreClock (previousClock);
         if (settings != nullptr)
         {
             settings->removeValue ("clockSaved");
