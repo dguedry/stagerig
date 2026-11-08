@@ -5,6 +5,7 @@
 #include "MainComponent.h"
 #include "HelpWindow.h"
 #include "LowLatency.h"
+#include "Theme.h"
 #include "BinaryData.h"
 #include <cstdio>
 #include <csignal>
@@ -226,7 +227,7 @@ public:
     {
     public:
         MainWindow (const juce::String& name, perf::Engine& engine, juce::PropertiesFile& settings, const juce::File& initialSetup)
-            : DocumentWindow (name, juce::Colour (0xff1e1f24), DocumentWindow::allButtons), appSettings (settings)
+            : DocumentWindow (perf::theme::windowTitle (name), juce::Colour (0xff1e1f24), DocumentWindow::allButtons), appSettings (settings)
         {
             setUsingNativeTitleBar (true);
             content = new perf::MainComponent (engine, settings, initialSetup);
