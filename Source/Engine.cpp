@@ -3,6 +3,7 @@
  #include <alsa/asoundlib.h>
 #endif
 #include "LowLatency.h"
+#include "Liveness.h"
 #include <pthread.h>
 #include <cstring>
 #include <climits>
@@ -4644,6 +4645,7 @@ void Engine::timerCallback() { housekeeping(); }
 
 void Engine::housekeeping()
 {
+    if (auto* l = liveness) l->heartbeatMs.store (livenessNowMs(), std::memory_order_relaxed);
     watchForStalls();
     watchAudioDevice();
     watchUsbReconnects();
@@ -4966,6 +4968,7 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
         }
     }
     audioCallbacks.fetch_add (1, std::memory_order_relaxed);
+    if (auto* l = liveness) l->audioCalls.fetch_add (1, std::memory_order_relaxed);
     if (! callbackThreadKnown || ! pthread_equal (callbackThread, pthread_self()))
     {
         callbackThread = pthread_self();

@@ -6,6 +6,7 @@
 #include "HelpWindow.h"
 #include "LowLatency.h"
 #include "Theme.h"
+#include "Liveness.h"
 #include "BinaryData.h"
 #include <cstdio>
 #include <csignal>
@@ -20,6 +21,8 @@
  #include <algorithm>
  #include <string>
  #include <vector>
+ #include <sys/mman.h>
+ #include <new>
 #endif
 
 namespace
@@ -201,6 +204,7 @@ public:
 
     void shutdown() override
     {
+        if (auto* l = perf::liveness) l->quitting.store (1);
         stopTimer();
         perf::HelpWindow::close();   // a help window must not outlive the app
         mainWindow.reset();     // closes plugin editors and autosaves
@@ -221,7 +225,11 @@ public:
         settings.reset();
     }
 
-    void systemRequestedQuit() override { quit(); }
+    void systemRequestedQuit() override
+    {
+        if (auto* l = perf::liveness) l->quitting.store (1);
+        quit();
+    }
 
     class MainWindow : public juce::DocumentWindow
     {
@@ -316,6 +324,10 @@ namespace
         std::signal (SIGINT,  forwardToChild);
         std::signal (SIGHUP,  forwardToChild);
 
+        // The page StageRig says it is alive on, shared across the fork.
+        if (void* page = ::mmap (nullptr, sizeof (perf::Liveness), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0); page != MAP_FAILED)
+            perf::liveness = new (page) perf::Liveness();
+
         std::vector<std::time_t> crashes;
         for (;;)
         {
@@ -332,8 +344,37 @@ namespace
             watchedChild = pid;
             ::prctl (PR_SET_NAME, "stagerig-watch", 0, 0, 0);
 
+            /* Waited on, and looked at twice a second. A StageRig whose screen and
+               sound have both stood still for twenty seconds is hung, which no crash
+               watch would see: it is ended and started again like a crash. One whose
+               screen is stuck but whose sound plays on is left alone (the show goes
+               on); a quit under way is never taken for a hang. The first minute is
+               the start, with plugins loading. */
             int status = 0;
-            while (::waitpid (pid, &status, 0) < 0 && errno == EINTR) {}
+            const auto started = perf::livenessNowMs();
+            if (auto* l = perf::liveness) { l->heartbeatMs.store (0); l->quitting.store (0); }
+            uint32_t lastCalls = 0;
+            int64_t callsMovedAt = started;
+            for (;;)
+            {
+                const pid_t r = ::waitpid (pid, &status, WNOHANG);
+                if (r == pid || (r < 0 && errno != EINTR)) break;
+                ::usleep (500000);
+                auto* l = perf::liveness;
+                if (l == nullptr || watchQuit || l->quitting.load() != 0) continue;
+                const auto now = perf::livenessNowMs();
+                if (const auto calls = l->audioCalls.load(); calls != lastCalls) { lastCalls = calls; callsMovedAt = now; }
+                const auto beat = l->heartbeatMs.load();
+                const bool screenStill = now - (beat > 0 ? beat : started) > 20000;
+                const bool soundStill  = now - callsMovedAt > 20000;
+                if (now - started > 60000 && screenStill && soundStill)
+                {
+                    std::fprintf (stderr, "[watch] StageRig has stopped responding: no screen and no sound for twenty seconds. Starting it again.\n");
+                    ::kill (pid, SIGKILL);
+                    while (::waitpid (pid, &status, 0) < 0 && errno == EINTR) {}
+                    break;
+                }
+            }
             watchedChild = -1;
 
             if (watchQuit) return WIFEXITED (status) ? WEXITSTATUS (status) : 0;
