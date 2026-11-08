@@ -1,0 +1,88 @@
+#!/bin/bash
+# Builds StageRig's apt and dnf repositories from release packages.
+#
+#   scripts/build-package-repo <packages-dir> <site-dir> <base-url>
+#
+# <packages-dir> holds .deb and .x86_64.rpm files (any number of versions).
+# <site-dir> is written fresh: apt/, rpm/, key.gpg, key.asc, stagerig.repo,
+# index.html. <base-url> is where the site is served, e.g.
+# https://dguedry.github.io/stagerig
+#
+# Signs with the one secret key in gpg's keyring (GNUPGHOME). The release
+# workflow imports it from the STAGERIG_REPO_SIGNING_KEY secret.
+#
+# Needs apt-ftparchive (apt-utils), createrepo_c and gpg.
+set -euo pipefail
+
+PKGS="$1"; SITE="$2"; BASE="${3%/}"
+
+rm -rf "$SITE"
+mkdir -p "$SITE/apt/pool/main" "$SITE/apt/dists/stable/main/binary-amd64" "$SITE/rpm"
+
+shopt -s nullglob
+debs=("$PKGS"/*.deb)
+rpms=("$PKGS"/*.x86_64.rpm)
+[ ${#debs[@]} -gt 0 ] || { echo "no .deb in $PKGS"; exit 1; }
+[ ${#rpms[@]} -gt 0 ] || { echo "no .rpm in $PKGS"; exit 1; }
+cp "${debs[@]}" "$SITE/apt/pool/main/"
+cp "${rpms[@]}" "$SITE/rpm/"
+
+sign() { gpg --batch --yes "$@"; }
+
+# apt: one suite, "stable", for every Debian and Ubuntu release (the package
+# is built on the oldest supported Ubuntu and depends on ordinary libraries).
+(
+  cd "$SITE/apt"
+  apt-ftparchive packages pool > dists/stable/main/binary-amd64/Packages
+  gzip -9kn dists/stable/main/binary-amd64/Packages
+  apt-ftparchive \
+    -o APT::FTPArchive::Release::Origin=StageRig \
+    -o APT::FTPArchive::Release::Label=StageRig \
+    -o APT::FTPArchive::Release::Suite=stable \
+    -o APT::FTPArchive::Release::Codename=stable \
+    -o APT::FTPArchive::Release::Architectures=amd64 \
+    -o APT::FTPArchive::Release::Components=main \
+    -o APT::FTPArchive::Release::Description="StageRig releases" \
+    release dists/stable > dists/stable/Release
+  sign --clearsign -o dists/stable/InRelease dists/stable/Release
+  sign --armor --detach-sign -o dists/stable/Release.gpg dists/stable/Release
+)
+
+# dnf: the metadata is signed (repo_gpgcheck); it carries each package's checksum.
+createrepo_c --quiet "$SITE/rpm"
+sign --armor --detach-sign -o "$SITE/rpm/repodata/repomd.xml.asc" "$SITE/rpm/repodata/repomd.xml"
+
+gpg --export > "$SITE/key.gpg"
+gpg --armor --export > "$SITE/key.asc"
+
+cat > "$SITE/stagerig.repo" <<EOF
+[stagerig]
+name=StageRig
+baseurl=$BASE/rpm
+enabled=1
+gpgcheck=0
+repo_gpgcheck=1
+gpgkey=$BASE/key.asc
+EOF
+
+cat > "$SITE/index.html" <<EOF
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>StageRig packages</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.5}
+pre{background:#f3f3f3;padding:.8rem;overflow-x:auto}</style></head><body>
+<h1>StageRig packages</h1>
+<p>Add this once and StageRig updates with the rest of the system.</p>
+<h2>Debian, Ubuntu, Linux Mint</h2>
+<pre>sudo install -d /etc/apt/keyrings
+curl -fsSL $BASE/key.gpg | sudo tee /etc/apt/keyrings/stagerig.gpg &gt;/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/stagerig.gpg] $BASE/apt stable main" | sudo tee /etc/apt/sources.list.d/stagerig.list
+sudo apt update &amp;&amp; sudo apt install stagerig</pre>
+<h2>Fedora</h2>
+<pre>sudo curl -fsSL -o /etc/yum.repos.d/stagerig.repo $BASE/stagerig.repo
+sudo dnf install stagerig</pre>
+<p><a href="https://github.com/dguedry/stagerig">Source and documentation</a></p>
+</body></html>
+EOF
+
+echo "built $SITE: ${#debs[@]} .deb, ${#rpms[@]} .rpm"

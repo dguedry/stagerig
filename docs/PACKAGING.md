@@ -28,7 +28,30 @@ Build notes for packagers:
   not packaged in Fedora. JUCE 8 is AGPLv3 (or commercial); StageRig is
   GPLv3-or-later.
 
-## Your own repositories first
+## StageRig's own apt and dnf repository
+
+The `package-repo` job in `.github/workflows/packages.yml` publishes a signed
+apt and dnf repository to GitHub Pages after every release, at
+<https://dguedry.github.io/stagerig/>. It is rebuilt each time from the last
+ten releases' `.deb` and `.rpm` by `scripts/build-package-repo`, which can be
+run by hand to check a change (it needs `apt-ftparchive`, `createrepo_c` and
+`gpg`). Running the workflow by hand on `main` publishes again without a
+release.
+
+- apt: one suite, `stable`, component `main`, `amd64`; `InRelease` and
+  `Release.gpg` are signed.
+- dnf: `repomd.xml` is signed (`repo_gpgcheck=1`) and carries every package's
+  checksum; the packages themselves are not signed (`gpgcheck=0`).
+- The key is used for nothing else: RSA 4096, no expiry, fingerprint
+  `0584 CCE9 4394 5336 4971  66DD E374 5FD7 E8DE B0F3`. Its private half is
+  the `STAGERIG_REPO_SIGNING_KEY` repository secret (armored, no passphrase);
+  keep an offline copy. The public half is published as `key.gpg` and
+  `key.asc`. A new key means every user fetches it again, so do not rotate it
+  lightly.
+- Pages is set to deploy from GitHub Actions; the job deploys through the
+  `github-pages` environment.
+
+## Other repositories
 
 **Ubuntu PPA (Launchpad).** Create a Launchpad account, upload your GPG key,
 create a PPA named `stagerig`. Then, per release and per Ubuntu series:

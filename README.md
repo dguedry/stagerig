@@ -132,17 +132,35 @@ every used program stays loaded and changes are instant (at the cost of RAM).
 
 ## Install
 
-**[Download the latest release](https://github.com/dguedry/stagerig/releases/latest)**
-— a `.deb` for Debian/Ubuntu and an `.rpm` for Fedora, both x86-64. They install
-`StageRig` and `stagerig-plugin-host` into `/usr/bin`, plus a launcher entry
-and the icon.
+Add StageRig's package repository once, and every new release arrives with
+your system's ordinary updates (`apt upgrade`, `dnf upgrade`, or the desktop's
+update manager). Packages are for x86-64. They install `StageRig` and
+`stagerig-plugin-host` into `/usr/bin`, plus a launcher entry and the icon.
+
+```sh
+# Debian / Ubuntu / Linux Mint
+sudo install -d /etc/apt/keyrings
+curl -fsSL https://dguedry.github.io/stagerig/key.gpg | sudo tee /etc/apt/keyrings/stagerig.gpg >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/stagerig.gpg] https://dguedry.github.io/stagerig/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/stagerig.list
+sudo apt update && sudo apt install stagerig
+
+# Fedora
+sudo curl -fsSL -o /etc/yum.repos.d/stagerig.repo https://dguedry.github.io/stagerig/stagerig.repo
+sudo dnf install stagerig
+```
+
+The repository is signed: apt checks it against the key saved above, and dnf
+asks you to accept the same key the first time. It holds the last ten
+releases.
 
 Verified on Ubuntu 24.04, Linux Mint 22.3 (Cinnamon) and Fedora 43, with native
 LV2/VST3 plugins and Windows plugins bridged through
 [vstenv](https://github.com/dguedry/vstenv).
 
-The package filename carries the version, so fetch whichever the latest release
-lists rather than hard-coding a number:
+**Without the repository:** each release's `.deb` and `.rpm` are on the
+**[releases page](https://github.com/dguedry/stagerig/releases/latest)**.
+Installed this way, StageRig does not update by itself.
 
 ```sh
 # Debian / Ubuntu
@@ -153,9 +171,6 @@ sudo apt install ./stagerig_*_amd64.deb
 gh release download --repo dguedry/stagerig --pattern '*.rpm'
 sudo dnf install ./stagerig-*.x86_64.rpm
 ```
-
-Without the GitHub CLI, open the releases page above and download the file
-directly; both packages are attached to every release.
 
 StageRig ships no plugins but the General MIDI player; the packages suggest a
 set of free ones good enough to gig with -- Surge XT, setBfree, ZynAddSubFX,

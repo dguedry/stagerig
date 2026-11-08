@@ -251,3 +251,54 @@ jobs:
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "StageRig $TAG" --generate-notes
           gh release upload "$TAG" pkgs/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  # The apt and dnf repositories on GitHub Pages, made again after every release
+  # from the last ten releases' packages, so `apt upgrade` and `dnf upgrade`
+  # bring StageRig up to date. Signed with the STAGERIG_REPO_SIGNING_KEY secret
+  # (an armored private key with no passphrase, used for nothing else).
+  # Run the workflow by hand on main to publish again without a release.
+  package-repo:
+    name: Publish the apt and dnf repositories
+    needs: [release]
+    if: |
+      always() && github.ref == 'refs/heads/main'
+      && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils createrepo-c gnupg
+      - name: The last ten releases' packages
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          mkdir pkgs
+          for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 10 --json tagName -q '.[].tagName'); do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" -p '*.deb' -p '*.x86_64.rpm' -D pkgs --skip-existing || true
+          done
+          ls -la pkgs
+      - name: Signing key
+        env:
+          KEY: ${{ secrets.STAGERIG_REPO_SIGNING_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "The STAGERIG_REPO_SIGNING_KEY secret is not set"; exit 1; fi
+          printf '%s\n' "$KEY" | gpg --batch --import
+      - name: Build the repositories
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          scripts/build-package-repo pkgs site "https://$OWNER.github.io/$REPO"
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: site }
+      - id: deploy
+        uses: actions/deploy-pages@v4
