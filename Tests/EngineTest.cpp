@@ -1203,6 +1203,57 @@ int main()
         engine.setInputMidiDevice (0, MidiDeviceInfo (before.midiDeviceName, before.midiDeviceIdentifier));
     }
 
+    // --- two keyboards of one name stay two; a keyboard gone mid-note lets go of it --------
+    {
+        auto idsOf = [] (const String& name) { StringArray ids; for (const auto& d : MidiInput::getAvailableDevices()) if (d.name == name) ids.add (d.identifier); return ids; };
+        auto waitFor = [] (std::function<bool()> done) { for (int i = 0; i < 60 && ! done(); ++i) MessageManager::getInstance()->runDispatchLoopUntil (50); return done(); };
+        const auto before0 = engine.getSetup().inputs[0];
+        while ((int) engine.getSetup().inputs.size() < 2) engine.addInput ("Lower");
+        const auto before1 = engine.getSetup().inputs[1];
+
+        auto t1 = MidiOutput::createNewDevice ("StageRig Twin");
+        auto t2 = MidiOutput::createNewDevice ("StageRig Twin");
+        if (t1 != nullptr && t2 != nullptr && waitFor ([&] { return idsOf ("StageRig Twin").size() == 2; }))
+        {
+            const auto ids = idsOf ("StageRig Twin");
+            engine.setInputMidiDevice (0, MidiDeviceInfo ("StageRig Twin", ids[0]));
+            engine.setInputMidiDevice (1, MidiDeviceInfo ("StageRig Twin", ids[1]));
+            // The second twin unplugged and back under a new port number.
+            t2.reset();
+            CHECK (waitFor ([&] { return idsOf ("StageRig Twin").size() == 1; }));
+            t2 = MidiOutput::createNewDevice ("StageRig Twin");
+            // Back, perhaps under its old number, perhaps a new one: either way on its own keyboard again.
+            CHECK (waitFor ([&] { const auto now = idsOf ("StageRig Twin");
+                                  const auto in1 = engine.getSetup().inputs[1].midiDeviceIdentifier;
+                                  return now.size() == 2 && now.contains (in1) && in1 != engine.getSetup().inputs[0].midiDeviceIdentifier; }));
+            std::printf ("     twins: input 1 on %s, input 2 on %s\n", engine.getSetup().inputs[0].midiDeviceIdentifier.toRawUTF8(),
+                         engine.getSetup().inputs[1].midiDeviceIdentifier.toRawUTF8());
+            CHECK (engine.getSetup().inputs[0].midiDeviceIdentifier == ids[0]);
+            CHECK (engine.getSetup().inputs[1].midiDeviceIdentifier != engine.getSetup().inputs[0].midiDeviceIdentifier);
+        }
+        else std::printf ("     no virtual MIDI devices here; twins skipped\n");
+        t1.reset(); t2.reset();
+
+        auto held = MidiOutput::createNewDevice ("StageRig Held Keys");
+        String idH;
+        if (held != nullptr && waitFor ([&] { idH = idsOf ("StageRig Held Keys")[0]; return idH.isNotEmpty(); }))
+        {
+            engine.setInputMidiDevice (0, MidiDeviceInfo ("StageRig Held Keys", idH));
+            engine.setInputChannel (0, 0);
+            held->sendMessageNow (MidiMessage::noteOn (1, 60, (uint8) 100));
+            held->sendMessageNow (MidiMessage::controllerEvent (1, 64, 127));
+            CHECK (waitFor ([&] { render (engine, 1); return engine.isHoldingNotes (0); }));
+            held.reset();            // pulled out with the key and the pedal down
+            const bool released = waitFor ([&] { render (engine, 1); return ! engine.isHoldingNotes (0); });
+            std::printf ("     a keyboard gone mid-note: %s\n", released ? "its note and pedal let go" : "STILL HELD");
+            CHECK (released);
+        }
+        else std::printf ("     no virtual MIDI devices here; held-note release skipped\n");
+
+        engine.setInputMidiDevice (0, MidiDeviceInfo (before0.midiDeviceName, before0.midiDeviceIdentifier));
+        engine.setInputMidiDevice (1, MidiDeviceInfo (before1.midiDeviceName, before1.midiDeviceIdentifier));
+    }
+
     // --- a pedal on the instrument itself: on / off, toggled, and a level ------------------
     {
         MappingDef onOff;

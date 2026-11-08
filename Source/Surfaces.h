@@ -247,6 +247,7 @@ private:
         kept (getFocusSlot checks they still exist), so a tap of the tempo does
         not send the knobs back to the first instrument. */
     void setupChanged() override                                    { layouts.clear(); }
+    void midiDevicesReconnected() override;
     void programChanged (int, int) override                         { layouts.clear(); }
     void programContentChanged (int, int) override                  { layouts.clear(); }
     void surfaceKnob (int input, int knob, int value, bool relative, float exact) override;

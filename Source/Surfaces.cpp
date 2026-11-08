@@ -803,6 +803,25 @@ void SurfaceHub::lookForKeyboards()
     if (changed && onSurfacesChanged) onSurfacesChanged();
 }
 
+/* A keyboard back under its old port numbers: the drivers talking to it over
+   MIDI hold dead connections that still look listed. They are let go and found
+   again at once. The MK1's own HID connection notices by itself. */
+void SurfaceHub::midiDevicesReconnected()
+{
+    for (auto it = surfaces.begin(); it != surfaces.end();)
+    {
+        if (dynamic_cast<KompleteKontrolMk1*> (it->get()) == nullptr)
+        {
+            shown.erase (it->get());
+            reportedProblems.erase (it->get());
+            it = surfaces.erase (it);
+        }
+        else ++it;
+    }
+    lastSearch = 0;
+    if (onSurfacesChanged) onSurfacesChanged();
+}
+
 void SurfaceHub::tick()
 {
     // The search for NKS presets finished: the knobs may have their makers' pages now.

@@ -74,6 +74,13 @@ bool Midi2Inputs::isMidi2 (const String& identifier)
     return endpoint.has_value() && endpoint->getProtocol() == ump::PacketProtocol::MIDI_2_0;
 }
 
+void Midi2Inputs::forget (const StringArray& identifiers)
+{
+    connections.erase (std::remove_if (connections.begin(), connections.end(),
+                                       [&identifiers] (const auto& c) { return identifiers.contains (c->identifier); }),
+                       connections.end());
+}
+
 StringArray Midi2Inputs::open (const StringArray& identifiers)
 {
     StringArray heard;

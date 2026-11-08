@@ -5,6 +5,7 @@
 #include "LowLatency.h"
 #include <pthread.h>
 #include <cstring>
+#include <climits>
 #include <cmath>
 #include <algorithm>
 
@@ -268,6 +269,9 @@ struct Engine::ProgramRuntime
 struct Engine::InputRuntime
 {
     String deviceIdentifier;                  // guarded by Engine::lock
+    /* Its device went away or was reconnected: whatever it was holding will
+       never be let go by it, so the audio thread lets go of it all. */
+    std::atomic<bool> deviceLost { false };
     std::atomic<int> channel { 0 };
     std::atomic<bool> respondToProgramChange { true };
     std::atomic<int> programChangeChannel { InputDef::pcChannelSameAsNotes };
@@ -347,6 +351,11 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     if (startAudioDevice)
     {
         std::unique_ptr<XmlElement> savedAudio (settings.getXmlValue ("audioDeviceState"));
+        if (savedAudio != nullptr) savedAudio->deleteAllChildElementsWithTagName ("MIDIINPUT");
+        if (const char* st = std::getenv ("STAGERIG_TEST_STALL"); st != nullptr && std::atoi (st) > 0)
+            stallTestFrom = Time::getMillisecondCounter() + (uint32) std::atoi (st) * 1000;
+        pendingEvents.reserve (1024);
+        handlingEvents.reserve (1024);
         deviceManager.initialise (0, 2, savedAudio.get(), true);
 
         /* First run, or a saved state on PipeWire's ALSA emulation ("Default
@@ -555,82 +564,160 @@ void Engine::DeviceManager::createAudioDeviceTypes (OwnedArray<AudioIODeviceType
    #endif
 }
 
-/* An audio device switched off and on again, or the sound system restarted:
-   StageRig keeps its choice and reopens the audio as soon as what it plays
-   into, and listens to, is there again. Through PipeWire (JACK) a device that
-   goes away takes StageRig's connections with it, and nothing makes them again
-   when it returns: the rig played on into nothing until Reopen audio. Checked
-   every second and a half while something is missing, and not at all
-   otherwise; only the JACK type can be asked what is there without
-   disturbing the open device. */
+/* The audio, watched so that it plays whatever happens to its devices.
+
+   - A device switched off and on, or the sound system restarted: through
+     PipeWire (JACK) a device that goes away takes StageRig's connections with it
+     and nothing makes them again when it returns. StageRig keeps its choice and
+     reopens the audio once the chosen devices have been back for a moment (all
+     their ports there), within about three seconds of their return.
+   - Audio that stops with the device still looking open (a stuck capture
+     device holding up PipeWire's graph, an ALSA device whose thread gave up):
+     the callbacks are counted, and three seconds without one is a stall.
+   - A device back with fewer channels than chosen is not taken as back.
+   - Reopening is tried again after 3, 6, 12 and then every 30 seconds while it
+     fails, so a device that cannot open does not cut the sound every tick.
+   - An input on another device than the output that keeps stalling the audio is
+     left out, so the output plays on; Audio... or Reopen audio tries it again.
+   Nothing is done while Audio... is open: the choice is being made there. */
+/** Said in the status bar, and in the log with the time, for after the show. */
+void Engine::sayAudio (const String& text)
+{
+    std::fprintf (stderr, "[audio-watch %s] %s\n", Time::getCurrentTime().toString (false, true, true, true).toRawUTF8(), text.toRawUTF8());
+    listeners.call ([text] (Listener& l) { l.statusMessage (text); });
+}
+
 void Engine::watchAudioDevice()
 {
     const auto now = Time::getMillisecondCounter();
     if (now - lastAudioWatch < 1500) return;
     lastAudioWatch = now;
+    if (audioWindowOpen) { audioRetries = 0; audioRetryAt = 0; return; }
 
     std::unique_ptr<XmlElement> saved (settings.getXmlValue ("audioDeviceState"));
-    if (saved == nullptr || saved->getStringAttribute ("deviceType") != "JACK") return;
+    if (saved == nullptr) return;
+    const auto type    = saved->getStringAttribute ("deviceType");
     const auto outName = saved->getStringAttribute ("audioOutputDeviceName");
     const auto inName  = saved->getStringAttribute ("audioInputDeviceName");
-    const bool wantsInput = inName.isNotEmpty() && saved->getStringAttribute ("audioDeviceInChans", "1") != "0";
+    const bool wantsInput = inName.isNotEmpty() && inName != benchedInput
+                            && saved->getStringAttribute ("audioDeviceInChans", "11").containsChar ('1');
+    auto bitsIn = [&saved] (const char* attr, int otherwise)
+    {
+        if (! saved->hasAttribute (attr)) return otherwise;
+        BigInteger b; b.parseString (saved->getStringAttribute (attr), 2);
+        return b.countNumberOfSetBits();
+    };
 
-    if (audioWindowOpen) return;        // being chosen right now
-
-    /* Missing: nothing open, or a chosen device's channels gone, or JUCE having
-       fallen back to other devices while the chosen ones were away. */
     auto* d = deviceManager.getCurrentAudioDevice();
     const auto open = deviceManager.getAudioDeviceSetup();
+    const auto calls = audioCallbacks.load (std::memory_order_relaxed);
+    const bool moving = calls != lastAudioCallbacks;
+    lastAudioCallbacks = calls;
+
     String missing;
-    if (d == nullptr || ! d->isOpen() || ! d->isPlaying())          missing = outName.isNotEmpty() ? outName : String ("the sound system");
-    else if (d->getTypeName() != "JACK")                            missing = outName;
-    else if (outName.isNotEmpty() && (open.outputDeviceName != outName || d->getActiveOutputChannels().isZero())) missing = outName;
-    else if (wantsInput && (open.inputDeviceName != inName || d->getActiveInputChannels().isZero()))            missing = inName;
+    bool stalled = false;
+    if (d == nullptr || ! d->isOpen() || ! d->isPlaying())
+        missing = outName.isNotEmpty() ? outName : String ("the sound system");
+    else if (type == "JACK")
+    {
+        const int wantOut = jmin (bitsIn ("audioDeviceOutChans", 2), d->getOutputChannelNames().size());
+        const int wantIn  = jmin (bitsIn ("audioDeviceInChans", 2), d->getInputChannelNames().size());
+        if (d->getTypeName() != "JACK")
+            missing = outName;
+        else if (outName.isNotEmpty() && (open.outputDeviceName != outName || d->getActiveOutputChannels().countNumberOfSetBits() < jmax (1, wantOut)))
+            missing = outName;
+        else if (wantsInput && (open.inputDeviceName != inName || d->getActiveInputChannels().countNumberOfSetBits() < jmax (1, wantIn)))
+            missing = inName;
+    }
+    if (missing.isEmpty() && d != nullptr && ! moving && now - audioStartedAt.load() > 3000)
+    {
+        missing = open.outputDeviceName.isNotEmpty() ? open.outputDeviceName : d->getName();
+        stalled = true;
+    }
+
+    // Just reopened and not yet heard from: neither back nor gone yet.
+    if (missing.isEmpty() && audioGone.isNotEmpty() && ! moving) return;
 
     if (missing.isEmpty())
     {
         if (audioGone.isNotEmpty())
-            listeners.call ([n = audioGone] (Listener& l) { l.statusMessage (n + " is back: sound restored."); });
+        {
+            sayAudio (audioGone + " is back: sound restored.");
+            // A restarted sound system has forgotten the buffer it was held at.
+            if (type == "JACK" && settings.getBoolValue ("pipewireTakeover", true))
+                LowLatency::forceClock (settings.getIntValue ("pipewireQuantum", 128), 48000);
+        }
         audioGone = {};
+        audioRetries = 0;
+        audioRetryAt = 0;
+        audioPresentTicks = 0;
         return;
     }
     if (audioGone != missing)
     {
         audioGone = missing;
-        listeners.call ([missing] (Listener& l) { l.statusMessage ("Audio: " + missing + " has gone. Switch it back on: StageRig reconnects by itself."); });
+        sayAudio (stalled ? "Audio: " + missing + " stopped playing. StageRig is reopening it."
+                          : "Audio: " + missing + " has gone. Switch it back on: StageRig reconnects by itself.");
     }
 
-    for (auto* type : deviceManager.getAvailableDeviceTypes())
-    {
-        if (type->getTypeName() != "JACK") continue;
-        type->scanForDevices();
-        const bool outThere = outName.isEmpty() || type->getDeviceNames (false).contains (outName);
-        const bool inThere  = ! wantsInput || type->getDeviceNames (true).contains (inName);
-        if (! outThere || ! inThere) return;
+    // What is there now (the JACK type can be asked without disturbing the open device).
+    bool present = true;
+    if (type == "JACK")
+        for (auto* t : deviceManager.getAvailableDeviceTypes())
+            if (t->getTypeName() == "JACK")
+            {
+                t->scanForDevices();
+                present = (outName.isEmpty() || t->getDeviceNames (false).contains (outName))
+                       && (! wantsInput || t->getDeviceNames (true).contains (inName));
+            }
+    audioPresentTicks = present ? audioPresentTicks + 1 : 0;
+    if (! present || (! stalled && audioPresentTicks < 2)) return;      // back a moment, with all its ports
+    if (now < audioRetryAt) return;
+    audioRetryAt = now + (uint32) jmin (30000, 3000 << jmin (audioRetries, 4));
+    ++audioRetries;
 
-        // As chosen, channels included: the open device's own have gone with the ports.
-        auto setup = deviceManager.getAudioDeviceSetup();
-        setup.outputDeviceName = outName;
-        setup.inputDeviceName = inName;
-        if (saved->hasAttribute ("audioDeviceInChans"))
-        {
-            setup.inputChannels.parseString (saved->getStringAttribute ("audioDeviceInChans"), 2);
-            setup.useDefaultInputChannels = false;
-        }
-        if (saved->hasAttribute ("audioDeviceOutChans"))
-        {
-            setup.outputChannels.parseString (saved->getStringAttribute ("audioDeviceOutChans"), 2);
-            setup.useDefaultOutputChannels = false;
-        }
-        else
-            setup.useDefaultOutputChannels = true;
-        if (deviceManager.getCurrentAudioDeviceType() != "JACK")
-            deviceManager.setCurrentAudioDeviceType ("JACK", true);
-        deviceManager.closeAudioDevice();
-        deviceManager.setAudioDeviceSetup (setup, true);
-        lastAudioWatch = Time::getMillisecondCounter();
+    // An input on another device that keeps stalling the audio is left out, so the output plays on.
+    String leaveOut;
+    if (stalled && audioRetries >= 3 && wantsInput && inName != outName)
+    {
+        benchedInput = leaveOut = inName;
+        sayAudio ("Audio: the input " + inName + " keeps stopping the sound, so StageRig plays on without it. "
+                  "Reopen audio in Audio... tries it again.");
+    }
+
+    if (type != "JACK")
+    {
+        restartAudioDevice();
         return;
     }
+    // As chosen, channels included: the open device's own have gone with the ports.
+    auto setup = open;
+    setup.outputDeviceName = outName;
+    setup.inputDeviceName = (wantsInput && leaveOut.isEmpty()) ? inName : String();
+    if (saved->hasAttribute ("audioDeviceInChans") && setup.inputDeviceName.isNotEmpty())
+    {
+        setup.inputChannels.parseString (saved->getStringAttribute ("audioDeviceInChans"), 2);
+        setup.useDefaultInputChannels = false;
+    }
+    else if (setup.inputDeviceName.isEmpty())
+    {
+        setup.inputChannels.clear();
+        setup.useDefaultInputChannels = false;
+    }
+    if (saved->hasAttribute ("audioDeviceOutChans"))
+    {
+        setup.outputChannels.parseString (saved->getStringAttribute ("audioDeviceOutChans"), 2);
+        setup.useDefaultOutputChannels = false;
+    }
+    else
+        setup.useDefaultOutputChannels = true;
+    if (deviceManager.getCurrentAudioDeviceType() != "JACK")
+        deviceManager.setCurrentAudioDeviceType ("JACK", true);
+    std::fprintf (stderr, "[audio-watch] reopening: out '%s', in '%s' (attempt %d)\n",
+                  setup.outputDeviceName.toRawUTF8(), setup.inputDeviceName.toRawUTF8(), audioRetries);
+    deviceManager.closeAudioDevice();
+    deviceManager.setAudioDeviceSetup (setup, true);
+    lastAudioWatch = Time::getMillisecondCounter();
 }
 
 void Engine::changeListenerCallback (ChangeBroadcaster*)
@@ -653,6 +740,20 @@ void Engine::changeListenerCallback (ChangeBroadcaster*)
                 || (saved->getStringAttribute ("audioInputDeviceName").isNotEmpty()
                     && saved->getStringAttribute ("audioInputDeviceName") != s.inputDeviceName))
                 complete = false;       // other devices than the chosen ones: a fallback
+            // Fewer channels open than chosen: a device back only in part.
+            if (auto* d = deviceManager.getCurrentAudioDevice(); complete && d != nullptr)
+            {
+                auto chosenBits = [&saved] (const char* attr, int otherwise)
+                {
+                    if (! saved->hasAttribute (attr)) return otherwise;
+                    BigInteger b; b.parseString (saved->getStringAttribute (attr), 2);
+                    return b.countNumberOfSetBits();
+                };
+                if (d->getActiveOutputChannels().countNumberOfSetBits() < jmin (chosenBits ("audioDeviceOutChans", 1), d->getOutputChannelNames().size())
+                    || (s.inputDeviceName.isNotEmpty()
+                        && d->getActiveInputChannels().countNumberOfSetBits() < jmin (chosenBits ("audioDeviceInChans", 0), d->getInputChannelNames().size())))
+                    complete = false;
+            }
         }
         if (complete && deviceManager.getCurrentAudioDeviceType() == "JACK")
             for (auto* t : deviceManager.getAvailableDeviceTypes())
@@ -666,7 +767,11 @@ void Engine::changeListenerCallback (ChangeBroadcaster*)
     }
     if (complete)
         if (auto xml = deviceManager.createStateXml())
+        {
+            // Which MIDI inputs are open is the engine's to say (openMidiDevices), never JUCE's from here.
+            xml->deleteAllChildElementsWithTagName ("MIDIINPUT");
             settings.setValue ("audioDeviceState", xml.get());
+        }
     settings.saveIfNeeded();
 
     // Said once, where it will be seen: the Audio window repeats it for as long as it is true.
@@ -1590,13 +1695,69 @@ void Engine::sendClock (int numSamples, double chunkStartMs, bool trackStarted, 
         for (int i = 0; i < n; ++i) midiOuts.push (clockPorts[i].load (std::memory_order_relaxed), MidiMessage::midiStop(), chunkStartMs + numSamples * 1000.0 / sampleRate);
 }
 
-void Engine::midiDevicesChanged()
+void Engine::midiDevicesChanged() { midiDevicesChanged ({}); }
+
+/* A USB keyboard or interface that drops out and comes back quickly can come back
+   under the very port numbers it had, so the device list looks unchanged and its
+   old, dead connections stay open: the keys go silent with nothing said. The
+   kernel numbers every arrival afresh, though, so a sound card whose USB device
+   number changed has been away. Its ports are opened again, and what its inputs
+   held is let go. A card's MIDI ports are ALSA client 16 + 4 x card. */
+void Engine::watchUsbReconnects()
+{
+   #if JUCE_LINUX
+    const auto now = Time::getMillisecondCounter();
+    if (now - lastUsbWatch < 1000) return;
+    lastUsbWatch = now;
+
+    StringArray cards;
+    for (const auto& e : RangedDirectoryIterator (File ("/sys/class/sound"), false, "card*", File::findFilesAndDirectories))
+    {
+        const auto name = e.getFile().getFileName();
+        if (! name.substring (4).containsOnly ("0123456789") || name.length() <= 4) continue;
+        char resolved[PATH_MAX];
+        if (::realpath (e.getFile().getChildFile ("device").getFullPathName().toRawUTF8(), resolved) == nullptr) continue;
+        const auto usb = File (String (CharPointer_UTF8 (resolved))).getParentDirectory();
+        const auto devnum = usb.getChildFile ("devnum");
+        if (! devnum.existsAsFile()) continue;          // not on USB
+        cards.add (name.substring (4) + "|" + usb.getFullPathName() + "|" + devnum.loadFileAsString().trim());
+    }
+    if (usbCards.isEmpty() && ! usbCardsKnown) { usbCards = cards; usbCardsKnown = true; return; }
+    if (cards == usbCards) return;
+
+    StringArray again;     // card numbers present before and now, but a new arrival
+    for (const auto& c : cards)
+    {
+        const auto card = c.upToFirstOccurrenceOf ("|", false, false);
+        for (const auto& old : usbCards)
+            if (old.upToFirstOccurrenceOf ("|", false, false) == card && old != c) again.add (card);
+    }
+    usbCards = cards;
+    if (again.isEmpty()) return;
+
+    StringArray reconnected, names;
+    for (const auto& d : MidiInput::getAvailableDevices())
+    {
+        const int client = d.identifier.upToFirstOccurrenceOf ("-", false, false).getIntValue();
+        if (client >= 16 && client < 128 && again.contains (String ((client - 16) / 4)))
+        {
+            reconnected.addIfNotAlreadyThere (d.identifier);
+            names.addIfNotAlreadyThere (d.name.trim());
+        }
+    }
+    if (reconnected.isEmpty()) return;
+    midiDevicesChanged (reconnected);
+    listeners.call ([n = names.joinIntoString (", ")] (Listener& l) { l.statusMessage (n + " reconnected."); });
+   #endif
+}
+
+void Engine::midiDevicesChanged (const StringArray& reconnected)
 {
     StringArray now;
     const auto ins = MidiInput::getAvailableDevices();
     for (const auto& d : ins) now.add ("i " + d.name + "|" + d.identifier);
     for (const auto& d : MidiOutput::getAvailableDevices()) now.add ("o " + d.name + "|" + d.identifier);
-    if (now == knownMidiDevices) return;
+    if (now == knownMidiDevices && reconnected.isEmpty()) return;
 
     /* One back under the identifier it had still has a dead connection on the books,
        which enabling would take for a live one: let go of it, and it opens afresh. */
@@ -1607,7 +1768,12 @@ void Engine::midiDevicesChanged()
 
     std::vector<bool> had;
     for (const auto& rt : runtimes) had.push_back (rt->deviceIdentifier.isNotEmpty());
-    refreshMidiDevices();
+    openMidiDevices (reconnected);
+    midiOuts.refresh();
+    resolveClockPorts();
+    if (! reconnected.isEmpty())
+        listeners.call ([] (Listener& l) { l.midiDevicesReconnected(); });
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
 
     // A device gives no sign of its own: say what changed, once for each.
     StringArray back, gone;
@@ -1633,34 +1799,80 @@ void Engine::refreshMidiDevices()
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
-void Engine::openMidiDevices()
+void Engine::openMidiDevices (const StringArray& reconnected)
 {
     auto available = MidiInput::getAvailableDevices();
 
-    StringArray wanted;
-    for (int i = 0; i < (int) setup.inputs.size(); ++i)
+    /* The name says which keyboard; the identifier only separates two of the same
+       name. An identifier is a port number that changes between plug-ins and boots,
+       and the old one can belong to another device by now, so alone it counts only
+       for an input that has no name.
+
+       First every input whose port is where it was, by name and number. Then the
+       others, by name, each to a port of that name no other input has: two
+       keyboards of one name stay two, and inputs that shared a port (a split)
+       go on sharing its new one. A port is shared otherwise only when it is the
+       one device of that name, which is then the same keyboard. */
+    const int n = (int) setup.inputs.size();
+    std::vector<String> before ((size_t) n), chosen ((size_t) n);
+    {
+        const ScopedLock sl (lock);
+        for (int i = 0; i < n && i < (int) runtimes.size(); ++i) before[(size_t) i] = runtimes[(size_t) i]->deviceIdentifier;
+    }
+    std::map<String, StringArray> claims;      // port -> the saved port numbers of the inputs on it
+    StringArray confirmed;                     // ports an input is on where it was
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& def = setup.inputs[(size_t) i];
+        if (def.midiDeviceIdentifier.isEmpty()) continue;
+        for (auto& d : available)
+            if (d.identifier == def.midiDeviceIdentifier && (d.name == def.midiDeviceName || def.midiDeviceName.isEmpty()))
+            {
+                chosen[(size_t) i] = d.identifier;
+                claims[d.identifier].addIfNotAlreadyThere (def.midiDeviceIdentifier);
+                confirmed.addIfNotAlreadyThere (d.identifier);
+            }
+    }
+    for (int i = 0; i < n; ++i)
     {
         auto& def = setup.inputs[(size_t) i];
-
-        /* The name says which keyboard; the identifier only separates two of the same
-           name. An identifier is a port number that changes between plug-ins and boots,
-           and the old one can belong to another device by now, so alone it counts only
-           for an input that has no name. */
-        bool found = false;
-        for (auto& d : available)
-            if (d.identifier == def.midiDeviceIdentifier && def.midiDeviceIdentifier.isNotEmpty()
-                && (d.name == def.midiDeviceName || def.midiDeviceName.isEmpty()))
-                found = true;
-        if (! found && def.midiDeviceName.isNotEmpty())
-            for (auto& d : available)
-                if (d.name == def.midiDeviceName) { def.midiDeviceIdentifier = d.identifier; found = true; break; }
-
-        if (found)
-            wanted.addIfNotAlreadyThere (def.midiDeviceIdentifier);
-
-        const ScopedLock sl (lock);
-        runtimes[(size_t) i]->deviceIdentifier = found ? def.midiDeviceIdentifier : String();
+        if (chosen[(size_t) i].isNotEmpty() || def.midiDeviceName.isEmpty()) continue;
+        const String group = def.midiDeviceIdentifier.isNotEmpty() ? def.midiDeviceIdentifier : "name:" + def.midiDeviceName;
+        Array<MidiDeviceInfo> same;
+        for (auto& d : available) if (d.name == def.midiDeviceName) same.add (d);
+        String pick;
+        for (auto& d : same)
+            if (claims[d.identifier].isEmpty() || claims[d.identifier].contains (group)) { pick = d.identifier; break; }
+        if (pick.isNotEmpty())
+        {
+            claims[pick].addIfNotAlreadyThere (group);
+            def.midiDeviceIdentifier = pick;
+            chosen[(size_t) i] = pick;
+        }
+        /* The one device of that name, taken by another input that moved too: the same
+           keyboard, split across inputs whose port numbers had drifted apart. Shared,
+           but not written down, so the input goes to a second keyboard of that name
+           when one appears. Never one an input is on where it was: that is the other
+           keyboard of a pair, and its twin is just away. */
+        else if (same.size() == 1 && ! confirmed.contains (same.getReference (0).identifier))
+            chosen[(size_t) i] = same.getReference (0).identifier;
     }
+
+    StringArray wanted;
+    for (int i = 0; i < n; ++i)
+    {
+        if (chosen[(size_t) i].isNotEmpty()) wanted.addIfNotAlreadyThere (chosen[(size_t) i]);
+        const ScopedLock sl (lock);
+        runtimes[(size_t) i]->deviceIdentifier = chosen[(size_t) i];
+        // Gone, moved, or reconnected under the same number: what it held is let go.
+        if (before[(size_t) i].isNotEmpty() && (before[(size_t) i] != chosen[(size_t) i] || reconnected.contains (before[(size_t) i])))
+            runtimes[(size_t) i]->deviceLost.store (true);
+    }
+
+    // A port reconnected under its old number has a dead connection on the books: closed, to open afresh.
+    for (const auto& id : reconnected)
+        deviceManager.setMidiInputDeviceEnabled (id, false);
+    if (midi2 != nullptr && ! reconnected.isEmpty()) midi2->forget (reconnected);
 
     /* A keyboard speaking MIDI 2.0 is heard through Midi2Inputs, unless an
        input on it asks for MIDI 1.0; the MIDI 1.0 path leaves it alone, so
@@ -1683,8 +1895,14 @@ void Engine::openMidiDevices()
     const auto heard = midi2 != nullptr ? midi2->open (asMidi2) : StringArray();
     if (heard != heardAsMidi2)
     {
+        // A keyboard moved between the MIDI 1.0 and 2.0 paths: what was in flight on the old one is lost.
         const ScopedLock sl (lock);
-        for (auto& rt : runtimes) rt->exact.clear();
+        for (auto& rt : runtimes)
+        {
+            rt->exact.clear();
+            if (rt->deviceIdentifier.isNotEmpty() && heard.contains (rt->deviceIdentifier) != heardAsMidi2.contains (rt->deviceIdentifier))
+                rt->deviceLost.store (true);
+        }
     }
     heardAsMidi2 = heard;
 
@@ -1741,6 +1959,14 @@ Engine::ProgramRuntime* Engine::getLoaded (int inputIndex, int program) const
     auto& m = runtimes[(size_t) inputIndex]->loaded;
     auto it = m.find (program);
     return it == m.end() ? nullptr : it->second.get();
+}
+
+bool Engine::isHoldingNotes (int inputIndex) const
+{
+    const ScopedLock sl (lock);
+    if (inputIndex < 0 || inputIndex >= (int) runtimes.size()) return false;
+    const auto* active = runtimes[(size_t) inputIndex]->active;
+    return active != nullptr && active->anythingHeld();
 }
 
 bool Engine::isProgramLoaded (int inputIndex, int program) const
@@ -4173,7 +4399,10 @@ void Engine::postEvent (const Event& e)
 
 void Engine::handleAsyncUpdate()
 {
-    std::vector<Event> events;
+    /* The two lists trade places and keep their room, so posting from the audio
+       and MIDI threads does not allocate (both are given room for 1024 at start). */
+    auto& events = handlingEvents;
+    events.clear();
     {
         const ScopedLock sl (eventLock);
         events.swap (pendingEvents);
@@ -4417,6 +4646,7 @@ void Engine::housekeeping()
 {
     watchForStalls();
     watchAudioDevice();
+    watchUsbReconnects();
     {
         // A minute of late-block counts, for the pre-show check.
         const auto now = Time::getMillisecondCounter();
@@ -4673,6 +4903,15 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
                     : 0.0;
     sampleRate = device->getCurrentSampleRate();
     blockSize  = device->getCurrentBufferSizeSamples();
+    audioStartedAt.store (Time::getMillisecondCounter());
+
+    /* The same rate and buffer as last time (a device reconnected, a port
+       linked or unlinked): the plugins are ready as they are. Preparing them
+       again is a round trip to every plugin host in turn, with the sound off,
+       and would throw away the note-offs queued meanwhile. */
+    if (sampleRate == preparedRate && blockSize == preparedBlock) return;
+    preparedRate = sampleRate;
+    preparedBlock = blockSize;
 
     const ScopedLock sl (lock);
     for (auto& in : runtimes)
@@ -4715,6 +4954,18 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
        Promoted here, on the thread itself, the first time it calls, and again
        whenever the device comes back on a new thread. PipeWire's thread is
        already realtime and is left alone. */
+    /* For testing the stall watch only: STAGERIG_TEST_STALL=<seconds> makes the
+       callbacks go quiet for ten seconds from then, as a stuck device would. */
+    if (stallTestFrom != 0)
+    {
+        const auto t = Time::getMillisecondCounter();
+        if (t >= stallTestFrom && t < stallTestFrom + 10000)
+        {
+            for (int c = 0; c < numOut; ++c) if (out[c] != nullptr) FloatVectorOperations::clear (out[c], numSamples);
+            return;
+        }
+    }
+    audioCallbacks.fetch_add (1, std::memory_order_relaxed);
     if (! callbackThreadKnown || ! pthread_equal (callbackThread, pthread_self()))
     {
         callbackThread = pthread_self();
@@ -4887,6 +5138,14 @@ void Engine::processInput (InputRuntime& in, const float* const* audioIn, int nu
 {
     in.block.clear();
     in.collector.removeNextBlockOfMessages (in.block, numSamples);
+    if (in.deviceLost.exchange (false, std::memory_order_acq_rel))
+    {
+        // Its keyboard went away mid-note: every note and pedal it held is let go, here and in a tail.
+        std::memset (in.noteShift, 0, sizeof (in.noteShift));
+        in.shiftedHeld = 0;
+        if (in.active != nullptr) in.active->needsNotesOff = true;
+        for (auto* p : in.releasing) p->needsNotesOff = true;
+    }
     if (! in.trackMidi.isEmpty())
     {
         // The songs' MIDI files, every channel as the file has it: the slots sort them out.

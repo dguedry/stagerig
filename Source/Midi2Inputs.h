@@ -34,6 +34,8 @@ public:
         hearing any others; those that are not MIDI 2.0 are passed over.
         Returns the ones it hears, which the MIDI 1.0 path should leave alone. */
     juce::StringArray open (const juce::StringArray& identifiers);
+    /** Closes these ports' connections, so the next open() makes them afresh (a device back under its old number). */
+    void forget (const juce::StringArray& identifiers);
 
     /** One packet as MIDI 1.0 messages, each with its exact value: what the
         connections do with what comes in, here for the tests. */

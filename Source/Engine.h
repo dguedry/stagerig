@@ -57,6 +57,8 @@ public:
         virtual ~Listener() = default;
         /** Inputs added/removed or a whole setup loaded. */
         virtual void setupChanged() {}
+        /** A MIDI device was reconnected under its old port number: anything holding its ports opens them again. */
+        virtual void midiDevicesReconnected() {}
         /** An output was added, removed or changed, or a master chain's plugin loaded or died. */
         virtual void outputsChanged() {}
         virtual void outputVolumeLearned (int output, int cc) { juce::ignoreUnused (output, cc); }
@@ -98,7 +100,7 @@ public:
     /** Closes and reopens the current audio device (picks up a new PIPEWIRE_LATENCY). */
     void restartAudioDevice();
     /** Audio... open or closed: while it is open the device chosen there is the choice. */
-    void setAudioWindowOpen (bool isOpen)                { audioWindowOpen = isOpen; if (! isOpen) changeListenerCallback (nullptr); }
+    void setAudioWindowOpen (bool isOpen)                { audioWindowOpen = isOpen; if (isOpen) benchedInput = {}; else changeListenerCallback (nullptr); }
 
     //==============================================================================
     // Setup document
@@ -527,6 +529,8 @@ public:
         "Organ", "organs" and "Organ " as three separate groups. */
     juce::StringArray getProgramGroups (int inputIndex) const;
     bool isProgramLoaded (int inputIndex, int program) const;
+    /** Whether the input's program in play holds a key or the sustain pedal (as the audio thread last saw it; for tests). */
+    bool isHoldingNotes (int inputIndex) const;
     void copyProgram (int inputIndex, int from, int to);
     void clearProgram (int inputIndex, int program);
 
@@ -805,7 +809,7 @@ private:
     void destroyNode (PluginNode*, int patienceMs = 3000);
     bool captureProgramState (int inputIndex, ProgramRuntime&, int timeoutMs = -1, bool onlyChanged = false);   // true if anything changed
     void resolveMappings (ProgramRuntime&, const ProgramDef&);
-    void openMidiDevices();
+    void openMidiDevices (const juce::StringArray& reconnected = {});
     void housekeeping();
     std::vector<std::unique_ptr<EffectRuntime>>* runtimeChainFor (ProgramRuntime&, int slot) const;
     std::vector<EffectDef>* defChainFor (ProgramDef&, int slot) const;
@@ -863,7 +867,16 @@ private:
     std::atomic<bool> audioThreadRealtime { true };
     uint32_t realtimeRecheck = 0;      // audio thread only
     void watchAudioDevice();
+    void sayAudio (const juce::String& text);
     bool audioWindowOpen = false;      // Audio... is open: the choice is being made there
+    std::atomic<juce::uint32> audioCallbacks { 0 };     // counted on the audio thread, for the stall watch
+    std::atomic<juce::uint32> audioStartedAt { 0 };
+    juce::uint32 stallTestFrom = 0;    // STAGERIG_TEST_STALL, for testing the stall watch
+    juce::uint32 lastAudioCallbacks = 0, audioRetryAt = 0;
+    int audioRetries = 0, audioPresentTicks = 0;
+    juce::String benchedInput;         // an input left out because it kept stalling the audio
+    double preparedRate = 0.0;
+    int preparedBlock = 0;
     juce::uint32 lastAudioWatch = 0;
     juce::String audioGone;            // the audio device waited for, said once
 
@@ -879,7 +892,7 @@ private:
 
     juce::CriticalSection lock;          // guards runtimes for audio + midi threads
     juce::CriticalSection eventLock;
-    std::vector<Event> pendingEvents;
+    std::vector<Event> pendingEvents, handlingEvents;
 
     double sampleRate = 44100.0;
     int blockSize = 512;
@@ -913,6 +926,11 @@ private:
     std::unique_ptr<Midi2Inputs> midi2;
     /** A MIDI device came or went: the inputs and outputs follow by themselves, and say so. */
     void midiDevicesChanged();
+    void midiDevicesChanged (const juce::StringArray& reconnected);
+    void watchUsbReconnects();
+    juce::uint32 lastUsbWatch = 0;
+    bool usbCardsKnown = false;
+    juce::StringArray usbCards;               // "card N: usb path devnum", to see a device come back under its old number
     juce::MidiDeviceListConnection midiDeviceList;
     juce::StringArray knownMidiDevices;
     juce::StringArray heardAsMidi2;           // message thread
