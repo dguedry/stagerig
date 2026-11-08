@@ -1745,6 +1745,32 @@ StageRig is built so that no one failure stops the sound.
   logging out ends both. Five crashes in two minutes means something is
   wrong with the setup or the computer, and the watchman stops trying.
 
+- **A keyboard or MIDI interface drops out.** Unplugged, switched off and
+  on, or a USB hiccup of a fraction of a second: every note and sustain
+  pedal it was holding is let go at once, so nothing hangs. When it comes
+  back it is picked up by itself, by its name, whatever port number the
+  computer gives it this time, and its knobs, screens and lights come back
+  with it. Two keyboards of the same model stay on their own inputs. MIDI
+  that StageRig sends out (clock, cues, an instrument's MIDI out) follows
+  its device the same way. The status bar says when one goes and comes back.
+- **An audio device drops out.** An interface that loses power, or a
+  keyboard with its own USB audio switched off and on: StageRig keeps your
+  choice in **Audio...** and reconnects to it within about two seconds of
+  its return, inputs included. Meanwhile it never saves a stand-in device
+  over your choice. The same happens when the computer's sound system
+  restarts. This needs the JACK device type (see *Audio settings and
+  latency*).
+- **The sound stops by itself.** If the audio stops arriving while the
+  device still looks open, StageRig notices within three seconds and
+  reopens it, trying again after 3, 6 and 12 seconds and then every 30. An
+  input on a different device from the output that keeps stopping the sound
+  is left out, so the output plays on; the status bar names it, and
+  **Reopen audio** in **Audio...** tries it again.
+- **StageRig freezes.** If both the screen and the sound stand still for
+  twenty seconds, the watchman ends StageRig and starts it again, as after a
+  crash. A frozen screen with the sound still playing is left alone: the show
+  goes on, and you can restart StageRig between songs.
+
 The last line of defence is a second computer: the same setup on a second
 laptop, through the same audio interface or a second one, ready to take
 over. Save the setup to both before the show.
@@ -1853,6 +1879,11 @@ switching the plugin off; scan again once the install has finished.
 | Static or crackle on a USB interface under the ALSA type | The buffer is below 128 samples, or the input is on a different device from the output. | Set 256 (or 128) in **Audio...**, and the same interface for input and output; the status line says which it is. |
 | A few seconds of static about once a minute | Autosave reading a plugin's state. | Press **Save** between songs rather than mid-song. |
 | No sound, plugin loaded | Instrument turned off, key or velocity range excludes what you play, gain at minimum, or wrong MIDI channel. | Check the instrument's controls; the on-screen keyboard rules out the controller. |
+| *X has gone: plug it back in and it is picked up.* | A MIDI device disconnected. Anything it was holding has been let go. | Check its cable and power. It reconnects by itself, and *X is connected* says so. |
+| *X reconnected.* | A USB device dropped out for a moment and came back. | Nothing: its ports were opened again. If it keeps happening, change the cable or plug it into a port on the computer itself rather than a hub. |
+| *Audio: X has gone. Switch it back on: StageRig reconnects by itself.* | The audio device you chose disappeared. | Check its power and cable. *X is back: sound restored* follows within about two seconds of its return. |
+| *Audio: X stopped playing. StageRig is reopening it.* | The sound stopped with the device still connected. | Usually nothing: *back* follows. If it repeats, see *No sound at all* below. |
+| *Audio: the input X keeps stopping the sound, so StageRig plays on without it.* | That input device is stuck and was holding up the output. | Check it, then press **Reopen audio** in **Audio...**. A reboot clears a stuck device. |
 | The keyboard is silent after plugging it in | The input is set to another device, often one shown as *(disconnected)*, or to the wrong channel. | Check the input's **MIDI device** and **Channel**. A keyboard can have several ports: play on the one for its keys (on a Studiologic SL, *SL CTRL*). **Options ▸ Rescan MIDI devices** is only a fallback. |
 | No sound at all, even from **Test** in **Audio...** | The computer's volume for that output is down, or the sound system has stalled: a stuck input on the same device holds the output too. | Raise **Computer volume** in **Audio...**. If that is not it, press **Reopen audio**; if still silent, choose another input (or none) for StageRig. A reboot clears a stuck device. |
 | A keyboard with its own USB audio keeps disconnecting every few seconds | Its digital (IEC958) output was chosen, which some keyboards cannot play. | Choose its analog output instead (for example *SL Analog Stereo*), in **Audio...** and in the system's sound settings. |
@@ -1866,10 +1897,79 @@ switching the plugin off; scan again once the install has finished.
 | The tablet's taps land somewhere else | Another window covers the plugin's window on the computer. | Move it aside; see *Showing a plugin's own window*. |
 | A Spitfire plugin's window (BBC Symphony Orchestra, LABS, Originals) locks up or crashes the plugin the first time it opens | It draws with OpenGL, which faults under Wine. | In the Wine prefix, open `drive_c/users/<you>/AppData/Roaming/Spitfire Audio/Settings/<plugin>.settings`, change `defaultOpenGL` from `1` to `0`, then press **Reload**. It looks the same. |
 
+### Step by step, on stage
+
+**No sound at all.**
+
+1. Play the on-screen keyboard. If that sounds, the problem is the keyboard
+   or its input: go to *One keyboard is silent*.
+2. Look at the status bar for an *Audio:* message, and wait two or three
+   seconds: a device that dropped out is reconnected by itself.
+3. Press **PANIC**: a plugin may be holding a muted or stuck state.
+4. Open **Audio...**. Check the output device, and that **Computer volume**
+   is up. Press **Test**.
+5. Press **Reopen audio**.
+6. Still nothing, and the device is plugged in and on: switch it off and on
+   again; StageRig reconnects when it returns.
+7. Last resort: quit and start StageRig again. It comes back on the same
+   song and programs.
+
+**One keyboard is silent.**
+
+1. Watch the input's meter in the Inputs list while you play: if it moves,
+   the notes arrive and the problem is the program (instrument off, range,
+   level).
+2. If not, check the input's **MIDI device** and **Channel**. A device shown
+   as *(disconnected)* is not there: check its cable and power.
+3. A keyboard with several ports must use the one for its keys (on a
+   Studiologic SL, *SL CTRL*).
+4. **Options ▸ Rescan MIDI devices**, as a fallback.
+
+**A note hangs.** Press **PANIC**. A keyboard that disconnects lets go of
+everything by itself; a hang that remains is a plugin that missed a note-off.
+
+**Crackle or dropouts.**
+
+1. The status line in **Audio...** names the usual causes: an input on
+   another device than the output, a buffer that is too small, no realtime
+   scheduling.
+2. Raise the buffer one step (128 to 256).
+3. Keep **Keep the processor at full speed while StageRig runs** ticked.
+4. Close other audio applications.
+5. *late N* climbing in the status bar means plugins are not keeping up:
+   a bigger buffer, or a lighter program.
+
+**StageRig froze.** If the sound plays on, finish the song and restart
+StageRig between songs. If both picture and sound stopped, it restarts by
+itself within about twenty seconds.
+
+### The log
+
+Everything StageRig and its plugins report is written to
+`~/.config/StageRig/stagerig.log`, however StageRig was started, so a
+problem at a show can be looked into afterwards. The previous one is kept as
+`stagerig.log.1` once it passes 10 MB. Each start begins with
+`=== StageRig started <date> ===`. Lines worth looking for:
+
+| Line | Meaning |
+|---|---|
+| `[audio-watch HH:MM:SS] Audio: ... has gone` / `... is back: sound restored` | An audio device went and came back, with the times. |
+| `[audio-watch] reopening: out '...', in '...' (attempt N)` | StageRig reopened the audio; a high N means a device that would not open. |
+| `[audio-watch ...] ... stopped playing` | The sound stopped with the device still connected. |
+| `[watch] StageRig stopped (...); starting it again` | StageRig crashed and was restarted. |
+| `[watch] StageRig has stopped responding` | StageRig froze and was restarted. |
+| `[audio] ...` at the top | The audio setup it started with. |
+
+Lines starting with a time and a plugin's name in brackets come from that
+plugin (Windows plugins say a lot; most of it is harmless). `scripts/stagerig-check`
+in the source checks the machine without changing anything. When reporting a
+problem, include the log and say what you were doing and when.
+
 ## Files StageRig uses
 
 | Path | What it is |
 |---|---|
+| `~/.config/StageRig/stagerig.log` | The log: what happened, with times (see *The log*). |
 | `~/.config/StageRig/StageRig.settings` | Window, audio device, scan folders, known plugins, tuning options. |
 | `~/.config/StageRig/autosave.stagerig.json` | The rolling autosave. |
 | `~/.config/StageRig/mapping-templates.json` | Your saved per-plugin mapping templates. |

@@ -98,8 +98,11 @@ other plugin.
   are kept in a folder beside the setup, so the two travel together.
 
 **[Read the user manual](https://github.com/dguedry/stagerig/blob/main/docs/MANUAL.md)** for everyday use, or press **Help**
-in the toolbar to read the same manual inside the app. The rest of this
-file is for building from source and for how the program works inside.
+in the toolbar to read the same manual inside the app. If something goes
+wrong on stage, its **[When something goes wrong](https://github.com/dguedry/stagerig/blob/main/docs/MANUAL.md#when-something-goes-wrong)**
+section has a step-by-step for each symptom, and everything that happened is
+in `~/.config/StageRig/stagerig.log`. The rest of this file is for building
+from source and for how the program works inside.
 
 Requires Linux, JUCE 8 (fetched as a submodule) and a C++17 compiler.
 Licensed under the [GPL-3.0](LICENSE).

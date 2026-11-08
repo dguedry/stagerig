@@ -28,6 +28,9 @@ running one is out of date.
 | The window's size and place | As at the last normal quit |
 | Audio device, tablet, how each keyboard is driven | As set |
 | An audio device switched off and on (a keyboard's own USB audio, say) | Reconnected by itself within about two seconds (JACK type) |
+| A keyboard or MIDI interface unplugged or switched off and on | Its held notes let go; picked up again by itself, whatever port it comes back on |
+| Sound that stops with the device still connected | Reopened within about three seconds |
+| StageRig frozen (no picture and no sound) | Restarted by itself after twenty seconds, on the same song |
 | The processor's speed | Held at full speed while StageRig runs, put back when it quits |
 
 A crash restarts StageRig by itself, up to five times in two minutes. Starting with a
@@ -52,3 +55,10 @@ Give the copy its own folder with `STAGERIG_SETTINGS_DIR`. It reads the setup it
 name but saves only inside that folder, so it can't touch the rig's file. Also change
 `remotePort` in the copy's settings, and leave its MK1 on Plain MIDI so it doesn't take
 the keyboard from the rig.
+
+## When something goes wrong
+
+The manual's *When something goes wrong* section has a step-by-step for no
+sound, a silent keyboard, a hanging note, crackle and a frozen StageRig, and
+explains the status messages. Everything that happened is in
+`~/.config/StageRig/stagerig.log`, with times.
