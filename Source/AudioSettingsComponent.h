@@ -84,6 +84,7 @@ public:
 
         addAndMakeVisible (selector);
         engine.getDeviceManager().addChangeListener (this);
+        lastType = engine.getDeviceManager().getCurrentAudioDeviceType();
         engine.setAudioWindowOpen (true);
         refreshStatus();
         refreshVolume();
@@ -288,7 +289,30 @@ private:
     }
 
     void timerCallback() override { refreshStatus(); refreshVolume(); }
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { refreshStatus(); refreshVolume(); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        /* Just switched to ALSA: no input to start with. An input on another card
+           than the output is two clocks drifting apart (crackle), and it takes
+           that card from the desktop too; choose one if you use a mic or line in. */
+        const auto type = engine.getDeviceManager().getCurrentAudioDeviceType();
+        if (type == "ALSA" && lastType.isNotEmpty() && lastType != "ALSA")
+        {
+            auto& dm = engine.getDeviceManager();
+            auto setup = dm.getAudioDeviceSetup();
+            if (setup.inputDeviceName.isNotEmpty())
+            {
+                setup.inputDeviceName = {};
+                setup.useDefaultInputChannels = false;
+                setup.inputChannels.clear();
+                lastType = type;
+                dm.setAudioDeviceSetup (setup, true);
+            }
+        }
+        lastType = type;
+        refreshStatus();
+        refreshVolume();
+    }
+    juce::String lastType;
 
     Engine& engine;
     juce::PropertiesFile& settings;
@@ -300,10 +324,10 @@ private:
     juce::TextButton applyBtn { "Reopen audio" }, fullBtn { "100%" };
     juce::Label volumeLabel { {}, "Computer volume" }, volumeNote,
                 keptNote { {}, "Every change here takes effect at once and is kept." },
-                typeNote { {}, "Device type: use JACK. On this computer it is the sound system's direct path: StageRig "
-                               "shares it with every other app, gets the buffer it asks for, and reconnects by itself when "
-                               "a device is switched off and on. ALSA is only for a computer without it, or a machine where "
-                               "StageRig should take an interface for itself; it does not reconnect a device that comes back." };
+                typeNote { {}, "Device type: on stage, choose ALSA and your interface. StageRig then has it to itself, "
+                               "with nothing in between: the least delay and the fewest things that can go wrong (other apps "
+                               "can't play through it meanwhile). JACK shares the interface with other apps through the "
+                               "computer's sound system. Either way StageRig reconnects a device switched off and on." };
     juce::Slider volumeSlider;
     std::vector<std::pair<juce::String, juce::String>> sinks;   // { name, description }
     std::vector<int> volumes;

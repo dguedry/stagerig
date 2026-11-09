@@ -874,6 +874,7 @@ private:
     juce::uint32 stallTestFrom = 0;    // STAGERIG_TEST_STALL, for testing the stall watch
     juce::uint32 lastAudioCallbacks = 0, audioRetryAt = 0;
     int audioRetries = 0, audioPresentTicks = 0;
+    bool audioSaidStuck = false;      // the sound system not answering has been said
     juce::String benchedInput;         // an input left out because it kept stalling the audio
     double preparedRate = 0.0;
     int preparedBlock = 0;

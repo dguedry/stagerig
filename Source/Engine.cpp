@@ -5,6 +5,11 @@
 #include "LowLatency.h"
 #include "Liveness.h"
 #include "DeviceReservation.h"
+#if JUCE_LINUX
+ #include <dlfcn.h>
+#endif
+#include <thread>
+
 #include <pthread.h>
 #include <cstring>
 #include <climits>
@@ -15,6 +20,9 @@ using namespace juce;
 
 namespace perf
 {
+#if JUCE_LINUX
+namespace { juce::String alsaNameNow (juce::AudioIODeviceType*, const juce::String& saved, bool input); }
+#endif
 
 //==============================================================================
 // Runtime structures
@@ -358,7 +366,46 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
             stallTestFrom = Time::getMillisecondCounter() + (uint32) std::atoi (st) * 1000;
         pendingEvents.reserve (1024);
         handlingEvents.reserve (1024);
-        deviceManager.initialise (0, 2, savedAudio.get(), true);
+        /* A sound card chosen on ALSA is opened or nothing is: falling back to
+           "the default" there leads into PipeWire's emulation (see
+           CardInputsAlsa). If the card will not open at the saved rate (the
+           SL73 plays only at 48 kHz), at the rate it offers; failing that, the
+           audio watch tries the chosen card again. */
+        const bool savedAlsa = savedAudio != nullptr && savedAudio->getStringAttribute ("deviceType") == "ALSA";
+       #if JUCE_LINUX
+        /* Chosen before ALSA's list was each card once by a plain name: the old
+           name ("SL; USB Stream Output", a card's front or surround device...)
+           becomes the card's direct device, and is saved so. */
+        if (savedAlsa)
+            for (auto* t : deviceManager.getAvailableDeviceTypes())
+                if (t->getTypeName() == "ALSA")
+                {
+                    t->scanForDevices();
+                    bool changed = false;
+                    for (auto [attr, input] : { std::pair { "audioOutputDeviceName", false }, std::pair { "audioInputDeviceName", true } })
+                    {
+                        const auto old = savedAudio->getStringAttribute (attr);
+                        if (old.isEmpty()) continue;
+                        if (const auto now = alsaNameNow (t, old, input); now.isNotEmpty() && now != old)
+                        {
+                            std::fprintf (stderr, "[audio] '%s' is now '%s'\n", old.toRawUTF8(), now.toRawUTF8());
+                            savedAudio->setAttribute (attr, now);
+                            changed = true;
+                        }
+                    }
+                    if (changed) settings.setValue ("audioDeviceState", savedAudio.get());
+                }
+       #endif
+        auto err = deviceManager.initialise (0, 2, savedAudio.get(), ! savedAlsa);
+        if (savedAlsa && err.isNotEmpty())
+        {
+            std::fprintf (stderr, "[audio] the chosen sound card did not open (%s); trying it at its own rate\n", err.toRawUTF8());
+            XmlElement anyRate (*savedAudio);
+            anyRate.removeAttribute ("audioDeviceRate");
+            err = deviceManager.initialise (0, 2, &anyRate, false);
+            if (err.isNotEmpty())
+                std::fprintf (stderr, "[audio] still not open (%s); the audio watch will try again\n", err.toRawUTF8());
+        }
 
         /* First run, or a saved state on PipeWire's ALSA emulation ("Default
            ALSA Output (currently PipeWire Media Server)"): prefer the JACK type
@@ -461,12 +508,17 @@ void Engine::restartAudioDevice()
 #if JUCE_LINUX
 namespace
 {
-    /** ALSA as JUCE has it, less the inputs that are not a sound card: "default",
-        "pipewire", "pulse", "jack" and the rate and mix plugins all lead into
-        PipeWire's ALSA emulation, whose input crashes inside libasound on its first
-        read (snd_pcm_mmap_readi). Choosing ALSA in the Audio window with inputs in
-        use picked "default" as the input and took StageRig down with it. Outputs
-        are left as they are. */
+    /** ALSA as StageRig offers it: each sound card's own devices, once each,
+        by a plain name ("SL — USB Audio"), and always the direct one behind it
+        (hw:CARD=...,DEV=...).
+
+        ALSA itself lists a card a dozen ways -- front, surround 2.1 to 7.1,
+        S/PDIF, dmix, dsnoop, "plug" conversions, the USB stream, and its
+        default -- and, besides, "default", "pipewire" and "pulse", which lead
+        back into PipeWire: its input has crashed StageRig in libasound, and
+        opening it with PipeWire stuck hung StageRig at start. Nobody can be
+        expected to pick the right one; on a stage the right one is the card
+        itself, with nothing in between, so that is the only one shown. */
     class CardInputsAlsa : public AudioIODeviceType
     {
     public:
@@ -476,35 +528,48 @@ namespace
         void scanForDevices() override
         {
             alsa->scanForDevices();
-            const auto cards = cardDescriptions();
             inputs.clear();
-            for (const auto& name : alsa->getDeviceNames (true))
-                if (cards.contains (withoutDuplicateNumber (name)))
-                    inputs.add (name);
+            outputs.clear();
+            const auto direct = directDevices();
+            for (bool input : { false, true })
+            {
+                auto& list = input ? inputs : outputs;
+                const auto juceNames = alsa->getDeviceNames (input);
+                for (const auto& d : direct)
+                    if (juceNames.contains (d.juceName) && suitable (d, input))
+                        list.push_back (d);
+                // A USB interface first: what ALSA opens when nothing is chosen yet.
+                std::stable_sort (list.begin(), list.end(), [] (const Direct& x, const Direct& y) { return isUsb (x.card) && ! isUsb (y.card); });
+            }
         }
 
         StringArray getDeviceNames (bool wantInputNames) const override
         {
-            return wantInputNames ? inputs : alsa->getDeviceNames (false);
+            StringArray names;
+            for (const auto& d : wantInputNames ? inputs : outputs) names.add (d.name);
+            return names;
         }
 
-        int getDefaultDeviceIndex (bool forInput) const override
-        {
-            return forInput ? 0 : alsa->getDefaultDeviceIndex (false);
-        }
+        int getDefaultDeviceIndex (bool) const override { return 0; }
 
         int getIndexOfDevice (AudioIODevice* device, bool asInput) const override
         {
             const int i = alsa->getIndexOfDevice (device, asInput);
-            if (! asInput || i < 0) return i;
-            return inputs.indexOf (alsa->getDeviceNames (true)[i]);
+            if (i < 0) return i;
+            const auto juceName = alsa->getDeviceNames (asInput)[i];
+            const auto& list = asInput ? inputs : outputs;
+            for (size_t k = 0; k < list.size(); ++k)
+                if (list[k].juceName == juceName) return (int) k;
+            return -1;
         }
 
         bool hasSeparateInputsAndOutputs() const override { return true; }
 
         AudioIODevice* createDevice (const String& outputName, const String& inputName) override
         {
-            if (inputName.isNotEmpty() && ! inputs.contains (inputName))
+            const auto* out = find (outputs, outputName);
+            const auto* in  = find (inputs, inputName);
+            if ((outputName.isNotEmpty() && out == nullptr) || (inputName.isNotEmpty() && in == nullptr))
                 return nullptr;
 
             /* The cards are asked for from PipeWire first, which closes them. JUCE
@@ -513,9 +578,8 @@ namespace
                the rig) for good. One still busy after that is not opened at all;
                the audio watch tries again. */
             Array<int> cards;
-            for (const auto& name : { outputName, inputName })
-                for (int card : cardsNamed (withoutDuplicateNumber (name)))
-                    cards.addIfNotAlreadyThere (card);
+            if (out != nullptr) cards.addIfNotAlreadyThere (out->card);
+            if (in != nullptr)  cards.addIfNotAlreadyThere (in->card);
             if (const auto busy = DeviceReservation::holdOnly (cards); ! busy.isEmpty())
             {
                 StringArray which;
@@ -523,17 +587,54 @@ namespace
                 std::fprintf (stderr, "[audio] sound card %s still in use by another program; not opened\n", which.joinIntoString (", ").toRawUTF8());
                 return nullptr;
             }
-            return alsa->createDevice (outputName, inputName);
+            return alsa->createDevice (out != nullptr ? out->juceName : String(), in != nullptr ? in->juceName : String());
+        }
+
+        /** The name shown now for a device saved under any older name: one of
+            ALSA's other names for the same card ("SL; USB Stream Output", the
+            card's front or surround device...) becomes that card's direct
+            device. Empty when the card is not there. */
+        String currentNameFor (const String& saved, bool input) const
+        {
+            const auto& list = input ? inputs : outputs;
+            if (find (list, saved) != nullptr) return saved;
+            const int card = cardOf (saved);
+            for (const auto& d : list)
+                if (d.juceName == saved || (card >= 0 && d.card == card)) return d.name;
+            return {};
         }
 
     private:
-        /** The descriptions JUCE names ALSA devices by, for those on a card
-            ("hw:CARD=USB,DEV=0", "front:CARD=...", "dsnoop:CARD=..."). */
-        static StringArray cardDescriptions()
+        struct Direct { String name, juceName; int card = -1, device = -1; };
+
+        /** A device fit for a rig: not a monitor's HDMI sound, nor a digital
+            S/PDIF socket, which a keyboard player never plugs into and which
+            ALSA lists beside the analog outputs under the same card name. */
+        static bool isUsb (int card) { return File ("/proc/asound/card" + String (card) + "/usbid").existsAsFile(); }
+
+        static bool suitable (const Direct& d, bool input)
         {
-            StringArray out;
+            const File info ("/proc/asound/card" + String (d.card) + "/pcm" + String (d.device) + (input ? "c" : "p") + "/info");
+            if (! info.existsAsFile()) return false;      // the card has no such direction
+            const auto id = info.loadFileAsString().fromFirstOccurrenceOf ("id:", false, false)
+                                .upToFirstOccurrenceOf ("\n", false, false).trim().toLowerCase();
+            for (auto* digital : { "hdmi", "digital", "iec958", "spdif", "s/pdif", "displayport" })
+                if (id.contains (digital)) return false;
+            return true;
+        }
+
+        static const Direct* find (const std::vector<Direct>& list, const String& name)
+        {
+            if (name.isEmpty()) return nullptr;
+            for (const auto& d : list) if (d.name == name) return &d;
+            return nullptr;
+        }
+
+        template <typename Fn>
+        static void forEachHint (Fn&& fn)
+        {
             void** hints = nullptr;
-            if (snd_device_name_hint (-1, "pcm", &hints) != 0) return out;
+            if (snd_device_name_hint (-1, "pcm", &hints) != 0) return;
             for (auto** h = hints; *h != nullptr; ++h)
             {
                 auto text = [h] (const char* key)
@@ -543,55 +644,62 @@ namespace
                     ::free (v);
                     return r;
                 };
-                const auto id = text ("NAME");
-                if (! id.contains ("CARD=") || id.startsWith ("default:") || id.startsWith ("sysdefault:") || id.startsWith ("plughw:"))
-                    continue;
-                if (const auto desc = text ("DESC").replace ("\n", "; "); desc.isNotEmpty())
-                    out.addIfNotAlreadyThere (desc);
+                fn (text ("NAME"), text ("DESC"));
             }
             snd_device_name_free_hint (hints);
-            return out;
         }
 
-        /** The ALSA card numbers behind a device name as JUCE shows it. */
-        static Array<int> cardsNamed (const String& name)
+        static int cardIndex (const String& alsaId)
         {
-            Array<int> out;
-            if (name.isEmpty()) return out;
-            void** hints = nullptr;
-            if (snd_device_name_hint (-1, "pcm", &hints) != 0) return out;
-            for (auto** h = hints; *h != nullptr; ++h)
+            const auto cardId = alsaId.fromFirstOccurrenceOf ("CARD=", false, false).upToFirstOccurrenceOf (",", false, false);
+            return cardId.isEmpty() ? -1 : snd_card_get_index (cardId.toRawUTF8());
+        }
+
+        /** Every card's direct devices: "SL — USB Audio" for hw:CARD=SL,DEV=0,
+            from the first line of ALSA's description ("SL, USB Audio"). */
+        static std::vector<Direct> directDevices()
+        {
+            std::vector<Direct> out;
+            forEachHint ([&out] (const String& id, const String& desc)
             {
-                auto text = [h] (const char* key)
-                {
-                    char* v = snd_device_name_get_hint (*h, key);
-                    const String r (CharPointer_UTF8 (v != nullptr ? v : ""));
-                    ::free (v);
-                    return r;
-                };
-                const auto id = text ("NAME");
-                if (! id.contains ("CARD=") || text ("DESC").replace ("\n", "; ") != name) continue;
-                const auto cardId = id.fromFirstOccurrenceOf ("CARD=", false, false).upToFirstOccurrenceOf (",", false, false);
-                if (const int index = snd_card_get_index (cardId.toRawUTF8()); index >= 0)
-                    out.addIfNotAlreadyThere (index);
-            }
-            snd_device_name_free_hint (hints);
+                if (! id.startsWith ("hw:CARD=")) return;
+                Direct d;
+                d.juceName = desc.replace ("\n", "; ");
+                const auto first = desc.upToFirstOccurrenceOf ("\n", false, false);
+                d.name = first.replaceFirstOccurrenceOf (", ", String (CharPointer_UTF8 (" \xe2\x80\x94 ")));
+                d.card = cardIndex (id);
+                d.device = id.fromLastOccurrenceOf ("DEV=", false, false).getIntValue();
+                for (const auto& o : out) if (o.name == d.name) d.name << " (" << id.fromLastOccurrenceOf ("DEV=", false, false) << ")";
+                out.push_back (d);
+            });
             return out;
         }
 
-        /** JUCE adds " (2)" and so on to repeated names. */
-        static String withoutDuplicateNumber (const String& name)
+        /** The card behind any name ALSA (as JUCE shows it) gives one of its devices. */
+        static int cardOf (const String& juceName)
         {
-            if (name.endsWithChar (')'))
-                if (const int open = name.lastIndexOf (" ("); open > 0
-                    && name.substring (open + 2, name.length() - 1).containsOnly ("0123456789"))
-                    return name.substring (0, open);
-            return name;
+            String bare = juceName;
+            if (bare.endsWithChar (')'))
+                if (const int open = bare.lastIndexOf (" ("); open > 0
+                    && bare.substring (open + 2, bare.length() - 1).containsOnly ("0123456789"))
+                    bare = bare.substring (0, open);
+            int card = -1;
+            forEachHint ([&] (const String& id, const String& desc)
+            {
+                if (card < 0 && id.contains ("CARD=") && desc.replace ("\n", "; ") == bare) card = cardIndex (id);
+            });
+            return card;
         }
 
         std::unique_ptr<AudioIODeviceType> alsa;
-        StringArray inputs;
+        std::vector<Direct> inputs, outputs;
     };
+
+    String alsaNameNow (AudioIODeviceType* t, const String& saved, bool input)
+    {
+        if (auto* cards = dynamic_cast<CardInputsAlsa*> (t)) return cards->currentNameFor (saved, input);
+        return {};
+    }
 
     /** A JACK device that never says its buffer is zero samples.
 
@@ -698,6 +806,55 @@ namespace
         int requested = 0;
     };
 
+    /* Set when the sound system has stopped answering (see soundSystemAnswers). */
+    std::atomic<bool> soundSystemStuck { false };
+
+    /** Whether PipeWire's JACK (or a JACK server) answers within timeoutMs.
+
+        A USB audio device that locks up (the SL73 has: "usb_set_interface
+        failed (-110)") can leave PipeWire's session manager stuck in the kernel,
+        and from then on every program asking PipeWire anything waits for good.
+        StageRig asked on its message thread -- to start, and every few seconds
+        to look for devices -- and never opened, or froze. It asks on a thread of
+        its own now and stops waiting; one question left unanswered is not
+        asked again until it is answered. */
+    bool soundSystemAnswers (int timeoutMs)
+    {
+        static std::atomic<bool> asking { false };
+        if (asking.load()) { soundSystemStuck = true; return false; }
+
+        using OpenFn = void* (*) (const char*, int, int*, ...);
+        using CloseFn = int (*) (void*);
+        static OpenFn openClient = nullptr;
+        static CloseFn closeClient = nullptr;
+        if (openClient == nullptr)
+        {
+            void* lib = ::dlopen ("libjack.so.0", RTLD_NOW | RTLD_NOLOAD);
+            if (lib == nullptr) lib = ::dlopen ("libjack.so.0", RTLD_NOW);
+            if (lib == nullptr) return true;     // no JACK at all: nothing to wait on
+            openClient = reinterpret_cast<OpenFn> (::dlsym (lib, "jack_client_open"));
+            closeClient = reinterpret_cast<CloseFn> (::dlsym (lib, "jack_client_close"));
+            if (openClient == nullptr || closeClient == nullptr) { openClient = nullptr; return true; }
+        }
+
+        auto answer = std::make_shared<std::atomic<int>> (0);     // 0 waiting, 1 answered
+        asking = true;
+        std::thread ([answer]
+        {
+            int status = 0;
+            if (void* c = openClient ("StageRigProbe", 0x01 /* JackNoStartServer */, &status)) closeClient (c);
+            answer->store (1);
+            asking = false;
+        }).detach();
+
+        const auto until = Time::getMillisecondCounter() + (uint32) timeoutMs;
+        while (answer->load() == 0 && Time::getMillisecondCounter() < until) Thread::sleep (10);
+        const bool answered = answer->load() != 0;
+        soundSystemStuck = ! answered;
+        if (! answered) std::fprintf (stderr, "[audio] the sound system (PipeWire) is not answering\n");
+        return answered;
+    }
+
     /** JACK, with each device it makes wrapped in SteadyBufferDevice. */
     class SteadyBufferJack final : public AudioIODeviceType, private AudioIODeviceType::Listener
     {
@@ -709,7 +866,10 @@ namespace
         }
         ~SteadyBufferJack() override { jack->removeListener (this); }
 
-        void scanForDevices() override                                  { jack->scanForDevices(); }
+        void scanForDevices() override
+        {
+            if (soundSystemAnswers (2000)) jack->scanForDevices();     // else the last lists stand
+        }
         StringArray getDeviceNames (bool wantInputNames) const override { return jack->getDeviceNames (wantInputNames); }
         int getDefaultDeviceIndex (bool forInput) const override        { return jack->getDefaultDeviceIndex (forInput); }
         bool hasSeparateInputsAndOutputs() const override               { return jack->hasSeparateInputsAndOutputs(); }
@@ -722,6 +882,7 @@ namespace
 
         AudioIODevice* createDevice (const String& outputName, const String& inputName) override
         {
+            if (! soundSystemAnswers (2000)) return nullptr;
             std::unique_ptr<AudioIODevice> d (jack->createDevice (outputName, inputName));
             return d != nullptr ? new SteadyBufferDevice (std::move (d)) : nullptr;
         }
@@ -861,6 +1022,18 @@ void Engine::watchAudioDevice()
                 present = (outName.isEmpty() || t->getDeviceNames (false).contains (outName))
                        && (! wantsInput || t->getDeviceNames (true).contains (inName));
             }
+   #if JUCE_LINUX
+    if (soundSystemStuck.load())
+    {
+        if (! audioSaidStuck)
+            sayAudio ("Audio: the computer's sound system has stopped answering. This happens when a USB audio "
+                      "device locks up: switch " + (outName.isNotEmpty() ? outName : String ("your audio interface"))
+                      + " off and on, or unplug it for a few seconds. StageRig carries on by itself.");
+        audioSaidStuck = true;
+        return;
+    }
+    audioSaidStuck = false;
+   #endif
     audioPresentTicks = present ? audioPresentTicks + 1 : 0;
     if (! present || (! stalled && audioPresentTicks < 2)) return;      // back a moment, with all its ports
     if (now < audioRetryAt) return;
