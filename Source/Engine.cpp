@@ -548,6 +548,146 @@ namespace
         std::unique_ptr<AudioIODeviceType> alsa;
         StringArray inputs;
     };
+
+    /** A JACK device that never says its buffer is zero samples.
+
+        PipeWire's JACK reports a buffer of 0 for a moment while StageRig's ports
+        are linked again (an input switched off, a buffer size changed). JUCE
+        splits every block into pieces of the size read at start, and pieces of
+        none never finish a block: the audio thread spun for ever, holding the
+        lock the screen then waited on, and the rig froze with the sound gone.
+        The last real size stands in, or the size asked for. */
+    class SteadyBufferDevice final : public AudioIODevice, private AudioIODeviceCallback
+    {
+    public:
+        explicit SteadyBufferDevice (std::unique_ptr<AudioIODevice> realDevice)
+            : AudioIODevice (realDevice->getName(), realDevice->getTypeName()), real (std::move (realDevice)) {}
+
+        ~SteadyBufferDevice() override { real->close(); }
+
+        AudioIODevice& inner() noexcept { return *real; }
+
+        StringArray getOutputChannelNames() override                 { return real->getOutputChannelNames(); }
+        StringArray getInputChannelNames() override                  { return real->getInputChannelNames(); }
+        std::optional<BigInteger> getDefaultOutputChannels() const override { return real->getDefaultOutputChannels(); }
+        std::optional<BigInteger> getDefaultInputChannels() const override  { return real->getDefaultInputChannels(); }
+        Array<double> getAvailableSampleRates() override             { return real->getAvailableSampleRates(); }
+        Array<int> getAvailableBufferSizes() override
+        {
+            auto sizes = real->getAvailableBufferSizes();
+            sizes.removeAllInstancesOf (0);
+            if (sizes.isEmpty()) sizes.add (getCurrentBufferSizeSamples());
+            return sizes;
+        }
+        int getDefaultBufferSize() override                          { return steady (real->getDefaultBufferSize()); }
+
+        String open (const BigInteger& ins, const BigInteger& outs, double rate, int bufferSize) override
+        {
+            if (bufferSize > 0) requested = bufferSize;
+            return real->open (ins, outs, rate, bufferSize);
+        }
+        void close() override                                        { real->close(); }
+        bool isOpen() override                                       { return real->isOpen(); }
+
+        void start (AudioIODeviceCallback* cb) override
+        {
+            if (cb == nullptr) { stop(); return; }
+            if (real->isPlaying() && client.load() != cb) real->stop();   // so the new one hears it start
+            client.store (cb);
+            real->start (this);
+        }
+        void stop() override
+        {
+            real->stop();     // returns once no block is running
+            client.store (nullptr);
+        }
+        bool isPlaying() override                                    { return real->isPlaying() && client.load() != nullptr; }
+        String getLastError() override                               { return real->getLastError(); }
+
+        int getCurrentBufferSizeSamples() override                   { return steady (real->getCurrentBufferSizeSamples()); }
+        double getCurrentSampleRate() override                       { return real->getCurrentSampleRate(); }
+        int getCurrentBitDepth() override                            { return real->getCurrentBitDepth(); }
+        BigInteger getActiveOutputChannels() const override          { return real->getActiveOutputChannels(); }
+        BigInteger getActiveInputChannels() const override           { return real->getActiveInputChannels(); }
+        int getOutputLatencyInSamples() override                     { return real->getOutputLatencyInSamples(); }
+        int getInputLatencyInSamples() override                      { return real->getInputLatencyInSamples(); }
+        AudioWorkgroup getWorkgroup() const override                 { return real->getWorkgroup(); }
+        bool hasControlPanel() const override                        { return real->hasControlPanel(); }
+        bool showControlPanel() override                             { return real->showControlPanel(); }
+        bool setAudioPreprocessingEnabled (bool b) override          { return real->setAudioPreprocessingEnabled (b); }
+        int getXRunCount() const noexcept override                   { return real->getXRunCount(); }
+
+    private:
+        int steady (int reported)
+        {
+            if (reported > 0) { lastGood = reported; return reported; }
+            if (lastGood > 0) return lastGood;
+            return requested > 0 ? requested : 1024;
+        }
+
+        // The real device calls these; they go on to the manager, naming this device.
+        void audioDeviceAboutToStart (AudioIODevice*) override
+        {
+            if (auto* cb = client.load()) cb->audioDeviceAboutToStart (this);
+        }
+        void audioDeviceStopped() override
+        {
+            if (auto* cb = client.load()) cb->audioDeviceStopped();
+        }
+        void audioDeviceError (const String& message) override
+        {
+            if (auto* cb = client.load()) cb->audioDeviceError (message);
+        }
+        void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut,
+                                               int numSamples, const AudioIODeviceCallbackContext& context) override
+        {
+            if (auto* cb = client.load(); cb != nullptr && numSamples > 0)
+                cb->audioDeviceIOCallbackWithContext (in, numIn, out, numOut, numSamples, context);
+            else
+                for (int c = 0; c < numOut; ++c)
+                    if (out[c] != nullptr) FloatVectorOperations::clear (out[c], jmax (0, numSamples));
+        }
+
+        std::unique_ptr<AudioIODevice> real;
+        std::atomic<AudioIODeviceCallback*> client { nullptr };
+        std::atomic<int> lastGood { 0 };
+        int requested = 0;
+    };
+
+    /** JACK, with each device it makes wrapped in SteadyBufferDevice. */
+    class SteadyBufferJack final : public AudioIODeviceType, private AudioIODeviceType::Listener
+    {
+    public:
+        explicit SteadyBufferJack (std::unique_ptr<AudioIODeviceType> realType)
+            : AudioIODeviceType (realType->getTypeName()), jack (std::move (realType))
+        {
+            jack->addListener (this);
+        }
+        ~SteadyBufferJack() override { jack->removeListener (this); }
+
+        void scanForDevices() override                                  { jack->scanForDevices(); }
+        StringArray getDeviceNames (bool wantInputNames) const override { return jack->getDeviceNames (wantInputNames); }
+        int getDefaultDeviceIndex (bool forInput) const override        { return jack->getDefaultDeviceIndex (forInput); }
+        bool hasSeparateInputsAndOutputs() const override               { return jack->hasSeparateInputsAndOutputs(); }
+
+        int getIndexOfDevice (AudioIODevice* device, bool asInput) const override
+        {
+            if (auto* d = dynamic_cast<SteadyBufferDevice*> (device)) device = &d->inner();
+            return jack->getIndexOfDevice (device, asInput);
+        }
+
+        AudioIODevice* createDevice (const String& outputName, const String& inputName) override
+        {
+            std::unique_ptr<AudioIODevice> d (jack->createDevice (outputName, inputName));
+            return d != nullptr ? new SteadyBufferDevice (std::move (d)) : nullptr;
+        }
+
+    private:
+        // JACK tells its listeners when ports are linked or unlinked; the manager listens here.
+        void audioDeviceListChanged() override { callDeviceChangeListeners(); }
+
+        std::unique_ptr<AudioIODeviceType> jack;
+    };
 }
 #endif
 
@@ -556,12 +696,18 @@ void Engine::DeviceManager::createAudioDeviceTypes (OwnedArray<AudioIODeviceType
     AudioDeviceManager::createAudioDeviceTypes (types);
    #if JUCE_LINUX
     for (int i = 0; i < types.size(); ++i)
+    {
         if (types[i]->getTypeName() == "ALSA")
         {
             std::unique_ptr<AudioIODeviceType> real (types.removeAndReturn (i));
             types.insert (i, new CardInputsAlsa (std::move (real)));
-            break;
         }
+        else if (types[i]->getTypeName() == "JACK")
+        {
+            std::unique_ptr<AudioIODeviceType> real (types.removeAndReturn (i));
+            types.insert (i, new SteadyBufferJack (std::move (real)));
+        }
+    }
    #endif
 }
 
@@ -4975,6 +5121,9 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
             return;
         }
     }
+    /* Only a block with sound in it counts as the audio moving: a device stuck
+       calling with nothing to play (see SteadyBufferDevice) is a stall. */
+    if (numSamples <= 0) return;
     audioCallbacks.fetch_add (1, std::memory_order_relaxed);
     if (auto* l = liveness) l->audioCalls.fetch_add (1, std::memory_order_relaxed);
     if (! callbackThreadKnown || ! pthread_equal (callbackThread, pthread_self()))
