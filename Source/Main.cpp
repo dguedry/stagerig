@@ -302,7 +302,8 @@ namespace
        in its own process, so this is the one part left that could take the
        show down, and now it cannot take it down for long.
 
-       Forked before JUCE starts, while the process has one thread. A quit
+       Forked before JUCE starts, while the process has one thread; the child
+       then starts the program afresh from disk. A quit
        -- the window closed, Ctrl+C, a SIGTERM from the desktop -- ends the
        child normally and the watchman with it. Five crashes inside two
        minutes is a rig that cannot start; it stops trying and says so. */
@@ -375,6 +376,17 @@ namespace
     int superviseLaunch (int argc, char* argv[])
     {
         if (const char* off = std::getenv ("STAGERIG_NO_SUPERVISOR"); off != nullptr && *off != 0 && *off != '0') return -1;
+
+        /* Started by a watchman: the liveness page is the open file it names. */
+        if (const char* fdText = std::getenv ("STAGERIG_WATCHED"); fdText != nullptr && *fdText != 0)
+        {
+            const int fd = std::atoi (fdText);
+            ::unsetenv ("STAGERIG_WATCHED");     // not for the plugin hosts
+            if (void* page = ::mmap (nullptr, sizeof (perf::Liveness), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); page != MAP_FAILED)
+                perf::liveness = static_cast<perf::Liveness*> (page);
+            ::close (fd);
+            return -1;
+        }
         for (int i = 1; i < argc; ++i)
             if (std::strcmp (argv[i], "--tempo") == 0) return -1;      // a one-shot command, not a show
 
@@ -384,9 +396,19 @@ namespace
         std::signal (SIGPIPE, SIG_IGN);
         startLog();
 
-        // The page StageRig says it is alive on, shared across the fork.
-        if (void* page = ::mmap (nullptr, sizeof (perf::Liveness), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0); page != MAP_FAILED)
-            perf::liveness = new (page) perf::Liveness();
+        /* The page StageRig says it is alive on: a memory file, so it is shared
+           with a StageRig that is a fresh program (see below), not only a fork. */
+        const int livenessFd = ::memfd_create ("stagerig-liveness", 0);
+        if (livenessFd >= 0 && ::ftruncate (livenessFd, sizeof (perf::Liveness)) == 0)
+            if (void* page = ::mmap (nullptr, sizeof (perf::Liveness), PROT_READ | PROT_WRITE, MAP_SHARED, livenessFd, 0); page != MAP_FAILED)
+                perf::liveness = new (page) perf::Liveness();
+
+        /* Each StageRig is the program on disk, started afresh -- not a copy of
+           the watchman's memory -- so one started again after a crash or a hang
+           is the version installed now, not the one there when the show began. */
+        char self[4096] = {};
+        const ssize_t selfLen = ::readlink ("/proc/self/exe", self, sizeof (self) - 1);
+        const std::string program = selfLen > 0 ? std::string (self, (size_t) selfLen) : std::string();
 
         std::vector<std::time_t> crashes;
         for (;;)
@@ -400,6 +422,12 @@ namespace
                 std::signal (SIGTERM, SIG_DFL);
                 std::signal (SIGINT,  SIG_DFL);
                 std::signal (SIGHUP,  SIG_DFL);
+                if (! program.empty() && perf::liveness != nullptr)
+                {
+                    ::setenv ("STAGERIG_WATCHED", std::to_string (livenessFd).c_str(), 1);
+                    ::execv (program.c_str(), argv);
+                    ::unsetenv ("STAGERIG_WATCHED");      // could not: go on as this copy
+                }
                 return -1;
             }
             watchedChild = pid;
@@ -416,14 +444,30 @@ namespace
             if (auto* l = perf::liveness) { l->heartbeatMs.store (0); l->quitting.store (0); }
             uint32_t lastCalls = 0;
             int64_t callsMovedAt = started;
+            int64_t quitSeenAt = 0;
             for (;;)
             {
                 const pid_t r = ::waitpid (pid, &status, WNOHANG);
                 if (r == pid || (r < 0 && errno != EINTR)) break;
                 ::usleep (500000);
                 auto* l = perf::liveness;
-                if (l == nullptr || watchQuit || l->quitting.load() != 0) continue;
                 const auto now = perf::livenessNowMs();
+                /* A quit is given thirty seconds, as plugins can be slow to close;
+                   one that hangs (the window closed on a stuck rig) is finished
+                   off, or nothing could close it. */
+                if (watchQuit || (l != nullptr && l->quitting.load() != 0))
+                {
+                    if (quitSeenAt == 0) quitSeenAt = now;
+                    else if (now - quitSeenAt > 30000)
+                    {
+                        std::fprintf (stderr, "[watch] StageRig did not finish quitting in thirty seconds; ending it.\n");
+                        ::kill (pid, SIGKILL);
+                        while (::waitpid (pid, &status, 0) < 0 && errno == EINTR) {}
+                        return 0;
+                    }
+                    continue;
+                }
+                if (l == nullptr) continue;
                 if (const auto calls = l->audioCalls.load(); calls != lastCalls) { lastCalls = calls; callsMovedAt = now; }
                 const auto beat = l->heartbeatMs.load();
                 const bool screenStill = now - (beat > 0 ? beat : started) > 20000;

@@ -1240,9 +1240,10 @@ int main()
         {
             engine.setInputMidiDevice (0, MidiDeviceInfo ("StageRig Held Keys", idH));
             engine.setInputChannel (0, 0);
-            held->sendMessageNow (MidiMessage::noteOn (1, 60, (uint8) 100));
-            held->sendMessageNow (MidiMessage::controllerEvent (1, 64, 127));
-            CHECK (waitFor ([&] { render (engine, 1); return engine.isHoldingNotes (0); }));
+            // Sent until held: the port may still be opening when the first one goes.
+            CHECK (waitFor ([&] { held->sendMessageNow (MidiMessage::noteOn (1, 60, (uint8) 100));
+                                  held->sendMessageNow (MidiMessage::controllerEvent (1, 64, 127));
+                                  render (engine, 1); return engine.isHoldingNotes (0); }));
             held.reset();            // pulled out with the key and the pedal down
             const bool released = waitFor ([&] { render (engine, 1); return ! engine.isHoldingNotes (0); });
             std::printf ("     a keyboard gone mid-note: %s\n", released ? "its note and pedal let go" : "STILL HELD");
