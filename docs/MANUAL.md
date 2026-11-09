@@ -1654,12 +1654,16 @@ no audio input is used.
 below 128 samples sounds like a broken cable there (256 is safe, 128 often
 works), and the status line warns about it.
 
-**JACK or ALSA?** Use **JACK**. On a PipeWire system it is the direct way in:
-StageRig shares the sound system with every other app, follows devices as they
-come and go, and gets the buffer it asks for. The **ALSA** type is for a
-computer without PipeWire's JACK library, or for a dedicated machine where
-StageRig should take an interface for itself; it does not reconnect a device
-that comes back.
+**JACK or ALSA?** **JACK** shares the sound system with every other app:
+Chrome can play through the same interface, and devices are followed as they
+come and go. **ALSA** takes the interface for StageRig alone, with nothing in
+between, which is the steadier choice for a stage rig with one interface. When
+you choose it, StageRig asks the desktop's sound system for that interface,
+which lets go of it: other apps can't play through it while StageRig runs, and
+it is handed back when you switch to JACK or quit. A device switched off and on
+is reconnected either way. On ALSA choose the interface by its own name (the
+SL73 is *SL; USB Stream Output*), never *Default ALSA Output* or *Pulseaudio*:
+those go back through the sound system.
 
 *late N* in the status bar counts buffers where a plugin did not answer in
 time. A few during loading are normal. A number that climbs while you play
@@ -1876,6 +1880,7 @@ switching the plugin off; scan again once the install has finished.
 | A plugin puts up a dialog every time it is looked at (no licence, a demo that nags) | It is loaded whenever its folder is scanned. | Select it in **Plugins...** and press **Remove selected**: it is switched off and left alone by later scans, until you switch it back on the same way. |
 | *late N* climbing while playing | Plugins are not keeping up with the buffer. | Raise the buffer size in **Audio...**, or check realtime scheduling. |
 | *clock held by another app* | Another audio application forces the system's buffer size. | Close it, or set its buffer size to match. |
+| On ALSA, no sound, and the log says *sound card N still in use by another program* | Another program that ignores the desktop's sound-card sharing (an old JACK server, or an app talking to the card directly) has the interface open. | Close that program and press **Reopen audio**, or choose JACK. |
 | Static or crackle on a USB interface under the ALSA type | The buffer is below 128 samples, or the input is on a different device from the output. | Set 256 (or 128) in **Audio...**, and the same interface for input and output; the status line says which it is. |
 | A few seconds of static about once a minute | Autosave reading a plugin's state. | Press **Save** between songs rather than mid-song. |
 | No sound, plugin loaded | Instrument turned off, key or velocity range excludes what you play, gain at minimum, or wrong MIDI channel. | Check the instrument's controls; the on-screen keyboard rules out the controller. |

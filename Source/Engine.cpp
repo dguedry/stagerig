@@ -4,6 +4,7 @@
 #endif
 #include "LowLatency.h"
 #include "Liveness.h"
+#include "DeviceReservation.h"
 #include <pthread.h>
 #include <cstring>
 #include <climits>
@@ -505,6 +506,23 @@ namespace
         {
             if (inputName.isNotEmpty() && ! inputs.contains (inputName))
                 return nullptr;
+
+            /* The cards are asked for from PipeWire first, which closes them. JUCE
+               opens an ALSA device waiting until it is free, on the message
+               thread: a card PipeWire still had open froze the Audio window (and
+               the rig) for good. One still busy after that is not opened at all;
+               the audio watch tries again. */
+            Array<int> cards;
+            for (const auto& name : { outputName, inputName })
+                for (int card : cardsNamed (withoutDuplicateNumber (name)))
+                    cards.addIfNotAlreadyThere (card);
+            if (const auto busy = DeviceReservation::holdOnly (cards); ! busy.isEmpty())
+            {
+                StringArray which;
+                for (int card : busy) which.add (String (card));
+                std::fprintf (stderr, "[audio] sound card %s still in use by another program; not opened\n", which.joinIntoString (", ").toRawUTF8());
+                return nullptr;
+            }
             return alsa->createDevice (outputName, inputName);
         }
 
@@ -530,6 +548,32 @@ namespace
                     continue;
                 if (const auto desc = text ("DESC").replace ("\n", "; "); desc.isNotEmpty())
                     out.addIfNotAlreadyThere (desc);
+            }
+            snd_device_name_free_hint (hints);
+            return out;
+        }
+
+        /** The ALSA card numbers behind a device name as JUCE shows it. */
+        static Array<int> cardsNamed (const String& name)
+        {
+            Array<int> out;
+            if (name.isEmpty()) return out;
+            void** hints = nullptr;
+            if (snd_device_name_hint (-1, "pcm", &hints) != 0) return out;
+            for (auto** h = hints; *h != nullptr; ++h)
+            {
+                auto text = [h] (const char* key)
+                {
+                    char* v = snd_device_name_get_hint (*h, key);
+                    const String r (CharPointer_UTF8 (v != nullptr ? v : ""));
+                    ::free (v);
+                    return r;
+                };
+                const auto id = text ("NAME");
+                if (! id.contains ("CARD=") || text ("DESC").replace ("\n", "; ") != name) continue;
+                const auto cardId = id.fromFirstOccurrenceOf ("CARD=", false, false).upToFirstOccurrenceOf (",", false, false);
+                if (const int index = snd_card_get_index (cardId.toRawUTF8()); index >= 0)
+                    out.addIfNotAlreadyThere (index);
             }
             snd_device_name_free_hint (hints);
             return out;
@@ -869,6 +913,9 @@ void Engine::watchAudioDevice()
 
 void Engine::changeListenerCallback (ChangeBroadcaster*)
 {
+    // Off ALSA: the sound cards StageRig asked PipeWire for are its again.
+    if (deviceManager.getCurrentAudioDeviceType() != "ALSA") DeviceReservation::releaseAll();
+
     /* The choice is kept as made. Saved while Audio... is open (it is being
        made), or when StageRig opens channels for an input or output itself with
        the chosen devices all there. Never while one has gone: the open device
