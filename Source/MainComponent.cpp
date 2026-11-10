@@ -1434,7 +1434,7 @@ public:
             knobsBtn.setTooltip ("What the keyboard's eight knobs turn on this plugin, the same on any keyboard and in every program with it");
             knobsBtn.onClick = [this] { panel.owner.showKnobsFor (index); };
             addChildComponent (soundsBtn);
-            soundsBtn.setTooltip ("The sounds this plugin's maker made for it: try them while you play, and keep one in this program");
+            soundsBtn.setTooltip ("This plugin's sounds: try them while you play, and keep one in this program");
             soundsBtn.onClick = [this] { panel.owner.showSoundsFor (index); };
             addAndMakeVisible (removeBtn);
             removeBtn.setTooltip ("Remove this instrument from the program");
@@ -1573,7 +1573,7 @@ public:
             else if (inputSlot)
                 guiBtn.setVisible (false);
             knobsBtn.setVisible (def.isPlugin());
-            soundsBtn.setVisible (def.isPlugin() && loaded && hasSounds (def.plugin));
+            soundsBtn.setVisible (def.isPlugin() && loaded);
             if (def.isPlugin())
             {
                 guiBtn.setButtonText (loading ? "Loading" : loaded ? "Window" : "Reload");
@@ -1586,16 +1586,6 @@ public:
         }
 
         void mouseDown (const MouseEvent&) override { panel.owner.playInstrumentFromKeyboard (index); }
-
-        /** Whether the maker's sounds for this plugin were found; worked out once a plugin and search. */
-        bool hasSounds (const PluginDescription& d)
-        {
-            auto* lib = panel.owner.getControlMaps();
-            if (lib == nullptr) return false;
-            const auto key = d.createIdentifierString() + "#" + String (lib->getNksGeneration());
-            if (key != soundsKey) { soundsKey = key; soundsFound = ! lib->soundsFor (d).empty(); }
-            return soundsFound;
-        }
 
         int midiChainHeight() const { const int h = midiChain.preferredHeight(); return h > 0 ? h + 2 : 0; }
         int preferredHeight() const { return slotHeaderHeight + midiChainHeight() + chain.preferredHeight() + 4; }
@@ -1811,8 +1801,6 @@ public:
         ComboBox outCh;
         TextButton inCh { "All channels" };
         TextButton guiBtn { "Window" }, knobsBtn { "Knobs" }, soundsBtn { "Sounds..." }, removeBtn { "X" };
-        String soundsKey;
-        bool soundsFound = false;
         EffectChainComponent midiChain, chain;
     };
 
@@ -3185,6 +3173,14 @@ void MainComponent::showKnobsFor (int input, int program, int slot)
     controllerWindows.push_back (showControlMapEditor (engine, *surfaceHub, *controlMaps, input, program, slot, [this] { markDirty(); }));
 }
 
+/* Sounds you kept, one folder a plugin beside the settings: "Sounds/Kontakt 8 (VST3)/Rhodes.stagerig-sound",
+   each the plugin's state as it gives it. Copy the folder to take them to another computer. */
+static File keptSoundsFolder (const ControlMapLibrary& lib, const PluginDescription& d)
+{
+    return lib.getFolder().getParentDirectory().getChildFile ("Sounds")
+              .getChildFile (File::createLegalFileName (d.name + " (" + d.pluginFormatName + ")"));
+}
+
 void MainComponent::showSoundsFor (int slot)
 {
     const int input = selectedInput, program = getEditedProgram();
@@ -3195,28 +3191,105 @@ void MainComponent::showSoundsFor (int slot)
     const auto& def = slots[(size_t) slot];
     const auto title = "Sounds: " + def.plugin.name;
     if (raiseWindow (title)) return;
-    auto sounds = controlMaps->soundsFor (def.plugin);
-    if (sounds.empty()) { showStatus ("No sounds from " + def.plugin.name + "'s maker were found on this computer."); return; }
+    auto* plugin = engine.getPlugin (input, program, slot);
+    if (plugin == nullptr || ! plugin->isAlive()) { showStatus (def.plugin.name + " is not running."); return; }
+
+    const auto desc = def.plugin;
+    const auto folder = keptSoundsFolder (*controlMaps, desc);
+    std::vector<SoundChoice> all;
+    // Yours first, then the plugin's own, then its maker's.
+    auto kept = folder.findChildFiles (File::findFiles, false, "*.stagerig-sound");
+    kept.sort();
+    for (const auto& f : kept)
+        all.push_back ({ SoundChoice::From::kept, f.getFileNameWithoutExtension(), "Kept by you", f, -1 });
+    const auto programs = plugin->getProgramNames();
+    for (int i = 0; i < programs.size(); ++i)
+        if (programs[i].isNotEmpty())
+            all.push_back ({ SoundChoice::From::program, programs[i], "The plugin's own program " + String (i + 1), {}, i });
+    for (const auto& f : vst3PresetFilesFor (desc))
+    {
+        const auto bank = f.getParentDirectory().getFileName();
+        all.push_back ({ SoundChoice::From::vst3Preset, f.getFileNameWithoutExtension(),
+                         "VST3 preset" + (bank.equalsIgnoreCase (desc.name) ? String() : "  -  " + bank), f, -1 });
+    }
+    for (const auto& s : controlMaps->soundsFor (desc))
+    {
+        StringArray under;
+        if (s.bank.isNotEmpty()) under.add (s.bank);
+        if (! s.tags.isEmpty()) under.add (s.tags.joinIntoString (", "));
+        all.push_back ({ SoundChoice::From::nks, s.name, under.isEmpty() ? String ("The maker's sound") : under.joinIntoString ("  -  "), s.file, -1 });
+    }
 
     // The sound it has now, to go back to.
-    juce::MemoryBlock before;
-    if (auto* p = engine.getPlugin (input, program, slot); p != nullptr && p->isAlive()) p->getState (before, 10000);
+    MemoryBlock before;
+    plugin->getState (before, 10000);
     const auto beforeName = def.soundName;
-    const auto pluginName = def.plugin.name;
-    auto* browser = new SoundBrowser (std::move (sounds), def.soundName,
-        [sp = Component::SafePointer<MainComponent> (this), input, program, slot, before, beforeName, pluginName] (const NksSound* s)
+    const auto pluginName = desc.name;
+    auto sp = Component::SafePointer<MainComponent> (this);
+
+    SoundBrowser::Callbacks cb;
+    cb.choose = [sp, input, program, slot, before, beforeName, pluginName] (const SoundChoice& s)
+    {
+        if (sp == nullptr) return;
+        auto& e = sp->engine;
+        String problem;
+        switch (s.from)
         {
-            if (sp == nullptr) return;
-            auto& e = sp->engine;
-            const auto problem = s != nullptr ? e.setPluginSound (input, program, slot, -1, s->file, s->name)
-                                              : (before.isEmpty() ? String ("There is no sound from before to go back to.")
-                                                                  : e.setPluginState (input, program, slot, -1, before, beforeName));
-            if (problem.isNotEmpty()) { sp->showStatus (pluginName + ": " + problem); return; }
-            sp->markDirty();
-            sp->showStatus (pluginName + ": " + (s != nullptr ? s->name : String ("the sound before")));
-            if (sp->slotsPanel != nullptr) sp->slotsPanel->refresh();
-        });
-    theme::launchDialog (browser, title, 0, 0);
+            case SoundChoice::From::before:
+                problem = before.isEmpty() ? String ("There is no sound from before to go back to.")
+                                           : e.setPluginState (input, program, slot, -1, before, beforeName);
+                break;
+            case SoundChoice::From::kept:
+            {
+                MemoryBlock state;
+                problem = s.file.loadFileAsData (state) && ! state.isEmpty() ? e.setPluginState (input, program, slot, -1, state, s.name)
+                                                                             : "Could not read " + s.file.getFullPathName();
+                break;
+            }
+            case SoundChoice::From::program:
+                problem = e.setPluginProgram (input, program, slot, -1, s.program, s.name);
+                break;
+            case SoundChoice::From::vst3Preset:
+            {
+                MemoryBlock state;
+                const auto r = vst3PresetState (s.file, state);
+                problem = r.failed() ? r.getErrorMessage() : e.setPluginState (input, program, slot, -1, state, s.name);
+                break;
+            }
+            case SoundChoice::From::nks:
+                problem = e.setPluginSound (input, program, slot, -1, s.file, s.name);
+                break;
+        }
+        if (problem.isNotEmpty()) { sp->showStatus (pluginName + ": " + problem); return; }
+        sp->markDirty();
+        sp->showStatus (pluginName + ": " + (s.from == SoundChoice::From::before ? String ("the sound before") : s.name));
+        if (sp->slotsPanel != nullptr) sp->slotsPanel->refresh();
+    };
+    cb.keep = [sp, input, program, slot, folder, pluginName] (const String& name) -> std::optional<SoundChoice>
+    {
+        if (sp == nullptr) return std::nullopt;
+        auto* p = sp->engine.getPlugin (input, program, slot);
+        MemoryBlock state;
+        if (p == nullptr || ! p->isAlive() || ! p->getState (state, 10000) || state.isEmpty())
+        {
+            sp->showStatus (pluginName + " did not give its sound.");
+            return std::nullopt;
+        }
+        const auto file = folder.getChildFile (File::createLegalFileName (name) + ".stagerig-sound");
+        if (! folder.createDirectory() || ! file.replaceWithData (state.getData(), state.getSize()))
+        {
+            sp->showStatus ("Could not save " + file.getFullPathName());
+            return std::nullopt;
+        }
+        sp->engine.keepPluginState (input, program, slot, -1, name, state);
+        sp->markDirty();
+        sp->showStatus (pluginName + ": kept \"" + name + "\"");
+        if (sp->slotsPanel != nullptr) sp->slotsPanel->refresh();
+        return SoundChoice { SoundChoice::From::kept, file.getFileNameWithoutExtension(), "Kept by you", file, -1 };
+    };
+    cb.forget = [] (const SoundChoice& s) { return s.file.deleteFile(); };
+
+    theme::launchDialog (new SoundBrowser (std::move (all), def.soundName, pluginName, std::move (cb)), title, 0, 0);
 }
 
 void MainComponent::showPedals()
@@ -3408,13 +3481,6 @@ void MainComponent::toggleRecording()
 void MainComponent::timerCallback()
 {
     PluginView::dropDeadSessions();      // a mirrored window that was closed ends its session
-
-    // The makers' sounds found (a minute after start among many plugins): their Sounds... buttons show.
-    if (controlMaps != nullptr && controlMaps->getNksGeneration() != nksSeen)
-    {
-        nksSeen = controlMaps->getNksGeneration();
-        if (slotsPanel != nullptr) slotsPanel->refresh();
-    }
 
     /* Where the show is, kept as it changes: a StageRig restarted after a
        crash comes back exactly here. A few numbers, written only when one

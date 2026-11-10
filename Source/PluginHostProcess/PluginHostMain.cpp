@@ -367,6 +367,30 @@ private:
                 stopAudioThread();
                 return ok();
 
+            case ipc::Msg::getPrograms:
+            {
+                if (instance == nullptr) return fail ("no plugin");
+                MemoryOutputStream out;
+                const int n = jlimit (0, 4096, instance->getNumPrograms());
+                out.writeInt (n);
+                for (int i = 0; i < n; ++i) out.writeString (instance->getProgramName (i));
+                return ok (out);
+            }
+
+            case ipc::Msg::setProgram:
+            {
+                if (instance == nullptr) return fail ("no plugin");
+                const int index = in.readInt();
+                if (index < 0 || index >= instance->getNumPrograms()) return fail ("no such program");
+                suppressNotifications = true;
+                {
+                    const std::lock_guard<std::mutex> l (processMutex);
+                    instance->setCurrentProgram (index);
+                }
+                suppressNotifications = false;
+                return ok();
+            }
+
             default:
                 return fail ("unknown request");
         }

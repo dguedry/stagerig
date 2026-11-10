@@ -229,12 +229,12 @@ static int probeSounds (const String& wanted)
                     KnownPluginList list;
                     list.recreateFromXml (*kp);
                     for (const auto& d : list.getTypes())
-                        if (! found && d.name.equalsIgnoreCase (wanted) && d.pluginFormatName == "VST3") { desc = d; found = true; }
+                        if (d.name.equalsIgnoreCase (wanted) && (! found || d.pluginFormatName == "VST3")) { desc = d; found = true; }
                 }
-    if (! found) { std::printf ("SKIP: no VST3 called %s in StageRig's plugin list\n", wanted.toRawUTF8()); return 77; }
+    if (! found) { std::printf ("SKIP: no plugin called %s in StageRig's plugin list\n", wanted.toRawUTF8()); return 77; }
+    std::printf ("     %s (%s)\n", desc.name.toRawUTF8(), desc.pluginFormatName.toRawUTF8());
     const auto sounds = library.soundsFor (desc);
-    CHECK (sounds.size() >= 2);
-    if (sounds.size() < 2) return 1;
+    std::printf ("     %d NKS sounds, %d VST3 presets\n", (int) sounds.size(), (int) vst3PresetFilesFor (desc).size());
 
     Engine engine (host, settings, /*startAudioDevice*/ false);
     auto settle = [&engine] { const auto t0 = Time::getMillisecondCounterHiRes(); pump (30);
@@ -249,6 +249,34 @@ static int probeSounds (const String& wanted)
     CHECK (plugin->getState (before));
 
     const auto& slot = [&engine]() -> const SlotDef& { return engine.getSetup().inputs[0].programs[0].slots[0]; };
+
+    // Its own programs, where it has a list of them.
+    const auto programs = plugin->getProgramNames();
+    std::printf ("     %d programs of its own%s\n", programs.size(), programs.isEmpty() ? "" : (": " + programs[0] + ", " + programs[1] + "...").toRawUTF8());
+    if (programs.size() >= 2)
+    {
+        CHECK (engine.setPluginProgram (0, 0, 0, -1, 1, programs[1]).isEmpty());
+        CHECK (slot().soundName == programs[1]);
+        CHECK (slot().state != before);
+        const auto atOne = slot().state;
+        CHECK (engine.setPluginProgram (0, 0, 0, -1, 0, programs[0]).isEmpty());
+        CHECK (slot().state != atOne);
+    }
+
+    // Kept: the state as the plugin gives it, given back.
+    {
+        MemoryBlock now;
+        CHECK (plugin->getState (now));
+        const auto file = scratch.getChildFile ("kept.stagerig-sound");
+        CHECK (file.replaceWithData (now.getData(), now.getSize()));
+        CHECK (engine.setPluginState (0, 0, 0, -1, before, {}).isEmpty());
+        MemoryBlock fromFile;
+        CHECK (file.loadFileAsData (fromFile));
+        CHECK (engine.setPluginState (0, 0, 0, -1, fromFile, "Kept").isEmpty());
+        CHECK (slot().soundName == "Kept");
+    }
+    if (sounds.size() < 2) { std::printf ("SOUNDS %s: %d failure(s)\n", wanted.toRawUTF8(), failures); std::fflush (stdout); std::_Exit (failures == 0 ? 0 : 1); }
+
     const auto& a = sounds.front();
     const auto& b = sounds[sounds.size() / 2];
     CHECK (engine.setPluginSound (0, 0, 0, -1, a.file, a.name).isEmpty());

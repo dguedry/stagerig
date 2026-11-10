@@ -99,6 +99,11 @@ public:
         while serialising -- so the autosave asks only those that say yes. */
     bool stateMayHaveChanged() const                        { return stateDirty.load(); }
     bool setState (const juce::MemoryBlock&);
+    /** The plugin's own list of programs (sounds), by name; empty when it has
+        none worth the name -- most plugins report one, "Default" or blank. */
+    juce::StringArray getProgramNames();
+    /** Switches the plugin to one of its own programs. */
+    bool setProgram (int index);
     bool showEditor (const juce::String& title);
     bool hideEditor();
     /** Keep the editor above every other window, or stop doing so. */

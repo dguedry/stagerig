@@ -605,6 +605,123 @@ int NksSound::matches (const PluginDescription& d) const
     return nksNameMatch (d, product, pluginName, vendor, pluginVendor);
 }
 
+namespace
+{
+    /** A VST3 preset: "VST3", version, the class id as 32 characters, where
+        its list of parts is; the list names the component's part ("Comp")
+        and the controller's ("Cont") by place and size. */
+    Result vstPresetToState (const uint8* d, size_t n, MemoryBlock& out)
+    {
+        if (n < 48 || std::memcmp (d, "VST3", 4) != 0) return Result::fail ("This is not a VST3 preset.");
+        XmlElement state ("VST3PluginState");
+        const auto listAt = le64 (d + 40);
+        if (listAt + 8 > n || std::memcmp (d + listAt, "List", 4) != 0) return Result::fail ("This preset's sound is damaged.");
+        const auto count = le32 (d + listAt + 4);
+        bool comp = false;
+        for (uint32 i = 0; i < count && i < 64; ++i)
+        {
+            const auto at = listAt + 8 + (uint64) i * 20;
+            if (at + 20 > n) break;
+            const auto offset = le64 (d + at + 4), size = le64 (d + at + 12);
+            if (offset > n || size > n - offset || size == 0) continue;
+            const bool isComp = std::memcmp (d + at, "Comp", 4) == 0;
+            if (isComp || std::memcmp (d + at, "Cont", 4) == 0)
+                state.createNewChildElement (isComp ? "IComponent" : "IEditController")
+                     ->addTextElement (MemoryBlock (d + offset, (size_t) size).toBase64Encoding());
+            comp = comp || isComp;
+        }
+        if (! comp) return Result::fail ("This preset's sound is damaged.");
+        AudioProcessor::copyXmlToBinary (state, out);
+        return Result::ok();
+    }
+
+    /** JUCE's id (PluginDescription::uniqueId) for a class id written as 32 hex characters. */
+    bool classIdHash (const char* hex32, int& out)
+    {
+        uint32 hash = 0;
+        for (int part = 0; part < 4; ++part)
+        {
+            const String h (hex32 + part * 8, 8);
+            if (! h.containsOnly ("0123456789abcdefABCDEF")) return false;
+            hash = hash * 31 + (uint32) h.getHexValue64();
+        }
+        out = (int) hash;
+        return true;
+    }
+
+    /** Every Wine prefix's drive C here, where Windows plugins keep their files. */
+    Array<File> wineDrives()
+    {
+        Array<File> drives;
+       #if JUCE_LINUX || JUCE_BSD
+        const auto home = File::getSpecialLocation (File::userHomeDirectory);
+        Array<File> prefixes;
+        if (const char* p = std::getenv ("WINEPREFIX"); p != nullptr && *p != 0) prefixes.add (File (p));
+        prefixes.add (home.getChildFile (".wine"));
+        for (const auto& f : home.findChildFiles (File::findDirectories, false, ".wine-*")) prefixes.addIfNotAlreadyThere (f);
+        prefixes.add (home.getChildFile (".local/share/vstenv/prefix"));
+        for (const auto& p : prefixes)
+            if (p.getChildFile ("drive_c").isDirectory()) drives.addIfNotAlreadyThere (p.getChildFile ("drive_c"));
+       #endif
+        return drives;
+    }
+}
+
+std::vector<File> vst3PresetFilesFor (const PluginDescription& d)
+{
+    std::vector<File> out;
+    if (d.pluginFormatName != "VST3") return out;
+    Array<File> roots;
+    const auto home = File::getSpecialLocation (File::userHomeDirectory);
+   #if JUCE_LINUX || JUCE_BSD
+    roots.add (home.getChildFile (".vst3/presets"));
+    roots.add (File ("/usr/share/vst3/presets"));
+    roots.add (File ("/usr/local/share/vst3/presets"));
+    for (const auto& c : wineDrives())
+    {
+        roots.add (c.getChildFile ("ProgramData/VST3 Presets"));
+        for (const auto& user : c.getChildFile ("users").findChildFiles (File::findDirectories, false))
+            roots.add (user.getChildFile ("Documents/VST3 Presets"));
+    }
+   #elif JUCE_WINDOWS
+    roots.add (File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("VST3 Presets"));
+    roots.add (File ("C:\\ProgramData\\VST3 Presets"));
+   #elif JUCE_MAC
+    roots.add (home.getChildFile ("Library/Audio/Presets"));
+    roots.add (File ("/Library/Audio/Presets"));
+   #endif
+    const auto wanted = plainWords (d.name);
+    for (const auto& root : roots)
+    {
+        if (! root.isDirectory()) continue;
+        for (const auto& maker : root.findChildFiles (File::findDirectories, false))
+            for (const auto& folder : maker.findChildFiles (File::findDirectories, false))
+            {
+                if (plainWords (folder.getFileName()) != wanted) continue;
+                for (const auto& f : folder.findChildFiles (File::findFiles, true, "*.vstpreset"))
+                {
+                    if (out.size() >= 5000) return out;
+                    // The file names its plugin: only this one's.
+                    FileInputStream in (f);
+                    char head[40];
+                    int id = 0;
+                    if (in.openedOk() && in.read (head, 40) == 40 && std::memcmp (head, "VST3", 4) == 0
+                        && classIdHash (head + 8, id) && id == d.uniqueId)
+                        out.push_back (f);
+                }
+            }
+    }
+    return out;
+}
+
+Result vst3PresetState (const File& f, MemoryBlock& out)
+{
+    if (f.getSize() > 256 * 1024 * 1024) return Result::fail (f.getFileName() + " is too big to be a preset.");
+    MemoryBlock data;
+    if (! f.loadFileAsData (data)) return Result::fail ("Could not read " + f.getFullPathName());
+    return vstPresetToState (static_cast<const uint8*> (data.getData()), data.getSize(), out);
+}
+
 Result nksStateFor (const File& f, const MemoryBlock& current, MemoryBlock& out)
 {
     auto head = AudioProcessor::getXmlFromBinary (current.getData(), (int) current.getSize());
@@ -627,25 +744,7 @@ Result nksStateFor (const File& f, const MemoryBlock& current, MemoryBlock& out)
     };
 
     if (n >= 48 && std::memcmp (d, "VST3", 4) == 0)
-    {
-        /* A VST3 preset: "VST3", version, the class id as 32 characters, where
-           its list of parts is; the list names the component's part ("Comp")
-           and the controller's ("Cont") by place and size. */
-        const auto listAt = le64 (d + 40);
-        if (listAt + 8 > n || std::memcmp (d + listAt, "List", 4) != 0) return Result::fail ("This NKS preset's sound is damaged.");
-        const auto count = le32 (d + listAt + 4);
-        bool comp = false;
-        for (uint32 i = 0; i < count && i < 64; ++i)
-        {
-            const auto at = listAt + 8 + (uint64) i * 20;
-            if (at + 20 > n) break;
-            const auto offset = le64 (d + at + 4), size = le64 (d + at + 12);
-            if (offset > n || size > n - offset) continue;
-            if (std::memcmp (d + at, "Comp", 4) == 0) { add ("IComponent", d + offset, (size_t) size); comp = size > 0; }
-            else if (std::memcmp (d + at, "Cont", 4) == 0) add ("IEditController", d + offset, (size_t) size);
-        }
-        if (! comp) return Result::fail ("This NKS preset's sound is damaged.");
-    }
+        return vstPresetToState (d, n, out);
     else
     {
         MemoryBlock now;
@@ -780,15 +879,7 @@ Array<File> ControlMapLibrary::defaultNksFolders()
             if (const auto f = drive.getChildFile (sub); f.isDirectory()) folders.addIfNotAlreadyThere (f);
     };
    #if JUCE_LINUX || JUCE_BSD
-    const auto home = File::getSpecialLocation (File::userHomeDirectory);
-    Array<File> prefixes;
-    if (const char* p = std::getenv ("WINEPREFIX"); p != nullptr && *p != 0) prefixes.add (File (p));
-    prefixes.add (home.getChildFile (".wine"));
-    for (const auto& f : home.findChildFiles (File::findDirectories | File::ignoreHiddenFiles, false, ".wine-*")) prefixes.add (f);
-    for (const auto& f : home.findChildFiles (File::findDirectories, false, ".wine-*")) prefixes.addIfNotAlreadyThere (f);
-    prefixes.add (home.getChildFile (".local/share/vstenv/prefix"));
-    for (const auto& p : prefixes)
-        if (p.getChildFile ("drive_c").isDirectory()) addWindowsTree (p.getChildFile ("drive_c"));
+    for (const auto& c : wineDrives()) addWindowsTree (c);
    #elif JUCE_WINDOWS
     addWindowsTree (File ("C:\\"));
    #elif JUCE_MAC

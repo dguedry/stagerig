@@ -137,6 +137,15 @@ struct NksSound
     loaded as VST3, as NKS sounds are made for VST plugins. */
 juce::Result nksStateFor (const juce::File&, const juce::MemoryBlock& current, juce::MemoryBlock& out);
 
+/** The standard VST3 preset files (.vstpreset) made for this plugin: in the
+    places VST3 keeps them, on Linux and inside the Wine prefixes Windows
+    plugins run in ("VST3 Presets/<maker>/<plugin>"), each checked to name
+    this very plugin. Reads the disk: not for the audio or message thread
+    in a hurry. */
+std::vector<juce::File> vst3PresetFilesFor (const juce::PluginDescription&);
+/** A .vstpreset as the state JUCE's VST3 host takes. */
+juce::Result vst3PresetState (const juce::File&, juce::MemoryBlock& out);
+
 /** NKS pages as a setup for the plugin as it is loaded here. A knob is
     found by its id when the ids are the plugin's kind (VST3 and VST3);
     otherwise by its VST2 number when the parameter there has a name like the

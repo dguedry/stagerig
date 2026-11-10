@@ -4428,9 +4428,26 @@ String Engine::setPluginState (int inputIndex, int program, int slot, int effect
     auto* p = getPlugin (inputIndex, program, slot, effect);
     if (p == nullptr || ! p->isAlive()) return "The plugin is not running.";
     if (! p->setState (state)) return "The plugin did not take the sound.";
+    keepPluginState (inputIndex, program, slot, effect, soundName, state);
+    return {};
+}
+
+String Engine::setPluginProgram (int inputIndex, int program, int slot, int effect, int index, const String& soundName)
+{
+    auto* p = getPlugin (inputIndex, program, slot, effect);
+    if (p == nullptr || ! p->isAlive()) return "The plugin is not running.";
+    if (! p->setProgram (index)) return "The plugin did not change its sound.";
+    keepPluginState (inputIndex, program, slot, effect, soundName, {});
+    return {};
+}
+
+void Engine::keepPluginState (int inputIndex, int program, int slot, int effect, const String& soundName, const MemoryBlock& otherwise)
+{
+    auto* p = getPlugin (inputIndex, program, slot, effect);
     // Kept as the plugin now has it (its own form of the sound), so a reload is this sound.
     MemoryBlock kept;
-    if (! p->getState (kept, 10000) || kept.getSize() == 0) kept = state;
+    if (p == nullptr || ! p->getState (kept, 10000) || kept.getSize() == 0) kept = otherwise;
+    if (kept.isEmpty()) return;
     if (auto* def = defFor (inputIndex, program))
     {
         if (effect < 0)
@@ -4447,7 +4464,6 @@ String Engine::setPluginState (int inputIndex, int program, int slot, int effect
             (*chain)[(size_t) effect].soundName = soundName;
         }
     }
-    return {};
 }
 
 bool Engine::isPluginAlive (int inputIndex, int program, int slot, int effect) const

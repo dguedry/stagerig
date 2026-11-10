@@ -1,7 +1,9 @@
 /*  The makers' sounds (NKS presets) on real plugins: found for the right
     plugin, and loaded into it -- the plugin's state afterwards holds that
     sound. Needs the plugins installed (yabridge VST3s); a plugin that is not
-    is skipped. Run by hand: it starts Wine. */
+    is skipped. Run by hand: it starts Wine, inside this process, where a
+    plugin now and then hangs loading; name one plugin to run it alone
+    ("PresetTest SWAM"). */
 #include "ControlMaps.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
@@ -87,6 +89,29 @@ static void tryPlugin (ControlMapLibrary& lib, const File& bundle)
     /* Not closed: a Wine plugin closed in this process can hang (Super 8 did,
        now and then). StageRig runs each in a process of its own, ended when
        it will not close; the test ends its process at the finish instead. */
+    /* A VST3 preset inside the NKS file (SWAM's are): saved out as a
+       .vstpreset, it gives the plugin the same state as the NKS file does. */
+    {
+        MemoryBlock file;
+        a.file.loadFileAsData (file);
+        const auto* d = static_cast<const uint8*> (file.getData());
+        for (size_t at = 12; at + 8 <= file.getSize();)
+        {
+            const uint32 len = (uint32) d[at + 4] | ((uint32) d[at + 5] << 8) | ((uint32) d[at + 6] << 16) | ((uint32) d[at + 7] << 24);
+            if (len > file.getSize() - at - 8) break;
+            if (std::memcmp (d + at, "PCHK", 4) == 0 && len > 8 && std::memcmp (d + at + 12, "VST3", 4) == 0)
+            {
+                const auto preset = File::createTempFile (".vstpreset");
+                preset.replaceWithData (d + at + 12, len - 4);
+                MemoryBlock fromPreset, fromNks;
+                check (vst3PresetState (preset, fromPreset).wasOk(), "a .vstpreset is read");
+                nksStateFor (a.file, before, fromNks);
+                check (fromPreset == fromNks, "and gives the same state as its NKS file");
+                preset.deleteFile();
+            }
+            at += 8 + len + (len & 1);
+        }
+    }
     (void) inst.release();
 }
 

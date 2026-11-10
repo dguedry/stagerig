@@ -384,6 +384,44 @@ bool RemotePlugin::setState (const MemoryBlock& state)
     return ok;
 }
 
+StringArray RemotePlugin::getProgramNames()
+{
+    StringArray names;
+    MemoryBlock data;
+    if (! request (ipc::Msg::getPrograms, {}, kControlTimeoutMs, &data)) return names;
+    MemoryInputStream in (data, false);
+    const int n = in.readInt();
+    for (int i = 0; i < n && ! in.isExhausted(); ++i)
+    {
+        /* A name that is only a number is no sound: "Program 3", "Default",
+           and Kontakt's 128 "MIDI channel 0 program 5", which are slots for
+           program changes. Left blank, so the rest keep their numbers. */
+        auto name = in.readString().trim();
+        auto words = StringArray::fromTokens (name.toLowerCase(), " _-:#.", "");
+        words.removeEmptyStrings();
+        bool generic = true;
+        for (const auto& w : words)
+            if (! w.containsOnly ("0123456789") && ! StringArray { "midi", "channel", "ch", "program", "prog", "preset", "patch",
+                                                                   "default", "init", "initial", "unnamed", "untitled", "empty" }.contains (w))
+                generic = false;
+        names.add (generic ? String() : name);
+    }
+    // Fewer than two real names is no list to choose from.
+    StringArray named (names);
+    named.removeEmptyStrings();
+    if (named.size() < 2) names.clear();
+    return names;
+}
+
+bool RemotePlugin::setProgram (int index)
+{
+    MemoryOutputStream out;
+    out.writeInt (index);
+    const bool ok = request (ipc::Msg::setProgram, out.getMemoryBlock(), kStateTimeoutMs, nullptr, true);
+    if (ok) stateDirty.store (true);       // the plugin's state is another now
+    return ok;
+}
+
 bool RemotePlugin::showEditor (const String& title)
 {
     MemoryOutputStream out;

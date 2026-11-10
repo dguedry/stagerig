@@ -348,9 +348,9 @@ transpose, curve and channels decide which notes enter at all. Left to right:
 |---|---|
 | **Checkbox** | Turns the instrument on. Off is silent but stays loaded. |
 | **Icon** | The plugin's own icon where it has one, otherwise a coloured badge with its initials. |
-| **Name** | Plugin name and format, and the maker's sound it was given with **Sounds...** (`Super 8: Moon Harp`). Red means it failed to load; hover for the reason. |
+| **Name** | Plugin name and format, and the sound it was given with **Sounds...** (`Super 8: Moon Harp`). Red means it failed to load; hover for the reason. |
 | **Window** | Opens the plugin's own window. Shows **Reload** instead if the plugin crashed and was left off (see *When something fails on stage*); a MIDI device has **Device...** here, the General MIDI player **Sound...**. |
-| **Sounds...** | The sounds the plugin's maker made for it, to try while you play and keep one in this program (see *A plugin's own sounds* below). Shown when the maker's sounds are on this computer. |
+| **Sounds...** | The plugin's sounds, from wherever StageRig can find them, to try while you play and keep one in this program (see *A plugin's own sounds* below). Plugins only. |
 | **Knobs** | What the keyboard's eight knobs turn on this plugin, shown as the eight knobs, and how its keys light. The same on any keyboard and in every program with the plugin (see *Keyboards: knobs, buttons, screens and lights*). Plugins only. |
 | **X** | Removes the instrument, and asks first. |
 | **GAIN** | Level of this instrument, applied after its effects. Double-click for 0 dB. |
@@ -364,25 +364,36 @@ transpose, curve and channels decide which notes enter at all. Left to right:
 
 ### A plugin's own sounds
 
-A plugin keeps its sounds in its own browser, and every plugin's is
-different. For many plugins StageRig can list them itself: those that come
-with **NKS** sounds -- Native Instruments' plugins, and the many others
-labelled *NKS ready* (Arturia, Spitfire, Audio Modeling's SWAM and more),
-which Komplete Kontrol browses. StageRig finds them on this computer by
-itself, a minute or so after it starts.
+**Sounds...** on an instrument lists every sound StageRig can find for that
+plugin, in one place, whoever made it:
 
-**Sounds...** on the instrument opens the list. Type to narrow it by name,
-bank or the maker's kind of sound (`pad warm`, `bass analog`). Click a sound,
-or walk the list with the arrow keys, and the plugin plays it at once, so you
-can try sounds while you play. The program keeps the last one chosen, under
-its name. **The sound before** at the top puts back what the plugin had when
-the list was opened.
+- **Kept by you** -- sounds you added with **Keep the sound playing now...**
+  (below).
+- **The plugin's own programs** -- the list a plugin gives its host, where it
+  has a real one (LV2 plugins' presets, many synths).
+- **VST3 presets** -- the standard preset files a plugin's maker installs
+  (`VST3 Presets/<maker>/<plugin>`, on Linux and inside the Wine prefixes).
+- **The maker's NKS sounds** -- for Native Instruments' plugins and the many
+  labelled *NKS ready* (Super 8, Spitfire, Audio Modeling's SWAM and more),
+  with their banks and kinds. StageRig finds these by itself, a minute or so
+  after it starts.
 
-A sound chosen this way is the plugin's whole state, as if picked in the
-plugin's own window: change it there afterwards and the program keeps the
-change. A plugin whose sounds StageRig cannot list (Kontakt's instruments,
-for one) works the old way: choose the sound in **Window** and the program
-keeps it. NKS sounds load into the plugin's VST3 version.
+Type to narrow the list (`pad warm`, `bass analog`). Click a sound, or walk
+the list with the arrow keys, and the plugin plays it at once, so you can try
+sounds while you play. The program keeps the last one chosen, and the
+instrument's row shows its name (`Super 8: Moon Harp`). **The sound before**
+at the top puts back what the plugin had when the list was opened.
+
+**Keep the sound playing now...** is for a plugin whose sounds StageRig
+cannot list -- Kontakt's instruments, for one. Choose the sound in the
+plugin's own **Window** as usual, then keep it under a name: from then on it
+is in that plugin's list, for any program. Right-click a kept sound to remove
+it. Kept sounds live in the `Sounds` folder beside the settings, a folder per
+plugin; copy it to take them to another computer.
+
+A sound chosen here is the plugin's whole state, as if picked in its own
+window: change it there afterwards and the program keeps the change. NKS
+sounds and VST3 presets load into the plugin's VST3 version.
 
 **+ Add instrument...** asks which kind:
 

@@ -627,6 +627,10 @@ public:
     juce::String setPluginSound (int inputIndex, int program, int slot, int effect, const juce::File& nksFile, const juce::String& soundName);
     /** Gives a plugin a state of its own, as it was (the sound before choosing another), kept the same way. */
     juce::String setPluginState (int inputIndex, int program, int slot, int effect, const juce::MemoryBlock&, const juce::String& soundName);
+    /** Switches a plugin to one of its own programs (RemotePlugin::getProgramNames), kept the same way. */
+    juce::String setPluginProgram (int inputIndex, int program, int slot, int effect, int index, const juce::String& soundName);
+    /** The plugin's state now, into the program under that name (`otherwise` if it cannot be read). */
+    void keepPluginState (int inputIndex, int program, int slot, int effect, const juce::String& soundName, const juce::MemoryBlock& otherwise = {});
     /** Restarts a plugin that failed or crashed, from its saved definition and state. */
     void reloadPlugin (int inputIndex, int program, int slot, int effect = -1);
 

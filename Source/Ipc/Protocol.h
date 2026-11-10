@@ -94,6 +94,8 @@ enum class Msg : uint32_t
     keepEditorOnTop,      // bool: while a tablet mirrors the window, nothing may cover it
     getInfo,              // -> name, isInstrument, hasEditor, latency
     quit,
+    getPrograms,          // -> count, then each program's name
+    setProgram,           // index
 
     // plugin -> host
     response = 100,       // requestId matches; payload: ok(bool), then request-specific data
