@@ -1595,12 +1595,16 @@ default.
 kept: there is nothing to apply or save. The top is StageRig's own **LEVEL AND
 LATENCY** section:
 
-- **Buffer size** -- the buffer StageRig asks for. 128 is the live default; 64
-  if the machine is quiet and has realtime scheduling (see below).
-- **Make the whole system use this buffer size while StageRig runs** -- holds
-  the whole audio system at that buffer size while StageRig runs, and puts the
-  previous value back on quit or as soon as you untick it. Turn it on when
-  another app has forced a big buffer and StageRig cannot get a small one.
+- **Buffer size** (JACK only) -- the buffer StageRig asks the computer's
+  sound system for. 128 is the live default; 64 if the machine is quiet and
+  has realtime scheduling (see below). On ALSA it is hidden: StageRig has the
+  interface to itself, and its buffer is **Audio buffer size** in the device
+  chooser below.
+- **Make the whole system use this buffer size while StageRig runs** (JACK
+  only) -- holds the whole audio system at that buffer size while StageRig
+  runs, and puts the previous value back on quit or as soon as you untick it.
+  Turn it on when another app has forced a big buffer and StageRig cannot get
+  a small one.
 - **Keep the processor at full speed while StageRig runs** -- on by default.
   Holds the computer in its performance power mode, so the processor does not
   slow down between notes and answer late, a common cause of crackle. The

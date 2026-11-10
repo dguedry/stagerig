@@ -86,6 +86,7 @@ public:
         engine.getDeviceManager().addChangeListener (this);
         lastType = engine.getDeviceManager().getCurrentAudioDeviceType();
         engine.setAudioWindowOpen (true);
+        showForType();
         refreshStatus();
         refreshVolume();
         startTimer (1000);
@@ -101,11 +102,14 @@ public:
     {
         auto r = getLocalBounds().reduced (10);
         title.setBounds (r.removeFromTop (22));
-        auto row = r.removeFromTop (26);
-        quantumLabel.setBounds (row.removeFromLeft (120));
-        quantumBox.setBounds (row.removeFromLeft (260));
-        r.removeFromTop (6);
-        takeover.setBounds (r.removeFromTop (24));
+        if (onPipeWire())       // PipeWire's buffer: only there when StageRig plays through it
+        {
+            auto row = r.removeFromTop (26);
+            quantumLabel.setBounds (row.removeFromLeft (120));
+            quantumBox.setBounds (row.removeFromLeft (260));
+            r.removeFromTop (6);
+            takeover.setBounds (r.removeFromTop (24));
+        }
         performance.setBounds (r.removeFromTop (24));
         r.removeFromTop (4);
         auto vol = r.removeFromTop (26);
@@ -127,6 +131,19 @@ public:
     }
 
 private:
+    /** The top buffer size and the system takeover are PipeWire's: on ALSA, StageRig
+       has the interface to itself and its buffer is the one in the device section below. */
+    bool onPipeWire() const { return engine.getDeviceManager().getCurrentAudioDeviceType() != "ALSA"; }
+
+    void showForType()
+    {
+        const bool pw = onPipeWire();
+        quantumLabel.setVisible (pw);
+        quantumBox.setVisible (pw);
+        takeover.setVisible (pw);
+        resized();
+    }
+
     /** Ticked: the whole computer is held at StageRig's buffer size, the clock as it was
         kept until StageRig quits (Main puts it back). Unticked: put back now. */
     void holdSystem (bool hold)
@@ -177,8 +194,8 @@ private:
                 << juce::String (1000.0 * d->getOutputLatencyInSamples() / sr, 1) << " ms";
             if (d->getTypeName() == "JACK")
                 txt << (LowLatency::pipeWireJackLoaded() ? "  (PipeWire graph)" : "  (JACK server)");
-            else
-                txt << "  -- choose JACK as the audio device type below: that is PipeWire's direct path, with no resampling";
+            else if (d->getTypeName() == "ALSA")
+                txt << "  (direct to the interface; its buffer size is set below)";
         }
         else txt << "no audio device open";
         for (const auto& w : engine.deviceWarnings()) txt << "\nWARNING: " << w;
@@ -190,7 +207,7 @@ private:
         if (clock.forceQuantum.isNotEmpty() && clock.forceQuantum != "0")
             txt << "\nSystem buffer forced to " << clock.forceQuantum << " samples" << (clock.forceRate.isNotEmpty() && clock.forceRate != "0" ? " at " + clock.forceRate + " Hz" : juce::String());
         const int wanted = settings.getBoolValue ("pipewireTakeover", true) ? settings.getIntValue ("pipewireQuantum", 128) : 0;
-        if (wanted > 0 && engine.getLastBlockSize() > wanted)
+        if (onPipeWire() && wanted > 0 && engine.getLastBlockSize() > wanted)
             txt << "\nWARNING: the system is running a " << engine.getLastBlockSize() << "-sample buffer, not the " << wanted
                 << " you asked for. Another application (Bitwig, for example) has forced it: close it, or set its buffer to " << wanted << ".";
         else if (clock.quantum.isNotEmpty())
@@ -309,6 +326,7 @@ private:
             }
         }
         lastType = type;
+        showForType();
         refreshStatus();
         refreshVolume();
     }
