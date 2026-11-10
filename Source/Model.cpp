@@ -125,6 +125,7 @@ var EffectDef::toVar() const
     if (auto xml = plugin.createXml())
         o->setProperty ("plugin", xml->toString (XmlElement::TextFormat().singleLine()));
     o->setProperty ("state", state.toBase64Encoding());
+    if (soundName.isNotEmpty()) o->setProperty ("soundName", soundName);
     o->setProperty ("bypassed", bypassed);
     return var (o);
 }
@@ -196,6 +197,7 @@ EffectDef EffectDef::fromVar (const var& v)
     if (auto xml = parseXML (propStr (v, "plugin")))
         e.plugin.loadFromXml (*xml);
     e.state.fromBase64Encoding (propStr (v, "state"));
+    e.soundName = propStr (v, "soundName");
     e.bypassed = prop<bool> (v, "bypassed", false);
     return e;
 }
@@ -207,6 +209,7 @@ var SlotDef::toVar() const
     if (auto xml = plugin.createXml())
         o->setProperty ("plugin", xml->toString (XmlElement::TextFormat().singleLine()));
     o->setProperty ("state", state.toBase64Encoding());
+    if (soundName.isNotEmpty()) o->setProperty ("soundName", soundName);
     o->setProperty ("enabled", enabled);
     o->setProperty ("gainDb", gainDb);
     o->setProperty ("transpose", transpose);
@@ -279,6 +282,7 @@ SlotDef SlotDef::fromVar (const var& v)
     if (auto xml = parseXML (propStr (v, "plugin")))
         s.plugin.loadFromXml (*xml);
     s.state.fromBase64Encoding (propStr (v, "state"));
+    s.soundName  = propStr (v, "soundName");
     s.enabled    = prop<bool>  (v, "enabled", true);
     s.gainDb     = prop<float> (v, "gainDb", 0.0f);
     s.transpose  = prop<int>   (v, "transpose", 0);

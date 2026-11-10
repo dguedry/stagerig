@@ -305,3 +305,16 @@ foreach(size 16 24 32 48 64 128 256 512)
 endforeach()
 
 include(CPack)
+
+juce_add_console_app(PresetTest PRODUCT_NAME "PresetTest")
+target_sources(PresetTest PRIVATE Tests/PresetTest.cpp Source/ControlMaps.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/MappingSuggestions.cpp Source/QrCode.cpp)
+target_include_directories(PresetTest PRIVATE Source)
+target_compile_definitions(PresetTest PRIVATE
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_LV2=0 JUCE_PLUGINHOST_LADSPA=0 JUCE_PLUGINHOST_VST=0)
+target_link_libraries(PresetTest PRIVATE
+    ClapHeaders
+    juce::juce_audio_processors juce::juce_audio_utils
+    juce::juce_core juce::juce_data_structures juce::juce_events
+    juce::juce_graphics juce::juce_gui_basics juce::juce_gui_extra
+    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)

@@ -110,6 +110,33 @@ struct NksPreset
     juce::String pagesKey() const;
 };
 
+/** One of a plugin maker's sounds: an NKS preset file, by its name and where
+    it sits in the maker's library (Native Instruments' Komplete Kontrol
+    browses the same files). Read without the sound itself, which can be big;
+    nksStateFor reads that when the sound is chosen. */
+struct NksSound
+{
+    juce::File file;
+    juce::String name, bank;               // bank: the maker's sub-banks, "Factory / Leads"
+    juce::StringArray tags;                // the maker's types and characters: "Synth Lead", "Analog"
+    juce::String vendor, product, pluginName, pluginVendor;
+    /** JUCE's id for the VST3 the file names (PluginDescription::uniqueId), when it names one. */
+    int vst3UniqueId = 0;
+    bool hasVst3Id = false;
+
+    static juce::Result read (const juce::File&, NksSound& out);
+    /** How surely it is this plugin's sound: 0 not, 4 by the plugin's own id, else as NksPreset::matches. */
+    int matches (const juce::PluginDescription&) const;
+};
+
+/** The state to give a plugin for an NKS sound, in the form JUCE's VST3 host
+    takes (AudioProcessor::setStateInformation). `current` is the plugin's
+    own state now, whose form says how its maker reads a sound: Native
+    Instruments' plugins take the preset file itself; a VST3 preset (the
+    maker's .vstpreset, inside) gives its two parts. Fails for a plugin not
+    loaded as VST3, as NKS sounds are made for VST plugins. */
+juce::Result nksStateFor (const juce::File&, const juce::MemoryBlock& current, juce::MemoryBlock& out);
+
 /** NKS pages as a setup for the plugin as it is loaded here. A knob is
     found by its id when the ids are the plugin's kind (VST3 and VST3);
     otherwise by its VST2 number when the parameter there has a name like the
@@ -161,6 +188,9 @@ public:
     /** The NKS pages for this plugin: those most of its presets have. Null
         when there are none or the search has not finished. */
     const NksPreset* findNks (const juce::PluginDescription&) const;
+    /** Every NKS sound found for this plugin, by bank and name. Empty when
+        there are none or the search has not finished. Any thread. */
+    std::vector<NksSound> soundsFor (const juce::PluginDescription&) const;
     /** Goes up by one when the search finishes, so what was worked out
         without its pages can be worked out again. */
     int getNksGeneration() const                            { return nksGeneration.load(); }
@@ -176,6 +206,7 @@ private:
     std::vector<Entry> maps;
 
     std::vector<NksPreset> nks;            // written once, by the search, before nksGeneration goes up
+    std::vector<NksSound> sounds;          // likewise
     std::atomic<int> nksGeneration { 0 };
     std::atomic<bool> nksStop { false };
     std::thread nksThread;

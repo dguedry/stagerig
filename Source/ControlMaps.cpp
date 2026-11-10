@@ -484,21 +484,189 @@ Result NksPreset::parse (const void* data, size_t size, NksPreset& out)
     return Result::ok();
 }
 
+namespace
+{
+    /** By the names an NKS file gives its plugin and maker. */
+    int nksNameMatch (const PluginDescription& d, const String& product, const String& pluginName,
+                      const String& vendor, const String& pluginVendor)
+    {
+        const auto wanted = plainWords (d.name);
+        if (wanted.isEmpty()) return 0;
+        const auto maker = plainWords (pluginVendor.isNotEmpty() ? pluginVendor : vendor), theirs = plainWords (d.manufacturerName);
+        if (maker.isNotEmpty() && theirs.isNotEmpty() && ! maker.contains (theirs) && ! theirs.contains (maker)) return 0;
+        int best = 0;
+        for (const auto& c : { plainWords (pluginName), plainWords (product) })
+        {
+            if (c.isEmpty()) continue;
+            if (c == wanted)                           best = jmax (best, 3);
+            else if (c.endsWith (" " + wanted))        best = jmax (best, 2);
+            else if (c.startsWith (wanted + " "))      best = jmax (best, 1);
+        }
+        return best;
+    }
+
+    uint32 le32 (const uint8* p) { return (uint32) p[0] | ((uint32) p[1] << 8) | ((uint32) p[2] << 16) | ((uint32) p[3] << 24); }
+    uint64 le64 (const uint8* p) { return (uint64) le32 (p) | ((uint64) le32 (p + 4) << 32); }
+
+    /** The chunks of an NKS file: id -> body (after the four-byte version). */
+    bool nksChunks (const MemoryBlock& data, std::map<String, std::pair<size_t, size_t>>& out)
+    {
+        const auto* d = static_cast<const uint8*> (data.getData());
+        const auto size = data.getSize();
+        if (size < 12 || std::memcmp (d, "RIFF", 4) != 0 || std::memcmp (d + 8, "NIKS", 4) != 0) return false;
+        for (size_t at = 12; at + 8 <= size;)
+        {
+            const uint32 len = le32 (d + at + 4);
+            if (len > size - at - 8) break;
+            if (len >= 4) out[String::fromUTF8 ((const char*) d + at, 4)] = { at + 12, (size_t) len - 4 };
+            at += 8 + (size_t) len + (len & 1);
+        }
+        return true;
+    }
+}
+
+Result NksSound::read (const File& f, NksSound& out)
+{
+    /* Only the description and the plugin's id, which come before the sound:
+       read a chunk header at a time and the sound passed over. */
+    FileInputStream in (f);
+    if (! in.openedOk()) return Result::fail ("Could not read " + f.getFullPathName());
+    char head[12];
+    if (in.read (head, 12) != 12 || std::memcmp (head, "RIFF", 4) != 0 || std::memcmp (head + 8, "NIKS", 4) != 0)
+        return Result::fail ("This is not an NKS preset.");
+    var info, plugin;
+    for (int n = 0; n < 16 && ! in.isExhausted(); ++n)
+    {
+        uint8 h[8];
+        if (in.read (h, 8) != 8) break;
+        const uint32 len = le32 (h + 4);
+        const bool wanted = std::memcmp (h, "NISI", 4) == 0 || std::memcmp (h, "PLID", 4) == 0;
+        if (wanted && len > 4 && len < 1024 * 1024)
+        {
+            MemoryBlock body;
+            if (in.readIntoMemoryBlock (body, (ssize_t) len) != (size_t) len) break;
+            MsgPack m { static_cast<const uint8*> (body.getData()) + 4, static_cast<const uint8*> (body.getData()) + len };
+            auto v = m.read();
+            if (m.ok) (std::memcmp (h, "NISI", 4) == 0 ? info : plugin) = v;
+            if (len & 1) in.skipNextBytes (1);
+        }
+        else if (! in.setPosition (in.getPosition() + (int64) len + (len & 1))) break;
+        if (! info.isVoid() && ! plugin.isVoid()) break;
+    }
+    if (info.isVoid()) return Result::fail ("This NKS preset has no description.");
+
+    NksSound s;
+    s.file = f;
+    s.name = info["name"].toString();
+    if (s.name.isEmpty()) s.name = f.getFileNameWithoutExtension();
+    s.vendor = info["vendor"].toString();
+    if (auto* chain = info["bankchain"].getArray())
+    {
+        StringArray parts;
+        for (int i = 0; i < chain->size(); ++i)
+            if (const auto part = chain->getReference (i).toString().trim(); part.isNotEmpty())
+                (i == 0 ? s.product = part : (parts.add (part), s.product));
+        s.bank = parts.joinIntoString (" / ");
+    }
+    auto addTags = [&s] (const var& list)
+    {
+        if (auto* a = list.getArray())
+            for (const auto& t : *a)
+            {
+                if (auto* inner = t.getArray()) { for (const auto& x : *inner) s.tags.addIfNotAlreadyThere (x.toString()); }
+                else s.tags.addIfNotAlreadyThere (t.toString());
+            }
+    };
+    addTags (info["types"]);
+    addTags (info["modes"]);
+    s.tags.removeEmptyStrings();
+    s.pluginName = plugin["pluginName"].toString();
+    s.pluginVendor = plugin["pluginVendor"].toString();
+    if (auto* uid = plugin["VST3.uid"].getArray(); uid != nullptr && uid->size() == 4)
+    {
+        uint32 hash = 0;      // as JUCE makes PluginDescription::uniqueId from the class id
+        bool any = false;
+        for (const auto& part : *uid)
+        {
+            const auto v = (uint32) (int64) part;
+            any = any || v != 0;
+            hash = hash * 31 + v;
+        }
+        s.hasVst3Id = any;
+        s.vst3UniqueId = (int) hash;
+    }
+    out = std::move (s);
+    return Result::ok();
+}
+
+int NksSound::matches (const PluginDescription& d) const
+{
+    if (hasVst3Id && d.pluginFormatName == "VST3") return d.uniqueId == vst3UniqueId ? 4 : 0;
+    return nksNameMatch (d, product, pluginName, vendor, pluginVendor);
+}
+
+Result nksStateFor (const File& f, const MemoryBlock& current, MemoryBlock& out)
+{
+    auto head = AudioProcessor::getXmlFromBinary (current.getData(), (int) current.getSize());
+    if (head == nullptr || ! head->hasTagName ("VST3PluginState"))
+        return Result::fail ("The maker's sounds load into the VST3 version of this plugin only.");
+    if (f.getSize() > 256 * 1024 * 1024) return Result::fail (f.getFileName() + " is too big to be an NKS preset.");
+    MemoryBlock data;
+    if (! f.loadFileAsData (data)) return Result::fail ("Could not read " + f.getFullPathName());
+    std::map<String, std::pair<size_t, size_t>> chunks;
+    if (! nksChunks (data, chunks)) return Result::fail ("This is not an NKS preset.");
+    const auto pchk = chunks.find ("PCHK");
+    if (pchk == chunks.end()) return Result::fail ("This NKS preset holds no sound.");
+    const auto* d = static_cast<const uint8*> (data.getData()) + pchk->second.first;
+    const auto n = pchk->second.second;
+
+    XmlElement state ("VST3PluginState");
+    auto add = [&state] (const char* part, const void* bytes, size_t size)
+    {
+        if (size > 0) state.createNewChildElement (part)->addTextElement (MemoryBlock (bytes, size).toBase64Encoding());
+    };
+
+    if (n >= 48 && std::memcmp (d, "VST3", 4) == 0)
+    {
+        /* A VST3 preset: "VST3", version, the class id as 32 characters, where
+           its list of parts is; the list names the component's part ("Comp")
+           and the controller's ("Cont") by place and size. */
+        const auto listAt = le64 (d + 40);
+        if (listAt + 8 > n || std::memcmp (d + listAt, "List", 4) != 0) return Result::fail ("This NKS preset's sound is damaged.");
+        const auto count = le32 (d + listAt + 4);
+        bool comp = false;
+        for (uint32 i = 0; i < count && i < 64; ++i)
+        {
+            const auto at = listAt + 8 + (uint64) i * 20;
+            if (at + 20 > n) break;
+            const auto offset = le64 (d + at + 4), size = le64 (d + at + 12);
+            if (offset > n || size > n - offset) continue;
+            if (std::memcmp (d + at, "Comp", 4) == 0) { add ("IComponent", d + offset, (size_t) size); comp = size > 0; }
+            else if (std::memcmp (d + at, "Cont", 4) == 0) add ("IEditController", d + offset, (size_t) size);
+        }
+        if (! comp) return Result::fail ("This NKS preset's sound is damaged.");
+    }
+    else
+    {
+        MemoryBlock now;
+        if (auto* c = head->getChildByName ("IComponent")) now.fromBase64Encoding (c->getAllSubText());
+        const auto* p = static_cast<const uint8*> (now.getData());
+        if (now.getSize() >= 12 && std::memcmp (p, "RIFF", 4) == 0 && std::memcmp (p + 8, "NIKS", 4) == 0)
+        {
+            // Native Instruments' plugins keep their VST3 state as a preset file: the file itself, then.
+            add ("IComponent", data.getData(), data.getSize());
+            add ("IEditController", data.getData(), data.getSize());
+        }
+        else
+            add ("IComponent", d, n);     // the VST2 sound, which most makers' VST3 versions read the same
+    }
+    AudioProcessor::copyXmlToBinary (state, out);
+    return Result::ok();
+}
+
 int NksPreset::matches (const PluginDescription& d) const
 {
-    const auto wanted = plainWords (d.name);
-    if (wanted.isEmpty()) return 0;
-    const auto maker = plainWords (pluginVendor.isNotEmpty() ? pluginVendor : vendor), theirs = plainWords (d.manufacturerName);
-    if (maker.isNotEmpty() && theirs.isNotEmpty() && ! maker.contains (theirs) && ! theirs.contains (maker)) return 0;
-    int best = 0;
-    for (const auto& c : { plainWords (pluginName), plainWords (product) })
-    {
-        if (c.isEmpty()) continue;
-        if (c == wanted)                           best = jmax (best, 3);
-        else if (c.endsWith (" " + wanted))        best = jmax (best, 2);    // "spitfire audio bbc symphony orchestra"
-        else if (c.startsWith (wanted + " "))      best = jmax (best, 1);    // "super 8 r2"
-    }
-    return best;
+    return nksNameMatch (d, product, pluginName, vendor, pluginVendor);
 }
 
 String NksPreset::pagesKey() const
@@ -638,6 +806,7 @@ void ControlMapLibrary::startNksSearch (const Array<File>& folders)
     {
         // The presets by folder: a plugin keeps its presets together, and they mostly share their pages.
         std::map<String, Array<File>> byFolder;
+        std::vector<File> every;      // every preset: the plugins' sounds
         int seen = 0;
         /* One folder at a time, so a stop (StageRig quitting) is seen within
            one folder's listing however big the tree; symlinks are not followed. */
@@ -652,6 +821,7 @@ void ControlMapLibrary::startNksSearch (const Array<File>& folders)
                 if (child.isSymbolicLink()) continue;
                 if (child.isDirectory()) { if (toWalk.size() < 100000) toWalk.push_back (child); continue; }
                 if (! child.hasFileExtension (".nksf") || ++seen > 200000) continue;
+                every.push_back (child);
                 auto& list = byFolder[dir.getFullPathName()];
                 if (list.size() < 16) list.add (child);
             }
@@ -672,7 +842,16 @@ void ControlMapLibrary::startNksSearch (const Array<File>& folders)
             for (const auto& [key, k] : kinds) if (most == nullptr || k.first > most->first) most = &k;
             if (most != nullptr) found.push_back (most->second);
         }
+        std::vector<NksSound> soundList;
+        soundList.reserve (every.size());
+        for (const auto& f : every)
+        {
+            if (nksStop.load()) break;
+            NksSound sd;
+            if (NksSound::read (f, sd).wasOk()) soundList.push_back (std::move (sd));
+        }
         nks = std::move (found);
+        sounds = std::move (soundList);
         ++nksGeneration;
     });
 }
@@ -685,6 +864,23 @@ const NksPreset* ControlMapLibrary::findNks (const PluginDescription& d) const
     for (const auto& n : nks)
         if (const int s = n.matches (d); s > bestScore) { best = &n; bestScore = s; }
     return best;
+}
+
+std::vector<NksSound> ControlMapLibrary::soundsFor (const PluginDescription& d) const
+{
+    std::vector<NksSound> out;
+    if (nksGeneration.load() == 0) return out;
+    // The surest match only: "Super 8 R2" names Super 8, but not when another library names it outright.
+    int best = 0;
+    for (const auto& s : sounds) best = jmax (best, s.matches (d));
+    if (best == 0) return out;
+    for (const auto& s : sounds) if (s.matches (d) == best) out.push_back (s);
+    std::sort (out.begin(), out.end(), [] (const NksSound& a, const NksSound& b)
+    {
+        if (const int c = a.bank.compareNatural (b.bank); c != 0) return c < 0;
+        return a.name.compareNatural (b.name) < 0;
+    });
+    return out;
 }
 
 bool ControlMapLibrary::waitForNks (int ms) const

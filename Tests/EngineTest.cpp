@@ -199,6 +199,87 @@ static int probeNks (const String& wanted)
     return 0;
 }
 
+/** STAGERIG_TEST_SOUNDS=<plugin name>: the maker's sounds through the engine,
+    on a real plugin from this computer's plugin list, in its own process as
+    on stage: two sounds chosen, each kept in the program under its name;
+    the sound before put back; and the plugin started again from what the
+    program kept is the sound chosen. Starts Wine; run by hand. */
+static int probeSounds (const String& wanted)
+{
+    const File scratch = File::getSpecialLocation (File::tempDirectory).getChildFile ("StageRigSoundsTest-" + String (Time::currentTimeMillis()));
+    scratch.createDirectory();
+    struct Cleanup { File d; ~Cleanup() { d.deleteRecursively(); } } cleanup { scratch };
+    PropertiesFile::Options opts;
+    opts.applicationName = "StageRigSoundsTest";
+    opts.filenameSuffix = "settings";
+    PropertiesFile settings (scratch.getChildFile ("test.settings"), opts);
+    PluginHost host (settings);
+
+    ControlMapLibrary library (scratch.getChildFile ("maps"));
+    library.startNksSearch (ControlMapLibrary::defaultNksFolders());
+    CHECK (library.waitForNks (600000));
+
+    PluginDescription desc;
+    bool found = false;
+    if (auto xml = parseXML (File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("StageRig/StageRig.settings")))
+        for (auto* v : xml->getChildWithTagNameIterator ("VALUE"))
+            if (v->getStringAttribute ("name") == "pluginList")
+                if (auto* kp = v->getChildByName ("KNOWNPLUGINS"))
+                {
+                    KnownPluginList list;
+                    list.recreateFromXml (*kp);
+                    for (const auto& d : list.getTypes())
+                        if (! found && d.name.equalsIgnoreCase (wanted) && d.pluginFormatName == "VST3") { desc = d; found = true; }
+                }
+    if (! found) { std::printf ("SKIP: no VST3 called %s in StageRig's plugin list\n", wanted.toRawUTF8()); return 77; }
+    const auto sounds = library.soundsFor (desc);
+    CHECK (sounds.size() >= 2);
+    if (sounds.size() < 2) return 1;
+
+    Engine engine (host, settings, /*startAudioDevice*/ false);
+    auto settle = [&engine] { const auto t0 = Time::getMillisecondCounterHiRes(); pump (30);
+                              while (engine.hasPendingLoads() && Time::getMillisecondCounterHiRes() - t0 < 180000.0) pump (50); };
+    String err;
+    CHECK (engine.addSlot (0, 0, desc, err));
+    settle();
+    CHECK (engine.isPluginAlive (0, 0, 0));
+    auto* plugin = engine.getPlugin (0, 0, 0);
+    if (plugin == nullptr || ! plugin->isAlive()) { std::printf ("     could not start %s: %s\n", wanted.toRawUTF8(), engine.getPluginLoadError (0, 0, 0).toRawUTF8()); return 1; }
+    MemoryBlock before;
+    CHECK (plugin->getState (before));
+
+    const auto& slot = [&engine]() -> const SlotDef& { return engine.getSetup().inputs[0].programs[0].slots[0]; };
+    const auto& a = sounds.front();
+    const auto& b = sounds[sounds.size() / 2];
+    CHECK (engine.setPluginSound (0, 0, 0, -1, a.file, a.name).isEmpty());
+    CHECK (slot().soundName == a.name);
+    const auto keptA = slot().state;
+    CHECK (keptA != before);
+    CHECK (engine.setPluginSound (0, 0, 0, -1, b.file, b.name).isEmpty());
+    CHECK (slot().soundName == b.name);
+    const auto keptB = slot().state;
+    CHECK (keptB != keptA);
+
+    // Saved and read again: the name goes with the program.
+    CHECK (SlotDef::fromVar (slot().toVar()).soundName == b.name);
+
+    // Started afresh from the program: the sound chosen.
+    engine.reloadPlugin (0, 0, 0);
+    settle();
+    MemoryBlock reloaded;
+    if (auto* p = engine.getPlugin (0, 0, 0); p != nullptr && p->isAlive()) p->getState (reloaded);
+    CHECK (reloaded.getSize() > 0);
+    CHECK (reloaded == keptB || reloaded != keptA);
+    std::printf ("     reloaded %s: %s\n", b.name.toRawUTF8(), reloaded == keptB ? "the same state" : "a state of its own (not the other sound)");
+
+    // The sound before, put back.
+    CHECK (engine.setPluginState (0, 0, 0, -1, before, {}).isEmpty());
+    CHECK (slot().soundName.isEmpty());
+    std::printf ("SOUNDS %s: %d failure(s)\n", wanted.toRawUTF8(), failures);
+    std::fflush (stdout);
+    std::_Exit (failures == 0 ? 0 : 1);
+}
+
 /* A keyboard speaking MIDI-CI Property Exchange, played by JUCE's own
    MIDI-CI: it finds StageRig, reads the program in play, the programs and the
    knobs, and is told when the program changes. Each answer is checked against
@@ -544,6 +625,8 @@ int main()
         return probeKompleteKontrol (String (k).getIntValue());
     if (const char* n = std::getenv ("STAGERIG_TEST_NKS"); n != nullptr && *n != 0)
         return probeNks (String (n));
+    if (const char* n = std::getenv ("STAGERIG_TEST_SOUNDS"); n != nullptr && *n != 0)
+        return probeSounds (String (n));
 
     // Own scratch folder: PluginHost keeps its crash list ("dead man's pedal") next to
     // the settings file, and a plain temp file would share /tmp with every other run,

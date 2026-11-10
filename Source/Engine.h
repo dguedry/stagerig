@@ -621,6 +621,12 @@ public:
     int getLoadsInFlight() const                    { return loadsInFlight.load(); }
     int getParallelLoads() const                    { return loaderThreadCount; }
     juce::String getPluginLoadError (int inputIndex, int program, int slot, int effect = -1) const;
+    /** Gives a plugin one of its maker's sounds (an NKS preset, from
+        ControlMapLibrary::soundsFor): it plays it at once, and the program
+        keeps it, under that name. Returns what went wrong, or nothing. */
+    juce::String setPluginSound (int inputIndex, int program, int slot, int effect, const juce::File& nksFile, const juce::String& soundName);
+    /** Gives a plugin a state of its own, as it was (the sound before choosing another), kept the same way. */
+    juce::String setPluginState (int inputIndex, int program, int slot, int effect, const juce::MemoryBlock&, const juce::String& soundName);
     /** Restarts a plugin that failed or crashed, from its saved definition and state. */
     void reloadPlugin (int inputIndex, int program, int slot, int effect = -1);
 

@@ -51,6 +51,10 @@ public:
     /** The controller setup of an instrument of the program being edited: its knobs, screen and lights. */
     void showKnobsFor (int slot);
     void showKnobsFor (int input, int program, int slot);
+    /** Sounds...: the maker's sounds for an instrument of the program being edited, to try and keep. */
+    void showSoundsFor (int slot);
+    /** The makers' sounds found on this computer (NKS presets), or null before the library exists. */
+    ControlMapLibrary* getControlMaps() const      { return controlMaps.get(); }
     void showPedals();
     /** The Knobs window for the instrument the input's knobs are on, in the edited program. */
     void showKnobsForFocus();
@@ -149,6 +153,7 @@ private:
     std::unique_ptr<ControlMapLibrary> controlMaps;
     std::unique_ptr<SurfaceHub> surfaceHub;
     std::vector<juce::Component::SafePointer<juce::Component>> controllerWindows;   // closed before the hub goes
+    int nksSeen = 0;
     bool raiseWindow (const juce::String& title);                                   // brings an open one of these to the front
     void showControllers();
     juce::Label tailLabel { {}, "Tail" };

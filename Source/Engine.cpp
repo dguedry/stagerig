@@ -5,6 +5,7 @@
 #include "LowLatency.h"
 #include "Liveness.h"
 #include "DeviceReservation.h"
+#include "ControlMaps.h"
 #if JUCE_LINUX
  #include <dlfcn.h>
 #endif
@@ -4410,6 +4411,43 @@ RemotePlugin* Engine::getPlugin (int inputIndex, int program, int slot, int effe
 {
     auto* node = getNode (inputIndex, program, slot, effect);
     return node != nullptr ? node->plugin.get() : nullptr;
+}
+
+String Engine::setPluginSound (int inputIndex, int program, int slot, int effect, const File& nksFile, const String& soundName)
+{
+    auto* p = getPlugin (inputIndex, program, slot, effect);
+    if (p == nullptr || ! p->isAlive()) return "The plugin is not running.";
+    MemoryBlock now, state;
+    if (! p->getState (now, 10000)) return "The plugin did not answer.";
+    if (const auto r = nksStateFor (nksFile, now, state); r.failed()) return r.getErrorMessage();
+    return setPluginState (inputIndex, program, slot, effect, state, soundName);
+}
+
+String Engine::setPluginState (int inputIndex, int program, int slot, int effect, const MemoryBlock& state, const String& soundName)
+{
+    auto* p = getPlugin (inputIndex, program, slot, effect);
+    if (p == nullptr || ! p->isAlive()) return "The plugin is not running.";
+    if (! p->setState (state)) return "The plugin did not take the sound.";
+    // Kept as the plugin now has it (its own form of the sound), so a reload is this sound.
+    MemoryBlock kept;
+    if (! p->getState (kept, 10000) || kept.getSize() == 0) kept = state;
+    if (auto* def = defFor (inputIndex, program))
+    {
+        if (effect < 0)
+        {
+            if (slot >= 0 && slot < (int) def->slots.size())
+            {
+                def->slots[(size_t) slot].state = std::move (kept);
+                def->slots[(size_t) slot].soundName = soundName;
+            }
+        }
+        else if (auto* chain = const_cast<std::vector<EffectDef>*> (def->chainFor (slot)); chain != nullptr && effect < (int) chain->size())
+        {
+            (*chain)[(size_t) effect].state = std::move (kept);
+            (*chain)[(size_t) effect].soundName = soundName;
+        }
+    }
+    return {};
 }
 
 bool Engine::isPluginAlive (int inputIndex, int program, int slot, int effect) const

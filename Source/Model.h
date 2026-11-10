@@ -22,6 +22,7 @@ struct EffectDef
 
     juce::PluginDescription plugin;
     juce::MemoryBlock state;
+    juce::String soundName;           // the maker's sound it was given (Sounds...), for display; empty if none
     bool bypassed = false;
 
     // A MIDI send ------------------------------------------------------------
@@ -98,6 +99,7 @@ struct SlotDef
 
     juce::PluginDescription plugin;   // which plugin
     juce::MemoryBlock state;          // last saved plugin state
+    juce::String soundName;           // the maker's sound it was given (Sounds...), for display; empty if none
     bool enabled = true;
     float gainDb = 0.0f;
     int transpose = 0;                // semitones

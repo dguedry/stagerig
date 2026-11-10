@@ -14,6 +14,7 @@
 #include "ProgramMap.h"
 #include "ParamPicker.h"
 #include "ControllerWindows.h"
+#include "SoundBrowser.h"
 #include <optional>
 
 using namespace juce;
@@ -1432,6 +1433,9 @@ public:
             addAndMakeVisible (knobsBtn);
             knobsBtn.setTooltip ("What the keyboard's eight knobs turn on this plugin, the same on any keyboard and in every program with it");
             knobsBtn.onClick = [this] { panel.owner.showKnobsFor (index); };
+            addChildComponent (soundsBtn);
+            soundsBtn.setTooltip ("The sounds this plugin's maker made for it: try them while you play, and keep one in this program");
+            soundsBtn.onClick = [this] { panel.owner.showSoundsFor (index); };
             addAndMakeVisible (removeBtn);
             removeBtn.setTooltip ("Remove this instrument from the program");
             addAndMakeVisible (midiChain);
@@ -1532,7 +1536,8 @@ public:
             }
             else
             {
-                name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]" + (loading ? "   loading..." : String()), dontSendNotification);
+                name.setText (def.plugin.name + (def.soundName.isNotEmpty() ? ": " + def.soundName : String())
+                              + "  [" + def.plugin.pluginFormatName + "]" + (loading ? "   loading..." : String()), dontSendNotification);
                 name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
                 name.setTooltip (error.isNotEmpty() ? error : "File: " + def.plugin.fileOrIdentifier);
             }
@@ -1568,6 +1573,7 @@ public:
             else if (inputSlot)
                 guiBtn.setVisible (false);
             knobsBtn.setVisible (def.isPlugin());
+            soundsBtn.setVisible (def.isPlugin() && loaded && hasSounds (def.plugin));
             if (def.isPlugin())
             {
                 guiBtn.setButtonText (loading ? "Loading" : loaded ? "Window" : "Reload");
@@ -1580,6 +1586,16 @@ public:
         }
 
         void mouseDown (const MouseEvent&) override { panel.owner.playInstrumentFromKeyboard (index); }
+
+        /** Whether the maker's sounds for this plugin were found; worked out once a plugin and search. */
+        bool hasSounds (const PluginDescription& d)
+        {
+            auto* lib = panel.owner.getControlMaps();
+            if (lib == nullptr) return false;
+            const auto key = d.createIdentifierString() + "#" + String (lib->getNksGeneration());
+            if (key != soundsKey) { soundsKey = key; soundsFound = ! lib->soundsFor (d).empty(); }
+            return soundsFound;
+        }
 
         int midiChainHeight() const { const int h = midiChain.preferredHeight(); return h > 0 ? h + 2 : 0; }
         int preferredHeight() const { return slotHeaderHeight + midiChainHeight() + chain.preferredHeight() + 4; }
@@ -1612,6 +1628,7 @@ public:
             top.removeFromRight (4);
             guiBtn.setBounds (top.removeFromRight (64));
             if (knobsBtn.isVisible()) { top.removeFromRight (4); knobsBtn.setBounds (top.removeFromRight (70)); }
+            if (soundsBtn.isVisible()) { top.removeFromRight (4); soundsBtn.setBounds (top.removeFromRight (76)); }
             name.setBounds (top);
 
             r.removeFromTop (2);
@@ -1793,7 +1810,9 @@ public:
         Label gainCap, transposeCap, keysCap, chCap, inChCap, panCap, velCap, curveCap;
         ComboBox outCh;
         TextButton inCh { "All channels" };
-        TextButton guiBtn { "Window" }, knobsBtn { "Knobs" }, removeBtn { "X" };
+        TextButton guiBtn { "Window" }, knobsBtn { "Knobs" }, soundsBtn { "Sounds..." }, removeBtn { "X" };
+        String soundsKey;
+        bool soundsFound = false;
         EffectChainComponent midiChain, chain;
     };
 
@@ -3166,6 +3185,40 @@ void MainComponent::showKnobsFor (int input, int program, int slot)
     controllerWindows.push_back (showControlMapEditor (engine, *surfaceHub, *controlMaps, input, program, slot, [this] { markDirty(); }));
 }
 
+void MainComponent::showSoundsFor (int slot)
+{
+    const int input = selectedInput, program = getEditedProgram();
+    const auto& inputs = engine.getSetup().inputs;
+    if (controlMaps == nullptr || input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return;
+    const auto& slots = inputs[(size_t) input].programs[(size_t) program].slots;
+    if (slot < 0 || slot >= (int) slots.size() || ! slots[(size_t) slot].isPlugin()) return;
+    const auto& def = slots[(size_t) slot];
+    const auto title = "Sounds: " + def.plugin.name;
+    if (raiseWindow (title)) return;
+    auto sounds = controlMaps->soundsFor (def.plugin);
+    if (sounds.empty()) { showStatus ("No sounds from " + def.plugin.name + "'s maker were found on this computer."); return; }
+
+    // The sound it has now, to go back to.
+    juce::MemoryBlock before;
+    if (auto* p = engine.getPlugin (input, program, slot); p != nullptr && p->isAlive()) p->getState (before, 10000);
+    const auto beforeName = def.soundName;
+    const auto pluginName = def.plugin.name;
+    auto* browser = new SoundBrowser (std::move (sounds), def.soundName,
+        [sp = Component::SafePointer<MainComponent> (this), input, program, slot, before, beforeName, pluginName] (const NksSound* s)
+        {
+            if (sp == nullptr) return;
+            auto& e = sp->engine;
+            const auto problem = s != nullptr ? e.setPluginSound (input, program, slot, -1, s->file, s->name)
+                                              : (before.isEmpty() ? String ("There is no sound from before to go back to.")
+                                                                  : e.setPluginState (input, program, slot, -1, before, beforeName));
+            if (problem.isNotEmpty()) { sp->showStatus (pluginName + ": " + problem); return; }
+            sp->markDirty();
+            sp->showStatus (pluginName + ": " + (s != nullptr ? s->name : String ("the sound before")));
+            if (sp->slotsPanel != nullptr) sp->slotsPanel->refresh();
+        });
+    theme::launchDialog (browser, title, 0, 0);
+}
+
 void MainComponent::showPedals()
 {
     // The Everywhere tab of the Controls panel, in the main window: Perform hides the panes, so it comes off first.
@@ -3355,6 +3408,13 @@ void MainComponent::toggleRecording()
 void MainComponent::timerCallback()
 {
     PluginView::dropDeadSessions();      // a mirrored window that was closed ends its session
+
+    // The makers' sounds found (a minute after start among many plugins): their Sounds... buttons show.
+    if (controlMaps != nullptr && controlMaps->getNksGeneration() != nksSeen)
+    {
+        nksSeen = controlMaps->getNksGeneration();
+        if (slotsPanel != nullptr) slotsPanel->refresh();
+    }
 
     /* Where the show is, kept as it changes: a StageRig restarted after a
        crash comes back exactly here. A few numbers, written only when one
