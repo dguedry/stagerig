@@ -21,7 +21,8 @@ using namespace juce;
 namespace perf
 {
 #if JUCE_LINUX
-namespace { juce::String alsaNameNow (juce::AudioIODeviceType*, const juce::String& saved, bool input); }
+namespace { juce::String alsaNameNow (juce::AudioIODeviceType*, const juce::String& saved, bool input);
+            bool alsaCardsChanged (juce::AudioIODeviceType*, const juce::String& openOutput); }
 #endif
 
 //==============================================================================
@@ -527,6 +528,7 @@ namespace
 
         void scanForDevices() override
         {
+            cardsSeen = cardList();
             alsa->scanForDevices();
             inputs.clear();
             outputs.clear();
@@ -588,6 +590,29 @@ namespace
                 return nullptr;
             }
             return alsa->createDevice (out != nullptr ? out->juceName : String(), in != nullptr ? in->juceName : String());
+        }
+
+        /** A card plugged in or taken out since the last look: the list is made
+            again (ALSA tells nobody), so the Audio window shows what is there and
+            the audio watch finds an interface switched back on. Only a card
+            coming is announced: JUCE, told its open device has gone, would open
+            another interface in its place. Cheap enough for every watch tick
+            (one small file); the full scan, which asks every card, only then. */
+        bool cardsChanged (const String& openOutput)
+        {
+            if (cardList() == cardsSeen) return false;
+            const auto before = outputs.size() + inputs.size();
+            StringArray had;
+            for (const auto& d : outputs) had.add (d.name);
+            for (const auto& d : inputs)  had.add (d.name);
+            scanForDevices();
+            bool added = outputs.size() + inputs.size() > before;
+            for (const auto& d : outputs) added = added || ! had.contains (d.name);
+            for (const auto& d : inputs)  added = added || ! had.contains (d.name);
+            /* Told while its open device is not in the list (gone), JUCE would open
+               another interface in its place: then only the audio watch acts. */
+            if (added && (openOutput.isEmpty() || find (outputs, openOutput) != nullptr)) callDeviceChangeListeners();
+            return true;
         }
 
         /** The name shown now for a device saved under any older name: one of
@@ -691,9 +716,18 @@ namespace
             return card;
         }
 
+        static String cardList() { return File ("/proc/asound/cards").loadFileAsString(); }
+
         std::unique_ptr<AudioIODeviceType> alsa;
         std::vector<Direct> inputs, outputs;
+        String cardsSeen;
     };
+
+    bool alsaCardsChanged (AudioIODeviceType* t, const String& openOutput)
+    {
+        if (auto* cards = dynamic_cast<CardInputsAlsa*> (t)) return cards->cardsChanged (openOutput);
+        return false;
+    }
 
     String alsaNameNow (AudioIODeviceType* t, const String& saved, bool input)
     {
@@ -944,6 +978,12 @@ void Engine::watchAudioDevice()
     const auto now = Time::getMillisecondCounter();
     if (now - lastAudioWatch < 1500) return;
     lastAudioWatch = now;
+   #if JUCE_LINUX
+    // An interface plugged in or out: ALSA's list made again, the Audio window's with it.
+    if (deviceManager.getCurrentAudioDeviceType() == "ALSA")
+        if (auto* t = deviceManager.getCurrentDeviceTypeObject())
+            alsaCardsChanged (t, deviceManager.getAudioDeviceSetup().outputDeviceName);
+   #endif
     if (audioWindowOpen) { audioRetries = 0; audioRetryAt = 0; return; }
 
     std::unique_ptr<XmlElement> saved (settings.getXmlValue ("audioDeviceState"));
@@ -970,11 +1010,11 @@ void Engine::watchAudioDevice()
     bool stalled = false;
     if (d == nullptr || ! d->isOpen() || ! d->isPlaying())
         missing = outName.isNotEmpty() ? outName : String ("the sound system");
-    else if (type == "JACK")
+    else if (type == "JACK" || type == "ALSA")
     {
         const int wantOut = jmin (bitsIn ("audioDeviceOutChans", 2), d->getOutputChannelNames().size());
         const int wantIn  = jmin (bitsIn ("audioDeviceInChans", 2), d->getInputChannelNames().size());
-        if (d->getTypeName() != "JACK")
+        if (d->getTypeName() != type)
             missing = outName;
         else if (outName.isNotEmpty() && (open.outputDeviceName != outName || d->getActiveOutputChannels().countNumberOfSetBits() < jmax (1, wantOut)))
             missing = outName;
@@ -1023,6 +1063,19 @@ void Engine::watchAudioDevice()
                        && (! wantsInput || t->getDeviceNames (true).contains (inName));
             }
    #if JUCE_LINUX
+    /* ALSA: the list as of the last card plugged in or out. Not opened while the
+       interface is away: a USB keyboard's audio asked again and again as it
+       comes up has locked up. */
+    if (type == "ALSA")
+        for (auto* t : deviceManager.getAvailableDeviceTypes())
+            if (t->getTypeName() == "ALSA")
+            {
+                alsaCardsChanged (t, open.outputDeviceName);
+                present = (outName.isEmpty() || t->getDeviceNames (false).contains (outName))
+                       && (! wantsInput || t->getDeviceNames (true).contains (inName));
+            }
+   #endif
+   #if JUCE_LINUX
     if (soundSystemStuck.load())
     {
         if (! audioSaidStuck)
@@ -1049,7 +1102,7 @@ void Engine::watchAudioDevice()
                   "Reopen audio in Audio... tries it again.");
     }
 
-    if (type != "JACK")
+    if (type != "JACK" && type != "ALSA")
     {
         restartAudioDevice();
         return;
@@ -1075,8 +1128,8 @@ void Engine::watchAudioDevice()
     }
     else
         setup.useDefaultOutputChannels = true;
-    if (deviceManager.getCurrentAudioDeviceType() != "JACK")
-        deviceManager.setCurrentAudioDeviceType ("JACK", true);
+    if (deviceManager.getCurrentAudioDeviceType() != type)
+        deviceManager.setCurrentAudioDeviceType (type, true);
     std::fprintf (stderr, "[audio-watch] reopening: out '%s', in '%s' (attempt %d)\n",
                   setup.outputDeviceName.toRawUTF8(), setup.inputDeviceName.toRawUTF8(), audioRetries);
     deviceManager.closeAudioDevice();
