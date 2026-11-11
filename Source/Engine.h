@@ -971,6 +971,7 @@ private:
     juce::StringArray usbCards;               // "card N: usb path devnum", to see a device come back under its old number
     juce::MidiDeviceListConnection midiDeviceList;
     juce::StringArray knownMidiDevices;
+    std::map<juce::String, juce::String> midiOpenedAs;      // MIDI 1.0 inputs open now: port number -> the device it was opened as
     juce::StringArray heardAsMidi2;           // message thread
     /** Every loaded Scale and Run that follows the song's key is told the key in play. */
     void applySongKey();
@@ -1029,6 +1030,7 @@ private:
     std::map<uint64_t, PluginNode*> nodeRegistry;   // message thread only
     std::map<uint64_t, std::vector<juce::uint32>> restartTimes;   // message thread: each node's recent automatic restarts
     int autoRestarts = 0;                                           // message thread
+    std::vector<std::pair<uint64_t, juce::uint32>> loadRetries;     // message thread: a restart that failed to load, and when to try again
     std::vector<std::pair<juce::uint32, int>> lateHistory;         // message thread: (time, late count) samples
     void watchForStalls();
     float guardGain[32];                                            // audio thread: the safety guard's gain per device channel

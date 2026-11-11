@@ -185,6 +185,15 @@ bool RemotePlugin::spawn (String& error)
         return false;
     }
 
+    /* A send waits ten seconds at most: a host that has stopped reading
+       (wedged with an earlier request unanswered) and is sent a state bigger
+       than the socket holds would otherwise keep the message thread in
+       send() for ever, where no timeout of ours reaches. */
+    {
+        const timeval patience { 10, 0 };
+        ::setsockopt (fds[0], SOL_SOCKET, SO_SNDTIMEO, &patience, sizeof (patience));
+    }
+
     // The child gets its socket end as fd 3; everything of ours stays private.
     posix_spawn_file_actions_t actions;
     ::posix_spawn_file_actions_init (&actions);
@@ -355,7 +364,14 @@ bool RemotePlugin::getState (MemoryBlock& state, int timeoutMs)
 {
     // Clear first: a change arriving while the host serialises is a change after this snapshot.
     stateDirty.store (false);
-    const bool ok = request (ipc::Msg::getState, {}, timeoutMs < 0 ? kStateTimeoutMs : timeoutMs, &state, true);
+    /* Put down for not answering only when it had time to: a caller with a
+       budget (the autosave mid-set, a program change) may have a few
+       milliseconds left of it, and a healthy plugin that takes longer than
+       that to write itself out is slow, not wedged. Given a second and a half
+       and silent, it is wedged -- and left alone would hold every autosave
+       for its whole budget, never noticed while its program is not playing. */
+    const bool fullTime = timeoutMs < 0 || timeoutMs >= 1500;
+    const bool ok = request (ipc::Msg::getState, {}, timeoutMs < 0 ? kStateTimeoutMs : timeoutMs, &state, fullTime);
     if (! ok) stateDirty.store (true);
     return ok;
 }
@@ -468,7 +484,8 @@ bool RemotePlugin::request (ipc::Msg type, const MemoryBlock& payload, int timeo
         pending.erase (id);
     }
 
-    if (! sent) { markDead ("connection to plugin host lost"); return false; }
+    // Not sent: gone, or not reading for so long that the socket is full (a wedged host). Either way it is over.
+    if (! sent) { if (! hostExited()) killHost(); markDead ("connection to plugin host lost"); return false; }
     if (! arrived)
     {
         if (! alive.load()) return false;                      // the reader saw it go while we waited
@@ -589,15 +606,18 @@ void RemotePlugin::handleNotification (const ipc::FrameHeader& header, const Mem
             stateDirty.store (true);
             if (listener != nullptr)
             {
-                if ((ipc::Msg) header.type == ipc::Msg::notifyParamTouched) listener->remoteParameterTouched (*this, index, value);
-                else                                                        listener->remoteParameterChanged (*this, index, value);
+                if (auto* l = listener.load())
+                {
+                    if ((ipc::Msg) header.type == ipc::Msg::notifyParamTouched) l->remoteParameterTouched (*this, index, value);
+                    else                                                        l->remoteParameterChanged (*this, index, value);
+                }
             }
             break;
         }
         case ipc::Msg::notifyEditorClosed:
             editorOpen.store (false);
             stateDirty.store (true);
-            if (listener != nullptr) listener->remoteEditorClosed (*this);
+            if (auto* l = listener.load()) l->remoteEditorClosed (*this);
             break;
         case ipc::Msg::notifyLog:
             std::fprintf (stderr, "[plugin-host %s] %s\n", name.toRawUTF8(), in.readString().toRawUTF8());
@@ -630,7 +650,7 @@ void RemotePlugin::markDead (const String& why)
         const std::lock_guard<std::mutex> l (pendingMutex);
         for (auto& [id, p] : pending) p->event.signal();
     }
-    if (listener != nullptr) listener->remoteDied (*this);
+    if (auto* l = listener.load()) l->remoteDied (*this);
 }
 
 bool RemotePlugin::killIfStalled (int stalledMs)
@@ -647,7 +667,13 @@ bool RemotePlugin::killIfStalled (int stalledMs)
         const std::lock_guard<std::mutex> l (pendingMutex);
         answering = ! pending.empty();
     }
-    if (! watchStarted || answering || asked == done || done != watchSeq)
+    /* Not looked at for a while (the message thread was held up, perhaps by a
+       request to this very plugin that kept its audio waiting): the clock
+       starts afresh, or the first look after would put down a plugin for
+       time nobody was watching. */
+    const bool lookedLately = now - watchLookedMs < 1500;
+    watchLookedMs = now;
+    if (! watchStarted || ! lookedLately || answering || asked == done || done != watchSeq)
     {
         // Idle, or still finishing blocks: nothing stuck.
         watchStarted = true;
@@ -684,9 +710,25 @@ void RemotePlugin::beginProcess (const float* inL, const float* inR, const MidiB
     blockInFlight = false;
     if (shm == nullptr || ! alive.load()) return;
 
-    // Still busy with a block it missed the deadline for? Skip this one.
+    /* Still busy with a block it missed the deadline for? Skip this one --
+       but not what it says: a note-off or a pedal coming up in a skipped
+       block was lost, and the note hung until Panic. Note-ons are let go (a
+       note late by a block or more is better not played); the rest waits for
+       the next block the plugin takes. */
     if (shm->completedSeq.load (std::memory_order_acquire) != shm->requestSeq.load (std::memory_order_relaxed))
+    {
+        for (const auto meta : midi)
+        {
+            if (meta.numBytes > 3 || meta.numBytes <= 0) continue;
+            if ((meta.data[0] & 0xf0) == 0x90 && meta.numBytes == 3 && meta.data[2] != 0) continue;      // a note-on
+            if (carryCount >= kCarry) { carryOverflowed = true; break; }
+            auto& ev = carry[carryCount++];
+            ev.samplePosition = 0;
+            ev.size = (uint8_t) meta.numBytes;
+            std::memcpy (ev.data, meta.data, (size_t) meta.numBytes);
+        }
         return;
+    }
 
     drainDoneSemaphore();
 
@@ -707,6 +749,23 @@ void RemotePlugin::beginProcess (const float* inL, const float* inR, const MidiB
         ppqPosition += ((double) n / currentSampleRate) * (bpm / 60.0);
 
     uint32_t count = 0;
+    // First what the blocks it missed would have told it.
+    if (carryOverflowed)
+    {
+        for (int ch = 0; ch < 16 && count + 2 <= ipc::kMaxMidi; ++ch)
+            for (const int cc : { 64, 123 })
+            {
+                auto& ev = shm->midi[count++];
+                ev.samplePosition = 0;
+                ev.size = 3;
+                ev.data[0] = (uint8_t) (0xb0 | ch); ev.data[1] = (uint8_t) cc; ev.data[2] = 0;
+            }
+    }
+    else
+        for (uint32_t i = 0; i < carryCount && count < ipc::kMaxMidi; ++i)
+            shm->midi[count++] = carry[i];
+    carryCount = 0;
+    carryOverflowed = false;
     for (const auto meta : midi)
     {
         if (count >= ipc::kMaxMidi) break;

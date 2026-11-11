@@ -440,6 +440,11 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     deviceManager.addMidiInputDeviceCallback ({}, this);
     midi2 = std::make_unique<Midi2Inputs> ([this] (const String& id, const MidiMessage& m, int64 exact) { receiveMidi (id, m, exact); });
     midiDeviceList = MidiDeviceListConnection::make ([this] { midiDevicesChanged(); });
+    /* What is there at the start is known from the start: the first change
+       heard of would otherwise take every port for a new arrival, and close
+       and open them all under whoever was playing. */
+    for (const auto& d : MidiInput::getAvailableDevices())  knownMidiDevices.add ("i " + d.name + "|" + d.identifier);
+    for (const auto& d : MidiOutput::getAvailableDevices()) knownMidiDevices.add ("o " + d.name + "|" + d.identifier);
 
     // Backing tracks: WAV, AIFF, FLAC, Ogg and MP3, read ahead on their own thread.
     trackFormats.registerBasicFormats();
@@ -1436,7 +1441,7 @@ void Engine::loadSetup (Setup newSetup)
         { const ScopedLock sl (lock); gone = std::move (player); }
         trackSong = -1;
     }
-    teardownRuntimes();
+    teardownRuntimes (false);     // their state would be thrown away with the setup on the next line
     setup = std::move (newSetup);
     songInPlay = -1;                        // the set's position says which song, until one is selected
     currentScene = -1;
@@ -2349,8 +2354,27 @@ void Engine::midiDevicesChanged (const StringArray& reconnected)
     for (const auto& d : MidiOutput::getAvailableDevices()) now.add ("o " + d.name + "|" + d.identifier);
     if (now == knownMidiDevices && reconnected.isEmpty()) return;
 
-    /* One back under the identifier it had still has a dead connection on the books,
-       which enabling would take for a live one: let go of it, and it opens afresh. */
+    /* A port that has just appeared, or come back: everything holding the port
+       of that number lets go of it BEFORE anything opens it. JUCE keeps one
+       connection a port number for as long as anything holds it, dead or not,
+       and hands that same one to whoever opens the number next -- so a
+       keyboard back under its old number, opened while its control surface
+       (or the engine's own old input) still held the dead connection, came
+       back deaf: keys silent, "connected" on the status line, and nothing
+       tried again. The surfaces first, then the engine's inputs; the hub
+       finds its keyboards again on its next look. */
+    bool appeared = ! reconnected.isEmpty();
+    StringArray outsAgain;
+    for (const auto& d : ins)
+        if (! knownMidiDevices.contains ("i " + d.name + "|" + d.identifier)) appeared = true;
+    for (const auto& d : MidiOutput::getAvailableDevices())
+        if (! knownMidiDevices.contains ("o " + d.name + "|" + d.identifier))
+        {
+            appeared = true;
+            outsAgain.addIfNotAlreadyThere (d.identifier);      // its old connection, if it had one, is dead too
+        }
+    if (appeared)
+        listeners.call ([] (Listener& l) { l.midiDevicesReconnected(); });
     for (const auto& d : ins)
         if (! knownMidiDevices.contains ("i " + d.name + "|" + d.identifier))
             deviceManager.setMidiInputDeviceEnabled (d.identifier, false);
@@ -2360,15 +2384,12 @@ void Engine::midiDevicesChanged (const StringArray& reconnected)
     for (const auto& rt : runtimes) had.push_back (rt->deviceIdentifier.isNotEmpty());
     openMidiDevices (reconnected);
     // The same cards' output ports, back under their old numbers too.
-    StringArray outsAgain;
     for (const auto& d : MidiOutput::getAvailableDevices())
         for (const auto& id : reconnected)
             if (d.identifier.upToFirstOccurrenceOf ("-", false, false) == id.upToFirstOccurrenceOf ("-", false, false))
                 outsAgain.addIfNotAlreadyThere (d.identifier);
     midiOuts.refresh (outsAgain);
     resolveClockPorts();
-    if (! reconnected.isEmpty())
-        listeners.call ([] (Listener& l) { l.midiDevicesReconnected(); });
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 
     // A device gives no sign of its own: say what changed, once for each.
@@ -2502,8 +2523,23 @@ void Engine::openMidiDevices (const StringArray& reconnected)
     }
     heardAsMidi2 = heard;
 
+    /* Opened as the device it is now. A port number that was open for another
+       device (one gone, this one arrived under its number before the list's
+       change was heard of), or for one no longer there, holds a dead
+       connection that enabling would take for a live one: closed first. */
+    for (auto it = midiOpenedAs.begin(); it != midiOpenedAs.end();)
+    {
+        bool same = false;
+        for (auto& d : available) if (d.identifier == it->first && d.name == it->second) same = true;
+        if (! same) { deviceManager.setMidiInputDeviceEnabled (it->first, false); it = midiOpenedAs.erase (it); }
+        else ++it;
+    }
     for (auto& d : available)
-        deviceManager.setMidiInputDeviceEnabled (d.identifier, wanted.contains (d.identifier) && ! heard.contains (d.identifier));
+    {
+        const bool on = wanted.contains (d.identifier) && ! heard.contains (d.identifier);
+        deviceManager.setMidiInputDeviceEnabled (d.identifier, on);
+        if (on) midiOpenedAs[d.identifier] = d.name; else midiOpenedAs.erase (d.identifier);
+    }
 }
 
 bool Engine::isInputHeardAsMidi2 (int inputIndex) const
@@ -3704,15 +3740,8 @@ void Engine::selectProgram (int inputIndex, int program)
 
     auto* next = ensureProgramLoaded (inputIndex, program);
 
-    /* Pull the outgoing program's state into the model before leaving it.
-       Anything set inside a plugin's own window -- SWAM being told which
-       controller is expression -- lives only in that process until it is
-       captured, and switching away is the natural moment: the program change
-       already marks the setup dirty and brings the autosave forward, so this
-       costs no extra write, it just makes the write current. `active` only
-       changes on this thread, so reading it outside the lock is safe. */
-    if (in.active != nullptr && in.active != next)
-        captureProgramState (inputIndex, *in.active);
+    // `active` only changes on this thread, so reading it outside the lock is safe.
+    ProgramRuntime* const outgoing = in.active != next ? in.active : nullptr;
 
     {
         const ScopedLock sl (lock);
@@ -3741,6 +3770,21 @@ void Engine::selectProgram (int inputIndex, int program)
     // External instruments switch to their patch with the program.
     sendPatches (*next, setup.inputs[(size_t) inputIndex].programs[(size_t) program]);
     ensureLentLoaded();                 // the programs its slots name on other inputs
+
+    /* The outgoing program's state into the model, now that the new sound has
+       taken over. Anything set inside a plugin's own window -- SWAM being
+       told which controller is expression -- lives only in that process
+       until it is captured, and switching away is the natural moment: the
+       change already marks the setup dirty and brings the autosave forward.
+       After the switch, never before it: a plugin slow to answer (a dialog
+       up in its window, a big library to write out) held the change itself,
+       up to thirty seconds, and was then put down while it still played.
+       Only the plugins that may have changed, for a second at most each; one
+       that does not answer in that keeps what the model has and is asked
+       again by the autosave. It is still loaded: unloading comes later, on
+       this thread. */
+    if (outgoing != nullptr)
+        captureProgramState (inputIndex, *outgoing, 1000, true);
 
     listeners.call ([=] (Listener& l) { l.programChanged (inputIndex, program); });
 }
@@ -4065,7 +4109,21 @@ void Engine::attachLoaded (LoadResult& r)
     if (r.plugin == nullptr)
     {
         node->loadError = r.error;
-        listeners.call ([&] (Listener& l) { l.statusMessage ("Failed to load plugin: " + r.error); });
+        /* A restart after a crash that did not load -- Wine still going down
+           with the hosts it took along -- is tried again in a few seconds,
+           within the same limit as the restarts themselves; it was tried
+           once and then left off for good. */
+        const auto now = Time::getMillisecondCounter();
+        auto& times = restartTimes[node->id];
+        times.erase (std::remove_if (times.begin(), times.end(), [now] (uint32 t) { return now - t > 60000; }), times.end());
+        if (! times.empty() && (int) times.size() < maxAutoRestartsPerMinute)
+        {
+            times.push_back (now);
+            loadRetries.emplace_back (node->id, now + 4000);
+            listeners.call ([&] (Listener& l) { l.statusMessage ("The plugin did not start again (" + r.error + "). Trying once more..."); });
+        }
+        else
+            listeners.call ([&] (Listener& l) { l.statusMessage ("Failed to load plugin: " + r.error); });
     }
     else
     {
@@ -4076,8 +4134,15 @@ void Engine::attachLoaded (LoadResult& r)
         // A plugin that has just loaded knows nothing about the rig's tempo.
         r.plugin->setTempo (setup.tempoBpm, 4, 4);
         r.plugin->setListener (node);
-        const ScopedLock sl (lock);
-        node->plugin = std::move (r.plugin);
+        {
+            const ScopedLock sl (lock);
+            node->plugin = std::move (r.plugin);
+        }
+        /* Dead on arrival: its process went between loading and now (while its
+           state was being set, say), before there was anyone to tell. Told
+           now, so it is started again like any other that stops. */
+        if (! node->plugin->isAlive())
+            notePluginDied (node->inputIndex.load(), node->program, node->slotIndex.load(), node->effectIndex.load());
     }
 
     const int inputIndex = node->inputIndex.load();
@@ -4105,9 +4170,10 @@ void Engine::unloadProgram (InputRuntime& in, int program)
     }
 
     // Find our input index to capture state into the right definition.
+    // What changed, within three seconds a plugin: it is going anyway, and the screen must not wait on it.
     for (int i = 0; i < (int) runtimes.size(); ++i)
         if (runtimes[(size_t) i].get() == &in)
-            captureProgramState (i, *rt);
+            captureProgramState (i, *rt, 3000, true);
 
     destroyProgramPlugins (*rt);
 }
@@ -5238,7 +5304,7 @@ void Engine::handleAsyncUpdate()
                    on every read, so a real change and no change look alike. */
                 if (auto* rt = getLoaded (e.input, e.a))
                 {
-                    captureProgramState (e.input, *rt);
+                    captureProgramState (e.input, *rt, 5000);
                     listeners.call ([&] (Listener& l) { l.programContentChanged (e.input, e.a); });
                 }
                 break;
@@ -5297,6 +5363,16 @@ void Engine::housekeeping()
     watchForStalls();
     watchAudioDevice();
     watchUsbReconnects();
+    // Restarts that did not load, tried again.
+    for (size_t i = 0; i < loadRetries.size();)
+    {
+        if ((int32) (Time::getMillisecondCounter() - loadRetries[i].second) < 0) { ++i; continue; }
+        const auto id = loadRetries[i].first;
+        loadRetries.erase (loadRetries.begin() + (long) i);
+        if (auto it = nodeRegistry.find (id); it != nodeRegistry.end())
+            if (auto* node = it->second; node->plugin == nullptr && ! node->loading.load())
+                reloadPlugin (node->inputIndex.load(), node->program, node->slotIndex.load(), node->effectIndex.load());
+    }
     {
         // A minute of late-block counts, for the pre-show check.
         const auto now = Time::getMillisecondCounter();
@@ -5533,13 +5609,16 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m, int64 exa
     in.collector.addMessageToQueue (m);
 }
 
+// A test asks for blocks when it pleases: not a device running late (lastCallbackMs).
 void Engine::renderBlockForTesting (float* const* out, int numOut, int numSamples)
 {
+    lastCallbackMs = 0.0;
     audioDeviceIOCallbackWithContext (nullptr, 0, out, numOut, numSamples, {});
 }
 
 void Engine::renderBlockForTesting (const float* const* in, int numIn, float* const* out, int numOut, int numSamples)
 {
+    lastCallbackMs = 0.0;
     audioDeviceIOCallbackWithContext (in, numIn, out, numOut, numSamples, {});
 }
 
@@ -6009,11 +6088,11 @@ void Engine::runChain (std::vector<std::unique_ptr<EffectRuntime>>& chain, const
     {
         if (! fx->alive() || fx->bypassed.load()) continue;
         fx->plugin->beginProcess (stereo.getReadPointer (0), stereo.getReadPointer (1), midi, numSamples);
+        /* Late, or stuck: the sound goes past it as it came, for this block.
+           Silence here was every instrument behind an output's effect gone
+           quiet for as long as one effect took to be found dead. */
         if (! fx->plugin->finishProcess (stereo.getWritePointer (0), stereo.getWritePointer (1), blockDeadline))
-        {
-            stereo.clear();
             lateBlocks.fetch_add (1);
-        }
     }
 }
 
@@ -6069,7 +6148,14 @@ void Engine::runMidiChains (ProgramRuntime& prog, int numSamples, bool notesOffN
                 slot->midi.swapWith (fx.produced);
             else
             {
-                slot->midi.clear();
+                /* Late: what it was given goes on past it, less the note-ons
+                   (it has not said what to play for them) -- the note-offs
+                   and pedals must reach the sound, or its notes hang. */
+                fx.produced.clear();
+                for (const auto meta : slot->midi)
+                    if (! ((meta.data[0] & 0xf0) == 0x90 && meta.numBytes == 3 && meta.data[2] != 0))
+                        fx.produced.addEvent (meta.data, meta.numBytes, meta.samplePosition);
+                slot->midi.swapWith (fx.produced);
                 lateBlocks.fetch_add (1);
             }
             /* A processor need not pass on notes-off it was given (an

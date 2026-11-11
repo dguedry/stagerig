@@ -110,7 +110,7 @@ public:
     bool keepEditorOnTop (bool onTop);
     bool isEditorOpen() const                               { return editorOpen.load(); }
 
-    void setListener (Listener* l)                          { listener = l; }
+    void setListener (Listener* l)                          { listener.store (l); }
 
     // Real-time ------------------------------------------------------------------------------
     /** Queue a parameter change to be applied with the next block. Audio thread only. */
@@ -192,18 +192,25 @@ private:
     std::atomic<uint32_t> nextRequestId { 1 };
     std::atomic<bool> alive { false }, editorOpen { false }, stateDirty { true };
     juce::String lastError;
-    Listener* listener = nullptr;
+    std::atomic<Listener*> listener { nullptr };      // set on the message thread, called on the reader's
 
     // audio-thread state
     bool blockInFlight = false;
     int inFlightSamples = 0;
+    /* What a block the plugin was too busy to take would have told it, less
+       the note-ons: note-offs, pedals, controllers. Given with the next block
+       it takes, or the notes it holds would never be let go. Audio thread only. */
+    static constexpr uint32_t kCarry = 128;
+    ipc::MidiEvent carry[kCarry];
+    uint32_t carryCount = 0;
+    bool carryOverflowed = false;       // more than it holds: everything is let go instead
     uint32_t pendingParamCount = 0;
     ipc::ParamChange pendingParams[ipc::kMaxParamChanges];
     std::atomic<int> missedBlocks { 0 };
 
     // The watchdog's memory: the last block seen finished, and since when. Message thread only.
     uint64_t watchSeq = 0;
-    juce::uint32 watchSinceMs = 0;
+    juce::uint32 watchSinceMs = 0, watchLookedMs = 0;
     bool watchStarted = false;          // the first look only starts the clock
 
     // Tempo: written by the message thread, read by the audio thread each block.
