@@ -1028,10 +1028,12 @@ void Engine::watchAudioDevice()
     if (now - lastAudioWatch < 1500) return;
     lastAudioWatch = now;
    #if JUCE_LINUX
-    // An interface plugged in or out: ALSA's list made again, the Audio window's with it.
-    if (deviceManager.getCurrentAudioDeviceType() == "ALSA")
-        if (auto* t = deviceManager.getCurrentDeviceTypeObject())
-            alsaCardsChanged (t, deviceManager.getAudioDeviceSetup().outputDeviceName);
+    /* An interface plugged in or out: ALSA's list made again, the Audio window's
+       with it -- whichever type is in use, so switching to ALSA finds the
+       interfaces there now, not those there when StageRig started. */
+    for (auto* t : deviceManager.getAvailableDeviceTypes())
+        if (t->getTypeName() == "ALSA")
+            alsaCardsChanged (t, deviceManager.getCurrentAudioDeviceType() == "ALSA" ? deviceManager.getAudioDeviceSetup().outputDeviceName : String());
    #endif
     if (audioWindowOpen) { audioRetries = 0; audioRetryAt = 0; return; }
 
