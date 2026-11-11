@@ -99,8 +99,20 @@ public:
 
     /** Closes and reopens the current audio device (picks up a new PIPEWIRE_LATENCY). */
     void restartAudioDevice();
-    /** Audio... open or closed: while it is open the device chosen there is the choice. */
-    void setAudioWindowOpen (bool isOpen)                { audioWindowOpen = isOpen; if (isOpen) benchedInput = {}; else changeListenerCallback (nullptr); }
+    /** Audio... open or closed. While someone is choosing there (see
+        noteAudioWindowTouched) the device chosen is the choice, and the audio
+        watch keeps its hands off. */
+    void setAudioWindowOpen (bool isOpen)
+    {
+        audioWindowOpen = isOpen;
+        if (isOpen) { benchedInput = {}; awayInput = {}; noteAudioWindowTouched(); }
+        else changeListenerCallback (nullptr);
+    }
+    /** A click in the Audio window (or a list it dropped down). The window
+        merely left open is not someone choosing: a device that drops out
+        then is gone back to, not taken for the new choice -- a rig played
+        with Audio... still open recovers as any other. */
+    void noteAudioWindowTouched()                        { audioTouchedAt = juce::Time::getMillisecondCounter(); }
 
     //==============================================================================
     // Setup document
@@ -668,6 +680,8 @@ public:
     double getCpuUsage() const                      { return deviceManager.getCpuUsage(); }
     /** Blocks in which at least one plugin process missed its deadline. */
     int getLateBlockCount() const                   { return lateBlocks.load(); }
+    /** Times the audio device ran dry (underruns: a block asked for late, a click or a gap), since the start. */
+    int getDeviceXrunCount() const                  { return deviceXruns.load(); }
 
     //==============================================================================
     // Staying up
@@ -877,8 +891,20 @@ private:
     std::atomic<bool> audioThreadRealtime { true };
     uint32_t realtimeRecheck = 0;      // audio thread only
     void watchAudioDevice();
+    void noteDeviceXruns();
     void sayAudio (const juce::String& text);
-    bool audioWindowOpen = false;      // Audio... is open: the choice is being made there
+    bool audioWindowOpen = false;      // Audio... is open
+    juce::uint32 audioTouchedAt = 0;   // last click there
+    /** Audio... open and used within the last minute: the choice is being made there. */
+    bool audioWindowBusy() const       { return audioWindowOpen && juce::Time::getMillisecondCounter() - audioTouchedAt < 60000; }
+    juce::String awayInput;            // an input left out because it has gone; opened again when it is back
+    int inputGoneTicks = 0, awayBackTicks = 0, awayLooks = 0;
+    juce::uint32 soundSystemRestartedAt = 0;   // when StageRig last restarted a stalled sound system
+    std::atomic<int> deviceXruns { 0 };   // blocks asked for late: counted on the audio thread
+    double lastCallbackMs = 0.0;           // audio thread only
+    int lastXruns = 0;
+    juce::uint32 xrunsSaidAt = 0;
+    juce::String lastDeviceError;
     std::atomic<juce::uint32> audioCallbacks { 0 };     // counted on the audio thread, for the stall watch
     std::atomic<juce::uint32> audioStartedAt { 0 };
     juce::uint32 stallTestFrom = 0;    // STAGERIG_TEST_STALL, for testing the stall watch

@@ -3518,7 +3518,8 @@ void MainComponent::timerCallback()
         cpuLabel.setText ((engine.isRecording() ? "REC " + formatElapsed (engine.getRecordingSeconds()) + "  |  " : String())
                           + "CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + dev
                           + (clockHeld ? "  |  clock held by another app" : String())
-                          + (engine.getLateBlockCount() > 0 ? "  |  " + String (engine.getLateBlockCount()) + " dropouts" : String()), dontSendNotification);
+                          + (engine.getLateBlockCount() > 0 ? "  |  " + String (engine.getLateBlockCount()) + " dropouts" : String())
+                          + (engine.getDeviceXrunCount() > 0 ? "  |  " + String (engine.getDeviceXrunCount()) + " underruns" : String()), dontSendNotification);
         cpuLabel.setTooltip (clockHeld ? "StageRig asked for a " + String (wanted) + "-sample buffer but the system is running a bigger one: another application (Bitwig, for example) has forced it. Close that app, or set its buffer to " + String (wanted) + "." : String());
         cpuLabel.setColour (Label::textColourId, (engine.getLateBlockCount() > 0 || clockHeld) ? Colours::orange
                                                  : engine.isRecording() ? Colour (0xffe05a5a) : textDim);

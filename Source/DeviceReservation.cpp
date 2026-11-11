@@ -55,12 +55,16 @@ namespace
         Msg* (*newMethodReturn) (Msg*) = nullptr;
         unsigned (*send) (Conn*, Msg*, unsigned*) = nullptr;
         void (*flush) (Conn*) = nullptr;
+        void (*close) (Conn*) = nullptr;          // these two are not needed to work: looked up, never required
+        void (*connUnref) (Conn*) = nullptr;
 
         bool load()
         {
             lib = ::dlopen ("libdbus-1.so.3", RTLD_NOW | RTLD_LOCAL);
             if (lib == nullptr) return false;
             auto get = [this] (auto& fn, const char* name) { fn = reinterpret_cast<std::remove_reference_t<decltype (fn)>> (::dlsym (lib, name)); return fn != nullptr; };
+            get (close, "dbus_connection_close");
+            get (connUnref, "dbus_connection_unref");
             return get (errorInit, "dbus_error_init") && get (errorFree, "dbus_error_free") && get (errorIsSet, "dbus_error_is_set")
                 && get (threadsInitDefault, "dbus_threads_init_default") && get (busGetPrivate, "dbus_bus_get_private")
                 && get (setExitOnDisconnect, "dbus_connection_set_exit_on_disconnect")
@@ -124,7 +128,21 @@ namespace
                     if (! jobs.empty()) { job = std::move (jobs.front()); jobs.pop_front(); }
                 }
                 if (job) { job(); continue; }
-                if (conn != nullptr) dbus.readWriteDispatch (conn, 100);     // answers RequestRelease
+                /* Answers RequestRelease. False is the bus gone (the desktop
+                   session's bus restarted): every name went with it, and asked
+                   again and again it would answer at once for ever -- a core
+                   spent on nothing. Let go of, and connected afresh when a card
+                   is next asked for. */
+                if (conn != nullptr && dbus.readWriteDispatch (conn, 100) == 0)
+                {
+                    std::fprintf (stderr, "[audio] the desktop's message bus has gone: the sound cards are no longer reserved\n");
+                    if (dbus.close != nullptr) dbus.close (conn);
+                    if (dbus.connUnref != nullptr) dbus.connUnref (conn);
+                    conn = nullptr;
+                    tried = false;
+                    held.clear();
+                    heldCount = 0;
+                }
             }
         }
 
@@ -133,7 +151,7 @@ namespace
             if (conn != nullptr) return true;
             if (tried) return false;
             tried = true;
-            if (! dbus.load()) { std::fprintf (stderr, "[audio] no libdbus: sound cards cannot be asked for from PipeWire\n"); return false; }
+            if (dbus.lib == nullptr && ! dbus.load()) { std::fprintf (stderr, "[audio] no libdbus: sound cards cannot be asked for from PipeWire\n"); return false; }
             dbus.threadsInitDefault();
             DBusErrorStorage err {}; dbus.errorInit (&err);
             conn = dbus.busGetPrivate (busSession, &err);

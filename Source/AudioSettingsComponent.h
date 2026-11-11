@@ -84,6 +84,12 @@ public:
 
         addAndMakeVisible (selector);
         engine.getDeviceManager().addChangeListener (this);
+        /* A click here, or in a list dropped down from here, is someone
+           choosing: the engine keeps what is chosen and leaves the device
+           alone meanwhile. The window merely left open is not (a rig played
+           with it open must recover as any other), so every click anywhere is
+           looked at, and those in this window or in a menu count. */
+        juce::Desktop::getInstance().addGlobalMouseListener (this);
         lastType = engine.getDeviceManager().getCurrentAudioDeviceType();
         engine.setAudioWindowOpen (true);
         showForType();
@@ -94,9 +100,13 @@ public:
 
     ~AudioSettingsComponent() override
     {
+        juce::Desktop::getInstance().removeGlobalMouseListener (this);
         engine.getDeviceManager().removeChangeListener (this);
         engine.setAudioWindowOpen (false);
     }
+
+    void mouseDown (const juce::MouseEvent& e) override       { touched (e); }
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails&) override { touched (e); }
 
     void resized() override
     {
@@ -131,6 +141,15 @@ public:
     }
 
 private:
+    void touched (const juce::MouseEvent& e)
+    {
+        auto* at = e.eventComponent != nullptr ? e.eventComponent->getTopLevelComponent() : nullptr;
+        if (at == nullptr) return;
+        // This window, or a top-level thing that is no window of the app's: a dropped-down list.
+        if (at == getTopLevelComponent() || dynamic_cast<juce::TopLevelWindow*> (at) == nullptr)
+            engine.noteAudioWindowTouched();
+    }
+
     /** The top buffer size and the system takeover are PipeWire's: on ALSA, StageRig
        has the interface to itself and its buffer is the one in the device section below. */
     bool onPipeWire() const { return engine.getDeviceManager().getCurrentAudioDeviceType() != "ALSA"; }

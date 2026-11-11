@@ -557,7 +557,7 @@ namespace
         void start (AudioIODeviceCallback* cb) override
         {
             if (cb == nullptr) { stop(); return; }
-            if (real->isPlaying() && client.load() != cb) real->stop();   // so the new one hears it start
+            if (client.load() != nullptr && client.load() != cb) real->stop();   // so the new one hears it start
             client.store (cb);
             real->start (this);
         }
@@ -566,7 +566,19 @@ namespace
             real->stop();     // returns once no block is running
             client.store (nullptr);
         }
-        bool isPlaying() override                                    { return real->isPlaying() && client.load() != nullptr; }
+        /* JUCE's ALSA device says it is not playing for good once any call in
+           its loop has failed -- an underrun among them, which the next line
+           there recovers from, the sound carrying on. Taken at its word, one
+           underrun had the audio watch close and open the interface: a
+           dropout for nothing, and the opening over and over that locks up a
+           USB keyboard's audio. For ALSA (the device given `plain`), started
+           and open is playing; a loop that has really ended stops calling,
+           which the watch sees for itself. */
+        bool isPlaying() override
+        {
+            if (client.load() == nullptr) return false;
+            return plainError ? real->isOpen() : real->isPlaying();
+        }
         String getLastError() override                               { return real->getLastError(); }
 
         int getCurrentBufferSizeSamples() override                   { return steady (real->getCurrentBufferSizeSamples()); }
@@ -759,8 +771,10 @@ namespace
             if (! info.existsAsFile()) return false;      // the card has no such direction
             const auto id = info.loadFileAsString().fromFirstOccurrenceOf ("id:", false, false)
                                 .upToFirstOccurrenceOf ("\n", false, false).trim().toLowerCase();
-            for (auto* digital : { "hdmi", "digital", "iec958", "spdif", "s/pdif", "displayport" })
-                if (id.contains (digital)) return false;
+            // STAGERIG_TEST_ALSA_ALL: for trying the ALSA paths on a monitor's sound, away from the rig's interface.
+            if (std::getenv ("STAGERIG_TEST_ALSA_ALL") == nullptr)
+                for (auto* digital : { "hdmi", "digital", "iec958", "spdif", "s/pdif", "displayport" })
+                    if (id.contains (digital)) return false;
             return true;
         }
 
@@ -1035,21 +1049,55 @@ void Engine::watchAudioDevice()
         if (t->getTypeName() == "ALSA")
             alsaCardsChanged (t, deviceManager.getCurrentAudioDeviceType() == "ALSA" ? deviceManager.getAudioDeviceSetup().outputDeviceName : String());
    #endif
-    if (audioWindowOpen) { audioRetries = 0; audioRetryAt = 0; return; }
+    noteDeviceXruns();
+    // Someone is choosing in Audio...: the choice is theirs to make.
+    if (audioWindowBusy()) { audioRetries = 0; audioRetryAt = 0; return; }
 
     std::unique_ptr<XmlElement> saved (settings.getXmlValue ("audioDeviceState"));
     if (saved == nullptr) return;
     const auto type    = saved->getStringAttribute ("deviceType");
     const auto outName = saved->getStringAttribute ("audioOutputDeviceName");
     const auto inName  = saved->getStringAttribute ("audioInputDeviceName");
-    const bool wantsInput = inName.isNotEmpty() && inName != benchedInput
-                            && saved->getStringAttribute ("audioDeviceInChans", "11").containsChar ('1');
+    const bool hasInput = inName.isNotEmpty() && saved->getStringAttribute ("audioDeviceInChans", "11").containsChar ('1');
     auto bitsIn = [&saved] (const char* attr, int otherwise)
     {
         if (! saved->hasAttribute (attr)) return otherwise;
         BigInteger b; b.parseString (saved->getStringAttribute (attr), 2);
         return b.countNumberOfSetBits();
     };
+    // In the chosen type's list, as last looked at.
+    auto listed = [this, &type] (const String& name, bool input)
+    {
+        for (auto* t : deviceManager.getAvailableDeviceTypes())
+            if (t->getTypeName() == type) return t->getDeviceNames (input).contains (name);
+        return true;
+    };
+    // Looked at again. ALSA's is kept current above; JACK's can be asked without disturbing the open device.
+    auto lookAgain = [this, &type]
+    {
+        if (type == "JACK")
+            for (auto* t : deviceManager.getAvailableDeviceTypes())
+                if (t->getTypeName() == "JACK") t->scanForDevices();
+    };
+
+    /* An input left out because it had gone (below): seen again for two looks,
+       it is wanted again, and the device is opened with it. */
+    if (awayInput.isNotEmpty())
+    {
+        if (awayInput != inName || ! hasInput) awayInput = {};          // another choice since
+        else
+        {
+            if (++awayLooks % 4 == 0) lookAgain();
+            awayBackTicks = listed (awayInput, true) ? awayBackTicks + 1 : 0;
+            if (awayBackTicks >= 2)
+            {
+                sayAudio ("Audio: the input " + awayInput + " is back. StageRig is opening it again.");
+                awayInput = {};
+                awayBackTicks = 0;
+            }
+        }
+    }
+    bool wantsInput = hasInput && inName != benchedInput && inName != awayInput;
 
     auto* d = deviceManager.getCurrentAudioDevice();
     const auto open = deviceManager.getAudioDeviceSetup();
@@ -1091,41 +1139,43 @@ void Engine::watchAudioDevice()
                 LowLatency::forceClock (settings.getIntValue ("pipewireQuantum", 128), 48000);
         }
         audioGone = {};
+        audioWhyNot = {};
         audioRetries = 0;
         audioRetryAt = 0;
         audioPresentTicks = 0;
+        inputGoneTicks = 0;
         return;
     }
+
+    // What is there now.
+    lookAgain();
+    const bool outPresent = outName.isEmpty() || listed (outName, false);
+
+    /* The output is there and the input is not: the sound must not wait for a
+       microphone's interface. Left out after two looks, said, and opened
+       again when it is back (above). */
+    bool inputJustLeft = false;
+    if (outPresent && wantsInput && inName != outName && ! listed (inName, true))
+    {
+        if (++inputGoneTicks < 2) return;
+        inputGoneTicks = 0;
+        awayInput = inName;
+        awayBackTicks = awayLooks = 0;
+        wantsInput = false;
+        inputJustLeft = true;
+        audioGone = missing;
+        sayAudio ("Audio: the input " + inName + " has gone, so StageRig plays on without it, and opens it again when it is back.");
+    }
+    else inputGoneTicks = 0;
+    const bool present = outPresent && (! wantsInput || listed (inName, true));
+
     if (audioGone != missing)
     {
         audioGone = missing;
-        sayAudio (stalled ? "Audio: " + missing + " stopped playing. StageRig is reopening it."
-                          : "Audio: " + missing + " has gone. Switch it back on: StageRig reconnects by itself.");
+        // Still there and silent is stopped; not there is gone, whichever way it was noticed.
+        sayAudio (stalled && present ? "Audio: " + missing + " stopped playing. StageRig is reopening it."
+                                     : "Audio: " + missing + " has gone. Switch it back on: StageRig reconnects by itself.");
     }
-
-    // What is there now (the JACK type can be asked without disturbing the open device).
-    bool present = true;
-    if (type == "JACK")
-        for (auto* t : deviceManager.getAvailableDeviceTypes())
-            if (t->getTypeName() == "JACK")
-            {
-                t->scanForDevices();
-                present = (outName.isEmpty() || t->getDeviceNames (false).contains (outName))
-                       && (! wantsInput || t->getDeviceNames (true).contains (inName));
-            }
-   #if JUCE_LINUX
-    /* ALSA: the list as of the last card plugged in or out. Not opened while the
-       interface is away: a USB keyboard's audio asked again and again as it
-       comes up has locked up. */
-    if (type == "ALSA")
-        for (auto* t : deviceManager.getAvailableDeviceTypes())
-            if (t->getTypeName() == "ALSA")
-            {
-                alsaCardsChanged (t, open.outputDeviceName);
-                present = (outName.isEmpty() || t->getDeviceNames (false).contains (outName))
-                       && (! wantsInput || t->getDeviceNames (true).contains (inName));
-            }
-   #endif
    #if JUCE_LINUX
     if (soundSystemStuck.load())
     {
@@ -1139,9 +1189,10 @@ void Engine::watchAudioDevice()
     audioSaidStuck = false;
    #endif
     audioPresentTicks = present ? audioPresentTicks + 1 : 0;
-    if (! present || (! stalled && audioPresentTicks < 2)) return;      // back a moment, with all its ports
+    if (! present || (! stalled && ! inputJustLeft && audioPresentTicks < 2)) return;      // back a moment, with all its ports
     if (now < audioRetryAt) return;
-    audioRetryAt = now + (uint32) jmin (30000, 3000 << jmin (audioRetries, 4));
+    // Twice at each wait, then longer: 3, 3, 6, 6, 12, 12... to thirty seconds.
+    audioRetryAt = now + (uint32) jmin (30000, 3000 << jmin (audioRetries / 2, 4));
     ++audioRetries;
 
     // An input on another device that keeps stalling the audio is left out, so the output plays on.
@@ -1152,6 +1203,37 @@ void Engine::watchAudioDevice()
         sayAudio ("Audio: the input " + inName + " keeps stopping the sound, so StageRig plays on without it. "
                   "Reopen audio in Audio... tries it again.");
     }
+
+   #if JUCE_LINUX
+    /* Open, answering, and no sound asked for after three reopenings: the
+       computer's sound system has stopped running its audio (PipeWire's clock
+       wedged, as after a USB device's lock-up). Opening it again does
+       nothing; starting it again does, and takes a few seconds -- the JACK
+       device drops out and is gone back to as for any restart. Once in ten
+       minutes at most, and not when it is the output's own input holding
+       things up (left out just above). */
+    if (type == "JACK" && stalled && audioRetries == 4 && settings.getBoolValue ("restartSoundSystem", true)
+        && (soundSystemRestartedAt == 0 || now - soundSystemRestartedAt > 600000))
+    {
+        soundSystemRestartedAt = now;
+        ChildProcess restart;
+        if (restart.start (StringArray { "systemctl", "--user", "restart", "pipewire.service", "pipewire-pulse.service", "wireplumber.service" }, 0))
+        {
+            sayAudio ("Audio: the computer's sound system has stopped running. StageRig is starting it again: "
+                      "the sound is back in a few seconds.");
+            audioRetryAt = now + 4000;
+            return;
+        }
+        sayAudio ("Audio: the computer's sound system has stopped running, and StageRig could not start it again. "
+                  "Log out and in again, or restart the computer.");
+    }
+    /* An interface that is there and will not play, three times running:
+       asking a USB keyboard's audio over and over is what locks it up, and
+       switching it off and on is what clears it. */
+    if (type == "ALSA" && audioRetries == 3 && audioWhyNot.isEmpty())
+        sayAudio ("Audio: " + missing + " is connected but will not play. Switch it off and on, or unplug it for a few seconds: "
+                  "StageRig keeps trying.");
+   #endif
 
     if (type != "JACK" && type != "ALSA")
     {
@@ -1179,6 +1261,8 @@ void Engine::watchAudioDevice()
     }
     else
         setup.useDefaultOutputChannels = true;
+    if (saved->hasAttribute ("audioDeviceRate")) setup.sampleRate = saved->getDoubleAttribute ("audioDeviceRate");
+    if (saved->hasAttribute ("audioDeviceBufferSize")) setup.bufferSize = saved->getIntAttribute ("audioDeviceBufferSize");
     if (deviceManager.getCurrentAudioDeviceType() != type)
         deviceManager.setCurrentAudioDeviceType (type, true);
     std::fprintf (stderr, "[audio-watch] reopening: out '%s', in '%s' (attempt %d)\n",
@@ -1190,8 +1274,35 @@ void Engine::watchAudioDevice()
         audioWhyNot = why;
         if (type == "ALSA") sayAudio ("Audio: " + why);
     }
-    else if (why.isEmpty()) audioWhyNot = {};
     lastAudioWatch = Time::getMillisecondCounter();
+}
+
+/** The device's underruns since the last look (the buffer ran dry: too small
+    for a busy moment), counted for the status bar and written in the log, at
+    most a line every ten seconds, for after the show. */
+void Engine::noteDeviceXruns()
+{
+    auto* d = deviceManager.getCurrentAudioDevice();
+    if (d == nullptr) { lastXruns = deviceXruns.load(); lastDeviceError = {}; return; }
+    /* An error the device met and played on from (JUCE's ALSA keeps the last
+       one for good; an underrun's is "Broken pipe"): written down once. */
+    if (const auto err = d->getLastError(); err != lastDeviceError)
+    {
+        lastDeviceError = err;
+        if (err.isNotEmpty() && d->isPlaying())
+            std::fprintf (stderr, "[audio-watch %s] %s reported \"%s\" and plays on\n",
+                          Time::getCurrentTime().toString (false, true, true, true).toRawUTF8(), d->getName().toRawUTF8(), err.toRawUTF8());
+    }
+    const int n = deviceXruns.load();
+    const auto now = Time::getMillisecondCounter();
+    if (n > lastXruns && now - xrunsSaidAt > 10000)
+    {
+        std::fprintf (stderr, "[audio-watch %s] %d underrun%s on %s (%d samples at %.0f Hz; the device's own count %d): %d since the start\n",
+                      Time::getCurrentTime().toString (false, true, true, true).toRawUTF8(), n - lastXruns, n - lastXruns == 1 ? "" : "s",
+                      d->getName().toRawUTF8(), d->getCurrentBufferSizeSamples(), d->getCurrentSampleRate(), d->getXRunCount(), n);
+        lastXruns = n;
+        xrunsSaidAt = now;
+    }
 }
 
 void Engine::changeListenerCallback (ChangeBroadcaster*)
@@ -1199,13 +1310,13 @@ void Engine::changeListenerCallback (ChangeBroadcaster*)
     // Off ALSA: the sound cards StageRig asked PipeWire for are its again.
     if (deviceManager.getCurrentAudioDeviceType() != "ALSA") DeviceReservation::releaseAll();
 
-    /* The choice is kept as made. Saved while Audio... is open (it is being
-       made), or when StageRig opens channels for an input or output itself with
+    /* The choice is kept as made. Saved while someone is choosing in Audio...
+       (a click there within the minute), or when StageRig opens channels for an input or output itself with
        the chosen devices all there. Never while one has gone: the open device
        has lost those channels, or JUCE has fallen back to other devices, and
        saving either would forget the choice the watchdog goes back to. */
     bool complete = deviceManager.getCurrentAudioDevice() != nullptr;
-    if (complete && ! audioWindowOpen)
+    if (complete && ! audioWindowBusy())
     {
         std::unique_ptr<XmlElement> saved (settings.getXmlValue ("audioDeviceState"));
         const auto s = deviceManager.getAudioDeviceSetup();
@@ -5443,6 +5554,13 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
     sampleRate = device->getCurrentSampleRate();
     blockSize  = device->getCurrentBufferSizeSamples();
     audioStartedAt.store (Time::getMillisecondCounter());
+    /* A device starting (again): not an underrun, but whatever was held while
+       there was no sound is let go, as its note-offs may be lost. */
+    lastCallbackMs = 0.0;
+    {
+        const ScopedLock sl (lock);
+        for (auto& rt : runtimes) rt->deviceLost.store (true, std::memory_order_release);
+    }
 
     /* The same rate and buffer as last time (a device reconnected, a port
        linked or unlinked): the plugins are ready as they are. Preparing them
@@ -5508,6 +5626,24 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
        calling with nothing to play (see SteadyBufferDevice) is a stall. */
     if (numSamples <= 0) return;
     audioCallbacks.fetch_add (1, std::memory_order_relaxed);
+    /* A block asked for much later than the one before it was due: the device
+       ran dry meanwhile (an underrun -- a click, or a gap). Counted here, where
+       it is heard, as the device types count only some of theirs. After half a
+       second of nothing, the keys released meanwhile may never have been
+       heard of (the collector keeps a second of messages and no more): every
+       note and pedal held is let go, as when a keyboard goes away. */
+    bool longGap = false;
+    {
+        const double nowMs = Time::getMillisecondCounterHiRes();
+        const double dueMs = sampleRate > 0.0 ? 1000.0 * numSamples / sampleRate : 0.0;
+        if (lastCallbackMs > 0.0 && dueMs > 0.0)
+        {
+            const double gap = nowMs - lastCallbackMs;
+            if (gap > 3.0 * dueMs + 3.0) deviceXruns.fetch_add (1, std::memory_order_relaxed);
+            longGap = gap > 500.0;
+        }
+        lastCallbackMs = nowMs;
+    }
     if (auto* l = liveness) l->audioCalls.fetch_add (1, std::memory_order_relaxed);
     if (! callbackThreadKnown || ! pthread_equal (callbackThread, pthread_self()))
     {
@@ -5536,6 +5672,8 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
     const double callbackStartMs = Time::getMillisecondCounterHiRes();
 
     const ScopedLock sl (lock);
+    if (longGap)
+        for (auto& rt : runtimes) rt->deviceLost.store (true, std::memory_order_release);
     bool panicNow = panicRequested.exchange (false);
 
     // With Link on, the tempo the audio side uses is the session's, this block.
