@@ -122,13 +122,17 @@ public:
         }
         performance.setBounds (r.removeFromTop (24));
         r.removeFromTop (4);
-        auto vol = r.removeFromTop (26);
-        volumeLabel.setBounds (vol.removeFromLeft (120));
-        fullBtn.setBounds (vol.removeFromRight (70)); vol.removeFromRight (8);
-        volumeSlider.setBounds (vol);
-        volumeNote.setBounds (r.removeFromTop (18).withTrimmedLeft (120));
-        r.removeFromTop (4);
-        status.setBounds (r.removeFromTop (118));
+        if (onPipeWire())       // the computer's volume for the output: PipeWire's, as the buffer above
+        {
+            auto vol = r.removeFromTop (26);
+            volumeLabel.setBounds (vol.removeFromLeft (120));
+            fullBtn.setBounds (vol.removeFromRight (70)); vol.removeFromRight (8);
+            volumeSlider.setBounds (vol);
+            volumeNote.setBounds (r.removeFromTop (18).withTrimmedLeft (120));
+            r.removeFromTop (4);
+        }
+        // As tall as what it says: on ALSA that is a line or two, not the eight JACK can need.
+        status.setBounds (r.removeFromTop (onPipeWire() ? 118 : 62));
         r.removeFromTop (8);
         typeNote.setBounds (r.removeFromTop (64));
         r.removeFromTop (4);
@@ -160,6 +164,7 @@ private:
         quantumLabel.setVisible (pw);
         quantumBox.setVisible (pw);
         takeover.setVisible (pw);
+        for (auto* c : std::initializer_list<juce::Component*> { &volumeLabel, &volumeSlider, &fullBtn, &volumeNote }) c->setVisible (pw);
         resized();
     }
 
@@ -208,7 +213,9 @@ private:
         {
             const double sr = d->getCurrentSampleRate();
             const int smp = engine.getLastBlockSize() > 0 ? engine.getLastBlockSize() : d->getCurrentBufferSizeSamples();
-            txt << d->getTypeName() << " / " << d->getName() << ":  " << juce::String (sr / 1000.0, 1) << " kHz, "
+            // By the name it is chosen by below, not the driver's ("SL, USB Audio; Direct hardware device without any conversions").
+            const auto chosen = engine.getDeviceManager().getAudioDeviceSetup().outputDeviceName;
+            txt << d->getTypeName() << " / " << (chosen.isNotEmpty() ? chosen : d->getName()) << ":  " << juce::String (sr / 1000.0, 1) << " kHz, "
                 << smp << " samples per block (" << juce::String (1000.0 * smp / sr, 1) << " ms), output latency "
                 << juce::String (1000.0 * d->getOutputLatencyInSamples() / sr, 1) << " ms";
             if (d->getTypeName() == "JACK")
@@ -222,6 +229,13 @@ private:
         if (settings.getBoolValue ("performanceMode", true))
             txt << (LowLatency::performanceModeHeld() ? "\nProcessor held at full speed (performance power mode)"
                                                       : "\nWARNING: the processor could not be held at full speed: no performance power mode here");
+        // The rest is the computer's sound system's, which StageRig does not play through on ALSA.
+        if (! onPipeWire())
+        {
+            status.setText (txt, juce::dontSendNotification);
+            status.setColour (juce::Label::textColourId, LowLatency::realtimeSchedulingAvailable() ? juce::Colour (0xff9aa0ab) : juce::Colours::orange);
+            return;
+        }
         const auto clock = LowLatency::readClock();
         if (clock.forceQuantum.isNotEmpty() && clock.forceQuantum != "0")
             txt << "\nSystem buffer forced to " << clock.forceQuantum << " samples" << (clock.forceRate.isNotEmpty() && clock.forceRate != "0" ? " at " + clock.forceRate + " Hz" : juce::String());

@@ -90,9 +90,10 @@ public:
 
             juce::String name = prog.name.isNotEmpty() ? prog.name : empty ? (def.isAudio() ? "straight through" : "empty program") : "(unnamed)";
             if (loading) name += "  ...loading";
-            g.setFont (juce::FontOptions ((float) juce::jmin (big * 2 / 3, cell.getHeight() - 4), juce::Font::bold));
+            // "empty program" is a note, not a name: small, so it is never squeezed to fit like one.
+            g.setFont (juce::FontOptions ((float) juce::jmin (empty ? big / 3 : big * 2 / 3, cell.getHeight() - 4), juce::Font::bold));
             g.setColour (empty ? juce::Colour (0xff6b7079) : (loading ? juce::Colour (0xffd8a657) : juce::Colours::white));
-            g.drawFittedText (name, cell, juce::Justification::centredLeft, big > 60 ? 3 : 2, 0.6f);
+            g.drawFittedText (name, cell, juce::Justification::centredLeft, big > 60 ? 3 : 2, 0.8f);
         }
     }
 
@@ -257,7 +258,8 @@ private:
                 {
                     const int n = (int) k - 2;
                     knobs[k]->setVisible (true);
-                    knobs[k]->setBounds (x0 + (n % perRow) * each, r.getY() + (n / perRow) * rowH, each, rowH);
+                    // A little air between the rows: one row's value sat on the next row's name.
+                    knobs[k]->setBounds (x0 + (n % perRow) * each, r.getY() + (n / perRow) * rowH, each, rowH - 10);
                 }
                 return;
             }

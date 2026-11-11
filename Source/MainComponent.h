@@ -124,6 +124,7 @@ private:
         is put aside before anything is written over it. */
     bool autosaveToKeep = false;
     void keepAutosaveAside();
+    juce::String livePositionOwner() const;
     juce::TextButton songsBtn { "Songs" };
     juce::TextButton remoteBtn { "Tablet" };
     juce::TextButton helpBtn { "Help" };

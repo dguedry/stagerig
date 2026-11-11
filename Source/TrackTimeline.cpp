@@ -431,7 +431,7 @@ void TrackTimeline::paint (Graphics& g)
         g.fillRoundedRectangle (br, 3.0f);
         g.setColour (Colours::white);
         g.drawText (m.name + (m.vamp ? "  (vamp)" : String())
-                      + (m.actions.empty() ? String() : "  \u2022 " + String ((int) m.actions.size()) + (m.actions.size() == 1 ? " action" : " actions")),
+                      + (m.actions.empty() ? String() : String::fromUTF8 ("  \xe2\x80\xa2 ") + String ((int) m.actions.size()) + (m.actions.size() == 1 ? " action" : " actions")),
                     br.reduced (6.0f, 0.0f).toNearestInt(), Justification::centredLeft, true);
     }
     // Marker flags: a line down the lanes, a flag in the band.

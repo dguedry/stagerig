@@ -352,7 +352,7 @@ void SongsPanel::refreshTransport()
                   ? "scene " + String (engine.getScene() + 1) + "/" + String (engine.getSceneCount()) + ": " + songs[(size_t) sceneSong].markers[(size_t) engine.getScene()].name
                   : String (engine.getSceneCount()) + " scenes: Next scene starts them");
     else if (! has)
-        text = "No backing track (Backing track... under the songs)";
+        text = "No backing track";
     else if (! engine.isTrackReady())
         text = songs[(size_t) song].name + "  -- loading " + String (roundToInt (engine.getTrackLoadProgress() * 100.0f)) + "%";
     else if (engine.isTrackCountingIn())

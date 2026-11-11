@@ -219,8 +219,9 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
           border:0; text-align:left; color:#fff; }
   .song .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700;
              font-size:14px; min-width:24px; }
+  /* Two lines for a long title before it is cut: on a phone one line holds four words. */
   .song .t { font-size:18px; font-weight:700; flex:1; overflow:hidden;
-             text-overflow:ellipsis; white-space:nowrap; }
+             display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
   .song .bpm { color:var(--dim); font-size:13px; font-weight:700; }
 
   /* The one you are on. */
@@ -2196,7 +2197,7 @@ String RemoteServer::controlsJson() const
             }
             row (mapped, m.sourceDescription(), (m.paramName.isNotEmpty() ? m.paramName : m.paramId) + (target.isNotEmpty() ? "  on " + target : String()));
         }
-        if (prog.mappings.empty()) row (mapped, "No mappings in this program", String());
+        if (prog.mappings.empty()) row (mapped, "No mappings in this program", "-");
         sections.add (var (mapped.get()));
     }
     o->setProperty ("sections", sections);

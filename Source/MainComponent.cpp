@@ -144,7 +144,7 @@ public:
                     finder->inputs.push_back (std::move (in));
                 }
             if (finder->inputs.empty()) { stopFinding ("No MIDI device is connected: plug the keyboard in first."); return; }
-            findBtn.setButtonText ("Listening...");
+            findBtn.setButtonText ("Listening: play a key (click to stop)");
             owner.showStatus ("Play a key on the keyboard for this input...");
         };
 
@@ -319,7 +319,7 @@ public:
            It was 150, so the last row was being clipped, which is why the PC
            channel selector looked squeezed. */
         const bool audio = audioBox.isVisible();
-        auto editor = r.removeFromBottom (audio ? 262 : 216);
+        auto editor = r.removeFromBottom ((audio ? 262 : 216) + (findBtn.isVisible() ? 25 : 0));
         auto buttons = r.removeFromBottom (26);
         r.removeFromBottom (4);
         list.setBounds (r);
@@ -337,11 +337,9 @@ public:
             editor.removeFromTop (6);
         }
         deviceLabel.setBounds (editor.removeFromTop (16));
-        {
-            auto row = editor.removeFromTop (24);
-            if (findBtn.isVisible()) { findBtn.setBounds (row.removeFromRight (96)); row.removeFromRight (4); }
-            deviceBox.setBounds (row);
-        }
+        deviceBox.setBounds (editor.removeFromTop (24));
+        // Under the list, not beside it: beside, it left the list too narrow to read a device's name.
+        if (findBtn.isVisible()) { editor.removeFromTop (3); findBtn.setBounds (editor.removeFromTop (22)); }
         editor.removeFromTop (6);
         auto chRow = editor.removeFromTop (24);
         channelLabel.setBounds (chRow.removeFromLeft (56));
@@ -386,7 +384,7 @@ public:
             if (def.midiDeviceName.isNotEmpty()) info << "  \xc2\xb7  " << def.midiDeviceName;
         }
         else
-            info = def.midiDeviceName.isNotEmpty() ? def.midiDeviceName : "no MIDI device chosen";
+            info = def.midiDeviceName.isNotEmpty() ? def.midiDeviceName : "no MIDI device";
         if (def.channel > 0 && ! def.isTrack()) info << "  ch " << def.channel;
         g.drawText (info, 8, 22, w - 80, 16, Justification::centredLeft, true);
 
@@ -479,7 +477,7 @@ private:
         uint32 until = 0;
     };
     std::unique_ptr<KeyFinder> finder;
-    TextButton findBtn { "Play a key..." };
+    TextButton findBtn { "Find it: play a key..." };
 
     void stopFinding (const String& say)
     {
@@ -488,7 +486,7 @@ private:
             for (auto& in : finder->inputs) in->stop();
             finder.reset();
         }
-        findBtn.setButtonText ("Play a key...");
+        findBtn.setButtonText ("Find it: play a key...");
         if (say.isNotEmpty()) owner.showStatus (say);
     }
 
@@ -2282,6 +2280,11 @@ public:
         th.addColumn ("Max", colMax, 50);
         th.addColumn ("Pass through", colPass, 70);
         th.setStretchToFitActive (true);
+        // In the window's colours: JUCE's own header is light grey, a stripe of another program in a dark panel.
+        th.setColour (TableHeaderComponent::backgroundColourId, bgRow);
+        th.setColour (TableHeaderComponent::textColourId, textDim);
+        th.setColour (TableHeaderComponent::outlineColourId, bgPanel);
+        th.setColour (TableHeaderComponent::highlightColourId, accentDim);
 
         // Editor row 1: target
         addAndMakeVisible (targetBox);
@@ -3193,7 +3196,13 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     /* Any start without a file named on the command line comes back where it
        was: the same song, scene, programs and tempo, the same input chosen, the
        knobs on the same instrument and page. */
-    if (! recovered && ! initialSetup.existsAsFile())
+    /* ...of the setup it was in: the position is a handful of numbers (which
+       program, which song), and applied to another setup they pointed at
+       whatever happened to have those numbers there -- empty programs, the
+       wrong song -- and were then saved into it. */
+    const auto positionOf = settings.getValue ("livePositionOf");
+    const bool sameSetup = positionOf.isEmpty() || positionOf == livePositionOwner();
+    if (! recovered && ! initialSetup.existsAsFile() && sameSetup)
     {
         engine.restoreLivePosition (pos);
         refreshAll();
@@ -3456,7 +3465,8 @@ void MainComponent::resized()
     tailSlider.setBounds (toolbar.removeFromRight (60));    toolbar.removeFromRight (2);
     tailLabel.setBounds (toolbar.removeFromRight (26));     toolbar.removeFromRight (8);
     tapButton.setBounds (toolbar.removeFromRight (42));     toolbar.removeFromRight (2);
-    tempoLabel.setBounds (toolbar.removeFromRight (engine.getTranspose() != 0 ? 118 : 66));    toolbar.removeFromRight (8);
+    // Room for what it says: the tempo, a song's transpose, and Link with its peers.
+    tempoLabel.setBounds (toolbar.removeFromRight (70 + (engine.getTranspose() != 0 ? 52 : 0) + (engine.isLinkEnabled() ? (engine.getLinkPeers() > 0 ? 66 : 46) : 0)));    toolbar.removeFromRight (8);
 
     auto status = r.removeFromBottom (24).reduced (8, 2);
     cpuLabel.setBounds (status.removeFromRight (470));
@@ -3596,6 +3606,7 @@ void MainComponent::timerCallback()
     {
         lastLivePosition = live;
         settings.setValue ("livePosition", live);
+        settings.setValue ("livePositionOf", livePositionOwner());
         settings.saveIfNeeded();
     }
     if (surfaceHub != nullptr)
@@ -3874,6 +3885,16 @@ void MainComponent::newSetup()
         if (r == 2) { saveSetup (false); if (dirty) return; }      // a cancelled save keeps the setup
         start();
     }), false);
+}
+
+/** Which setup the live position is a position in: its file, or the unsaved one by what is in it. */
+String MainComponent::livePositionOwner() const
+{
+    if (currentFile != File()) return currentFile.getFullPathName();
+    const auto& st = engine.getSetup();
+    String shape ("unsaved:");
+    for (const auto& in : st.inputs) shape << in.name << '/';
+    return shape << (int) st.songs.size() << '/' << (int) st.sets.size();
 }
 
 void MainComponent::keepAutosaveAside()
@@ -4155,7 +4176,8 @@ void MainComponent::outputsChanged()
 void MainComponent::showAudioSettings()
 {
     auto* content = new AudioSettingsComponent (engine, settings, [this] (const String& s) { showStatus (s); });
-    content->setSize (640, 782);
+    // ALSA shows less (no sound-system buffer, no computer volume): a shorter window, not the same one half empty.
+    content->setSize (640, engine.getDeviceManager().getCurrentAudioDeviceType() == "ALSA" ? 600 : 782);
     perf::theme::launchDialog (content, "Audio settings", 0, 0);
 }
 
@@ -4291,7 +4313,8 @@ bool MainComponent::startRemote()
 void MainComponent::updateTempoLabel()
 {
     const int st = engine.getTranspose();
-    const String linkText = engine.isLinkEnabled() ? "   Link" + (engine.getLinkPeers() > 0 ? " \u00b7 " + String (engine.getLinkPeers()) : String()) : String();
+    // The dot as UTF-8, said to be so: a plain string literal is read as Latin-1, and showed "Â·".
+    const String linkText = engine.isLinkEnabled() ? "   Link" + (engine.getLinkPeers() > 0 ? String::fromUTF8 (" \xc2\xb7 ") + String (engine.getLinkPeers()) : String()) : String();
     tempoLabel.setText (String (engine.getTempoBpm(), 1) + " bpm" + (st != 0 ? "   " + String (st > 0 ? "+" : "") + String (st) + " st" : String()) + linkText, dontSendNotification);
     tempoLabel.setTooltip (st != 0 ? "The tempo, and the song's transpose: the keyboards play " + String (std::abs (st)) + (std::abs (st) == 1 ? " semitone " : " semitones ") + (st > 0 ? "up" : "down")
                                    : "The tempo. Tap it, or set it on the song.");
