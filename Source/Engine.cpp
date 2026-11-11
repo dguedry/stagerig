@@ -3161,7 +3161,11 @@ void Engine::performAction (int songIndex, const ActionDef& a)
             {
                 // A cue note is a press: let it go a moment later so a lighting desk sees a key, not a stuck one.
                 if (const int port = midiOuts.portFor (a.portIdentifier, a.portName); port >= 0)
+                {
+                    // The queue has one writer, the audio thread, which writes under the lock: so does this.
+                    const ScopedLock sl (lock);
                     midiOuts.push (port, MidiMessage::noteOff (ch, a.data1), Time::getMillisecondCounterHiRes() + 100.0);
+                }
             }
             break;
         }

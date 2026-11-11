@@ -373,6 +373,17 @@ namespace
 
     /** -1 in the process that goes on to be StageRig; otherwise the exit code
         the watchman finishes with. */
+    /** Said in a window, by whatever the desktop has for it: the watchman has
+        no screen of its own, and started from the menu, no terminal either. */
+    void tellUser (const char* text)
+    {
+        if (::fork() != 0) return;
+        ::execlp ("zenity", "zenity", "--error", "--title=StageRig", "--no-wrap", (std::string ("--text=") + text).c_str(), (char*) nullptr);
+        ::execlp ("kdialog", "kdialog", "--title", "StageRig", "--error", text, (char*) nullptr);
+        ::execlp ("notify-send", "notify-send", "-u", "critical", "StageRig", text, (char*) nullptr);
+        ::_exit (0);
+    }
+
     int superviseLaunch (int argc, char* argv[])
     {
         if (const char* off = std::getenv ("STAGERIG_NO_SUPERVISOR"); off != nullptr && *off != 0 && *off != '0') return -1;
@@ -411,6 +422,7 @@ namespace
         const std::string program = selfLen > 0 ? std::string (self, (size_t) selfLen) : std::string();
 
         std::vector<std::time_t> crashes;
+        int shortRuns = 0;
         for (;;)
         {
             const pid_t pid = ::fork();
@@ -483,19 +495,35 @@ namespace
             watchedChild = -1;
 
             if (watchQuit) return WIFEXITED (status) ? WEXITSTATUS (status) : 0;
-            if (WIFEXITED (status)) return WEXITSTATUS (status);       // it quit: so do we
+            /* It was quitting: closed is closed, even if it fell over on the
+               way out (it used to come back, a closed rig reappearing). */
+            if (quitSeenAt != 0 || (perf::liveness != nullptr && perf::liveness->quitting.load() != 0)) return 0;
+            /* It left by itself and cleanly: so do we. Leaving with an error
+               and never having said it was quitting is not a quit (the display
+               connection lost, an exit from inside a library): started again. */
+            if (WIFEXITED (status) && WEXITSTATUS (status) == 0) return 0;
 
             const int sig = WIFSIGNALED (status) ? WTERMSIG (status) : 0;
+            const std::string how = sig != 0 ? std::string (strsignal (sig)) : "exit code " + std::to_string (WIFEXITED (status) ? WEXITSTATUS (status) : -1);
             const auto now = std::time (nullptr);
             crashes.erase (std::remove_if (crashes.begin(), crashes.end(), [now] (std::time_t t) { return now - t > 120; }), crashes.end());
             crashes.push_back (now);
-            if (crashes.size() >= 5)
+            /* Five in two minutes, or five runs running that each lasted under
+               three minutes (a crash when one plugin finishes loading, a hang
+               at every start: each takes over a minute, and never made five in
+               two): given up on, and said where it is seen -- from the menu
+               there is no terminal to read. */
+            shortRuns = perf::livenessNowMs() - started < 180000 ? shortRuns + 1 : 0;
+            if (crashes.size() >= 5 || shortRuns >= 5)
             {
-                std::fprintf (stderr, "[watch] StageRig has crashed %d times in two minutes (last: %s); not starting it again.\n",
-                              (int) crashes.size(), strsignal (sig));
+                std::fprintf (stderr, "[watch] StageRig has stopped %d times running (last: %s); not starting it again.\n",
+                              (int) std::max ((int) crashes.size(), shortRuns), how.c_str());
+                tellUser ("StageRig keeps stopping as it starts, so it has not been started again.\n\n"
+                          "A plugin that fails as it loads is the usual cause. The log says what happened last: "
+                          "stagerig.log in the StageRig settings folder.");
                 return 1;
             }
-            std::fprintf (stderr, "[watch] StageRig stopped (%s); starting it again where it was.\n", strsignal (sig));
+            std::fprintf (stderr, "[watch] StageRig stopped (%s); starting it again where it was.\n", how.c_str());
             ::setenv ("STAGERIG_RECOVERED", std::to_string (crashes.size()).c_str(), 1);
         }
     }

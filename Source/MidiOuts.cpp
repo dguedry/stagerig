@@ -91,9 +91,23 @@ void MidiOuts::refresh (const StringArray& reconnected)
                 break;
             }
         }
+        /* Opened again after being away: what was sent while it was (the
+           note-offs, the pedal coming up) never arrived, and the synth beyond
+           it, if it stayed switched on, still holds those notes. Every pedal
+           and note let go, as the first thing it hears. */
+        auto openQuiet = [&p]
+        {
+            p.device = MidiOutput::openDevice (p.identifier);
+            if (p.device != nullptr)
+                for (int ch = 1; ch <= 16; ++ch)
+                {
+                    p.device->sendMessageNow (MidiMessage::controllerEvent (ch, 64, 0));
+                    p.device->sendMessageNow (MidiMessage::allNotesOff (ch));
+                }
+        };
         if (! there)                               p.device.reset();
-        else if (reconnected.contains (p.identifier)) { p.device.reset(); p.device = MidiOutput::openDevice (p.identifier); }
-        else if (p.device == nullptr)               p.device = MidiOutput::openDevice (p.identifier);
+        else if (reconnected.contains (p.identifier)) { p.device.reset(); openQuiet(); }
+        else if (p.device == nullptr)               openQuiet();
     }
 }
 
