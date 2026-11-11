@@ -510,6 +510,116 @@ void Engine::restartAudioDevice()
 #if JUCE_LINUX
 namespace
 {
+    /** A JACK device that never says its buffer is zero samples.
+
+        PipeWire's JACK reports a buffer of 0 for a moment while StageRig's ports
+        are linked again (an input switched off, a buffer size changed). JUCE
+        splits every block into pieces of the size read at start, and pieces of
+        none never finish a block: the audio thread spun for ever, holding the
+        lock the screen then waited on, and the rig froze with the sound gone.
+        The last real size stands in, or the size asked for. */
+    class SteadyBufferDevice final : public AudioIODevice, private AudioIODeviceCallback
+    {
+    public:
+        /** `plain`, when given, turns the device's own error on opening into words for a player. */
+        explicit SteadyBufferDevice (std::unique_ptr<AudioIODevice> realDevice, std::function<String (const String&)> plain = {})
+            : AudioIODevice (realDevice->getName(), realDevice->getTypeName()), real (std::move (realDevice)), plainError (std::move (plain)) {}
+
+        ~SteadyBufferDevice() override { real->close(); }
+
+        AudioIODevice& inner() noexcept { return *real; }
+
+        StringArray getOutputChannelNames() override                 { return real->getOutputChannelNames(); }
+        StringArray getInputChannelNames() override                  { return real->getInputChannelNames(); }
+        std::optional<BigInteger> getDefaultOutputChannels() const override { return real->getDefaultOutputChannels(); }
+        std::optional<BigInteger> getDefaultInputChannels() const override  { return real->getDefaultInputChannels(); }
+        Array<double> getAvailableSampleRates() override             { return real->getAvailableSampleRates(); }
+        Array<int> getAvailableBufferSizes() override
+        {
+            auto sizes = real->getAvailableBufferSizes();
+            sizes.removeAllInstancesOf (0);
+            if (sizes.isEmpty()) sizes.add (getCurrentBufferSizeSamples());
+            return sizes;
+        }
+        int getDefaultBufferSize() override                          { return steady (real->getDefaultBufferSize()); }
+
+        String open (const BigInteger& ins, const BigInteger& outs, double rate, int bufferSize) override
+        {
+            if (bufferSize > 0) requested = bufferSize;
+            const auto error = real->open (ins, outs, rate, bufferSize);
+            if (error.isEmpty() || ! plainError) return error;
+            std::fprintf (stderr, "[audio] %s: %s\n", getName().toRawUTF8(), error.toRawUTF8());
+            return plainError (error);
+        }
+        void close() override                                        { real->close(); }
+        bool isOpen() override                                       { return real->isOpen(); }
+
+        void start (AudioIODeviceCallback* cb) override
+        {
+            if (cb == nullptr) { stop(); return; }
+            if (real->isPlaying() && client.load() != cb) real->stop();   // so the new one hears it start
+            client.store (cb);
+            real->start (this);
+        }
+        void stop() override
+        {
+            real->stop();     // returns once no block is running
+            client.store (nullptr);
+        }
+        bool isPlaying() override                                    { return real->isPlaying() && client.load() != nullptr; }
+        String getLastError() override                               { return real->getLastError(); }
+
+        int getCurrentBufferSizeSamples() override                   { return steady (real->getCurrentBufferSizeSamples()); }
+        double getCurrentSampleRate() override                       { return real->getCurrentSampleRate(); }
+        int getCurrentBitDepth() override                            { return real->getCurrentBitDepth(); }
+        BigInteger getActiveOutputChannels() const override          { return real->getActiveOutputChannels(); }
+        BigInteger getActiveInputChannels() const override           { return real->getActiveInputChannels(); }
+        int getOutputLatencyInSamples() override                     { return real->getOutputLatencyInSamples(); }
+        int getInputLatencyInSamples() override                      { return real->getInputLatencyInSamples(); }
+        AudioWorkgroup getWorkgroup() const override                 { return real->getWorkgroup(); }
+        bool hasControlPanel() const override                        { return real->hasControlPanel(); }
+        bool showControlPanel() override                             { return real->showControlPanel(); }
+        bool setAudioPreprocessingEnabled (bool b) override          { return real->setAudioPreprocessingEnabled (b); }
+        int getXRunCount() const noexcept override                   { return real->getXRunCount(); }
+
+    private:
+        int steady (int reported)
+        {
+            if (reported > 0) { lastGood = reported; return reported; }
+            if (lastGood > 0) return lastGood;
+            return requested > 0 ? requested : 1024;
+        }
+
+        // The real device calls these; they go on to the manager, naming this device.
+        void audioDeviceAboutToStart (AudioIODevice*) override
+        {
+            if (auto* cb = client.load()) cb->audioDeviceAboutToStart (this);
+        }
+        void audioDeviceStopped() override
+        {
+            if (auto* cb = client.load()) cb->audioDeviceStopped();
+        }
+        void audioDeviceError (const String& message) override
+        {
+            if (auto* cb = client.load()) cb->audioDeviceError (message);
+        }
+        void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut,
+                                               int numSamples, const AudioIODeviceCallbackContext& context) override
+        {
+            if (auto* cb = client.load(); cb != nullptr && numSamples > 0)
+                cb->audioDeviceIOCallbackWithContext (in, numIn, out, numOut, numSamples, context);
+            else
+                for (int c = 0; c < numOut; ++c)
+                    if (out[c] != nullptr) FloatVectorOperations::clear (out[c], jmax (0, numSamples));
+        }
+
+        std::unique_ptr<AudioIODevice> real;
+        std::function<String (const String&)> plainError;
+        std::atomic<AudioIODeviceCallback*> client { nullptr };
+        std::atomic<int> lastGood { 0 };
+        int requested = 0;
+    };
+
     /** ALSA as StageRig offers it: each sound card's own devices, once each,
         by a plain name ("SL — USB Audio"), and always the direct one behind it
         (hw:CARD=...,DEV=...).
@@ -557,6 +667,7 @@ namespace
 
         int getIndexOfDevice (AudioIODevice* device, bool asInput) const override
         {
+            if (auto* wrapped = dynamic_cast<SteadyBufferDevice*> (device)) device = &wrapped->inner();
             const int i = alsa->getIndexOfDevice (device, asInput);
             if (i < 0) return i;
             const auto juceName = alsa->getDeviceNames (asInput)[i];
@@ -590,7 +701,11 @@ namespace
                 std::fprintf (stderr, "[audio] sound card %s still in use by another program; not opened\n", which.joinIntoString (", ").toRawUTF8());
                 return nullptr;
             }
-            return alsa->createDevice (out != nullptr ? out->juceName : String(), in != nullptr ? in->juceName : String());
+            std::unique_ptr<AudioIODevice> d (alsa->createDevice (out != nullptr ? out->juceName : String(), in != nullptr ? in->juceName : String()));
+            if (d == nullptr) return nullptr;
+            const int card = out != nullptr ? out->card : in->card;
+            const String name = out != nullptr ? out->name : in->name;
+            return new SteadyBufferDevice (std::move (d), [card, name] (const String& e) { return plainError (e, card, name); });
         }
 
         /** A card plugged in or taken out since the last look: the list is made
@@ -719,6 +834,43 @@ namespace
 
         static String cardList() { return File ("/proc/asound/cards").loadFileAsString(); }
 
+        /** A card's name as its maker gives it ("Saffire 6 USB"), from the kernel's list. */
+        static String cardName (int card)
+        {
+            for (const auto& line : StringArray::fromLines (cardList()))
+                if (line.trim().startsWith (String (card) + " [") && line.contains (" - "))
+                    return line.fromFirstOccurrenceOf (" - ", false, false).trim();
+            return "card " + String (card);
+        }
+
+        /** ALSA's words for why a card did not open, in a player's. */
+        static String plainError (const String& error, int card, const String& name)
+        {
+            const auto e = error.toLowerCase();
+            if (e.contains ("no space left on device"))
+            {
+                /* The kernel's "not enough bandwidth": a USB socket group has room
+                   for so much audio at once, and another USB audio device on the
+                   same group is using it. Which one, by its bus. */
+                const auto bus = File ("/proc/asound/card" + String (card) + "/usbbus").loadFileAsString().upToFirstOccurrenceOf ("/", false, false).trim();
+                StringArray others;
+                if (bus.isNotEmpty())
+                    for (const auto& dir : File ("/proc/asound").findChildFiles (File::findDirectories, false, "card*"))
+                        if (dir.getFileName() != "card" + String (card)
+                            && dir.getChildFile ("usbbus").loadFileAsString().upToFirstOccurrenceOf ("/", false, false).trim() == bus)
+                            others.add (cardName (dir.getFileName().substring (4).getIntValue()));
+                const auto who = others.isEmpty() ? String ("another USB device") : others.joinIntoString (" and ");
+                return name + " has no room on its USB connection for its sound: " + who + " shares the same group of USB "
+                       "sockets and is using it. Plug " + name + " into a socket of another group (on many computers, the "
+                       "front sockets, or another row at the back), or switch " + who + " off. Then choose Reopen audio.";
+            }
+            if (e.contains ("busy"))
+                return name + " is in use by another program. Close it, or choose Reopen audio.";
+            if (e.contains ("no such device") || e.contains ("no such file"))
+                return name + " is not there: switched off or unplugged. Switch it on: StageRig reconnects by itself.";
+            return name + " did not open (" + error + ").";
+        }
+
         std::unique_ptr<AudioIODeviceType> alsa;
         std::vector<Direct> inputs, outputs;
         String cardsSeen;
@@ -736,110 +888,6 @@ namespace
         return {};
     }
 
-    /** A JACK device that never says its buffer is zero samples.
-
-        PipeWire's JACK reports a buffer of 0 for a moment while StageRig's ports
-        are linked again (an input switched off, a buffer size changed). JUCE
-        splits every block into pieces of the size read at start, and pieces of
-        none never finish a block: the audio thread spun for ever, holding the
-        lock the screen then waited on, and the rig froze with the sound gone.
-        The last real size stands in, or the size asked for. */
-    class SteadyBufferDevice final : public AudioIODevice, private AudioIODeviceCallback
-    {
-    public:
-        explicit SteadyBufferDevice (std::unique_ptr<AudioIODevice> realDevice)
-            : AudioIODevice (realDevice->getName(), realDevice->getTypeName()), real (std::move (realDevice)) {}
-
-        ~SteadyBufferDevice() override { real->close(); }
-
-        AudioIODevice& inner() noexcept { return *real; }
-
-        StringArray getOutputChannelNames() override                 { return real->getOutputChannelNames(); }
-        StringArray getInputChannelNames() override                  { return real->getInputChannelNames(); }
-        std::optional<BigInteger> getDefaultOutputChannels() const override { return real->getDefaultOutputChannels(); }
-        std::optional<BigInteger> getDefaultInputChannels() const override  { return real->getDefaultInputChannels(); }
-        Array<double> getAvailableSampleRates() override             { return real->getAvailableSampleRates(); }
-        Array<int> getAvailableBufferSizes() override
-        {
-            auto sizes = real->getAvailableBufferSizes();
-            sizes.removeAllInstancesOf (0);
-            if (sizes.isEmpty()) sizes.add (getCurrentBufferSizeSamples());
-            return sizes;
-        }
-        int getDefaultBufferSize() override                          { return steady (real->getDefaultBufferSize()); }
-
-        String open (const BigInteger& ins, const BigInteger& outs, double rate, int bufferSize) override
-        {
-            if (bufferSize > 0) requested = bufferSize;
-            return real->open (ins, outs, rate, bufferSize);
-        }
-        void close() override                                        { real->close(); }
-        bool isOpen() override                                       { return real->isOpen(); }
-
-        void start (AudioIODeviceCallback* cb) override
-        {
-            if (cb == nullptr) { stop(); return; }
-            if (real->isPlaying() && client.load() != cb) real->stop();   // so the new one hears it start
-            client.store (cb);
-            real->start (this);
-        }
-        void stop() override
-        {
-            real->stop();     // returns once no block is running
-            client.store (nullptr);
-        }
-        bool isPlaying() override                                    { return real->isPlaying() && client.load() != nullptr; }
-        String getLastError() override                               { return real->getLastError(); }
-
-        int getCurrentBufferSizeSamples() override                   { return steady (real->getCurrentBufferSizeSamples()); }
-        double getCurrentSampleRate() override                       { return real->getCurrentSampleRate(); }
-        int getCurrentBitDepth() override                            { return real->getCurrentBitDepth(); }
-        BigInteger getActiveOutputChannels() const override          { return real->getActiveOutputChannels(); }
-        BigInteger getActiveInputChannels() const override           { return real->getActiveInputChannels(); }
-        int getOutputLatencyInSamples() override                     { return real->getOutputLatencyInSamples(); }
-        int getInputLatencyInSamples() override                      { return real->getInputLatencyInSamples(); }
-        AudioWorkgroup getWorkgroup() const override                 { return real->getWorkgroup(); }
-        bool hasControlPanel() const override                        { return real->hasControlPanel(); }
-        bool showControlPanel() override                             { return real->showControlPanel(); }
-        bool setAudioPreprocessingEnabled (bool b) override          { return real->setAudioPreprocessingEnabled (b); }
-        int getXRunCount() const noexcept override                   { return real->getXRunCount(); }
-
-    private:
-        int steady (int reported)
-        {
-            if (reported > 0) { lastGood = reported; return reported; }
-            if (lastGood > 0) return lastGood;
-            return requested > 0 ? requested : 1024;
-        }
-
-        // The real device calls these; they go on to the manager, naming this device.
-        void audioDeviceAboutToStart (AudioIODevice*) override
-        {
-            if (auto* cb = client.load()) cb->audioDeviceAboutToStart (this);
-        }
-        void audioDeviceStopped() override
-        {
-            if (auto* cb = client.load()) cb->audioDeviceStopped();
-        }
-        void audioDeviceError (const String& message) override
-        {
-            if (auto* cb = client.load()) cb->audioDeviceError (message);
-        }
-        void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut,
-                                               int numSamples, const AudioIODeviceCallbackContext& context) override
-        {
-            if (auto* cb = client.load(); cb != nullptr && numSamples > 0)
-                cb->audioDeviceIOCallbackWithContext (in, numIn, out, numOut, numSamples, context);
-            else
-                for (int c = 0; c < numOut; ++c)
-                    if (out[c] != nullptr) FloatVectorOperations::clear (out[c], jmax (0, numSamples));
-        }
-
-        std::unique_ptr<AudioIODevice> real;
-        std::atomic<AudioIODeviceCallback*> client { nullptr };
-        std::atomic<int> lastGood { 0 };
-        int requested = 0;
-    };
 
     /* Set when the sound system has stopped answering (see soundSystemAnswers). */
     std::atomic<bool> soundSystemStuck { false };
@@ -1134,7 +1182,13 @@ void Engine::watchAudioDevice()
     std::fprintf (stderr, "[audio-watch] reopening: out '%s', in '%s' (attempt %d)\n",
                   setup.outputDeviceName.toRawUTF8(), setup.inputDeviceName.toRawUTF8(), audioRetries);
     deviceManager.closeAudioDevice();
-    deviceManager.setAudioDeviceSetup (setup, true);
+    // Why it did not open, said once in a player's words (the ALSA type gives them).
+    if (const auto why = deviceManager.setAudioDeviceSetup (setup, true); why.isNotEmpty() && why != audioWhyNot)
+    {
+        audioWhyNot = why;
+        if (type == "ALSA") sayAudio ("Audio: " + why);
+    }
+    else if (why.isEmpty()) audioWhyNot = {};
     lastAudioWatch = Time::getMillisecondCounter();
 }
 

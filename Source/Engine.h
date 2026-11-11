@@ -890,6 +890,7 @@ private:
     int preparedBlock = 0;
     juce::uint32 lastAudioWatch = 0;
     juce::String audioGone;            // the audio device waited for, said once
+    juce::String audioWhyNot;          // why it last did not open, said once
 
     /** Tap tempo. Only the recent taps count: a pause means the player has
         stopped tapping and started again, and averaging across that gap would
