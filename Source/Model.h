@@ -658,6 +658,8 @@ struct Setup
     static Setup fromVar (const juce::var&);
 
     juce::Result saveToFile (const juce::File&) const;
+    /** Where the save before the last is kept: <name>.bak, beside the file. */
+    static juce::File backupOf (const juce::File&);
     static juce::Result loadFromFile (const juce::File&, Setup& out);
 
     static Setup makeDefault();

@@ -329,6 +329,31 @@ int main()
     CHECK (Setup::loadFromFile (bad.getFile(), ignored).failed());
     CHECK (Setup::loadFromFile (juce::File ("/nonexistent/x.json"), ignored).failed());
 
+    // The save before stays as <name>.bak: a damaged file has a readable one beside it.
+    {
+        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("stagerig-modeltest-bak");
+        dir.deleteRecursively();
+        const auto f = dir.getChildFile ("rig.stagerig.json");
+        Setup first = Setup::makeDefault();
+        first.tempoBpm = 97.0;
+        CHECK (first.saveToFile (f).wasOk());
+        CHECK (! Setup::backupOf (f).existsAsFile());          // nothing before the first save
+        Setup second = first;
+        second.tempoBpm = 133.0;
+        CHECK (second.saveToFile (f).wasOk());
+        Setup back;
+        CHECK (Setup::loadFromFile (f, back).wasOk() && back.tempoBpm == 133.0);
+        CHECK (Setup::loadFromFile (Setup::backupOf (f), back).wasOk() && back.tempoBpm == 97.0);
+        CHECK (f.replaceWithText ("{ \"format\": \"stagerig"));       // cut short, as by a full disk
+        CHECK (Setup::loadFromFile (f, back).failed());
+        CHECK (Setup::loadFromFile (Setup::backupOf (f), back).wasOk());
+        // A damaged file is not moved over the good save before it.
+        CHECK (f.replaceWithText ("{"));
+        CHECK (second.saveToFile (f).wasOk());
+        CHECK (Setup::loadFromFile (Setup::backupOf (f), back).wasOk());
+        dir.deleteRecursively();
+    }
+
     // Mapping templates: store, reload, remove.
     {
         juce::TemporaryFile tf (".json");

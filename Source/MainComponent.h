@@ -45,7 +45,8 @@ public:
     /** ARA-only plugins need an ARA host; they may show an empty editor and can hang. */
     static bool looksLikeAraPlugin (const juce::PluginDescription&);
     void selectInput (int);
-    void loadSetupFile (const juce::File&);
+    /** Loads a setup; a file that cannot be read falls back on the save before it (<name>.bak). False if neither loads. */
+    bool loadSetupFile (const juce::File&);
     /** An instrument row was clicked: the on-screen keyboard plays that instrument. */
     void playInstrumentFromKeyboard (int slot);
     /** The controller setup of an instrument of the program being edited: its knobs, screen and lights. */
@@ -119,6 +120,10 @@ private:
     juce::TextButton performBtn { "Perform" };
     juce::String lastLivePosition;                        // what the settings last heard of where the show is
     bool newerFile = false, overwriteWarned = false;     // the open file was saved by a newer StageRig
+    /** A setup was there at start and could not be read: the autosave on disk
+        is put aside before anything is written over it. */
+    bool autosaveToKeep = false;
+    void keepAutosaveAside();
     juce::TextButton songsBtn { "Songs" };
     juce::TextButton remoteBtn { "Tablet" };
     juce::TextButton helpBtn { "Help" };

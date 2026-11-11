@@ -1013,20 +1013,42 @@ void Setup::migrateMidiFiles()
     }
 }
 
+File Setup::backupOf (const File& f) { return f.getSiblingFile (f.getFileName() + ".bak"); }
+
 Result Setup::saveToFile (const File& f) const
 {
     if (! f.getParentDirectory().createDirectory())
         return Result::fail ("Could not create directory " + f.getParentDirectory().getFullPathName());
 
+    /* Written beside the file, pushed to the disk, and checked, before it
+       takes the file's place: a full disk or a failing one must leave the
+       setup as it was, never a piece of the new one. The save before stays as
+       <name>.bak, which loading falls back on. */
     TemporaryFile temp (f);
     {
         FileOutputStream out (temp.getFile());
         if (! out.openedOk())
             return Result::fail ("Could not write " + f.getFullPathName());
         JSON::writeToStream (out, toVar());
+        out.flush();
+        if (out.getStatus().failed())
+            return Result::fail ("Could not write " + f.getFullPathName() + ": " + out.getStatus().getErrorMessage()
+                                 + " (is the disk full?)");
+    }
+    if (temp.getFile().getSize() < 2)
+        return Result::fail ("Could not write " + f.getFullPathName() + " (is the disk full?)");
+    if (f.existsAsFile() && f.getSize() > 2)
+    {
+        const auto bak = backupOf (f);
+        bak.deleteFile();
+        if (! f.moveFileTo (bak)) f.copyFileTo (bak);
     }
     if (! temp.overwriteTargetFileWithTemporary())
+    {
+        // The save before is put back if the new one could not take its place.
+        if (! f.existsAsFile()) backupOf (f).copyFileTo (f);
         return Result::fail ("Could not replace " + f.getFullPathName());
+    }
     return Result::ok();
 }
 

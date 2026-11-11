@@ -3063,11 +3063,32 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     surfaceHub->onSurfaceProblem = [this] (const String& problem) { showStatus (problem); };
 
     // Open the requested setup, else restore the last one.
+    /* The first of these that is there and reads; one that is there and does
+       not read (damaged: a disk that filled, a power cut) falls back on its
+       save before, then on the next. Nothing readable where something was is
+       said in a window, and the autosave on disk is kept aside before this
+       session writes its own over it. */
     File last (settings.getValue ("lastSetup"));
-    if (initialSetup.existsAsFile())            loadSetupFile (initialSetup);
-    else if (last.existsAsFile())               loadSetupFile (last);
-    else if (getAutosaveFile().existsAsFile())  loadSetupFile (getAutosaveFile());
-    else                                        refreshAll();
+    bool loaded = false, anyThere = false;
+    for (const auto& f : { initialSetup, last, getAutosaveFile() })
+    {
+        if (f == File() || ! (f.existsAsFile() || Setup::backupOf (f).existsAsFile())) continue;
+        anyThere = true;
+        if (loadSetupFile (f)) { loaded = true; break; }
+    }
+    if (! loaded)
+    {
+        refreshAll();
+        if (anyThere)
+        {
+            autosaveToKeep = true;
+            AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "The setup could not be read",
+                "StageRig could not read the setup it had last time, nor the copy from the save before it, "
+                "so it has started empty.\n\nNothing has been deleted: the files are still in "
+                + getAutosaveFile().getParentDirectory().getFullPathName() + ", and the autosave there is kept aside "
+                "before a new one is written. Open... loads another setup file.");
+        }
+    }
 
     /* A copy with a settings folder of its own (STAGERIG_SETTINGS_DIR, beside a running
        rig) may read the setup its settings name, but it is not that setup's owner:
@@ -3547,11 +3568,20 @@ void MainComponent::timerCallback()
            runs mid-set, and a plugin that stalls its audio to serialise, or a
            host that has stopped answering, must not take the music with it. */
         const auto captured = engine.captureSetup (5000, true);
-        const bool ok = captured.saveToFile (getAutosaveFile()).wasOk();
+        keepAutosaveAside();
+        auto saved = captured.saveToFile (getAutosaveFile());
 
-        if (currentFile != File() && currentFile.existsAsFile())
-            captured.saveToFile (currentFile);
+        // The open file too -- but never unasked over one a newer StageRig made (Save asks first).
+        if (saved.wasOk() && currentFile != File() && currentFile.existsAsFile() && ! (newerFile && ! overwriteWarned))
+            saved = captured.saveToFile (currentFile);
 
+        const bool ok = saved.wasOk();
+        if (! ok)
+        {
+            // Not saved is still to be saved, and said: tried again at the next interval.
+            dirty = true;
+            showStatus ("Autosave failed: " + saved.getErrorMessage());
+        }
         if (ok)
             fileLabel.setText ((currentFile == File() ? String ("(unsaved setup)") : currentFile.getFullPathName())
                                    + "   autosaved " + Time::getCurrentTime().toString (false, true, false), dontSendNotification);
@@ -3760,15 +3790,38 @@ void MainComponent::newSetup()
     }), false);
 }
 
-void MainComponent::loadSetupFile (const File& f)
+void MainComponent::keepAutosaveAside()
+{
+    if (! autosaveToKeep) return;
+    autosaveToKeep = false;
+    for (const auto& f : { getAutosaveFile(), Setup::backupOf (getAutosaveFile()) })
+        if (f.existsAsFile() && f.getSize() > 2)
+            f.copyFileTo (f.getSiblingFile (f.getFileName() + ".unread-" + Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S")));
+}
+
+bool MainComponent::loadSetupFile (const File& f)
 {
     Setup s;
-    auto r = Setup::loadFromFile (f, s);
+    auto r = f.existsAsFile() ? Setup::loadFromFile (f, s) : Result::fail (f.getFileName() + " is not there.");
     if (r.failed())
     {
-        showStatus ("Load failed: " + r.getErrorMessage());
-        refreshAll();
-        return;
+        // The save before it, if this one is damaged.
+        const auto bak = Setup::backupOf (f);
+        Setup fromBak;
+        if (bak.existsAsFile() && Setup::loadFromFile (bak, fromBak).wasOk())
+        {
+            s = std::move (fromBak);
+            AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "An older copy was loaded",
+                f.getFileName() + " could not be read (" + r.getErrorMessage() + ").\n\nStageRig loaded the copy from the save before it, "
+                + bak.getFileName() + ", from " + bak.getLastModificationTime().toString (true, true, false, true)
+                + ". Changes made after that are not in it.");
+        }
+        else
+        {
+            showStatus ("Load failed: " + r.getErrorMessage());
+            refreshAll();
+            return false;
+        }
     }
     const int madeBy = s.loadedFormatVersion;
     engine.loadSetup (std::move (s));
@@ -3796,6 +3849,7 @@ void MainComponent::loadSetupFile (const File& f)
                     + getAutosaveFile().getLastModificationTime().toString (false, true, false, true) + "): Open... > " + getAutosaveFile().getFileName());
     else
         showStatus ("Loaded " + f.getFileName());
+    return true;
 }
 
 bool MainComponent::writeSetupFile (const File& f, int captureBudgetMs)
@@ -3816,6 +3870,7 @@ bool MainComponent::writeSetupFile (const File& f, int captureBudgetMs)
             }));
         return false;
     }
+    if (f == getAutosaveFile()) keepAutosaveAside();
     auto r = engine.captureSetup (captureBudgetMs).saveToFile (f);
     if (r.failed()) { showStatus ("Save failed: " + r.getErrorMessage()); return false; }
     if (f != getAutosaveFile()) newerFile = false;     // written by this version now: Save no longer asks
