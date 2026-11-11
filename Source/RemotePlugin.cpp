@@ -657,6 +657,14 @@ bool RemotePlugin::killIfStalled (int stalledMs)
 {
     if (shm == nullptr || ! alive.load()) return false;
     const auto now = Time::getMillisecondCounter();
+    // Nothing but invalid sound for some three hundred blocks running: it will not come right by itself.
+    if (garbageRun.load (std::memory_order_relaxed) > 300)
+    {
+        garbageRun.store (0);
+        killHost();
+        markDead ("plugin gave only invalid sound (not a number)");
+        return true;
+    }
     const auto done = shm->completedSeq.load (std::memory_order_acquire);
     const auto asked = shm->requestSeq.load (std::memory_order_acquire);
     bool answering;
@@ -806,6 +814,25 @@ bool RemotePlugin::finishProcess (float* outL, float* outR, const timespec& dead
         }
     }
 
+    /* Not a number, or infinite, anywhere in the block: not sound. Passed on,
+       it would get into the delay lines of every effect after this plugin and
+       stay there, the output silent (the guard at the end sees to that) until
+       each was loaded again. The block is refused instead -- silence from an
+       instrument, the sound let past an effect -- and a plugin that gives
+       nothing else for a few seconds is started again by the watch
+       (killIfStalled). x * 0 is 0 for every real number and not for these. */
+    if (outL != nullptr || outR != nullptr)
+    {
+        float poison = 0.0f;
+        for (int i = 0; i < inFlightSamples; ++i) poison += shm->outL[i] * 0.0f + shm->outR[i] * 0.0f;
+        if (poison != 0.0f)        // NaN compares unequal to everything
+        {
+            garbageBlocks.fetch_add (1, std::memory_order_relaxed);
+            garbageRun.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+        garbageRun.store (0, std::memory_order_relaxed);
+    }
     if (outL != nullptr) FloatVectorOperations::copy (outL, shm->outL, inFlightSamples);
     if (outR != nullptr) FloatVectorOperations::copy (outR, shm->outR, inFlightSamples);
     if (midiOut != nullptr)

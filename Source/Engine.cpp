@@ -1789,7 +1789,10 @@ std::unique_ptr<Engine::InputRuntime> Engine::makeInputRuntime (const InputDef& 
     auto rt = std::make_unique<InputRuntime>();
     rt->loop.events.reserve (16384);          // a few minutes of playing
     rt->collector.reset (sampleRate);
-    rt->trackMidi.ensureSize (4096);
+    // Room enough that the audio thread never has to ask for more: a backing track's
+    // parts all starting at a seam, with their notes-off, come to well over a thousand bytes each.
+    rt->trackMidi.ensureSize (32768);
+    rt->holdBlock.ensureSize (8192);
     rt->shifted.ensureSize (4096);
     rt->block.ensureSize (8192);              // the keys and a loop playing round them
     rt->sentMidi.ensureSize (2048);
@@ -3905,7 +3908,7 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
     auto slot = std::make_unique<SlotRuntime> (*this, inputIndex, program, slotIndex);
     slot->applyDef (def);
     slot->stereo.setSize (2, blockSize);
-    slot->midi.ensureSize (2048);
+    slot->midi.ensureSize (16384);
     nodeRegistry[slot->id] = slot.get();
     if (def.isExternal())
     {
@@ -3916,7 +3919,7 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
     else if (def.isGm())
     {
         slot->isGm = true;
-        slot->gmMidi.ensureSize (4096);
+        slot->gmMidi.ensureSize (32768);
         queueGmLoad (*slot);
     }
     else if (def.isInput())

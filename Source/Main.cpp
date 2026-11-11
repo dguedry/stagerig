@@ -96,6 +96,18 @@ public:
         if (const char* dir = std::getenv ("STAGERIG_SETTINGS_DIR"); dir != nullptr && *dir != 0)
             opts.folderName = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (dir)).getFullPathName();
         opts.storageFormat = juce::PropertiesFile::storeAsXML;
+        /* A settings file that is there and cannot be read (cut short by a
+           power cut, a full disk) would be started over empty and written
+           back so at the first change -- the audio interface, the last setup,
+           the plugin list gone, and no copy. Put aside first, so it can be
+           looked at or put back. */
+        if (const auto f = opts.getDefaultFile(); f.existsAsFile() && f.getSize() > 0 && juce::parseXML (f) == nullptr)
+        {
+            const auto aside = f.getSiblingFile (f.getFileName() + ".unreadable-" + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S"));
+            f.copyFileTo (aside);
+            std::fprintf (stderr, "[settings] %s could not be read; kept as %s, and StageRig starts with fresh settings\n",
+                          f.getFullPathName().toRawUTF8(), aside.getFileName().toRawUTF8());
+        }
         settings = std::make_unique<juce::PropertiesFile> (opts);
 
         // Optional: `StageRig path/to/setup.stagerig.json` opens that setup instead of the last one.

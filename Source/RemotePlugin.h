@@ -200,6 +200,7 @@ private:
     /* What a block the plugin was too busy to take would have told it, less
        the note-ons: note-offs, pedals, controllers. Given with the next block
        it takes, or the notes it holds would never be let go. Audio thread only. */
+    std::atomic<int> garbageBlocks { 0 }, garbageRun { 0 };    // blocks refused for holding NaN or infinity: in all, and running
     static constexpr uint32_t kCarry = 128;
     ipc::MidiEvent carry[kCarry];
     uint32_t carryCount = 0;
