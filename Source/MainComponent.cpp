@@ -126,6 +126,28 @@ public:
             list.repaintRow (sel);
         };
 
+        addAndMakeVisible (findBtn);
+        findBtn.setTooltip ("Finds this keyboard for you: press this, then play any key on it. A keyboard often shows up as "
+                            "several MIDI devices (SL CTRL, SL DAW, SL LINK...) and only one of them carries the keys.");
+        findBtn.onClick = [this]
+        {
+            if (finder != nullptr) { stopFinding ({}); return; }
+            if (list.getSelectedRow() < 0) return;
+            devices = MidiInput::getAvailableDevices();
+            finder = std::make_unique<KeyFinder>();
+            finder->forInput = list.getSelectedRow();
+            finder->until = Time::getMillisecondCounter() + 20000;
+            for (const auto& d : devices)
+                if (auto in = MidiInput::openDevice (d.identifier, finder.get()))
+                {
+                    in->start();
+                    finder->inputs.push_back (std::move (in));
+                }
+            if (finder->inputs.empty()) { stopFinding ("No MIDI device is connected: plug the keyboard in first."); return; }
+            findBtn.setButtonText ("Listening...");
+            owner.showStatus ("Play a key on the keyboard for this input...");
+        };
+
         addAndMakeVisible (pcChannelBox);
         // Ids: 1 = same as notes, 2 = any, 3.. = channel 1..16
         pcChannelBox.addItem ("Same as notes", 1);
@@ -233,6 +255,7 @@ public:
         audioBox.setVisible (def.isAudio());
         for (auto* c : std::initializer_list<Component*> { &deviceLabel, &deviceBox, &channelLabel, &channelBox, &pcToggle, &pcChannelLabel, &pcChannelBox })
             c->setVisible (! def.isTrack());
+        findBtn.setVisible (! def.isTrack());
         deviceLabel.setText (def.isAudio() ? "Control MIDI device (program changes, pedals)" : "MIDI device", dontSendNotification);
         if (def.isAudio())
         {
@@ -314,7 +337,11 @@ public:
             editor.removeFromTop (6);
         }
         deviceLabel.setBounds (editor.removeFromTop (16));
-        deviceBox.setBounds (editor.removeFromTop (24));
+        {
+            auto row = editor.removeFromTop (24);
+            if (findBtn.isVisible()) { findBtn.setBounds (row.removeFromRight (96)); row.removeFromRight (4); }
+            deviceBox.setBounds (row);
+        }
         editor.removeFromTop (6);
         auto chRow = editor.removeFromTop (24);
         channelLabel.setBounds (chRow.removeFromLeft (56));
@@ -379,6 +406,7 @@ public:
 private:
     void timerCallback() override
     {
+        lookForKey();
         // Repaint only the audio rows, and only when their meter would look different.
         const auto& inputs = engine.getSetup().inputs;
         for (int i = 0; i < (int) inputs.size(); ++i)
@@ -428,6 +456,64 @@ private:
     ComboBox outputBox;
     Array<MidiDeviceInfo> devices;
     int lastNotified = -1;
+
+    /* Play a key...: every MIDI input is listened to for a moment, and the one
+       a note comes from is the keyboard. Its ports are let go of at once
+       after, heard or not. */
+    struct KeyFinder : MidiInputCallback
+    {
+        void handleIncomingMidiMessage (MidiInput* source, const MidiMessage& m) override
+        {
+            // The first note-on from any of them: one writer, then said.
+            if (m.isNoteOn() && source != nullptr && ! claimed.exchange (true))
+            {
+                { const ScopedLock sl (lock); heard = source->getIdentifier(); }
+                gotOne.store (true);
+            }
+        }
+        std::vector<std::unique_ptr<MidiInput>> inputs;
+        CriticalSection lock;
+        String heard;
+        std::atomic<bool> claimed { false }, gotOne { false };
+        int forInput = -1;
+        uint32 until = 0;
+    };
+    std::unique_ptr<KeyFinder> finder;
+    TextButton findBtn { "Play a key..." };
+
+    void stopFinding (const String& say)
+    {
+        if (finder != nullptr)
+        {
+            for (auto& in : finder->inputs) in->stop();
+            finder.reset();
+        }
+        findBtn.setButtonText ("Play a key...");
+        if (say.isNotEmpty()) owner.showStatus (say);
+    }
+
+    void lookForKey()
+    {
+        if (finder == nullptr) return;
+        if (finder->gotOne.load())
+        {
+            String id;
+            { const ScopedLock sl (finder->lock); id = finder->heard; }
+            const int input = finder->forInput;
+            MidiDeviceInfo found;
+            for (const auto& d : devices) if (d.identifier == id) found = d;
+            stopFinding ({});
+            if (found.identifier.isNotEmpty() && input >= 0 && input < (int) engine.getSetup().inputs.size())
+            {
+                engine.setInputMidiDevice (input, found);
+                owner.markDirty();
+                refresh();
+                owner.showStatus (engine.getSetup().inputs[(size_t) input].name + " is the keyboard on " + found.name + ".");
+            }
+        }
+        else if ((int32) (Time::getMillisecondCounter() - finder->until) > 0)
+            stopFinding ("No key was heard. Is the keyboard switched on and plugged in?");
+    }
 };
 
 //==============================================================================

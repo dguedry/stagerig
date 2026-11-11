@@ -145,7 +145,7 @@ whichever section answers what you typed.
 | **Instruments** (right, top) | The instruments of the current program, each with its controls, MIDI chain and effects, then **PROGRAM EFFECTS**. |
 | **MIDI mappings** (right, bottom) | Knobs and pedals mapped to plugin parameters in this program, with Learn and Suggest. |
 | **Keys** (bottom, optional) | An on-screen keyboard for trying sounds without a controller. |
-| **Status bar** | Current file, CPU, sample rate, buffer size and latency, and warnings such as *N dropouts* or *clock held by another app*. |
+| **Status bar** | Current file, CPU, sample rate, buffer size and latency, and warnings such as *N dropouts* (a plugin answered late), *N underruns* (the audio interface ran dry: a click or a gap) or *clock held by another app*. Either count climbing means the buffer is too small for the program: raise it one step in **Audio...**. |
 
 **New** starts an empty setup, and asks first when the current one has unsaved
 changes. **Open...** opens a setup file.
@@ -211,6 +211,10 @@ Each keyboard input has, below the list:
 - **Name** -- what the input is called everywhere: in the songs, on the
   tablet, on the printed list. Type in the box.
 - **MIDI device** -- any MIDI device the system can see (USB or DIN).
+  **Play a key...** beside it finds the keyboard for you: press it, then play
+  any key, and the device the note came from is chosen. Use it when a
+  keyboard shows up as several devices (a Studiologic SL as *SL CTRL*, *SL
+  DAW* and *SL LINK*): only one of them carries the keys.
   A keyboard plugged in after starting is picked up by itself. A device is
   known by its name, so if a saved device is missing, the list shows it as
   *(disconnected)* -- even when another keyboard has since taken its place in
@@ -1726,6 +1730,12 @@ mapping, including each plugin's own state, and your songs and set lists.
   the setup you open, the status bar says so. Press **Save** between songs,
   not mid-song.
 
+- Every save keeps the save before it beside the file, as `<name>.bak`. A
+  setup that cannot be read (a power cut or a full disk can cut a file short)
+  is loaded from that copy instead, and a window says so. If neither reads,
+  StageRig starts empty, says so, and puts the autosave on disk aside before
+  writing a new one: nothing is deleted.
+
 A setup file is plain text, so a copy is a backup.
 
 ## Playing live
@@ -1921,6 +1931,10 @@ switching the plugin off; scan again once the install has finished.
 | A plugin puts up a dialog every time it is looked at (no licence, a demo that nags) | It is loaded whenever its folder is scanned. | Select it in **Plugins...** and press **Remove selected**: it is switched off and left alone by later scans, until you switch it back on the same way. |
 | *late N* climbing while playing | Plugins are not keeping up with the buffer. | Raise the buffer size in **Audio...**, or check realtime scheduling. |
 | *clock held by another app* | Another audio application forces the system's buffer size. | Close it, or set its buffer size to match. |
+| *The computer's sound system has stopped running. StageRig is starting it again* | On the JACK type: the sound system (PipeWire) is there but has stopped moving sound, usually after a USB device's lock-up. | Nothing: StageRig restarts it and the sound is back in a few seconds (other programs' sound blinks too). `restartSoundSystem` in the settings file turns this off. |
+| *The input ... has gone, so StageRig plays on without it* | An audio input's interface was unplugged or switched off. | Nothing: the keyboards play on, and the input is opened again when it is back. |
+| *... is connected but will not play. Switch it off and on* | An interface on the ALSA type that opens and gives no sound, three times running. | Switch it off and on, or unplug it for a few seconds. StageRig keeps trying, more slowly, so as not to lock a USB keyboard's audio up. |
+| *... has no room on its USB connection for its sound* | Two USB 1.1 audio devices (an older interface, a keyboard's own audio) share one group of USB sockets, which has room for one of them. | Plug one into a socket of another group, or into a USB 2.0 hub with a lane per socket, or switch the other off; then **Reopen audio**. |
 | *The computer's sound system has stopped answering* | A USB audio device has locked up (the kernel log says *usb_set_interface failed (-110)*), and PipeWire is stuck waiting for it. | Switch that device off and on, or unplug it for a few seconds. StageRig keeps running meanwhile and picks the device up again. |
 | On ALSA, no sound, and the log says *sound card N still in use by another program* | Another program that ignores the desktop's sound-card sharing (an old JACK server, or an app talking to the card directly) has the interface open. | Close that program and press **Reopen audio**, or choose JACK. |
 | Static or crackle on a USB interface under the ALSA type | The buffer is below 128 samples, or the input is on a different device from the output. | Set 256 (or 128) in **Audio...**, and the same interface for input and output; the status line says which it is. |
