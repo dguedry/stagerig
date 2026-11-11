@@ -1627,7 +1627,8 @@ to shift octave.
 The **buffer size** is how much audio the computer prepares at a time, in
 samples. A smaller buffer means less delay between a key and the sound, and
 less room for a slow plugin; 128 samples is 2.7 ms at 48 kHz and a good live
-default.
+default. *Choosing a buffer size*, below, says which to pick and what to do
+when the sound clicks.
 
 **Audio...** has two parts. Every change in it takes effect at once and is
 kept: there is nothing to apply or save. The top is StageRig's own **LEVEL AND
@@ -1664,27 +1665,97 @@ ALSA type only sound cards are offered as inputs: the system's default and
 sound-server entries are left out, as reading from them can crash.
 
 **An audio device switched off and on again** -- a keyboard with its own USB
-audio, an interface that loses power -- is reconnected by itself on the JACK
-type, usually within two seconds of coming back; the status bar says when it
-goes and when it is back, and the choice in **Audio...** is kept meanwhile.
-The same happens after the computer's sound system restarts.
+audio, an interface that loses power -- is reconnected by itself, on the ALSA
+type and the JACK type alike, usually within a few seconds of coming back;
+the status bar says when it goes and when it is back, and the choice in
+**Audio...** is kept meanwhile. The same happens after the computer's sound
+system restarts.
 
 **Reopen audio**, at the bottom, closes and reopens the audio device. Use it
 when the sound has stopped, for example after the computer's sound system was
 restarted or an audio device came back.
 
-**For the lowest latency:**
+### Choosing a buffer size
 
-- Use the **JACK** device type. On a PipeWire system this plugs StageRig
-  straight into the sound system with no resampling and no extra buffering.
-  The ALSA type goes through a compatibility layer.
-- Give yourself **realtime scheduling** -- permission for the audio to run
-  ahead of everything else on the machine. Run `ulimit -r`; if it prints 0,
-  add yourself to the `pipewire` group with `sudo usermod -aG pipewire $USER`
-  and log out and back in. Small buffers without it cause dropouts.
-- **Close other audio applications.** A DAW such as Bitwig forces the whole
-  system to its own buffer size every few seconds; StageRig then shows *clock
-  held by another app* in the status bar and cannot get its own buffer size.
+There is one buffer size that counts, and where it is set depends on the
+device type:
+
+| Device type | The buffer that counts | Where |
+|---|---|---|
+| **ALSA** (StageRig has the interface to itself) | **Audio buffer size** | The device chooser, lower part of **Audio...** |
+| **JACK** (through the computer's sound system) | **Buffer size** | **LEVEL AND LATENCY**, top of **Audio...** |
+
+On ALSA the top one is hidden, so only the one that counts is shown.
+
+| Buffer | One buffer at 48 kHz | Use it when |
+|---|---|---|
+| 64 | 1.3 ms | A quiet machine with light plugins, and you want the tightest feel. |
+| **128** | 2.7 ms | The place to start. |
+| **256** | 5.3 ms | Any clicking at 128: the safe choice for a USB interface, and for big sample libraries. |
+| 512 | 10.7 ms | Heavy programs on a slow machine. The delay starts to be felt under the fingers. |
+
+The delay you feel is more than one buffer: the interface keeps a few of them
+in hand, and its own electronics add a little. The status line at the top of
+**Audio...** shows the real figure for the device as it is running (*output
+latency*), which is the number to go by. On ALSA any size in between can be
+chosen too (192, 224); the round ones above are the ones to try first.
+
+**How to choose.** Start at 128 and play your heaviest program, hard, for a
+few minutes, watching the status bar at the bottom of the main window:
+
+- Nothing appears: stay there, or try 64.
+- ***N dropouts*** appears and climbs: a plugin is not answering within the
+  buffer. Go up one step (128 to 256), or make that program lighter.
+- ***N underruns*** appears and climbs: the interface itself ran dry -- the
+  computer did not get the next buffer to it in time. Go up one step; if it
+  goes on at 256, see *When the sound clicks* below.
+
+A few dropouts while a program is loading are normal and are not heard.
+Both counts start from zero each time StageRig starts, and each underrun is
+written in the log with the time and the buffer size, to look at after a
+show.
+
+### When the sound clicks
+
+Clicks on a fast computer are almost never the computer being too slow. In
+order, the things that cause them:
+
+1. **The buffer is too small for this program.** One step up, as above.
+2. **The audio is not running at realtime priority.** The sound has to be
+   let ahead of everything else on the computer, or a busy moment anywhere
+   -- a web page, a file being copied -- delays it. StageRig asks for this by
+   itself, for its own audio and for each plugin's, every time the audio
+   device starts, and raises the sound-making thread of each Windows plugin
+   above that plugin's own background work (loading from disk, scanning its
+   library). All it needs from you is permission: the status line in
+   **Audio...** says *realtime scheduling available*, and warns in orange if
+   not. If it warns, run `ulimit -r`; if that prints 0, add yourself to the
+   `pipewire` group with `sudo usermod -aG pipewire $USER`, then log out and
+   back in.
+3. **An input on another device than the output.** Two devices are two
+   clocks; see *One device for input and output* below. Choose no input if
+   you use none.
+4. **The processor slowing down between notes.** Keep **Keep the processor
+   at full speed while StageRig runs** ticked.
+5. **Another audio application.** A DAW such as Bitwig forces the whole
+   sound system to its own buffer size every few seconds; on the JACK type
+   StageRig then shows *clock held by another app* in the status bar and
+   cannot get its own. Close it, or use the ALSA type, which other programs
+   cannot reach.
+6. **Two USB audio devices on one group of sockets.** Older (USB 1.1) audio
+   devices, a keyboard's own audio among them, share a small allowance per
+   group of sockets; see *... has no room on its USB connection* under
+   *When something fails on stage*.
+
+For a computer used mostly as a rig, one more step is worth taking once:
+start Linux with its low-latency scheduling on. Add `preempt=full threadirqs`
+to the kernel's boot options (on Ubuntu and Mint: the `GRUB_CMDLINE_LINUX_DEFAULT`
+line in `/etc/default/grub`, then `sudo update-grub` and restart). Nothing
+else changes, and taking the words out again undoes it. A separate
+"realtime" kernel is rarely needed on top of that, and can be at odds with
+NVIDIA's graphics driver.
+
+### Which device, and which device type
 
 **One device for input and output.** An input on another device than the
 output is a second clock that has to be kept in step, and a USB device,
@@ -1694,7 +1765,8 @@ no audio input is used.
 
 **A USB interface on the ALSA type** is driven by StageRig directly. A buffer
 below 128 samples sounds like a broken cable there (256 is safe, 128 often
-works), and the status line warns about it.
+works), and the status line warns about it. A keyboard's built-in USB audio
+is the least forgiving kind: start it at 256.
 
 **JACK or ALSA?** On stage, choose **ALSA** and your interface. StageRig then
 has the interface to itself, with nothing in between: the least delay and the
@@ -1709,12 +1781,6 @@ handed back when you switch to JACK or quit. **JACK** shares the interface with
 other apps through the computer's sound system. Either way a device switched
 off and on is reconnected, and a choice saved under one of ALSA's older names
 is moved to the new one by itself.
-
-*N dropouts* in the status bar counts buffers where a plugin did not answer in
-time; *N underruns* counts the times the audio interface itself ran dry (a
-click, or a gap). A few dropouts during loading are normal. Either number
-climbing while you play means the buffer size is too small for the plugins in
-that program.
 
 ## Saving your setup
 
@@ -2004,16 +2070,25 @@ switching the plugin off; scan again once the install has finished.
 **A note hangs.** Press **PANIC**. A keyboard that disconnects lets go of
 everything by itself; a hang that remains is a plugin that missed a note-off.
 
-**Crackle or dropouts.**
+**Crackle, clicks or dropouts.**
 
 1. The status line in **Audio...** names the usual causes: an input on
    another device than the output, a buffer that is too small, no realtime
    scheduling.
-2. Raise the buffer one step (128 to 256).
+2. Raise the buffer one step (128 to 256). On the ALSA type that is **Audio
+   buffer size** in the lower part of **Audio...**; on JACK, **Buffer size**
+   at the top.
 3. Keep **Keep the processor at full speed while StageRig runs** ticked.
 4. Close other audio applications.
-5. *N dropouts* or *N underruns* climbing in the status bar means the plugins are not keeping up:
-   a bigger buffer, or a lighter program.
+5. *N dropouts* climbing in the status bar is a plugin answering late;
+   *N underruns* is the interface running dry. Either way: a bigger buffer,
+   or a lighter program.
+6. If it began after an audio device dropped out and came back, restart
+   StageRig once and update it: an older version lost the audio's realtime
+   priority at the first reconnection.
+
+*Choosing a buffer size* and *When the sound clicks*, under *Audio settings
+and latency*, go through each of these.
 
 **StageRig froze.** If the sound plays on, finish the song and restart
 StageRig between songs. If both picture and sound stopped, it restarts by
