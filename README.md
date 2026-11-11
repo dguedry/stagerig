@@ -370,7 +370,9 @@ real-time: loading, state, parameter lists, editor windows and notifications.
 - A plugin that hangs (a stuck editor, a bridge waiting on Wine) can't freeze
   StageRig: requests to it time out, and the audio thread waits for each
   process only until 85 % of the block period has passed. Late blocks are
-  counted in the status bar as "late N".
+  counted in the status bar as "N dropouts"; a late instrument is silent for
+  that block, a late effect lets the sound past dry, and the note-offs and
+  pedals a busy plugin missed reach it with its next block.
 - Plugin editors are windows of the host process, so they survive independently
   of StageRig's UI. Instruments of one program render in parallel, one process
   per core; effect chains run in order.

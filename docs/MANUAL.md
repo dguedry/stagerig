@@ -1710,9 +1710,11 @@ other apps through the computer's sound system. Either way a device switched
 off and on is reconnected, and a choice saved under one of ALSA's older names
 is moved to the new one by itself.
 
-*late N* in the status bar counts buffers where a plugin did not answer in
-time. A few during loading are normal. A number that climbs while you play
-means the buffer size is too small for the plugins in that program.
+*N dropouts* in the status bar counts buffers where a plugin did not answer in
+time; *N underruns* counts the times the audio interface itself ran dry (a
+click, or a gap). A few dropouts during loading are normal. Either number
+climbing while you play means the buffer size is too small for the plugins in
+that program.
 
 ## Saving your setup
 
@@ -1797,8 +1799,11 @@ StageRig is built so that no one failure stops the sound.
   was on, with the tempo as it was. The backing track is ready but not
   started; press Play when the band comes back in. The status bar says it
   happened. A quit is a quit: closing the window, Ctrl+C or the desktop
-  logging out ends both. Five crashes in two minutes means something is
-  wrong with the setup or the computer, and the watchman stops trying.
+  logging out ends both, and a StageRig that falls over while it is quitting
+  stays closed. Five crashes in two minutes, or five runs in a row that each
+  lasted under three minutes (a plugin that fails every time it loads),
+  means something is wrong with the setup or the computer: the watchman
+  stops trying, and says so in a window.
 
 - **A keyboard or MIDI interface drops out.** Unplugged, switched off and
   on, or a USB hiccup of a fraction of a second: every note and sustain
@@ -1813,14 +1818,24 @@ StageRig is built so that no one failure stops the sound.
   choice in **Audio...** and reconnects to it within about two seconds of
   its return, inputs included. Meanwhile it never saves a stand-in device
   over your choice. The same happens when the computer's sound system
-  restarts. This needs the JACK device type (see *Audio settings and
-  latency*).
+  restarts. This works on both the ALSA and the JACK device type, and with
+  the **Audio...** window left open: only while someone is clicking in that
+  window does StageRig leave the device alone.
+- **An audio input drops out.** A microphone's or line input's interface
+  unplugged while the output is still there: the keyboards play on without
+  it, the status bar says so, and the input is opened again when it is back.
 - **The sound stops by itself.** If the audio stops arriving while the
   device still looks open, StageRig notices within three seconds and
-  reopens it, trying again after 3, 6 and 12 seconds and then every 30. An
-  input on a different device from the output that keeps stopping the sound
-  is left out, so the output plays on; the status bar names it, and
-  **Reopen audio** in **Audio...** tries it again.
+  reopens it, trying again after 3, 3, 6, 6, 12 and 12 seconds and so on up
+  to every 30. An input on a different device from the output that keeps
+  stopping the sound is left out, so the output plays on; the status bar
+  names it, and **Reopen audio** in **Audio...** tries it again. On the JACK
+  type, if reopening three times has not helped, the computer's sound system
+  itself has stopped running: StageRig restarts it (other programs' sound
+  blinks for a moment) and the sound is back in a few seconds. On the ALSA
+  type, an interface that is connected and will not play after three tries
+  needs switching off and on; the status bar says so, and StageRig keeps
+  trying.
 - **StageRig freezes.** If both the screen and the sound stand still for
   twenty seconds, the watchman ends StageRig and starts it again, as after a
   crash. A frozen screen with the sound still playing is left alone: the show
@@ -1929,7 +1944,7 @@ switching the plugin off; scan again once the install has finished.
 | *StageRig stopped and restarted itself* | StageRig crashed and the watchman started it again, on the same song. | Press Play if a backing track was running. Note what you were doing and report it. |
 | A plugin shows *Deactivated* in the Plugins window | It hung or crashed twice while being scanned, or you removed it. | Select it and press **Remove selected** to give it another chance. |
 | A plugin puts up a dialog every time it is looked at (no licence, a demo that nags) | It is loaded whenever its folder is scanned. | Select it in **Plugins...** and press **Remove selected**: it is switched off and left alone by later scans, until you switch it back on the same way. |
-| *late N* climbing while playing | Plugins are not keeping up with the buffer. | Raise the buffer size in **Audio...**, or check realtime scheduling. |
+| *N dropouts* or *N underruns* climbing while playing | The plugins, or the computer, are not keeping up with the buffer. | Raise the buffer size in **Audio...**, or check realtime scheduling. |
 | *clock held by another app* | Another audio application forces the system's buffer size. | Close it, or set its buffer size to match. |
 | *The computer's sound system has stopped running. StageRig is starting it again* | On the JACK type: the sound system (PipeWire) is there but has stopped moving sound, usually after a USB device's lock-up. | Nothing: StageRig restarts it and the sound is back in a few seconds (other programs' sound blinks too). `restartSoundSystem` in the settings file turns this off. |
 | *The input ... has gone, so StageRig plays on without it* | An audio input's interface was unplugged or switched off. | Nothing: the keyboards play on, and the input is opened again when it is back. |
@@ -1997,7 +2012,7 @@ everything by itself; a hang that remains is a plugin that missed a note-off.
 2. Raise the buffer one step (128 to 256).
 3. Keep **Keep the processor at full speed while StageRig runs** ticked.
 4. Close other audio applications.
-5. *late N* climbing in the status bar means plugins are not keeping up:
+5. *N dropouts* or *N underruns* climbing in the status bar means the plugins are not keeping up:
    a bigger buffer, or a lighter program.
 
 **StageRig froze.** If the sound plays on, finish the song and restart
@@ -2017,7 +2032,11 @@ problem at a show can be looked into afterwards. The previous one is kept as
 | `[audio-watch HH:MM:SS] Audio: ... has gone` / `... is back: sound restored` | An audio device went and came back, with the times. |
 | `[audio-watch] reopening: out '...', in '...' (attempt N)` | StageRig reopened the audio; a high N means a device that would not open. |
 | `[audio-watch ...] ... stopped playing` | The sound stopped with the device still connected. |
+| `[audio-watch HH:MM:SS] N underruns on ...` | The audio interface ran dry N times (clicks or gaps), with the buffer size at the time. Many of these means a bigger buffer. |
+| `[audio-watch ...] ... the computer's sound system has stopped running` | PipeWire had stopped moving sound; StageRig restarted it. |
+| `[audio-watch ...] ... the input ... has gone` / `... is back` | An audio input's interface went and came back; the output played on. |
 | `[watch] StageRig stopped (...); starting it again` | StageRig crashed and was restarted. |
+| `[watch] ... not starting it again` | The watchman gave up after repeated failures at start. |
 | `[watch] StageRig has stopped responding` | StageRig froze and was restarted. |
 | `[audio] ...` at the top | The audio setup it started with. |
 
@@ -2048,7 +2067,8 @@ chooses another, such as GeneralUser GS.
 Advanced options can be set in `StageRig.settings`: `parallelLoads` (how many
 plugins load at once; default half the machine's threads, 4 to 12),
 `parallelBridgedLoads`, `bridgedColdStartSolo`, `pipewireQuantum` (the buffer
-size) and `pipewireTakeover`.
+size), `pipewireTakeover`, and `restartSoundSystem` (set to `0` to stop
+StageRig restarting a sound system that has stopped running; on by default).
 
 ## Keyboard and mouse reference
 
