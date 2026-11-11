@@ -26,6 +26,16 @@ bool currentThreadIsRealtime();
     process may not (RLIMIT_RTPRIO), in which case nothing changes. */
 bool makeCurrentThreadRealtime (int priority);
 
+/** Windows plugins run through yabridge make their sound on a thread inside
+    Wine ("audio-0"), which yabridge puts at realtime priority 5 -- the same
+    as every other thread of the plugin: Kontakt's disk loading, its database
+    scan, its analytics. The sound then waits its turn among them, and behind
+    anything the desktop gives a higher realtime priority. Raises those audio
+    threads, and only those, to `priority` (below StageRig's own audio thread,
+    which waits on them). Returns how many were raised. Cheap enough to call
+    every few seconds; any thread. Linux only. */
+int raiseBridgedAudioThreads (int priority);
+
 /** PipeWire's session clock settings, as pw-metadata reports them. Empty = not set. */
 struct ClockState { juce::String forceQuantum, forceRate, quantum, rate; };
 ClockState readClock();

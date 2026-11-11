@@ -888,8 +888,10 @@ private:
     juce::StringArray lastDeviceWarnings;
     pthread_t callbackThread {};
     bool callbackThreadKnown = false;              // audio thread only
+    std::atomic<bool> promoteAudioThread { true }; // a device has started: its thread is to be made realtime
     std::atomic<bool> audioThreadRealtime { true };
     uint32_t realtimeRecheck = 0;      // audio thread only
+    int bridgedRaiseTick = 0;          // message thread
     void watchAudioDevice();
     void noteDeviceXruns();
     void sayAudio (const juce::String& text);

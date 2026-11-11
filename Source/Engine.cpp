@@ -5370,6 +5370,12 @@ void Engine::housekeeping()
     watchForStalls();
     watchAudioDevice();
     watchUsbReconnects();
+    /* The Windows plugins' audio threads, raised above their own background
+       threads (LowLatency::raiseBridgedAudioThreads): looked for every few
+       seconds, as a plugin's appears only once it has loaded and started. */
+    if (++bridgedRaiseTick % 6 == 0 && LowLatency::realtimeSchedulingAvailable())
+        if (const int n = LowLatency::raiseBridgedAudioThreads (80); n > 0)
+            std::fprintf (stderr, "[audio] %d Windows plugin audio thread%s raised to realtime priority 80\n", n, n == 1 ? "" : "s");
     // Restarts that did not load, tried again.
     for (size_t i = 0; i < loadRetries.size();)
     {
@@ -5641,7 +5647,9 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
     blockSize  = device->getCurrentBufferSizeSamples();
     audioStartedAt.store (Time::getMillisecondCounter());
     /* A device starting (again): not an underrun, but whatever was held while
-       there was no sound is let go, as its note-offs may be lost. */
+       there was no sound is let go, as its note-offs may be lost. Its thread
+       is a new one, to be made realtime whatever its handle looks like. */
+    promoteAudioThread.store (true);
     lastCallbackMs = 0.0;
     {
         const ScopedLock sl (lock);
@@ -5731,18 +5739,22 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
         lastCallbackMs = nowMs;
     }
     if (auto* l = liveness) l->audioCalls.fetch_add (1, std::memory_order_relaxed);
-    if (! callbackThreadKnown || ! pthread_equal (callbackThread, pthread_self()))
+    /* A device opened again runs on a new thread, and a new thread is often
+       given the very handle the old one had: told apart by the handle alone,
+       it was taken for the old, promoted one, and the rig played at desktop
+       priority from its first reconnection until it was restarted -- clicks
+       whenever anything else was busy. So: asked for at every device start,
+       and looked at again every few hundred blocks whatever was concluded
+       before (PipeWire, too, raises its own thread a moment after its first
+       cycles). */
+    if (promoteAudioThread.exchange (false, std::memory_order_acq_rel)
+        || ! callbackThreadKnown || ! pthread_equal (callbackThread, pthread_self())
+        || ++realtimeRecheck % 512 == 0)
     {
         callbackThread = pthread_self();
         callbackThreadKnown = true;
         audioThreadRealtime.store (LowLatency::currentThreadIsRealtime() || LowLatency::makeCurrentThreadRealtime (85));
-        realtimeRecheck = 0;
     }
-    /* PipeWire raises its thread to realtime a moment after the first cycles,
-       through its own realtime module: asked again now and then while the answer
-       is no, or the warning would stay up for a thread that is realtime. */
-    else if (! audioThreadRealtime.load (std::memory_order_relaxed) && ++realtimeRecheck % 512 == 0)
-        audioThreadRealtime.store (LowLatency::currentThreadIsRealtime());
 
     for (int c = 0; c < numOut; ++c)
         if (out[c] != nullptr)

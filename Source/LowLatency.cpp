@@ -1,6 +1,9 @@
 #include "LowLatency.h"
 #include <pthread.h>
 #include <sched.h>
+#include <dirent.h>
+#include <cstdio>
+#include <string>
 #include <dlfcn.h>
 #include <sys/resource.h>
 #include <cstdlib>
@@ -72,6 +75,56 @@ bool makeCurrentThreadRealtime (int priority)
     sched_param sp {};
     sp.sched_priority = jlimit (sched_get_priority_min (SCHED_RR), sched_get_priority_max (SCHED_RR), priority);
     return ::pthread_setschedparam (::pthread_self(), SCHED_RR, &sp) == 0;
+}
+
+int raiseBridgedAudioThreads (int priority)
+{
+    int raised = 0;
+   #if JUCE_LINUX
+    /* /proc, by hand: a few hundred processes to look at the name of, and the
+       threads of the twenty or so that are plugin bridges. */
+    auto nameOf = [] (const std::string& path)
+    {
+        char buf[32] {};
+        if (FILE* f = std::fopen (path.c_str(), "r")) { if (std::fgets (buf, sizeof (buf), f) == nullptr) buf[0] = 0; std::fclose (f); }
+        return std::string (buf);
+    };
+    if (DIR* proc = ::opendir ("/proc"))
+    {
+        while (auto* e = ::readdir (proc))
+        {
+            if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
+            const std::string pid (e->d_name);
+            if (nameOf ("/proc/" + pid + "/comm").rfind ("yabridge-host", 0) != 0) continue;
+            if (DIR* tasks = ::opendir (("/proc/" + pid + "/task").c_str()))
+            {
+                while (auto* t = ::readdir (tasks))
+                {
+                    if (t->d_name[0] < '0' || t->d_name[0] > '9') continue;
+                    if (nameOf ("/proc/" + pid + "/task/" + t->d_name + "/comm").rfind ("audio-", 0) != 0) continue;
+                    const pid_t tid = (pid_t) std::atoi (t->d_name);
+                    sched_param now {};
+                    const int policy = ::sched_getscheduler (tid);
+                    if (policy < 0 || ::sched_getparam (tid, &now) != 0) continue;
+                   #ifdef SCHED_RESET_ON_FORK
+                    if ((policy & ~SCHED_RESET_ON_FORK) != SCHED_FIFO) continue;
+                   #else
+                    if (policy != SCHED_FIFO) continue;
+                   #endif
+                    if (now.sched_priority >= priority) continue;
+                    sched_param want {};
+                    want.sched_priority = priority;
+                    if (::sched_setscheduler (tid, SCHED_FIFO, &want) == 0) ++raised;
+                }
+                ::closedir (tasks);
+            }
+        }
+        ::closedir (proc);
+    }
+   #else
+    ignoreUnused (priority);
+   #endif
+    return raised;
 }
 
 String realtimeSchedulingHint()
