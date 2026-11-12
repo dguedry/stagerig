@@ -1,5 +1,11 @@
 #include "PluginView.h"
 #include <juce_events/juce_events.h>
+#include <fstream>
+#include <iterator>
+#include <regex>
+#include <string>
+#include <signal.h>
+#include <unistd.h>
 
 using namespace juce;
 
@@ -330,26 +336,44 @@ void PluginView::sweepStrays()
        our port range only, so nothing else on the machine can match: a VNC
        server someone runs for their own desktop is on other ports and has
        other arguments. */
-    auto pkill = findTool ("pkill");
-    if (pkill == File()) return;
+    /* Anchored at both ends to the exact command lines start() builds, so only
+       a process that IS one of ours fits. websockify is a Python script, so
+       its argv[0] is the interpreter.
 
-    /* Anchored at both ends to the exact command lines start() builds. pkill
-       -f matches anywhere in a process's whole command line, so an unanchored
-       pattern also matches a terminal, an editor or a script that merely
-       mentions those words -- which is how a test shell got killed while this
-       was being checked. With ^ and $ only a process that IS one of ours fits.
-       websockify is a Python script, so its argv[0] is the interpreter. */
-    const String vncRange = "59[1][0-9]";        // 5910-5919
-    const String webRange = "69[1][0-9]";        // 6910-6919
-    for (const String pattern : {
-            "^\\S*x11vnc -id [0-9]+ -localhost -rfbport " + vncRange
-                + " -nopw -forever -shared -quiet -noxdamage$",
-            "^(\\S+ )?\\S*websockify --web=\\S+ 127\\.0\\.0\\.1:" + webRange
-                + " 127\\.0\\.0\\.1:" + vncRange + "$" })
+       And only strays: one whose parent is another StageRig that is running
+       belongs to that StageRig, and is serving its tablet. This used pkill on
+       the patterns alone, so starting or quitting one StageRig (a second copy,
+       a test) ended the plugin windows another was showing. */
+    const std::string vncRange = "59[1][0-9]";        // 5910-5919
+    const std::string webRange = "69[1][0-9]";        // 6910-6919
+    const std::regex ours[] = {
+        std::regex ("^\\S*x11vnc -id [0-9]+ -localhost -rfbport " + vncRange + " -nopw -forever -shared -quiet -noxdamage$"),
+        std::regex ("^(\\S+ )?\\S*websockify --web=\\S+ 127\\.0\\.0\\.1:" + webRange + " 127\\.0\\.0\\.1:" + vncRange + "$") };
+
+    const auto self = (int) ::getpid();
+    for (const auto& dir : File ("/proc").findChildFiles (File::findDirectories, false))
     {
-        ChildProcess p;
-        if (p.start (StringArray { pkill.getFullPathName(), "-f", pattern }))
-            p.waitForProcessToFinish (2000);
+        const int pid = dir.getFileName().getIntValue();
+        if (pid <= 0 || pid == self) continue;
+        // Read to the end, not by size: a file in /proc says it is empty.
+        auto slurp = [] (const File& f)
+        {
+            std::ifstream in (f.getFullPathName().toStdString(), std::ios::binary);
+            return std::string ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        };
+        std::string cmd = slurp (dir.getChildFile ("cmdline"));
+        if (cmd.empty()) continue;
+        while (! cmd.empty() && cmd.back() == 0) cmd.pop_back();
+        for (auto& c : cmd) if (c == 0) c = ' ';
+        if (! std::regex_match (cmd, ours[0]) && ! std::regex_match (cmd, ours[1])) continue;
+
+        // "pid (comm) state ppid ...": whose is it?
+        const String stat (slurp (dir.getChildFile ("stat")));
+        const int parent = stat.fromLastOccurrenceOf (")", false, false).trim().fromFirstOccurrenceOf (" ", false, false).getIntValue();
+        if (parent != self && parent > 1
+            && String (slurp (File ("/proc/" + String (parent) + "/comm"))).trim() == "StageRig")
+            continue;
+        ::kill (pid, SIGTERM);
     }
 }
 
