@@ -149,6 +149,8 @@ public:
     /** Gives the knobs to this instrument of the input's program (a plugin slot), on its first page:
         what a press of Next instrument does, from the Stage panel's buttons. The keyboard follows. */
     void setFocusSlot (int input, int slot);
+    /** A plugin was given another sound (Sounds...): its knob pages may be other ones. */
+    void soundChanged()                 { layouts.clear(); }
     /** The instrument and page each input's knobs are on, as text to keep between runs, and back. The page
         waits for the plugin to load, since until then there are no pages to be on. */
     juce::String getFocusState() const;

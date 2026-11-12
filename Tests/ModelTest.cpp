@@ -329,6 +329,22 @@ int main()
     CHECK (Setup::loadFromFile (bad.getFile(), ignored).failed());
     CHECK (Setup::loadFromFile (juce::File ("/nonexistent/x.json"), ignored).failed());
 
+    // A maker's sound and the file it came from (its knob pages are that sound's) are kept with the instrument.
+    {
+        Setup st = Setup::makeDefault();
+        SlotDef sd;
+        sd.plugin.name = "Kontakt 8";
+        sd.soundName = "Alicia's Keys";
+        sd.soundFile = "/sounds/Alicias Keys.nksf";
+        st.inputs[0].programs[0].slots.push_back (sd);
+        juce::TemporaryFile t (".json");
+        CHECK (st.saveToFile (t.getFile()).wasOk());
+        Setup back;
+        CHECK (Setup::loadFromFile (t.getFile(), back).wasOk());
+        CHECK (! back.inputs[0].programs[0].slots.empty() && back.inputs[0].programs[0].slots.back().soundFile == "/sounds/Alicias Keys.nksf");
+        CHECK (! back.inputs[0].programs[0].slots.empty() && back.inputs[0].programs[0].slots.back().soundName == "Alicia's Keys");
+    }
+
     // The save before stays as <name>.bak: a damaged file has a readable one beside it.
     {
         const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("stagerig-modeltest-bak");

@@ -4660,7 +4660,11 @@ String Engine::setPluginSound (int inputIndex, int program, int slot, int effect
     MemoryBlock now, state;
     if (! p->getState (now, 10000)) return "The plugin did not answer.";
     if (const auto r = nksStateFor (nksFile, now, state); r.failed()) return r.getErrorMessage();
-    return setPluginState (inputIndex, program, slot, effect, state, soundName);
+    if (const auto wrong = setPluginState (inputIndex, program, slot, effect, state, soundName); wrong.isNotEmpty()) return wrong;
+    // The file is remembered: its knob pages are this sound's (a Kontakt instrument's own, not another's).
+    if (auto* def = defFor (inputIndex, program); def != nullptr && effect < 0 && slot >= 0 && slot < (int) def->slots.size())
+        def->slots[(size_t) slot].soundFile = nksFile.getFullPathName();
+    return {};
 }
 
 String Engine::setPluginState (int inputIndex, int program, int slot, int effect, const MemoryBlock& state, const String& soundName)
@@ -4696,6 +4700,7 @@ void Engine::keepPluginState (int inputIndex, int program, int slot, int effect,
             {
                 def->slots[(size_t) slot].state = std::move (kept);
                 def->slots[(size_t) slot].soundName = soundName;
+                def->slots[(size_t) slot].soundFile.clear();        // setPluginSound names it again, for a maker's file
             }
         }
         else if (auto* chain = const_cast<std::vector<EffectDef>*> (def->chainFor (slot)); chain != nullptr && effect < (int) chain->size())

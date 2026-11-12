@@ -210,6 +210,7 @@ var SlotDef::toVar() const
         o->setProperty ("plugin", xml->toString (XmlElement::TextFormat().singleLine()));
     o->setProperty ("state", state.toBase64Encoding());
     if (soundName.isNotEmpty()) o->setProperty ("soundName", soundName);
+    if (soundFile.isNotEmpty()) o->setProperty ("soundFile", soundFile);
     o->setProperty ("enabled", enabled);
     o->setProperty ("gainDb", gainDb);
     o->setProperty ("transpose", transpose);
@@ -283,6 +284,7 @@ SlotDef SlotDef::fromVar (const var& v)
         s.plugin.loadFromXml (*xml);
     s.state.fromBase64Encoding (propStr (v, "state"));
     s.soundName  = propStr (v, "soundName");
+    s.soundFile  = propStr (v, "soundFile");
     s.enabled    = prop<bool>  (v, "enabled", true);
     s.gainDb     = prop<float> (v, "gainDb", 0.0f);
     s.transpose  = prop<int>   (v, "transpose", 0);

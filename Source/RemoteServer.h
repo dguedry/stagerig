@@ -32,6 +32,16 @@ public:
     /** Called on the message thread when the stand has changed the setup (a knob, a scene),
         so the computer counts it as unsaved and the autosave picks it up. */
     std::function<void()> onEdited;
+    /** The setup file, from the stand: saved, saved under a name, another one opened.
+        Set by the window, called on the message thread.
+        onSetupList: { name, files: [{ name, when, current }] } -- the setups beside the open one.
+        onSetupSave: no name saves the open file. Says what went wrong, or nothing; "name" when
+        the setup has no file yet, "exists" when the name is another file's and over is not set.
+        onSetupOpen: says what went wrong, or nothing. */
+    std::function<juce::String()> onSetupName;       // the open setup's name; nothing for one never saved
+    std::function<juce::var()> onSetupList;
+    std::function<juce::String (const juce::String& name, bool over)> onSetupSave;
+    std::function<juce::String (const juce::String& name)> onSetupOpen;
     /** Whether a request changes how the show is built (set lists, scenes, what a song
         loads) rather than playing it. The one list the editing lock is checked against:
         a new route that edits goes here, and is locked with the rest. */

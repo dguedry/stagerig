@@ -86,8 +86,13 @@ SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot, bool
         fromSetup (*layout.map);
         return layout;
     }
-    // No setup of ours: the maker's pages, if its NKS presets have them.
-    if (const auto* nks = library.findNks (sd.plugin))
+    /* No setup of ours: the maker's pages. Those of the sound it was given
+       (Sounds...) first -- a Kontakt instrument has its own knobs, which are
+       not the next instrument's -- else the plugin's, if its presets have them. */
+    const auto* nks = library.nksOfFile (sd.soundFile);
+    if (nks != nullptr && controlMapFromNks (*nks, sd.plugin, params).pages.empty()) nks = nullptr;
+    if (nks == nullptr) nks = library.findNks (sd.plugin);
+    if (nks != nullptr)
     {
         const auto made = controlMapFromNks (*nks, sd.plugin, params);
         if (! made.pages.empty())

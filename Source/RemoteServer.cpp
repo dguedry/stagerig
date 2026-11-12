@@ -69,7 +69,27 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   body { margin:0; background:var(--bg); color:#fff; font:16px/1.4 system-ui,sans-serif;
          padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
   header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:var(--panel); position:sticky; top:0; z-index:2; }
-  header h1 { font-size:15px; margin:0; flex:1; color:var(--dim); font-weight:600; letter-spacing:.06em; }
+  header h1 { font-size:15px; margin:0; flex:1; min-width:0; color:var(--dim); font-weight:600; letter-spacing:.06em; }
+  /* The title is the setup's name, and the way to its file: save it, open another. */
+  #setupBtn { font:inherit; color:inherit; letter-spacing:inherit; background:none; border:0; padding:8px 0; max-width:100%;
+              display:flex; align-items:baseline; gap:5px; text-align:left; }
+  #setupBtn span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  #setupBtn::after { content:"\25BE"; color:var(--accent); flex:none; }
+  @media (max-width:480px) { header { gap:8px; padding:12px; } #tap i { display:none; } }
+  #sheet { display:none; position:fixed; inset:0; z-index:5; background:rgba(0,0,0,.6); align-items:flex-start; justify-content:center; padding:60px 14px 14px; }
+  #sheet .box { background:var(--panel); border-radius:14px; width:100%; max-width:460px; max-height:calc(100vh - 80px); overflow:auto; padding:16px; }
+  #sheet h2 { font-size:12px; color:var(--dim); letter-spacing:.08em; margin:0 0 4px; }
+  #sheet .cur { font-size:19px; font-weight:700; margin:0 0 12px; overflow-wrap:anywhere; }
+  #sheet .acts { display:flex; gap:8px; margin-bottom:16px; }
+  #sheet .acts button { flex:1; border:0; border-radius:10px; padding:14px 8px; font-size:16px; font-weight:700; background:var(--row); color:#fff; }
+  #sheet .acts button.go { background:var(--accent); color:#06121f; }
+  #sheet .acts button:disabled { opacity:.4; }
+  #sheet .file { display:flex; align-items:baseline; gap:10px; width:100%; text-align:left; border:0; border-radius:10px; background:var(--row); color:#fff;
+                 padding:13px 12px; margin-top:6px; font-size:16px; }
+  #sheet .file b { flex:1; font-weight:600; overflow-wrap:anywhere; }
+  #sheet .file i { font-style:normal; color:var(--dim); font-size:12px; white-space:nowrap; }
+  #sheet .file.on { outline:2px solid var(--accent); }
+  #sheet .note { color:var(--dim); font-size:13px; margin:10px 0 0; }
   #panic { background:#a3282d; color:#fff; border:0; border-radius:8px; padding:10px 16px; font-weight:700; font-size:14px; }
   .input { margin:14px 12px 22px; }
   .now { background:var(--panel); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
@@ -125,11 +145,17 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .knobs { padding:4px 12px 10px; }
   .kslot { margin-top:8px; }
   .kname { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin:0 0 4px; }
-  .knob { display:grid; grid-template-columns:96px 1fr 64px; align-items:center; gap:10px; padding:4px 0; }
-  .knob .kn { color:#fff; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .knob .kv { color:var(--dim); font-size:13px; text-align:right; font-variant-numeric:tabular-nums; }
+  /* A knob is its whole name over its slider, and as many side by side as the
+     screen has room for: one row each was a name cut to a few letters beside
+     a slider the width of a tablet. */
+  .kgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:4px 22px; }
+  .knob { display:grid; grid-template-columns:1fr auto; grid-template-areas:"n v" "s s"; align-items:end; gap:0 10px; padding:6px 0 2px; min-width:0; }
+  .knob .kn { grid-area:n; color:#fff; font-size:14px; font-weight:600; line-height:1.2; overflow-wrap:anywhere;
+              display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .knob .kv { grid-area:v; color:var(--dim); font-size:13px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .knob input[type=range], .knob .ksw { grid-area:s; }
   .knob.off { opacity:.4; }
-  .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:8px 0; border-radius:8px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; width:100%; }
+  .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:6px 0; margin:3px 0; border-radius:8px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; width:100%; }
   .knob .ksw.on { background:#2f5f9a; border-color:#2f5f9a; }
   .kname { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
   .kinst { font:inherit; text-transform:none; letter-spacing:0; padding:3px 10px; border-radius:6px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; }
@@ -290,14 +316,22 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 </style></head>
 <body>
 <header>
-  <h1>STAGERIG</h1>
+  <h1><button id="setupBtn" title="Save this setup, or open another"><span id="setupName">STAGERIG</span></button></h1>
   <div class="hdr">
     <span class="bpm" id="bpm">…<i>bpm</i></span>
-    <button id="tap">TAP TEMPO</button>
+    <button id="tap">TAP<i style="font-style:normal"> TEMPO</i></button>
     <button id="panic">PANIC</button>
   </div>
 </header>
 <div id="err"></div>
+<div id="sheet"><div class="box">
+  <h2>SETUP</h2>
+  <p class="cur" id="sheetName"></p>
+  <div class="acts"><button class="go" id="sheetSave">Save</button><button id="sheetSaveAs">Save as...</button><button id="sheetClose">Close</button></div>
+  <h2 id="sheetOpenHead">OPEN ANOTHER</h2>
+  <div id="sheetFiles"></div>
+  <p class="note" id="sheetNote"></p>
+</div></div>
 <div id="gate">
   <form id="codeform">
     <p>Enter the 6-character code from the <b>Tablet control</b> window on the computer</p>
@@ -365,6 +399,59 @@ function show(msg, ms) {
   if (showTimer) { clearTimeout(showTimer); showTimer = null; }
   if (msg) showTimer = setTimeout(() => { e.style.display = "none"; showTimer = null; }, ms || 6000);
 }
+
+/* The setup's file, from the stand: its name is the page's title, and a tap on
+   it saves it, saves it under a new name, or opens another one from the same
+   folder on the computer. */
+const sheet = document.getElementById("sheet");
+function setupTitle(name) { document.getElementById("setupName").textContent = name || "Unsaved setup"; }
+async function openSheet() {
+  let d;
+  try { d = await api("/api/setup"); } catch (e) { if (!e.gate) show(e.message); return; }
+  setupTitle(d.name);
+  document.getElementById("sheetName").textContent = d.name || "Unsaved setup";
+  document.getElementById("sheetSave").disabled = false;
+  const host = document.getElementById("sheetFiles"); host.innerHTML = "";
+  const others = (d.files || []);
+  document.getElementById("sheetOpenHead").style.display = others.length ? "" : "none";
+  others.forEach(f => {
+    const b = document.createElement("button"); b.className = "file" + (f.current ? " on" : "");
+    const n = document.createElement("b"); n.textContent = f.name; b.appendChild(n);
+    const w = document.createElement("i"); w.textContent = f.current ? "open now" : f.when; b.appendChild(w);
+    b.onclick = async () => {
+      if (!confirm((f.current ? "Open \u201c" + f.name + "\u201d again, as it was last saved?" : "Open \u201c" + f.name + "\u201d?")
+                   + " The sound stops while its plugins load." + (d.name ? "" : " This setup has never been saved: save it first to keep it."))) return;
+      note("Opening " + f.name + "...");
+      try { await api("/api/setup?do=open&name=" + encodeURIComponent(f.name), { method: "POST" }); sheet.style.display = "none"; setupTitle(f.name); show("Opened " + f.name, 3000); refresh(true); }
+      catch (e) { if (!e.gate) note(e.message); }
+    };
+    host.appendChild(b);
+  });
+  note(d.canOpen === false ? "Opening another setup from the tablet is off (Tablet window on the computer)." : others.length ? "" : "No other setups are saved beside this one.");
+  host.style.display = d.canOpen === false ? "none" : "";
+  if (d.canOpen === false) document.getElementById("sheetOpenHead").style.display = "none";
+  sheet.style.display = "flex";
+}
+function note(t) { document.getElementById("sheetNote").textContent = t || ""; }
+async function saveSetup(name, over) {
+  note("Saving...");
+  try {
+    const r = await api("/api/setup?do=save" + (name ? "&name=" + encodeURIComponent(name) : "") + (over ? "&over=1" : ""), { method: "POST" });
+    if (r.need === "name") { note(""); return saveAs(); }
+    if (r.need === "over") { note(""); if (confirm("\u201c" + name + "\u201d is already there. Save over it?")) return saveSetup(name, true); return; }
+    sheet.style.display = "none"; setupTitle(r.name); show("Saved " + r.name, 3000);
+  } catch (e) { if (!e.gate) note(e.message); }
+}
+function saveAs() {
+  const cur = document.getElementById("sheetName").textContent;
+  const name = prompt("A name for this setup", cur === "Unsaved setup" ? "My setup" : cur + " copy");
+  if (name !== null && name.trim()) saveSetup(name.trim(), false);
+}
+document.getElementById("setupBtn").onclick = openSheet;
+document.getElementById("sheetClose").onclick = () => { sheet.style.display = "none"; };
+document.getElementById("sheetSave").onclick = () => saveSetup("", false);
+document.getElementById("sheetSaveAs").onclick = saveAs;
+sheet.onclick = (e) => { if (e.target === sheet) sheet.style.display = "none"; };
 
 let lastState = null;
 let editMode = false;        // the Set list tab in its editing dress: build and reorder set lists from the stand
@@ -976,6 +1063,7 @@ document.addEventListener("visibilitychange", syncLevelPolling);
 
 function render(s) {
   lastState = s;
+  setupTitle(s.setup);
   for (const k in meters) delete meters[k];
   if (s.tempo) showTempo(s.tempo);
   const root = document.getElementById("inputs");
@@ -1119,6 +1207,7 @@ async function loadPanel(i) {
       title.appendChild(pg);
     }
     sec.appendChild(title);
+    const grid = document.createElement("div"); grid.className = "kgrid"; sec.appendChild(grid);
     knobs.forEach(k => {
       const row = document.createElement("label"); row.className = "knob" + (k.value < 0 ? " off" : "");
       if (k.switch) {
@@ -1129,7 +1218,7 @@ async function loadPanel(i) {
         b.onclick = (e) => { e.preventDefault(); const on = b.classList.contains("on");
           api("/api/knob?input=" + i + "&program=" + data.program + "&slot=" + data.slot + "&id=" + encodeURIComponent(k.id) + "&value=" + (on ? "0" : "1"), { method: "POST" })
             .then(() => { b.classList.toggle("on", !on); b.textContent = on ? "Off" : "On"; }).catch(e => { if (!e.gate) show(e.message); }); };
-        sec.appendChild(row); return;
+        grid.appendChild(row); return;
       }
       row.innerHTML = '<span class="kn"></span><input type="range" min="0" max="1000"><span class="kv"></span>';
       row.querySelector(".kn").textContent = k.name || "-";
@@ -1148,7 +1237,7 @@ async function loadPanel(i) {
       };
       r.onpointerdown = () => { knobTouch[tkey] = true; };
       r.onpointerup = r.onpointercancel = () => { setTimeout(() => { delete knobTouch[tkey]; }, 300); };
-      sec.appendChild(row);
+      grid.appendChild(row);
     });
     host.appendChild(sec);
   }
@@ -1986,6 +2075,8 @@ String RemoteServer::stateJson() const
     root->setProperty ("scenes", ! engine.hasTrack() && engine.songHasScenes (engine.currentSongIndex()));
     // Whether the stand may build set lists and scenes (Tablet window on the computer).
     root->setProperty ("canEdit", settings.getBoolValue ("remoteEditing", true));
+    // The setup's name, the page's title: a tap on it saves it or opens another.
+    if (onSetupName) root->setProperty ("setup", onSetupName());
     {
         // A song in play with no track and no click can have scenes added, its first included.
         const int sp = engine.currentSongIndex();
@@ -2545,7 +2636,7 @@ bool RemoteServer::isEditingRoute (const String& path)
     /* Building the show: off when the computer says the stand may not edit.
        Everything else -- songs, programs, keys, scenes chosen, knobs, the
        track, tempo, panic -- is playing it, and always allowed. */
-    static const char* const editing[] = { "/api/setedit", "/api/scene?" };
+    static const char* const editing[] = { "/api/setedit", "/api/scene?", "/api/setup?do=open" };
     const auto route = path.upToFirstOccurrenceOf ("&", false, false);
     for (const char* e : editing)
         if (route.startsWith (e) || route == String (e).trimCharactersAtEnd ("?")) return true;
@@ -2692,6 +2783,44 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
     /* Songs and sets. Each one nudges the revision so every other tablet
        redraws on its next poll rather than showing a stale set list. */
+    if (path.startsWith ("/api/setup"))
+    {
+        /* GET                          the open setup's name and the setups saved beside it
+           POST ...?do=save             the open file; {"need":"name"} when it has none yet
+                 do=save&name=[&over=1] under a name, beside the open one; {"need":"over"} when that is another file
+                 do=open&name=          one of the listed setups
+           The setup's file, from the stand. Saving reads every plugin's sound, so it is given time. */
+        const String what = query["do"], name = query["name"].trim();
+        const bool over = arg ("over") != 0;
+        String out;
+        const bool answered = produceOnMessageThread ([this, what, name, over]() -> String
+        {
+            DynamicObject::Ptr o (new DynamicObject());
+            if (what.isEmpty())
+            {
+                if (! onSetupList) return "{}";
+                auto v = onSetupList();
+                if (auto* d = v.getDynamicObject()) d->setProperty ("canOpen", settings.getBoolValue ("remoteEditing", true));
+                return JSON::toString (v, true);
+            }
+            String wrong = "The computer cannot do that.";
+            if (what == "save" && onSetupSave) wrong = onSetupSave (name, over);
+            else if (what == "open" && onSetupOpen) wrong = onSetupOpen (name);
+            if (wrong == "name")        o->setProperty ("need", "name");
+            else if (wrong == "exists") o->setProperty ("need", "over");
+            else if (wrong.isNotEmpty()) o->setProperty ("error", wrong);
+            else
+            {
+                o->setProperty ("ok", true);
+                if (onSetupName) o->setProperty ("name", onSetupName());
+            }
+            return JSON::toString (var (o.get()), true);
+        }, out, 30000);
+        if (! answered) { sendBusy (sock); return; }
+        ++revision;
+        sendJson (sock, out.contains ("\"error\"") ? "409 Conflict" : "200 OK", out);
+        return;
+    }
     if (path.startsWith ("/api/setedit"))
     {
         /* POST ...?do=new&name=        a set list, made current, to fill

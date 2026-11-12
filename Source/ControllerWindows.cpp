@@ -354,6 +354,9 @@ private:
 
     String automaticName() const
     {
+        // The sound it was given has pages of its own (a Kontakt instrument's): those, by its name.
+        if (const auto* sd = slotDef(); sd != nullptr && library.nksOfFile (sd->soundFile) != nullptr)
+            return "Automatic: the maker's pages for " + (sd->soundName.isNotEmpty() ? sd->soundName : String ("this sound"));
         if (const auto* nks = library.findNks (plugin))
             return "Automatic: " + (nks->vendor.isNotEmpty() ? nks->vendor + "'s" : String ("the maker's")) + " own pages";
         return "Automatic: StageRig's picks, then every parameter";
@@ -395,8 +398,12 @@ private:
         storeKeys();
         if (own) return;
         auto m = automaticLayout();
-        m.name = plugin.name;
-        for (int n = 2; library.find (plugin, m.name) != nullptr; ++n) m.name = plugin.name + " " + String (n);
+        // Named for the instrument inside the plugin when the sound says which (a Kontakt library), else for the plugin.
+        String base = plugin.name;
+        if (const auto* sd = slotDef(); sd != nullptr)
+            if (const auto* own = library.nksOfFile (sd->soundFile); own != nullptr && own->product.isNotEmpty()) base = own->product;
+        m.name = base;
+        for (int n = 2; library.find (plugin, m.name) != nullptr; ++n) m.name = base + " " + String (n);
         if (const auto* nks = library.findNks (plugin)) m.notes = "Made from " + (nks->vendor.isNotEmpty() ? nks->vendor + "'s" : String ("the maker's")) + " pages.";
         m.keys = edit.keys;
         edit = m;

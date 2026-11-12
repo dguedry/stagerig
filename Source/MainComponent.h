@@ -84,6 +84,9 @@ private:
     void openSetup();
     void saveSetup (bool forceAskForFile);
     bool writeSetupFile (const juce::File&, int captureBudgetMs = -1);
+    bool saveSetupTo (const juce::File&);                      // Save As: the file, its charts beside it, and it becomes the open one
+    juce::File setupsFolder() const;                           // where the open setup is, and so where the tablet saves and opens
+    static juce::String setupNameOf (const juce::File&);
     void setCurrentFile (const juce::File&);
     juce::File getAutosaveFile() const;
 

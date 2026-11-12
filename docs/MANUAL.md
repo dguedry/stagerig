@@ -399,6 +399,18 @@ A sound chosen here is the plugin's whole state, as if picked in its own
 window: change it there afterwards and the program keeps the change. NKS
 sounds and VST3 presets load into the plugin's VST3 version.
 
+**The knobs follow the sound.** A plugin that holds many instruments --
+Kontakt above all -- has no one set of knobs: each instrument inside it puts
+its own controls on them. When a sound comes from the maker's list, the
+keyboard's knobs, the Stage view and the tablet take that sound's own pages
+(its maker's names, in its maker's order), program by program, so two
+programs with two Kontakt instruments each have the right knobs. An
+instrument chosen in the plugin's own window and kept with **Keep...** has no
+such pages: StageRig picks from the parameters the plugin shows, and
+**Knobs** on the instrument is where you lay them out and name the layout
+(one per instrument inside the plugin, chosen per program).
+
+
 **+ Add instrument...** asks which kind:
 
 - **Plugin instrument** -- your instrument plugins, grouped by manufacturer.
@@ -1290,6 +1302,14 @@ what each keyboard is on now at the top, and its front panel) and
 **Controls** (what every pedal, knob and button does, in the laptop's
 Controls panel's sections, to check from the stand; teaching is done at the
 laptop). **TAP TEMPO** and **PANIC** are in the header.
+
+The header's title is the setup's name. Tap it to **Save** the setup,
+**Save as...** under a new name, or **open another** of the setups saved in
+the same folder on the computer (the home folder for a setup never saved).
+The tablet names a setup, never a place: for another folder, use **Open...**
+on the computer. Opening stops the sound while the plugins load, so it asks
+first; it is off when editing from the tablet is switched off in the Tablet
+window.
 
 ![The tablet set list: the song you are on in large type, the running order, and a search](images/tablet-setlist.png)
 

@@ -3378,6 +3378,7 @@ void MainComponent::showSoundsFor (int slot)
         }
         if (problem.isNotEmpty()) { sp->showStatus (pluginName + ": " + problem); return; }
         sp->markDirty();
+        if (sp->surfaceHub != nullptr) sp->surfaceHub->soundChanged();
         sp->showStatus (pluginName + ": " + (s.from == SoundChoice::From::before ? String ("the sound before") : s.name));
         if (sp->slotsPanel != nullptr) sp->slotsPanel->refresh();
     };
@@ -4013,15 +4014,32 @@ void MainComponent::saveSetup (bool forceAskForFile)
         auto f = fc.getResult();
         if (f == File()) return;
         if (! f.hasFileExtension ("json")) f = f.withFileExtension ("stagerig.json");
-        if (writeSetupFile (f))
-        {
-            // The charts travel with the setup: copy the folder to the new name.
-            const auto from = engine.getChartsFolder(), to = chartsFolderFor (f);
-            if (from.isDirectory() && from != to) from.copyDirectoryTo (to);
-            setCurrentFile (f);
-            showStatus ("Saved " + f.getFileName());
-        }
+        saveSetupTo (f);
     });
+}
+
+bool MainComponent::saveSetupTo (const File& f)
+{
+    if (! writeSetupFile (f)) return false;
+    // The charts travel with the setup: copy the folder to the new name.
+    const auto from = engine.getChartsFolder(), to = chartsFolderFor (f);
+    if (from.isDirectory() && from != to) from.copyDirectoryTo (to);
+    setCurrentFile (f);
+    showStatus ("Saved " + f.getFileName());
+    return true;
+}
+
+File MainComponent::setupsFolder() const
+{
+    return currentFile != File() ? currentFile.getParentDirectory() : File::getSpecialLocation (File::userHomeDirectory);
+}
+
+String MainComponent::setupNameOf (const File& f)
+{
+    const auto n = f.getFileName();
+    for (const char* end : { ".stagerig.json", ".performer.json", ".json" })
+        if (n.endsWithIgnoreCase (end)) return n.dropLastCharacters ((int) strlen (end));
+    return n;
 }
 
 void MainComponent::saveOnQuit()
@@ -4293,6 +4311,62 @@ bool MainComponent::startRemote()
         remote = std::make_unique<RemoteServer> (engine, settings);
         remote->setHub (surfaceHub.get());
         remote->onEdited = [this] { markDirty(); };       // a knob or a scene changed on the stand: unsaved, and the autosave takes it
+        /* The setup's file, from the stand. The tablet names a setup, never a
+           path: it saves and opens beside the open one (the home folder for a
+           setup never saved), among the files listed to it. */
+        auto setupsHere = [this]
+        {
+            Array<File> files;
+            for (const auto& f : setupsFolder().findChildFiles (File::findFiles, false, "*.stagerig.json;*.performer.json"))
+                if (f != getAutosaveFile()) files.add (f);
+            files.sort();
+            return files;
+        };
+        remote->onSetupName = [this] { return currentFile != File() ? setupNameOf (currentFile) : String(); };
+        remote->onSetupList = [this, setupsHere]
+        {
+            DynamicObject::Ptr o (new DynamicObject());
+            o->setProperty ("name", currentFile != File() ? setupNameOf (currentFile) : String());
+            Array<var> list;
+            for (const auto& f : setupsHere())
+            {
+                DynamicObject::Ptr e (new DynamicObject());
+                e->setProperty ("name", setupNameOf (f));
+                e->setProperty ("when", f.getLastModificationTime().formatted ("%e %b %Y").trim());
+                e->setProperty ("current", f == currentFile);
+                list.add (var (e.get()));
+            }
+            o->setProperty ("files", list);
+            return var (o.get());
+        };
+        remote->onSetupSave = [this] (const String& asked, bool over) -> String
+        {
+            File f = currentFile;
+            if (asked.isNotEmpty())
+            {
+                auto name = File::createLegalFileName (asked).trim();
+                if (name.endsWithIgnoreCase (".stagerig.json")) name = name.dropLastCharacters (14).trim();
+                if (name.isEmpty() || name.startsWithChar ('.')) return "That name cannot be used for a file. Try another.";
+                f = setupsFolder().getChildFile (name + ".stagerig.json");
+                if (f.existsAsFile() && f != currentFile && ! over) return "exists";
+            }
+            else if (f == File()) return "name";
+            if (newerFile && f == currentFile && ! overwriteWarned)
+                return "This setup was saved by a newer StageRig, and saving over it would lose what this version did not load. Use Save as... to keep both.";
+            if (f == currentFile ? writeSetupFile (f) : saveSetupTo (f))
+            {
+                if (f == currentFile) showStatus ("Saved " + f.getFileName() + " (from the tablet)");
+                return {};
+            }
+            return statusText.isNotEmpty() ? statusText : String ("The setup could not be saved.");
+        };
+        remote->onSetupOpen = [this, setupsHere] (const String& asked) -> String
+        {
+            for (const auto& f : setupsHere())
+                if (setupNameOf (f) == asked)
+                    return loadSetupFile (f) ? String() : (statusText.isNotEmpty() ? statusText : asked + " could not be opened.");
+            return asked + " is not there any more.";
+        };
     }
     const int port = settings.getIntValue ("remotePort", 7777);
 

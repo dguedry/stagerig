@@ -957,6 +957,19 @@ const NksPreset* ControlMapLibrary::findNks (const PluginDescription& d) const
     return best;
 }
 
+const NksPreset* ControlMapLibrary::nksOfFile (const String& path) const
+{
+    if (path.isEmpty()) return nullptr;
+    auto it = nksFiles.find (path);
+    if (it == nksFiles.end())
+    {
+        NksPreset p;
+        if (NksPreset::read (File (path), p).failed()) p.pages.clear();
+        it = nksFiles.emplace (path, std::move (p)).first;
+    }
+    return it->second.pages.empty() ? nullptr : &it->second;
+}
+
 std::vector<NksSound> ControlMapLibrary::soundsFor (const PluginDescription& d) const
 {
     std::vector<NksSound> out;

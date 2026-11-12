@@ -197,6 +197,9 @@ public:
     /** The NKS pages for this plugin: those most of its presets have. Null
         when there are none or the search has not finished. */
     const NksPreset* findNks (const juce::PluginDescription&) const;
+    /** The NKS pages of one sound's file (a slot's soundFile): the knobs of
+        that very sound. Null when the file is gone or has none. Message thread. */
+    const NksPreset* nksOfFile (const juce::String& path) const;
     /** Every NKS sound found for this plugin, by bank and name. Empty when
         there are none or the search has not finished. Any thread. */
     std::vector<NksSound> soundsFor (const juce::PluginDescription&) const;
@@ -214,6 +217,7 @@ private:
     juce::String folderSignature;      // names and modification times, as last loaded
     std::vector<Entry> maps;
 
+    mutable std::map<juce::String, NksPreset> nksFiles;    // read as asked for; one with no pages is kept empty
     std::vector<NksPreset> nks;            // written once, by the search, before nksGeneration goes up
     std::vector<NksSound> sounds;          // likewise
     std::atomic<int> nksGeneration { 0 };

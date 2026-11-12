@@ -100,6 +100,9 @@ struct SlotDef
     juce::PluginDescription plugin;   // which plugin
     juce::MemoryBlock state;          // last saved plugin state
     juce::String soundName;           // the maker's sound it was given (Sounds...), for display; empty if none
+    /** The maker's file that sound came from (an NKS preset), when it did: its
+        knob pages are that sound's -- a Kontakt instrument's, not Kontakt's. */
+    juce::String soundFile;
     bool enabled = true;
     float gainDb = 0.0f;
     int transpose = 0;                // semitones
