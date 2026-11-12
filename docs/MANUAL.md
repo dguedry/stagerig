@@ -791,11 +791,13 @@ in Options > Your keyboards; those with a screen show the names and values.
   list is searchable -- or press **Pick it in the plugin's window** and move
   the control in the plugin's own window. Give it a short name for the
   screen if the plugin's own name is long. **Clear** empties it.
-  Tick **On/off switch** for a control that is on or off rather than a
-  range: the Stage view and the tablet then show a switch for it, flipped
-  with one tap. A plugin that says a control is a switch has it ticked
-  already; Kontakt gives every control as a range, so its buttons need the
-  tick.
+  **Shown as** says whether it is a **Knob** (it turns through a range) or
+  a **Button** (on or off): a button is a switch on the Stage view and the
+  tablet, flipped with one click or tap. A control the plugin says is on or
+  off is a button already; Kontakt gives every control as a range, so its
+  buttons need choosing. The same choice is a right-click away on any knob
+  of the Stage view (**A knob** / **A button**), where a knob that should
+  have been a button is seen.
 - **Key colours** (the other tab): runs of keys with a colour and a name,
   such as keyswitches, a drum kit's pads, or the range a sampled instrument
   has. Notes are as the plugin hears them (**C1**, **F#2**, or a number),

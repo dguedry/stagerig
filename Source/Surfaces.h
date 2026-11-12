@@ -151,6 +151,16 @@ public:
     void setFocusSlot (int input, int slot);
     /** A plugin was given another sound (Sounds...): its knob pages may be other ones. */
     void soundChanged()                 { layouts.clear(); }
+    /** The automatic pages for that instrument (the maker's, or StageRig's picks) as a
+        layout that can be kept and changed; and a name for it no layout of the plugin has. */
+    ControlMap automaticMapFor (int input, int program, int slot) const;
+    juce::String newLayoutNameFor (int input, int program, int slot) const;
+    /** One knob of the page the keyboard's knobs are on, for `input`: a button (on or
+        off) or a knob (a range), wherever it is shown. An automatic layout becomes the
+        player's own first, as with any change to it. Says what went wrong, or nothing. */
+    juce::String setKnobIsSwitch (int input, int knob, bool isSwitch);
+    /** Whether that knob is a button because the plugin says so (nothing to choose). */
+    bool knobIsSwitchByPlugin (int input, int knob);
     /** The instrument and page each input's knobs are on, as text to keep between runs, and back. The page
         waits for the plugin to load, since until then there are no pages to be on. */
     juce::String getFocusState() const;

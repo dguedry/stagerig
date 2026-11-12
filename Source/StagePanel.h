@@ -129,7 +129,9 @@ private:
             addChildComponent (sw);
             sw.setClickingTogglesState (false);
             sw.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2f5f9a));
-            sw.onClick = [this] { if (onMove) onMove (sw.getToggleState() ? 0.0 : 1.0); };
+            sw.onClick = [this] { if (rightDown) { rightDown = false; return; } if (onMove) onMove (sw.getToggleState() ? 0.0 : 1.0); };
+            sw.addMouseListener (this, false);          // a right-click on the button is the same menu as on the knob
+            slider.onRightClick = [this] { if (onMenu) onMenu(); };
             for (auto* l : { &name, &value })
             {
                 addAndMakeVisible (*l);
@@ -141,6 +143,11 @@ private:
             name.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
             value.setFont (juce::FontOptions (11.0f));
             value.setColour (juce::Label::textColourId, juce::Colours::white);
+        }
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            rightDown = e.mods.isPopupMenu() && e.eventComponent == &sw;
+            if (e.mods.isPopupMenu() && onMenu) onMenu();
         }
         void set (double v)                         // from the model or the plugin: never while the hand is on it
         {
@@ -189,9 +196,44 @@ private:
         juce::Label name, value;
         juce::String text;                          // the value in the keyboard's words, when there is no format
         std::function<void (double)> onMove;
+        std::function<void()> onMenu;               // a right-click: knob or button, and what the knobs turn
         std::function<juce::String (double)> format;
-        bool dragging = false, silent = false;
+        bool dragging = false, silent = false, rightDown = false;
     };
+
+    /** A right-click on one of the page's knobs. Whether a control is a knob
+        or a button is set here, where it is seen to be wrong: a plugin that
+        gives its on/off buttons as ranges (Kontakt does) shows a knob for a
+        thing that only has two positions. */
+    void knobMenu (int in, int program, int sl, int k, juce::Component* target)
+    {
+        if (hub == nullptr) return;
+        const bool isSwitch = hub->viewFor (in).knobSwitches[(size_t) k];
+        const bool byPlugin = hub->knobIsSwitchByPlugin (in, k);
+        juce::PopupMenu m;
+        if (byPlugin) m.addItem (3, "A button: the plugin says this one is on or off", false, true);
+        else
+        {
+            m.addItem (1, "A knob  (turns through a range)", true, ! isSwitch);
+            m.addItem (4, "A button  (on or off, one click)", true, isSwitch);
+        }
+        m.addSeparator();
+        m.addItem (2, "Change what the knobs turn...  (the Knobs window)");
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target),
+                         [sp = juce::Component::SafePointer<StagePanel> (this), in, program, sl, k, isSwitch] (int r)
+        {
+            if (sp == nullptr || sp->hub == nullptr) return;
+            if (r == 2) { if (sp->onOpenKnobs) sp->onOpenKnobs (in, program, sl); return; }
+            if ((r != 1 && r != 4) || (r == 4) == isSwitch) return;
+            if (const auto wrong = sp->hub->setKnobIsSwitch (in, k, r == 4); wrong.isNotEmpty())
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Knob or button", wrong);
+                return;
+            }
+            for (auto& p : sp->panels) p->key.clear();
+            if (sp->onEdited) sp->onEdited();
+        });
+    }
 
     /** One input's front panel: which instrument, which page, and the knobs. */
     struct Panel : public juce::Component
@@ -421,8 +463,11 @@ private:
                 {
                     auto knob = std::make_unique<Knob>();
                     knob->onMove = [this, in, k] (double v) { if (hub != nullptr) hub->setKnob (in, k, (float) v); if (onEdited) onEdited(); };
-                    knob->slider.onRightClick = [this, in, program, sl] { if (onOpenKnobs) onOpenKnobs (in, program, sl); };
-                    knob->slider.setTooltip ("Knob " + juce::String (k + 1) + " on the keyboard. Right-click to change what the knobs turn (the Knobs window)");
+                    knob->onMenu = [this, in, program, sl, k, raw = knob.get()] { knobMenu (in, program, sl, k, raw); };
+                    const juce::String tip = "Knob " + juce::String (k + 1) + " on the keyboard. Right-click to make it a button (on or off) or a knob, "
+                                             "or to change what the knobs turn";
+                    knob->slider.setTooltip (tip);
+                    knob->sw.setTooltip (tip);
                     p.knobs.push_back (std::move (knob));
                 }
             for (auto& k : p.knobs) p.addAndMakeVisible (*k);

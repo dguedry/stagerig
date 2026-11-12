@@ -170,6 +170,97 @@ int SurfaceHub::getFocusPage (int input)
     return focus[input].page;
 }
 
+ControlMap SurfaceHub::automaticMapFor (int input, int program, int slot) const
+{
+    ControlMap m;
+    const auto& inputs = engine.getSetup().inputs;
+    if (input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return m;
+    const auto& prog = inputs[(size_t) input].programs[(size_t) program];
+    if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return m;
+    m.pluginName = prog.slots[(size_t) slot].plugin.name;
+    m.pluginManufacturer = prog.slots[(size_t) slot].plugin.manufacturerName;
+    auto* p = engine.isPluginAlive (input, program, slot) ? engine.getPlugin (input, program, slot) : nullptr;
+    if (p == nullptr) return m;
+    // As the keyboard has it with no layout of the player's: what layoutFor works out.
+    const auto layout = layoutFor (input, program, slot, true);
+    for (const auto& pg : layout.pages)
+    {
+        ControlPage page;
+        page.name = pg.name;
+        for (const auto& k : pg.knobs)
+        {
+            ControlKnob knob;
+            if (k.paramIndex >= 0 && k.paramIndex < (int) p->getParameters().size())
+            {
+                const auto& prm = p->getParameters()[(size_t) k.paramIndex];
+                knob = { prm.id, prm.name, k.name != prm.name ? k.name : String(), k.isSwitch };
+            }
+            page.knobs.push_back (knob);
+        }
+        while (! page.knobs.empty() && page.knobs.back().isEmpty()) page.knobs.pop_back();
+        m.pages.push_back (page);
+    }
+    if (m.pages.empty()) m.pages.push_back ({ "Sound", {} });
+    return m;
+}
+
+String SurfaceHub::newLayoutNameFor (int input, int program, int slot) const
+{
+    const auto& inputs = engine.getSetup().inputs;
+    if (input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return {};
+    const auto& prog = inputs[(size_t) input].programs[(size_t) program];
+    if (slot < 0 || slot >= (int) prog.slots.size()) return {};
+    const auto& sd = prog.slots[(size_t) slot];
+    // Named for the instrument inside the plugin when the sound says which (a Kontakt library), else for the plugin.
+    String base = sd.plugin.name;
+    if (const auto* own = library.nksOfFile (sd.soundFile); own != nullptr && own->product.isNotEmpty()) base = own->product;
+    String name = base;
+    for (int n = 2; library.find (sd.plugin, name) != nullptr; ++n) name = base + " " + String (n);
+    return name;
+}
+
+bool SurfaceHub::knobIsSwitchByPlugin (int input, int knob)
+{
+    const auto& inputs = engine.getSetup().inputs;
+    if (input < 0 || input >= (int) inputs.size() || knob < 0 || knob >= SurfaceView::numKnobs) return false;
+    const int program = inputs[(size_t) input].currentProgram, slot = getFocusSlot (input), page = getFocusPage (input);
+    const auto& layout = currentLayout (input);
+    if (page < 0 || page >= (int) layout.pages.size()) return false;
+    const int idx = layout.pages[(size_t) page].knobs[(size_t) knob].paramIndex;
+    auto* p = engine.isPluginAlive (input, program, slot) ? engine.getPlugin (input, program, slot) : nullptr;
+    if (p == nullptr || idx < 0 || idx >= (int) p->getParameters().size()) return false;
+    const auto& prm = p->getParameters()[(size_t) idx];
+    return prm.boolean || prm.numSteps == 2;
+}
+
+String SurfaceHub::setKnobIsSwitch (int input, int knob, bool isSwitch)
+{
+    const auto& inputs = engine.getSetup().inputs;
+    if (input < 0 || input >= (int) inputs.size()) return "That keyboard is not there.";
+    const int program = inputs[(size_t) input].currentProgram, slot = getFocusSlot (input), page = getFocusPage (input);
+    const auto& prog = inputs[(size_t) input].programs[(size_t) program];
+    if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return "That instrument has no knobs to change.";
+    const auto& sd = prog.slots[(size_t) slot];
+
+    ControlMap map;
+    bool own = false;
+    if (sd.controlMap != "-")
+        if (const auto* m = library.find (sd.plugin, sd.controlMap)) { map = *m; own = true; }
+    if (! own)
+    {
+        map = automaticMapFor (input, program, slot);
+        map.name = newLayoutNameFor (input, program, slot);
+    }
+    if (page < 0 || page >= (int) map.pages.size()) return "That page has no knobs to change.";
+    auto& knobs = map.pages[(size_t) page].knobs;
+    if (knob < 0 || knob >= (int) knobs.size() || knobs[(size_t) knob].isEmpty()) return "That knob turns nothing yet.";
+    knobs[(size_t) knob].isSwitch = isSwitch;
+    if (const auto r = library.save (map); r.failed()) return r.getErrorMessage();
+    engine.setSlotControlMap (input, program, slot, map.name);
+    libraryChanged();
+    return {};
+}
+
 const SurfaceHub::Layout& SurfaceHub::currentLayout (int input)
 {
     static const Layout none;

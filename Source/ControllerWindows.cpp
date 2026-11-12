@@ -112,15 +112,31 @@ public:
         addAndMakeVisible (labelEd);
         labelEd.setTextToShowWhenEmpty ("Name on the screen (the parameter's own when empty)", textDim);
         labelEd.onReturnKey = labelEd.onFocusLost = [this] { renameKnob(); };
-        addAndMakeVisible (switchTick);
-        switchTick.setTooltip ("This control is on or off, not a range: the Stage view and the tablet show a switch for it, one tap to flip. "
-                               "For a button the plugin gives as a range (Kontakt's all are); one the plugin says is a switch is ticked already.");
-        switchTick.onClick = [this]
+        addAndMakeVisible (shownAs);
+        shownAs.setText ("Shown as", dontSendNotification);
+        shownAs.setColour (Label::textColourId, textDim);
+        shownAs.setJustificationType (Justification::centredRight);
+        for (auto* b : { &asKnobBtn, &asButtonBtn })
         {
-            const bool on = switchTick.getToggleState();
-            knobForEdit().isSwitch = on;
-            saveAndShow();
-        };
+            addAndMakeVisible (*b);
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (7301);
+            b->setColour (TextButton::buttonOnColourId, accentDim);
+            b->setTooltip ("A knob turns through a range. A button is on or off: the Stage view and the tablet show it as a switch, one tap to flip. "
+                           "Choose Button for an on/off control the plugin gives as a range (Kontakt's all are); "
+                           "one the plugin says is on or off is a button already.");
+            b->onClick = [this, b]
+            {
+                if (! b->getToggleState()) return;
+                const bool on = b == &asButtonBtn;
+                const ControlPage* pg = page < (int) edit.pages.size() ? &edit.pages[(size_t) page] : nullptr;
+                if (pg != nullptr && selected < (int) pg->knobs.size() && pg->knobs[(size_t) selected].isSwitch == on) return;
+                knobForEdit().isSwitch = on;
+                saveAndShow();
+            };
+        }
+        asKnobBtn.setConnectedEdges (Button::ConnectedOnRight);
+        asButtonBtn.setConnectedEdges (Button::ConnectedOnLeft);
         addAndMakeVisible (fromWindowBtn);
         fromWindowBtn.setTooltip ("Opens the plugin's window: move the control you want, and this knob turns it");
         fromWindowBtn.onClick = [this] { pickFromWindow(); };
@@ -199,8 +215,10 @@ public:
         paramPicker.setBounds (row);
         knobsArea.removeFromTop (6);
         row = knobsArea.removeFromTop (26);
-        switchTick.setBounds (row.removeFromRight (150));
-        row.removeFromRight (8);
+        asButtonBtn.setBounds (row.removeFromRight (130));
+        asKnobBtn.setBounds (row.removeFromRight (70));
+        shownAs.setBounds (row.removeFromRight (74));
+        row.removeFromRight (4);
         labelEd.setBounds (row);
 
         // Keys.
@@ -220,7 +238,7 @@ private:
         int number = 1;
         String name, param, value;
         float level = -1.0f;
-        bool selected = false, lit = false, empty = true;
+        bool selected = false, lit = false, empty = true, isSwitch = false;
         std::function<void()> onClick;
 
         void paint (Graphics& g) override
@@ -236,8 +254,23 @@ private:
             g.setFont (FontOptions (10.5f));
             g.drawText ("KNOB " + String (number), inner.removeFromTop (14), Justification::centred);
 
-            // The knob itself: an arc to where it is.
             auto dial = inner.removeFromTop (46).toFloat().withSizeKeepingCentre (40.0f, 40.0f);
+            if (isSwitch)
+            {
+                // A button: lit when on.
+                const auto pill = dial.withSizeKeepingCentre (56.0f, 26.0f);
+                const bool on = level >= 0.5f;
+                g.setColour (on ? Colour (0xff2f5f9a) : Colour (0xff3a3e48));
+                g.fillRoundedRectangle (pill, 6.0f);
+                g.setColour (on ? Colour (0xff5fa8ff) : Colour (0xff50555f));
+                g.drawRoundedRectangle (pill, 6.0f, 1.5f);
+                g.setColour (Colours::white);
+                g.setFont (FontOptions (12.0f, Font::bold));
+                g.drawText (level < 0.0f ? String ("button") : String (on ? "ON" : "OFF"), pill.toNearestInt(), Justification::centred);
+            }
+            else
+            {
+            // The knob itself: an arc to where it is.
             const float range = MathConstants<float>::pi * 1.5f;
             Path track;
             track.addCentredArc (dial.getCentreX(), dial.getCentreY(), 17.0f, 17.0f, 0.0f, -range / 2.0f, range / 2.0f, true);
@@ -249,6 +282,7 @@ private:
                 on.addCentredArc (dial.getCentreX(), dial.getCentreY(), 17.0f, 17.0f, 0.0f, -range / 2.0f, -range / 2.0f + range * level, true);
                 g.setColour (Colour (0xff5fa8ff));
                 g.strokePath (on, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
+            }
             }
 
             g.setColour (empty ? textDim : Colours::white);
@@ -376,32 +410,14 @@ private:
 
     ControlMap automaticLayout() const
     {
-        ControlMap m;
-        m.pluginName = plugin.name;
-        m.pluginManufacturer = plugin.manufacturerName;
-        auto* p = livePlugin();
-        if (p == nullptr) return m;
-        // As the keyboard has it with no layout of yours: what the hub works out.
-        const auto layout = hub.layoutFor (input, program, slot, true);
-        for (const auto& pg : layout.pages)
+        if (livePlugin() == nullptr)
         {
-            ControlPage page;
-            page.name = pg.name;
-            for (const auto& k : pg.knobs)
-            {
-                ControlKnob knob;
-                if (k.paramIndex >= 0 && k.paramIndex < (int) p->getParameters().size())
-                {
-                    const auto& prm = p->getParameters()[(size_t) k.paramIndex];
-                    knob = { prm.id, prm.name, k.name != prm.name ? k.name : String() };
-                }
-                page.knobs.push_back (knob);
-            }
-            while (! page.knobs.empty() && page.knobs.back().isEmpty()) page.knobs.pop_back();
-            m.pages.push_back (page);
+            ControlMap m;
+            m.pluginName = plugin.name;
+            m.pluginManufacturer = plugin.manufacturerName;
+            return m;
         }
-        if (m.pages.empty()) m.pages.push_back ({ "Sound", {} });
-        return m;
+        return hub.automaticMapFor (input, program, slot);
     }
 
     /** About to change something: an automatic layout becomes yours first. */
@@ -410,12 +426,8 @@ private:
         storeKeys();
         if (own) return;
         auto m = automaticLayout();
-        // Named for the instrument inside the plugin when the sound says which (a Kontakt library), else for the plugin.
-        String base = plugin.name;
-        if (const auto* sd = slotDef(); sd != nullptr)
-            if (const auto* own = library.nksOfFile (sd->soundFile); own != nullptr && own->product.isNotEmpty()) base = own->product;
-        m.name = base;
-        for (int n = 2; library.find (plugin, m.name) != nullptr; ++n) m.name = base + " " + String (n);
+        m.name = hub.newLayoutNameFor (input, program, slot);
+        if (m.name.isEmpty()) m.name = plugin.name;
         if (const auto* nks = library.findNks (plugin)) m.notes = "Made from " + (nks->vendor.isNotEmpty() ? nks->vendor + "'s" : String ("the maker's")) + " pages.";
         m.keys = edit.keys;
         edit = m;
@@ -563,11 +575,13 @@ private:
             t.name = knob.label.isNotEmpty() ? knob.label : t.param;
             t.level = -1.0f;
             t.value = {};
+            t.isSwitch = knob.isSwitch;
             if (p != nullptr && idx >= 0 && idx < (int) p->getParameters().size())
             {
                 const auto& prm = p->getParameters()[(size_t) idx];
                 t.level = jlimit (0.0f, 1.0f, p->getCachedParameterValue (idx));
-                t.value = prm.boolean || prm.numSteps == 2 || knob.isSwitch ? String (t.level >= 0.5f ? "On" : "Off") : String (roundToInt (t.level * 100.0f)) + "%";
+                t.isSwitch = prm.boolean || prm.numSteps == 2 || knob.isSwitch;
+                t.value = t.isSwitch ? String (t.level >= 0.5f ? "On" : "Off") : String (roundToInt (t.level * 100.0f)) + "%";
             }
             t.selected = k == selected;
             t.repaint();
@@ -598,8 +612,10 @@ private:
         clearBtn.setEnabled (idx >= 0 || knob.label.isNotEmpty());
         // On or off: as the plugin says where it does, else as set here.
         const bool byPlugin = idx >= 0 && idx < (int) params.size() && (params[(size_t) idx].boolean || params[(size_t) idx].numSteps == 2);
-        switchTick.setToggleState (byPlugin || knob.isSwitch, dontSendNotification);
-        switchTick.setEnabled (idx >= 0 && ! byPlugin);
+        asButtonBtn.setToggleState (byPlugin || knob.isSwitch, dontSendNotification);
+        asKnobBtn.setToggleState (! (byPlugin || knob.isSwitch), dontSendNotification);
+        asKnobBtn.setEnabled (idx >= 0 && ! byPlugin);
+        asButtonBtn.setEnabled (idx >= 0 && ! byPlugin);
     }
 
     ControlKnob& knobForEdit()
@@ -687,7 +703,7 @@ private:
     void showTab()
     {
         const bool knobs = knobsTab.getToggleState();
-        for (auto* c : std::initializer_list<Component*> { &addPageBtn, &removePageBtn, &pageNameEd, &editCap, &paramPicker, &labelEd, &switchTick, &fromWindowBtn, &clearBtn })
+        for (auto* c : std::initializer_list<Component*> { &addPageBtn, &removePageBtn, &pageNameEd, &editCap, &paramPicker, &labelEd, &shownAs, &asKnobBtn, &asButtonBtn, &fromWindowBtn, &clearBtn })
             c->setVisible (knobs);
         for (auto& t : tiles) t.setVisible (knobs);
         layoutPageTabs();
@@ -867,7 +883,8 @@ private:
     ComboBox layoutBox, pageBox;
     TextButton shareBtn { "Share..." }, addPageBtn { "+ Page" }, removePageBtn { "Remove page" }, fromWindowBtn, clearBtn { "Clear" }, addKeysBtn { "+ Keys" };
     TextEditor pageNameEd, labelEd;
-    ToggleButton switchTick { "On/off switch" };
+    Label shownAs;
+    TextButton asKnobBtn { "Knob" }, asButtonBtn { "Button (on / off)" };
     std::vector<std::unique_ptr<TextButton>> pageTabs;
     Rectangle<int> pageTabsArea;
     std::array<Tile, ControlPage::numKnobs> tiles;
