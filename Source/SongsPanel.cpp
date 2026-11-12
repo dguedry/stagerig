@@ -236,6 +236,13 @@ void SongsPanel::refresh()
         setHeader.setText (sets.empty() ? "SET LIST  (none yet: Set list... > New set list...)" : "SET LIST  (none chosen: pick one under Set list...)", dontSendNotification);
     }
 
+    /* The song that comes up -- at the start, from a footswitch, the tablet --
+       is the chosen one too: its row is the lit one, and Edit..., Chart...
+       and Capture beside it acted on another, or were dimmed. */
+    if (const int up = engine.currentSongIndex(); up >= 0 && up < (int) songs.size()
+                                                  && (up != songLastUp || selectedSong < 0 || selectedSong >= (int) songs.size()))
+        selectedSong = up;
+    songLastUp = engine.currentSongIndex();
     const bool haveSong = selectedSong >= 0 && selectedSong < (int) songs.size();
     const bool haveSet  = set >= 0 && set < (int) sets.size();
     removeBtn.setEnabled (haveSong);
@@ -411,7 +418,9 @@ void SongsPanel::ListProxy::paintListBoxItem (int row, Graphics& g, int w, int h
     const auto& sg = songs[(size_t) songIndex];
 
     // The song being played is the one that has to be findable at a glance.
-    g.fillAll (playing ? accentDim : (selected ? Colour (0xff2c3038) : bgRow));
+    g.fillAll (playing ? accentDim : (selected ? Colour (0xff3a3f4c) : bgRow));
+    // The chosen one, when it is not the one playing: the song Edit..., Chart... and Capture act on.
+    if (selected && ! playing) { g.setColour (accent); g.fillRect (0, 0, 3, h); }
 
     auto r = Rectangle<int> (0, 0, w, h).reduced (6, 0);
 
@@ -635,7 +644,7 @@ void SongsPanel::editSelectedSong()
     StringArray roots { "None  (each Scale and Run keeps its own key)" }, scales;
     for (int i = 0; i < 12; ++i) roots.add (MidiFx::noteNames[i]);
     for (int i = 0; i < MidiFx::numScaleModes(); ++i) scales.add (MidiFx::scaleModes[i]);
-    w->addComboBox ("key", roots, "Key (the Scale and Run effects play in it; a chord chart that names its key is shown in it)");
+    w->addComboBox ("key", roots, "Key (for the Scale and Run effects, and chord charts)");
     w->addComboBox ("scale", scales, "Scale");
     w->getComboBoxComponent ("key")->setSelectedItemIndex (jlimit (0, 12, sg.keyRoot + 1), dontSendNotification);
     w->getComboBoxComponent ("scale")->setSelectedItemIndex (jlimit (0, MidiFx::numScaleModes() - 1, sg.keyMode), dontSendNotification);
@@ -862,7 +871,7 @@ void SongsPanel::newChordChart (int songIndex)
     const String key = sg.hasKey() ? noteNameFor (sg.keyRoot, MidiFx::keyPrefersFlats (sg.keyRoot, sg.keyMode)) + (MidiFx::keyIsMinor (sg.keyMode) ? "m" : "") : String ("C");
     const String text = "{title: " + sg.name + "}\n{key: " + key + "}\n{subtitle: tempo, who starts}\n\n"
                         "{comment: Intro}\n[C]    [G]    [Am]    [F]\n\n"
-                        "{comment: Verse}\n[C]Chords go in square brackets [G]before the syllable they [Am]fall on, like [F]this.\n"
+                        "{comment: Verse}\n[C]Chords go in square [G]brackets,\n[Am]before the syllable they [F]fall on.\n"
                         "A line without brackets is just words.\n";
     if (! dest.replaceWithText (text)) return;
     engine.addSongChart (songIndex, { dest.getFileName(), {} });

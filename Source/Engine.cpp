@@ -6531,7 +6531,9 @@ std::vector<Engine::CheckItem> Engine::showCheck() const
     else
     {
         const int block = lastBlockSamples.load() > 0 ? lastBlockSamples.load() : dev->getCurrentBufferSizeSamples();
-        add (CheckItem::good, "Audio: " + dev->getName() + ", " + String (roundToInt (dev->getCurrentSampleRate())) + " Hz, "
+        // By the name it is chosen by in Audio..., not the driver's ("...; Direct hardware device without any conversions").
+        const auto chosen = const_cast<DeviceManager&> (deviceManager).getAudioDeviceSetup().outputDeviceName;
+        add (CheckItem::good, "Audio: " + (chosen.isNotEmpty() ? chosen : dev->getName()) + ", " + String (roundToInt (dev->getCurrentSampleRate())) + " Hz, "
                               + String (block) + " samples (" + String (1000.0 * block / jmax (1.0, dev->getCurrentSampleRate()), 1) + " ms)");
         if (! audioThreadRealtime.load())
             add (CheckItem::problem, "The audio is not running at realtime priority, so a busy computer can break it up. "
@@ -6648,7 +6650,7 @@ std::vector<Engine::CheckItem> Engine::showCheck() const
             if (folder.getChildFile (c.file).existsAsFile()) ++filesOk;
             else add (CheckItem::warning, song.name + ": its chart " + c.displayName() + " is missing.");
     }
-    if (filesOk > 0) add (CheckItem::good, String (filesOk) + " backing-track and chart files found");
+    if (filesOk > 0) add (CheckItem::good, String (filesOk) + (filesOk == 1 ? " backing-track or chart file found" : " backing-track and chart files found"));
 
     // Tonight so far.
     if (autoRestarts > 0)

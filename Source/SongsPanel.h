@@ -126,6 +126,7 @@ public:
 private:
 
     int selectedSong = -1;        // index into engine.getSongs()
+    int songLastUp = -2;          // the song in play when the list was last drawn: a new one is chosen too
     int selectedInSet = -1;       // position within the current set
 
     std::unique_ptr<juce::FileChooser> chooser;

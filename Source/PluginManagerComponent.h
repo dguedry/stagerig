@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PluginHost.h"
+#include "Theme.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 
@@ -30,6 +31,15 @@ public:
             b->setTooltip ("Look for new or updated " + format->getName() + " plugins in:\n" + host.getScanPaths (*format).toString().replace (";", "\n"));
             b->onClick = [this, format] { queue.push_back ({ format, host.getScanPaths (*format) }); startNext(); };
             addAndMakeVisible (b);
+        }
+
+        {
+            // In the window's colours: JUCE's own header is light grey in a dark window.
+            auto& th = list.getTableListBox().getHeader();
+            th.setColour (juce::TableHeaderComponent::backgroundColourId, theme::bgRow);
+            th.setColour (juce::TableHeaderComponent::textColourId, theme::textDim);
+            th.setColour (juce::TableHeaderComponent::outlineColourId, theme::bgPanel);
+            th.setColour (juce::TableHeaderComponent::highlightColourId, theme::accentDim);
         }
 
         addAndMakeVisible (folderBtn);

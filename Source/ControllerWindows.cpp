@@ -1032,7 +1032,7 @@ private:
     Viewport keyboardsView;
     Component keyboardsList;
     std::vector<std::unique_ptr<KeyboardRow>> keyboardRows;
-    String shownKeyboards;
+    String shownKeyboards { "(nothing shown yet)" };     // not empty: no keyboard at all is something to show too
 };
 
 //==============================================================================

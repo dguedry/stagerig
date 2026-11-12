@@ -1422,9 +1422,9 @@ public:
         g.setColour (textDim);
         int users = 0;
         for (auto& in : engine.getSetup().inputs) if (in.output == row) ++users;
-        g.drawText ("channels " + String (d.left + 1) + (d.right >= 0 ? "+" + String (d.right + 1) : String ("")) + "   \xc2\xb7   "
-                    + String (users) + (users == 1 ? " input" : " inputs") + "   \xc2\xb7   " + String (d.chain.effects.size()) + (d.chain.effects.size() == 1 ? " effect" : " effects"),
-                    8, 21, w - 16, 16, Justification::centredLeft, true);
+        g.drawText ("channels " + String (d.left + 1) + (d.right >= 0 ? "+" + String (d.right + 1) : String ("")) + ", "
+                    + String (users) + (users == 1 ? " input" : " inputs") + ", " + String (d.chain.effects.size()) + (d.chain.effects.size() == 1 ? " effect" : " effects"),
+                    8, 21, w - 12, 16, Justification::centredLeft, true);
     }
     void selectedRowsChanged (int) override { refresh(); }
 
@@ -3636,8 +3636,8 @@ void MainComponent::timerCallback()
         cpuLabel.setText ((engine.isRecording() ? "REC " + formatElapsed (engine.getRecordingSeconds()) + "  |  " : String())
                           + "CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + dev
                           + (clockHeld ? "  |  clock held by another app" : String())
-                          + (engine.getLateBlockCount() > 0 ? "  |  " + String (engine.getLateBlockCount()) + " dropouts" : String())
-                          + (engine.getDeviceXrunCount() > 0 ? "  |  " + String (engine.getDeviceXrunCount()) + " underruns" : String()), dontSendNotification);
+                          + (engine.getLateBlockCount() > 0 ? "  |  " + String (engine.getLateBlockCount()) + (engine.getLateBlockCount() == 1 ? " dropout" : " dropouts") : String())
+                          + (engine.getDeviceXrunCount() > 0 ? "  |  " + String (engine.getDeviceXrunCount()) + (engine.getDeviceXrunCount() == 1 ? " underrun" : " underruns") : String()), dontSendNotification);
         cpuLabel.setTooltip (clockHeld ? "StageRig asked for a " + String (wanted) + "-sample buffer but the system is running a bigger one: another application (Bitwig, for example) has forced it. Close that app, or set its buffer to " + String (wanted) + "." : String());
         cpuLabel.setColour (Label::textColourId, (engine.getLateBlockCount() > 0 || clockHeld) ? Colours::orange
                                                  : engine.isRecording() ? Colour (0xffe05a5a) : textDim);
