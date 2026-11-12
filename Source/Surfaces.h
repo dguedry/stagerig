@@ -132,7 +132,7 @@ public:
     ~SurfaceHub() override;
 
     // What the knobs turn ---------------------------------------------------------
-    struct Knob { int paramIndex = -1; juce::String name; };
+    struct Knob { int paramIndex = -1; juce::String name; bool isSwitch = false; };
     struct Page { juce::String name; std::array<Knob, SurfaceView::numKnobs> knobs; };
     struct Layout
     {

@@ -63,6 +63,7 @@ var ControlMap::toVar() const
             if (k.paramId.isNotEmpty())   ko->setProperty ("id", k.paramId);
             if (k.paramName.isNotEmpty()) ko->setProperty ("param", k.paramName);
             if (k.label.isNotEmpty())     ko->setProperty ("label", k.label);
+            if (k.isSwitch)               ko->setProperty ("switch", true);
             knobList.add (var (ko.get()));
         }
         po->setProperty ("knobs", var (knobList));
@@ -120,7 +121,7 @@ bool ControlMap::fromVar (const var& v, ControlMap& out, String& error)
                     for (const auto& kv : *knobList)
                     {
                         if ((int) p.knobs.size() >= ControlPage::numKnobs) break;
-                        p.knobs.push_back ({ str (kv, "id"), str (kv, "param"), str (kv, "label") });
+                        p.knobs.push_back ({ str (kv, "id"), str (kv, "param"), str (kv, "label"), (bool) kv.getProperty ("switch", false) });
                     }
             if (p.name.isEmpty()) p.name = "Page " + String ((int) m.pages.size() + 1);
             m.pages.push_back (std::move (p));

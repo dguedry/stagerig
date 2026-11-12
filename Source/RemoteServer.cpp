@@ -76,20 +76,26 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   #setupBtn span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
   #setupBtn::after { content:"\25BE"; color:var(--accent); flex:none; }
   @media (max-width:480px) { header { gap:8px; padding:12px; } #tap i { display:none; } }
-  #sheet { display:none; position:fixed; inset:0; z-index:5; background:rgba(0,0,0,.6); align-items:flex-start; justify-content:center; padding:60px 14px 14px; }
-  #sheet .box { background:var(--panel); border-radius:14px; width:100%; max-width:460px; max-height:calc(100vh - 80px); overflow:auto; padding:16px; }
-  #sheet h2 { font-size:12px; color:var(--dim); letter-spacing:.08em; margin:0 0 4px; }
-  #sheet .cur { font-size:19px; font-weight:700; margin:0 0 12px; overflow-wrap:anywhere; }
-  #sheet .acts { display:flex; gap:8px; margin-bottom:16px; }
-  #sheet .acts button { flex:1; border:0; border-radius:10px; padding:14px 8px; font-size:16px; font-weight:700; background:var(--row); color:#fff; }
-  #sheet .acts button.go { background:var(--accent); color:#06121f; }
-  #sheet .acts button:disabled { opacity:.4; }
-  #sheet .file { display:flex; align-items:baseline; gap:10px; width:100%; text-align:left; border:0; border-radius:10px; background:var(--row); color:#fff;
+  .dlg { display:none; position:fixed; inset:0; z-index:5; background:rgba(0,0,0,.6); align-items:flex-start; justify-content:center; padding:60px 14px 14px; }
+  .dlg .box { background:var(--panel); border-radius:14px; width:100%; max-width:460px; max-height:calc(100vh - 80px); overflow:auto; padding:16px; scrollbar-color:#4a4f5c transparent; }
+  .dlg h2 { font-size:12px; color:var(--dim); letter-spacing:.08em; margin:0 0 4px; }
+  .dlg .cur { font-size:19px; font-weight:700; margin:0 0 12px; overflow-wrap:anywhere; }
+  .dlg .acts { display:flex; gap:8px; margin-bottom:16px; }
+  .dlg .acts button { flex:1; border:0; border-radius:10px; padding:14px 8px; font-size:16px; font-weight:700; background:var(--row); color:#fff; }
+  .dlg .acts button.go { background:var(--accent); color:#06121f; }
+  .dlg .acts button:disabled { opacity:.4; }
+  .dlg .file { display:flex; align-items:baseline; gap:10px; width:100%; text-align:left; border:0; border-radius:10px; background:var(--row); color:#fff;
                  padding:13px 12px; margin-top:6px; font-size:16px; }
-  #sheet .file b { flex:1; font-weight:600; overflow-wrap:anywhere; }
-  #sheet .file i { font-style:normal; color:var(--dim); font-size:12px; white-space:nowrap; }
-  #sheet .file.on { outline:2px solid var(--accent); }
-  #sheet .note { color:var(--dim); font-size:13px; margin:10px 0 0; }
+  .dlg .file b { flex:1; font-weight:600; overflow-wrap:anywhere; }
+  .dlg .file i { font-style:normal; color:var(--dim); font-size:12px; white-space:nowrap; }
+  .dlg .file.on { outline:2px solid var(--accent); }
+  .dlg .note { color:var(--dim); font-size:13px; margin:10px 0 0; }
+  .dlg .file { flex-wrap:wrap; }
+  .dlg .file small { flex-basis:100%; color:var(--dim); font-size:12px; font-weight:400; margin-top:2px; }
+  .dlg .find { width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid #3a3d47; background:var(--bg,#14161b); color:#fff; margin-bottom:8px; }
+  .dlg .head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .dlg .head .cur { flex:1; margin:0; }
+  .dlg .head button { border:0; border-radius:10px; padding:11px 16px; font-size:15px; font-weight:700; background:var(--row); color:#fff; }
   #panic { background:#a3282d; color:#fff; border:0; border-radius:8px; padding:10px 16px; font-weight:700; font-size:14px; }
   .input { margin:14px 12px 22px; }
   .now { background:var(--panel); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
@@ -324,13 +330,20 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   </div>
 </header>
 <div id="err"></div>
-<div id="sheet"><div class="box">
+<div id="sheet" class="dlg"><div class="box">
   <h2>SETUP</h2>
   <p class="cur" id="sheetName"></p>
   <div class="acts"><button class="go" id="sheetSave">Save</button><button id="sheetSaveAs">Save as...</button><button id="sheetClose">Close</button></div>
   <h2 id="sheetOpenHead">OPEN ANOTHER</h2>
   <div id="sheetFiles"></div>
   <p class="note" id="sheetNote"></p>
+</div></div>
+<div id="snd" class="dlg"><div class="box">
+  <h2>SOUNDS</h2>
+  <div class="head"><p class="cur" id="sndName"></p><button id="sndClose">Close</button></div>
+  <input class="find" id="sndFind" placeholder="Search: name, bank or kind (pad warm)" autocomplete="off" spellcheck="false">
+  <div id="sndList"></div>
+  <p class="note" id="sndNote"></p>
 </div></div>
 <div id="gate">
   <form id="codeform">
@@ -452,6 +465,53 @@ document.getElementById("sheetClose").onclick = () => { sheet.style.display = "n
 document.getElementById("sheetSave").onclick = () => saveSetup("", false);
 document.getElementById("sheetSaveAs").onclick = saveAs;
 sheet.onclick = (e) => { if (e.target === sheet) sheet.style.display = "none"; };
+
+/* A plugin's sounds, from the stand: the list Sounds... shows on the computer.
+   A tap gives the instrument that sound at once, to hear while you play; the
+   program keeps the last one tapped. */
+const snd = document.getElementById("snd");
+let sndCtx = null;
+function drawSounds() {
+  if (!sndCtx) return;
+  const words = document.getElementById("sndFind").value.toLowerCase().split(/\s+/).filter(w => w);
+  const host = document.getElementById("sndList"); host.innerHTML = "";
+  let shown = 0, more = 0;
+  sndCtx.sounds.forEach((c, idx) => {
+    const text = (c.name + " " + c.detail).toLowerCase();
+    if (!words.every(w => text.includes(w))) return;
+    if (shown >= 150) { ++more; return; }
+    ++shown;
+    const b = document.createElement("button"); b.className = "file" + (c.name === sndCtx.current ? " on" : "");
+    const n = document.createElement("b"); n.textContent = c.name; b.appendChild(n);
+    const d = document.createElement("small"); d.textContent = c.detail; b.appendChild(d);
+    b.onclick = async () => {
+      const note = document.getElementById("sndNote"); note.textContent = "Loading " + c.name + "...";
+      try {
+        await api("/api/sounds?input=" + sndCtx.input + "&program=" + sndCtx.program + "&slot=" + sndCtx.slot + "&index=" + idx + "&name=" + encodeURIComponent(c.name), { method: "POST" });
+        sndCtx.current = c.name; note.textContent = "";
+        host.querySelectorAll(".file.on").forEach(x => x.classList.remove("on")); b.classList.add("on");
+        const strip = document.querySelector('.knobs[data-input="' + sndCtx.input + '"]'); if (strip) strip.dataset.key = "";
+        loadPanel(sndCtx.input);
+      } catch (e) { if (!e.gate) note.textContent = e.message; }
+    };
+    host.appendChild(b);
+  });
+  document.getElementById("sndNote").textContent = !sndCtx.sounds.length ? "No sounds were found to list for " + sndCtx.plugin + ". Choose one in its own window (GUI)."
+    : more ? more + " more: type to narrow the list." : shown ? "" : "Nothing matches.";
+}
+async function openSounds(input, slot) {
+  let d;
+  try { d = await api("/api/sounds?input=" + input + "&slot=" + slot); } catch (e) { if (!e.gate) show(e.message); return; }
+  if (!d.plugin) { show("That instrument has no sounds to list."); return; }
+  sndCtx = { input: input, slot: slot, program: d.program, plugin: d.plugin, current: d.current || "", sounds: d.sounds || [] };
+  document.getElementById("sndName").textContent = d.plugin;
+  document.getElementById("sndFind").value = "";
+  drawSounds();
+  snd.style.display = "flex";
+}
+document.getElementById("sndFind").oninput = drawSounds;
+document.getElementById("sndClose").onclick = () => { snd.style.display = "none"; sndCtx = null; };
+snd.onclick = (e) => { if (e.target === snd) { snd.style.display = "none"; sndCtx = null; } };
 
 let lastState = null;
 let editMode = false;        // the Set list tab in its editing dress: build and reorder set lists from the stand
@@ -732,6 +792,13 @@ document.addEventListener("visibilitychange", syncTransportPolling);
    footswitch press or a change made on the laptop without doing anything. */
 function renderSets(s) {
   const host = document.getElementById("setview");
+  {
+    // Only when the set list, its songs or where the show is in it changed: a program picked or a knob turned leaves it alone.
+    const { inputs, tempo, revision, setup, ...rest } = s;
+    const made = JSON.stringify([rest, editMode, songFilter]);
+    if (made === setsKey) return;
+    setsKey = made;
+  }
   host.innerHTML = "";
   const sets = s.sets || [], songs = s.songs || [];
   if (!sets.length) {
@@ -1061,12 +1128,39 @@ async function pollLevels() {
 }
 document.addEventListener("visibilitychange", syncLevelPolling);
 
+/* What changed is what is redrawn. A program picked, a song stepped to, a
+   tempo tapped: the number, the name and the lit button change where they
+   stand, and nothing else moves -- the page is only built again when what it
+   is made of changes (a program named, an input added, a group chosen). */
+let progKey = "", setsKey = "";
+const progEls = {};
 function render(s) {
   lastState = s;
   setupTitle(s.setup);
-  for (const k in meters) delete meters[k];
   if (s.tempo) showTempo(s.tempo);
   const root = document.getElementById("inputs");
+  const made = JSON.stringify([s.inputs.map(inp => [inp.name, !!inp.track, !!inp.audio, inp.programs.map(p => [p.index, p.name, p.group || ""])]), filters]);
+  if (made === progKey) {
+    s.inputs.forEach((inp, i) => {
+      const e = progEls[i];
+      if (!e) return;
+      e.num.textContent = String(inp.current).padStart(3, "0");
+      e.title.textContent = inp.currentName || (inp.audio ? "Audio passes straight through (no effects)" : "Empty program \u2014 nothing loaded");
+      e.loading.style.display = inp.loading ? "" : "none";
+      e.buttons.forEach((b, index) => b.classList.toggle("on", index === inp.current));
+      loadSlots(i);
+      loadPanel(i);
+    });
+    renderSets(s);
+    syncTabs();
+    return;
+  }
+  progKey = made;
+  for (const k in meters) delete meters[k];
+  for (const k in progEls) delete progEls[k];
+  // The knob strips are kept as they are: built again, each would blink out until its values came back.
+  const oldKnobs = {};
+  root.querySelectorAll(".knobs").forEach(k => { oldKnobs[k.dataset.input] = k; });
   root.innerHTML = "";
   {
     const cap = document.createElement("div"); cap.className = "empty"; cap.style.padding = "10px 16px 0"; cap.style.fontSize = "13px";
@@ -1109,7 +1203,9 @@ function render(s) {
     guiButtons[i] = gui;
     syncGuiButton(i);
 
-    if (inp.loading) { const l = document.createElement("div"); l.className = "loading"; l.textContent = "Loading plugins…"; now.appendChild(l); }
+    const loadingEl = document.createElement("div"); loadingEl.className = "loading"; loadingEl.textContent = "Loading plugins…";
+    loadingEl.style.display = inp.loading ? "" : "none"; now.appendChild(loadingEl);
+    progEls[i] = { num: now.querySelector(".num"), title: now.querySelector(".title"), loading: loadingEl, buttons: new Map() };
     if (inp.audio) {
       const m = document.createElement("div"); m.className = "meter";
       m.innerHTML = '<div class="bars"><i><span></span></i><i><span></span></i></div><b></b>';
@@ -1147,6 +1243,7 @@ function render(s) {
       b.innerHTML = '<span class="n"></span><span class="t"></span>';
       b.querySelector(".n").textContent = String(p.index).padStart(3, "0");
       b.querySelector(".t").textContent = p.name || "Untitled";
+      progEls[i].buttons.set(p.index, b);
       b.onclick = async () => {
         try { await api("/api/select?input=" + i + "&program=" + p.index, { method: "POST" }); await refresh(true); show(""); }
         catch (e) { show(e.message); }
@@ -1155,7 +1252,8 @@ function render(s) {
     });
     wrap.appendChild(grid);
 
-    const knobs = document.createElement("div"); knobs.className = "knobs"; knobs.dataset.input = i;
+    let knobs = oldKnobs[i];
+    if (!knobs) { knobs = document.createElement("div"); knobs.className = "knobs"; knobs.dataset.input = i; }
     wrap.appendChild(knobs);
     root.appendChild(wrap);
     loadSlots(i);
@@ -1180,7 +1278,7 @@ async function loadPanel(i) {
   let data;
   try { data = await api("/api/panel?input=" + i); } catch (e) { return; } finally { panelBusy[i] = false; }
   const knobs = data.knobs || [], instruments = data.instruments || [];
-  const key = JSON.stringify([data.slot, instruments.map(s => s.name), data.page, data.pageCount, data.pageName, knobs.map(k => k.id + k.name)]);
+  const key = JSON.stringify([data.slot, !!data.sounds, instruments.map(s => s.name), data.page, data.pageCount, data.pageName, knobs.map(k => k.id + k.name)]);
   if (host.dataset.key !== key) {
     host.dataset.key = key;
     host.innerHTML = "";
@@ -1197,6 +1295,12 @@ async function loadPanel(i) {
         title.appendChild(b);
       });
     } else title.textContent = data.instrument || "";
+    if (data.sounds) {
+      const sb = document.createElement("button"); sb.className = "kinst"; sb.textContent = "Sounds\u2026";
+      sb.title = "Choose one of this plugin's sounds";
+      sb.onclick = () => openSounds(i, data.slot);
+      title.appendChild(sb);
+    }
     if (data.pageCount > 0) {
       const pg = document.createElement("span"); pg.className = "kpage";
       const mk = (txt, dir) => { const b = document.createElement("button"); b.textContent = txt; b.disabled = data.pageCount < 2;
@@ -2330,6 +2434,7 @@ String RemoteServer::panelJson (int input) const
         instruments.add (var (so.get()));
     }
     o->setProperty ("instruments", instruments);
+    o->setProperty ("sounds", sd.isPlugin() && onSoundList != nullptr);     // Sounds... is offered for it
     const bool hasPage = sd.isPlugin() && view.knobLevels != SurfaceView().knobLevels;
     o->setProperty ("page", hasPage ? view.page : -1);
     o->setProperty ("pageCount", hasPage ? view.pageCount : 0);
@@ -2870,6 +2975,27 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         String body;
         if (produceOnMessageThread ([this] { return controlsJson(); }, body, 2000)) sendJson (sock, "200 OK", body);
         else sendBusy (sock);
+        return;
+    }
+    if (path.startsWith ("/api/sounds"))
+    {
+        /* GET  ...?input=&slot=                    the sounds that instrument's plugin can be given (the Sounds... list)
+           POST ...?input=&program=&slot=&index=&name=   one of them, given to it now and kept with the program */
+        const int input = arg ("input"), slot = arg ("slot"), program = arg ("program", -1), index = arg ("index", -1);
+        const String name = query["name"];
+        const bool choose = line.startsWith ("POST");
+        String out;
+        const bool answered = produceOnMessageThread ([this, input, slot, program, index, name, choose]() -> String
+        {
+            if (! choose) return onSoundList ? JSON::toString (onSoundList (input, slot), true) : String ("{}");
+            DynamicObject::Ptr o (new DynamicObject());
+            const auto wrong = onSoundChoose ? onSoundChoose (input, program, slot, index, name) : String ("The computer cannot do that.");
+            if (wrong.isNotEmpty()) o->setProperty ("error", wrong); else o->setProperty ("ok", true);
+            return JSON::toString (var (o.get()), true);
+        }, out, 20000);
+        if (! answered) { sendBusy (sock); return; }
+        if (choose) { ++revision; if (onEdited) MessageManager::callAsync ([this] { if (onEdited) onEdited(); }); }
+        sendJson (sock, choose && out.contains ("\"error\"") ? "409 Conflict" : "200 OK", out);
         return;
     }
     if (path.startsWith ("/api/panel"))

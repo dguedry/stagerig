@@ -791,6 +791,11 @@ in Options > Your keyboards; those with a screen show the names and values.
   list is searchable -- or press **Pick it in the plugin's window** and move
   the control in the plugin's own window. Give it a short name for the
   screen if the plugin's own name is long. **Clear** empties it.
+  Tick **On/off switch** for a control that is on or off rather than a
+  range: the Stage view and the tablet then show a switch for it, flipped
+  with one tap. A plugin that says a control is a switch has it ticked
+  already; Kontakt gives every control as a range, so its buttons need the
+  tick.
 - **Key colours** (the other tab): runs of keys with a colour and a name,
   such as keyswitches, a drum kit's pads, or the range a sampled instrument
   has. Notes are as the plugin hears them (**C1**, **F#2**, or a number),
@@ -1422,6 +1427,17 @@ everywhere), its **Level** and **Pan**, then the page of eight knobs they are
 on, named as the instrument's layout names them, with the page arrows. A
 slider moved on the stand moves the parameter at once; a parameter moved
 anywhere else moves the slider once a second, unless a thumb is on it.
+
+**Sounds...** beside the instrument's name lists that plugin's sounds, the
+same list as **Sounds...** on the computer: the ones you kept, the plugin's
+own programs, VST3 presets and the maker's sounds. Type to narrow it, tap
+one and the instrument plays it at once; the program keeps the last one
+tapped. An instrument chosen inside a plugin's own window (a Kontakt
+instrument not in the list) is still chosen there, through **GUI**.
+
+The page changes only what changed: picking a program or a song relights
+the button and rewrites the name where they stand, and nothing else on the
+page moves.
 
 ### Showing a plugin's own window
 

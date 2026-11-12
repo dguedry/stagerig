@@ -112,6 +112,15 @@ public:
         addAndMakeVisible (labelEd);
         labelEd.setTextToShowWhenEmpty ("Name on the screen (the parameter's own when empty)", textDim);
         labelEd.onReturnKey = labelEd.onFocusLost = [this] { renameKnob(); };
+        addAndMakeVisible (switchTick);
+        switchTick.setTooltip ("This control is on or off, not a range: the Stage view and the tablet show a switch for it, one tap to flip. "
+                               "For a button the plugin gives as a range (Kontakt's all are); one the plugin says is a switch is ticked already.");
+        switchTick.onClick = [this]
+        {
+            const bool on = switchTick.getToggleState();
+            knobForEdit().isSwitch = on;
+            saveAndShow();
+        };
         addAndMakeVisible (fromWindowBtn);
         fromWindowBtn.setTooltip ("Opens the plugin's window: move the control you want, and this knob turns it");
         fromWindowBtn.onClick = [this] { pickFromWindow(); };
@@ -189,7 +198,10 @@ public:
         row.removeFromRight (8);
         paramPicker.setBounds (row);
         knobsArea.removeFromTop (6);
-        labelEd.setBounds (knobsArea.removeFromTop (26));
+        row = knobsArea.removeFromTop (26);
+        switchTick.setBounds (row.removeFromRight (150));
+        row.removeFromRight (8);
+        labelEd.setBounds (row);
 
         // Keys.
         auto keysArea = r;
@@ -555,7 +567,7 @@ private:
             {
                 const auto& prm = p->getParameters()[(size_t) idx];
                 t.level = jlimit (0.0f, 1.0f, p->getCachedParameterValue (idx));
-                t.value = prm.boolean || prm.numSteps == 2 ? String (t.level >= 0.5f ? "On" : "Off") : String (roundToInt (t.level * 100.0f)) + "%";
+                t.value = prm.boolean || prm.numSteps == 2 || knob.isSwitch ? String (t.level >= 0.5f ? "On" : "Off") : String (roundToInt (t.level * 100.0f)) + "%";
             }
             t.selected = k == selected;
             t.repaint();
@@ -584,6 +596,10 @@ private:
         fromWindowBtn.setEnabled (running);
         fromWindowBtn.setButtonText (waitingForWindow ? "Move it in the plugin now..." : "Pick it in the plugin's window");
         clearBtn.setEnabled (idx >= 0 || knob.label.isNotEmpty());
+        // On or off: as the plugin says where it does, else as set here.
+        const bool byPlugin = idx >= 0 && idx < (int) params.size() && (params[(size_t) idx].boolean || params[(size_t) idx].numSteps == 2);
+        switchTick.setToggleState (byPlugin || knob.isSwitch, dontSendNotification);
+        switchTick.setEnabled (idx >= 0 && ! byPlugin);
     }
 
     ControlKnob& knobForEdit()
@@ -671,7 +687,7 @@ private:
     void showTab()
     {
         const bool knobs = knobsTab.getToggleState();
-        for (auto* c : std::initializer_list<Component*> { &addPageBtn, &removePageBtn, &pageNameEd, &editCap, &paramPicker, &labelEd, &fromWindowBtn, &clearBtn })
+        for (auto* c : std::initializer_list<Component*> { &addPageBtn, &removePageBtn, &pageNameEd, &editCap, &paramPicker, &labelEd, &switchTick, &fromWindowBtn, &clearBtn })
             c->setVisible (knobs);
         for (auto& t : tiles) t.setVisible (knobs);
         layoutPageTabs();
@@ -851,6 +867,7 @@ private:
     ComboBox layoutBox, pageBox;
     TextButton shareBtn { "Share..." }, addPageBtn { "+ Page" }, removePageBtn { "Remove page" }, fromWindowBtn, clearBtn { "Clear" }, addKeysBtn { "+ Keys" };
     TextEditor pageNameEd, labelEd;
+    ToggleButton switchTick { "On/off switch" };
     std::vector<std::unique_ptr<TextButton>> pageTabs;
     Rectangle<int> pageTabsArea;
     std::array<Tile, ControlPage::numKnobs> tiles;

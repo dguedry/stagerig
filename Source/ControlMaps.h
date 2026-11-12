@@ -21,6 +21,10 @@ struct ControlKnob
     juce::String paramId;      // the plugin's parameter id
     juce::String paramName;    // the plugin's name for it, to find it when the id does not
     juce::String label;        // what the screen shows; the parameter's name when empty
+    /** On or off, not a range: shown as a switch on the Stage view and the
+        tablet. For a parameter the plugin does not say is one (Kontakt's are
+        all ranges to a host); one it does say is a switch is one anyway. */
+    bool isSwitch = false;
 
     bool isEmpty() const       { return paramId.isEmpty() && paramName.isEmpty(); }
 };

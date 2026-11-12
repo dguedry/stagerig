@@ -75,6 +75,7 @@ SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot, bool
                         if (p.name.equalsIgnoreCase (mk.paramName)) { idx = p.index; break; }
                 page.knobs[(size_t) k].paramIndex = idx;
                 page.knobs[(size_t) k].name = mk.label.isNotEmpty() ? mk.label : idx >= 0 ? params[(size_t) idx].name : mk.paramName;
+                page.knobs[(size_t) k].isSwitch = mk.isSwitch;
             }
             layout.pages.push_back (std::move (page));
         }
@@ -291,7 +292,7 @@ SurfaceView SurfaceHub::viewFor (int input)
                 const float value = plugin->getCachedParameterValue (knob.paramIndex);
                 const auto& p = plugin->getParameters()[(size_t) knob.paramIndex];
                 v.knobLevels[(size_t) k] = jlimit (0.0f, 1.0f, value);
-                v.knobSwitches[(size_t) k] = p.boolean || p.numSteps == 2;
+                v.knobSwitches[(size_t) k] = p.boolean || p.numSteps == 2 || knob.isSwitch;
                 v.knobValues[(size_t) k] = v.knobSwitches[(size_t) k] ? String (value >= 0.5f ? "On" : "Off")
                                                                         : String (roundToInt (value * 100.0f)) + "%";
             }

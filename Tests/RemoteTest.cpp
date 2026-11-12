@@ -322,7 +322,7 @@ int main()
             check (RemoteServer::isEditingRoute (e), String ("editing: ") + e);
         for (const char* p : { "/api/select?input=0&program=3", "/api/transport?do=section&index=2", "/api/knob?input=0&slot=0&id=level&value=0.5",
                                "/api/songkey?song=1&root=2&mode=0", "/api/song?index=1", "/api/panic", "/api/state", "/api/panel?input=0", "/api/setlist?index=1",
-                               "/api/setup?t=c", "/api/setup?do=save&t=c", "/api/setup?do=save&name=Friday&over=1&t=c" })
+                               "/api/setup?t=c", "/api/setup?do=save&t=c", "/api/sounds?input=0&slot=0&t=c", "/api/setup?do=save&name=Friday&over=1&t=c" })
             check (! RemoteServer::isEditingRoute (p), String ("playing, never locked: ") + p);
     }
 

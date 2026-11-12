@@ -597,6 +597,7 @@ int main()
         ControlPage sound; sound.name = "Sound";
         sound.knobs.push_back ({ "1001", "Reverb", "Room" });
         sound.knobs.push_back ({ {}, "Tone", {} });
+        sound.knobs.push_back ({ "1002", "Sustain", "Pedal", true });      // on or off, though the plugin gives a range
         m.pages.push_back (sound);
         m.pages.push_back ({ "Empty", {} });
         m.keys.push_back ({ 24, 35, 0xff8a00, "Articulations" });
@@ -605,7 +606,8 @@ int main()
         ControlMap back; juce::String error;
         CHECK (ControlMap::fromVar (juce::JSON::parse (juce::JSON::toString (m.toVar())), back, error));
         CHECK (back.name == m.name && back.pluginName == "Kontakt 8" && back.pluginManufacturer == "Native Instruments" && back.author == "Someone");
-        CHECK (back.pages.size() == 2 && back.pages[0].name == "Sound" && back.pages[0].knobs.size() == 2);
+        CHECK (back.pages.size() == 2 && back.pages[0].name == "Sound" && back.pages[0].knobs.size() == 3);
+        CHECK (back.pages[0].knobs[2].isSwitch && ! back.pages[0].knobs[0].isSwitch && ! back.pages[0].knobs[1].isSwitch);
         CHECK (back.pages[0].knobs[0].paramId == "1001" && back.pages[0].knobs[0].paramName == "Reverb" && back.pages[0].knobs[0].label == "Room");
         CHECK (back.pages[0].knobs[1].paramId.isEmpty() && back.pages[0].knobs[1].paramName == "Tone");
         CHECK (back.keys.size() == 2 && back.keys[0].low == 24 && back.keys[0].high == 35 && back.keys[0].colour == 0xff8a00 && back.keys[0].label == "Articulations");

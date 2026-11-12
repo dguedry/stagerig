@@ -3297,22 +3297,17 @@ static File keptSoundsFolder (const ControlMapLibrary& lib, const PluginDescript
               .getChildFile (File::createLegalFileName (d.name + " (" + d.pluginFormatName + ")"));
 }
 
-void MainComponent::showSoundsFor (int slot)
+std::vector<SoundChoice> MainComponent::soundChoicesFor (int input, int program, int slot)
 {
-    const int input = selectedInput, program = getEditedProgram();
-    const auto& inputs = engine.getSetup().inputs;
-    if (controlMaps == nullptr || input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return;
-    const auto& slots = inputs[(size_t) input].programs[(size_t) program].slots;
-    if (slot < 0 || slot >= (int) slots.size() || ! slots[(size_t) slot].isPlugin()) return;
-    const auto& def = slots[(size_t) slot];
-    const auto title = "Sounds: " + def.plugin.name;
-    if (raiseWindow (title)) return;
-    auto* plugin = engine.getPlugin (input, program, slot);
-    if (plugin == nullptr || ! plugin->isAlive()) { showStatus (def.plugin.name + " is not running."); return; }
-
-    const auto desc = def.plugin;
-    const auto folder = keptSoundsFolder (*controlMaps, desc);
     std::vector<SoundChoice> all;
+    const auto& inputs = engine.getSetup().inputs;
+    if (controlMaps == nullptr || input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return all;
+    const auto& slots = inputs[(size_t) input].programs[(size_t) program].slots;
+    if (slot < 0 || slot >= (int) slots.size() || ! slots[(size_t) slot].isPlugin()) return all;
+    auto* plugin = engine.getPlugin (input, program, slot);
+    if (plugin == nullptr || ! plugin->isAlive()) return all;
+    const auto desc = slots[(size_t) slot].plugin;
+    const auto folder = keptSoundsFolder (*controlMaps, desc);
     // Yours first, then the plugin's own, then its maker's.
     auto kept = folder.findChildFiles (File::findFiles, false, "*.stagerig-sound");
     kept.sort();
@@ -3335,6 +3330,69 @@ void MainComponent::showSoundsFor (int slot)
         if (! s.tags.isEmpty()) under.add (s.tags.joinIntoString (", "));
         all.push_back ({ SoundChoice::From::nks, s.name, under.isEmpty() ? String ("The maker's sound") : under.joinIntoString ("  -  "), s.file, -1 });
     }
+    return all;
+}
+
+String MainComponent::giveSound (int input, int program, int slot, const SoundChoice& s, const MemoryBlock& before, const String& beforeName)
+{
+    const auto& inputs = engine.getSetup().inputs;
+    if (input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return "That program is not there.";
+    const auto& slots = inputs[(size_t) input].programs[(size_t) program].slots;
+    if (slot < 0 || slot >= (int) slots.size() || ! slots[(size_t) slot].isPlugin()) return "That instrument is not there.";
+    const auto pluginName = slots[(size_t) slot].plugin.name;
+    auto& e = engine;
+    String problem;
+    switch (s.from)
+    {
+        case SoundChoice::From::before:
+            problem = before.isEmpty() ? String ("There is no sound from before to go back to.")
+                                       : e.setPluginState (input, program, slot, -1, before, beforeName);
+            break;
+        case SoundChoice::From::kept:
+        {
+            MemoryBlock state;
+            problem = s.file.loadFileAsData (state) && ! state.isEmpty() ? e.setPluginState (input, program, slot, -1, state, s.name)
+                                                                         : "Could not read " + s.file.getFullPathName();
+            break;
+        }
+        case SoundChoice::From::program:
+            problem = e.setPluginProgram (input, program, slot, -1, s.program, s.name);
+            break;
+        case SoundChoice::From::vst3Preset:
+        {
+            MemoryBlock state;
+            const auto r = vst3PresetState (s.file, state);
+            problem = r.failed() ? r.getErrorMessage() : e.setPluginState (input, program, slot, -1, state, s.name);
+            break;
+        }
+        case SoundChoice::From::nks:
+            problem = e.setPluginSound (input, program, slot, -1, s.file, s.name);
+            break;
+    }
+    if (problem.isNotEmpty()) { showStatus (pluginName + ": " + problem); return problem; }
+    markDirty();
+    if (surfaceHub != nullptr) surfaceHub->soundChanged();
+    showStatus (pluginName + ": " + (s.from == SoundChoice::From::before ? String ("the sound before") : s.name));
+    if (slotsPanel != nullptr) slotsPanel->refresh();
+    return {};
+}
+
+void MainComponent::showSoundsFor (int slot)
+{
+    const int input = selectedInput, program = getEditedProgram();
+    const auto& inputs = engine.getSetup().inputs;
+    if (controlMaps == nullptr || input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return;
+    const auto& slots = inputs[(size_t) input].programs[(size_t) program].slots;
+    if (slot < 0 || slot >= (int) slots.size() || ! slots[(size_t) slot].isPlugin()) return;
+    const auto& def = slots[(size_t) slot];
+    const auto title = "Sounds: " + def.plugin.name;
+    if (raiseWindow (title)) return;
+    auto* plugin = engine.getPlugin (input, program, slot);
+    if (plugin == nullptr || ! plugin->isAlive()) { showStatus (def.plugin.name + " is not running."); return; }
+
+    const auto desc = def.plugin;
+    const auto folder = keptSoundsFolder (*controlMaps, desc);
+    auto all = soundChoicesFor (input, program, slot);
 
     // The sound it has now, to go back to.
     MemoryBlock before;
@@ -3344,43 +3402,9 @@ void MainComponent::showSoundsFor (int slot)
     auto sp = Component::SafePointer<MainComponent> (this);
 
     SoundBrowser::Callbacks cb;
-    cb.choose = [sp, input, program, slot, before, beforeName, pluginName] (const SoundChoice& s)
+    cb.choose = [sp, input, program, slot, before, beforeName] (const SoundChoice& s)
     {
-        if (sp == nullptr) return;
-        auto& e = sp->engine;
-        String problem;
-        switch (s.from)
-        {
-            case SoundChoice::From::before:
-                problem = before.isEmpty() ? String ("There is no sound from before to go back to.")
-                                           : e.setPluginState (input, program, slot, -1, before, beforeName);
-                break;
-            case SoundChoice::From::kept:
-            {
-                MemoryBlock state;
-                problem = s.file.loadFileAsData (state) && ! state.isEmpty() ? e.setPluginState (input, program, slot, -1, state, s.name)
-                                                                             : "Could not read " + s.file.getFullPathName();
-                break;
-            }
-            case SoundChoice::From::program:
-                problem = e.setPluginProgram (input, program, slot, -1, s.program, s.name);
-                break;
-            case SoundChoice::From::vst3Preset:
-            {
-                MemoryBlock state;
-                const auto r = vst3PresetState (s.file, state);
-                problem = r.failed() ? r.getErrorMessage() : e.setPluginState (input, program, slot, -1, state, s.name);
-                break;
-            }
-            case SoundChoice::From::nks:
-                problem = e.setPluginSound (input, program, slot, -1, s.file, s.name);
-                break;
-        }
-        if (problem.isNotEmpty()) { sp->showStatus (pluginName + ": " + problem); return; }
-        sp->markDirty();
-        if (sp->surfaceHub != nullptr) sp->surfaceHub->soundChanged();
-        sp->showStatus (pluginName + ": " + (s.from == SoundChoice::From::before ? String ("the sound before") : s.name));
-        if (sp->slotsPanel != nullptr) sp->slotsPanel->refresh();
+        if (sp != nullptr) sp->giveSound (input, program, slot, s, before, beforeName);
     };
     cb.keep = [sp, input, program, slot, folder, pluginName] (const String& name) -> std::optional<SoundChoice>
     {
@@ -4321,6 +4345,41 @@ bool MainComponent::startRemote()
                 if (f != getAutosaveFile()) files.add (f);
             files.sort();
             return files;
+        };
+        /* A plugin's sounds, from the stand: the same list Sounds... shows, for
+           the instrument on that keyboard's current program. */
+        remote->onSoundList = [this] (int input, int slot)
+        {
+            DynamicObject::Ptr o (new DynamicObject());
+            const auto& inputs = engine.getSetup().inputs;
+            if (input < 0 || input >= (int) inputs.size()) return var (o.get());
+            const int program = inputs[(size_t) input].currentProgram;
+            const auto& slots = inputs[(size_t) input].programs[(size_t) program].slots;
+            if (slot < 0 || slot >= (int) slots.size() || ! slots[(size_t) slot].isPlugin()) return var (o.get());
+            o->setProperty ("plugin", slots[(size_t) slot].plugin.name);
+            o->setProperty ("current", slots[(size_t) slot].soundName);
+            o->setProperty ("program", program);
+            Array<var> list;
+            for (const auto& c : soundChoicesFor (input, program, slot))
+            {
+                DynamicObject::Ptr e (new DynamicObject());
+                e->setProperty ("name", c.name);
+                e->setProperty ("detail", c.detail);
+                list.add (var (e.get()));
+            }
+            o->setProperty ("sounds", list);
+            return var (o.get());
+        };
+        remote->onSoundChoose = [this] (int input, int program, int slot, int index, const String& name) -> String
+        {
+            const auto& inputs = engine.getSetup().inputs;
+            // A tap that arrives after the program changed belongs to the old one.
+            if (input < 0 || input >= (int) inputs.size() || inputs[(size_t) input].currentProgram != program) return "The program changed: open Sounds again.";
+            const auto all = soundChoicesFor (input, program, slot);
+            const SoundChoice* pick = index >= 0 && index < (int) all.size() && all[(size_t) index].name == name ? &all[(size_t) index] : nullptr;
+            if (pick == nullptr) for (const auto& c : all) if (c.name == name) { pick = &c; break; }
+            if (pick == nullptr) return name + " is not in the list any more.";
+            return giveSound (input, program, slot, *pick, {}, {});
         };
         remote->onSetupName = [this] { return currentFile != File() ? setupNameOf (currentFile) : String(); };
         remote->onSetupList = [this, setupsHere]

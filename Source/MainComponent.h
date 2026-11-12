@@ -54,6 +54,10 @@ public:
     void showKnobsFor (int input, int program, int slot);
     /** Sounds...: an instrument's sounds, from wherever they can be found, to try and keep (SoundBrowser). */
     void showSoundsFor (int slot);
+    /** Every sound StageRig can find for the plugin there: yours, its own programs, VST3 presets, the maker's. */
+    std::vector<struct SoundChoice> soundChoicesFor (int input, int program, int slot);
+    /** Gives the plugin there that sound, and keeps it with the program. Says what went wrong, or nothing. */
+    juce::String giveSound (int input, int program, int slot, const struct SoundChoice&, const juce::MemoryBlock& before, const juce::String& beforeName);
     void showPedals();
     /** The Knobs window for the instrument the input's knobs are on, in the edited program. */
     void showKnobsForFocus();

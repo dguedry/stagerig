@@ -38,6 +38,10 @@ public:
         onSetupSave: no name saves the open file. Says what went wrong, or nothing; "name" when
         the setup has no file yet, "exists" when the name is another file's and over is not set.
         onSetupOpen: says what went wrong, or nothing. */
+    /** A plugin's sounds, from the stand (the Sounds... list): { plugin, current, program, sounds: [{ name, detail }] }
+        for the instrument in that slot of the input's current program; and one of them given to it. */
+    std::function<juce::var (int input, int slot)> onSoundList;
+    std::function<juce::String (int input, int program, int slot, int index, const juce::String& name)> onSoundChoose;
     std::function<juce::String()> onSetupName;       // the open setup's name; nothing for one never saved
     std::function<juce::var()> onSetupList;
     std::function<juce::String (const juce::String& name, bool over)> onSetupSave;
