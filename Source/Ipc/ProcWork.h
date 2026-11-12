@@ -78,14 +78,17 @@ inline Work measure (pid_t root)
     return w;
 }
 
-/** Busy between two looks `seconds` apart: reading a megabyte a second or
-    more, or using most of a processor. (A window's idle message loop in Wine
-    uses a fifth of one, and is not work.) */
+/** Busy between two looks `seconds` apart: any reading to speak of, or any
+    real use of a processor. Kept low on purpose: a Windows plugin waiting on
+    Wine's own services (which are not under it) shows little of either, and
+    was taken for stuck at the first, higher, mark. What this lets through is
+    a window idling in its message loop, which is why every wait that uses it
+    also has an end. */
 inline bool busyBetween (const Work& before, const Work& after, double seconds)
 {
     const double ticks = (double) ::sysconf (_SC_CLK_TCK);
     const double cpu = ticks > 0 ? (double) (after.cpuTicks - before.cpuTicks) / ticks / seconds : 0.0;
     const double read = (double) (after.bytesRead - before.bytesRead) / seconds;
-    return after.bytesRead >= before.bytesRead && after.cpuTicks >= before.cpuTicks && (read >= 1.0e6 || cpu >= 0.6);
+    return after.bytesRead >= before.bytesRead && after.cpuTicks >= before.cpuTicks && (read >= 1.0e5 || cpu >= 0.05);
 }
 }
