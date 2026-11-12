@@ -71,6 +71,17 @@ var ControlMap::toVar() const
     }
     o->setProperty ("pages", var (pageList));
 
+    Array<var> buttonList;
+    for (const auto& k : buttons)
+    {
+        DynamicObject::Ptr ko (new DynamicObject());
+        if (k.paramId.isNotEmpty())   ko->setProperty ("id", k.paramId);
+        if (k.paramName.isNotEmpty()) ko->setProperty ("param", k.paramName);
+        if (k.label.isNotEmpty())     ko->setProperty ("label", k.label);
+        buttonList.add (var (ko.get()));
+    }
+    if (! buttonList.isEmpty()) o->setProperty ("buttons", var (buttonList));
+
     Array<var> keyList;
     for (const auto& z : keys)
     {
@@ -110,6 +121,14 @@ bool ControlMap::fromVar (const var& v, ControlMap& out, String& error)
         return false;
     }
     if (m.name.isEmpty()) m.name = m.pluginName;
+
+    if (auto* buttonList = o->getProperty ("buttons").getArray())
+        for (const auto& kv : *buttonList)
+        {
+            if ((int) m.buttons.size() >= ControlMap::maxButtons) break;
+            ControlKnob k { str (kv, "id"), str (kv, "param"), str (kv, "label"), true };
+            if (! k.isEmpty()) m.buttons.push_back (std::move (k));
+        }
 
     if (auto* pageList = o->getProperty ("pages").getArray())
         for (const auto& pv : *pageList)

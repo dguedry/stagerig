@@ -64,7 +64,7 @@ public:
                           "It takes a keyboard StageRig can talk to: a Komplete Kontrol (S MK1, MK2, MK3, A or M), a Launchkey MK4, any MIDI 2.0 keyboard, "
                           "or one whose eight knobs you taught in the Controls panel. Those with a screen show these names and values.", dontSendNotification);
 
-        for (auto* b : { &knobsTab, &keysTab })
+        for (auto* b : { &knobsTab, &buttonsTab, &keysTab })
         {
             addAndMakeVisible (b);
             b->setClickingTogglesState (true);
@@ -128,11 +128,27 @@ public:
             b->onClick = [this, b]
             {
                 if (! b->getToggleState()) return;
-                const bool on = b == &asButtonBtn;
                 const ControlPage* pg = page < (int) edit.pages.size() ? &edit.pages[(size_t) page] : nullptr;
-                if (pg != nullptr && selected < (int) pg->knobs.size() && pg->knobs[(size_t) selected].isSwitch == on) return;
-                knobForEdit().isSwitch = on;
+                const bool have = pg != nullptr && selected < (int) pg->knobs.size() && ! pg->knobs[(size_t) selected].isEmpty();
+                if (! have) { showSelected(); return; }
+                if (b == &asKnobBtn)
+                {
+                    if (! pg->knobs[(size_t) selected].isSwitch) return;
+                    knobForEdit().isSwitch = false;         // one marked a switch in its place, from before there were buttons
+                    saveAndShow();
+                    return;
+                }
+                // A button: it leaves the knobs and joins the buttons.
+                auto moved = knobForEdit();
+                moved.isSwitch = true;
+                bool already = false;
+                for (const auto& hb : edit.buttons) already = already || paramIndexOf (hb) == paramIndexOf (moved);
+                if (! already && (int) edit.buttons.size() < ControlMap::maxButtons) edit.buttons.push_back (moved);
+                knobForEdit() = {};
+                trimPage();
                 saveAndShow();
+                status.setText ((moved.label.isNotEmpty() ? moved.label : moved.paramName) + " is a button now: it is on the Buttons tab, and knob "
+                                + String (selected + 1) + " is free.", dontSendNotification);
             };
         }
         asKnobBtn.setConnectedEdges (Button::ConnectedOnRight);
@@ -142,6 +158,55 @@ public:
         fromWindowBtn.onClick = [this] { pickFromWindow(); };
         addAndMakeVisible (clearBtn);
         clearBtn.onClick = [this] { pickParam (-1); };
+
+        addChildComponent (caption (buttonsCap, "BUTTONS: this instrument's on/off controls, the ones wanted most first"));
+        addChildComponent (buttonsList);
+        buttonsList.setModel (&buttonsModel);
+        buttonsList.setRowHeight (28);
+        buttonsList.setColour (ListBox::backgroundColourId, bgRow);
+        addChildComponent (buttonsHelp);
+        buttonsHelp.setColour (Label::textColourId, textDim);
+        buttonsHelp.setJustificationType (Justification::topLeft);
+        buttonsHelp.setText ("A button is on or off. It is a button to press on the Stage view and on the tablet, above the knobs, and takes none of the "
+                             "keyboard's eight knobs. Add one from the list of the plugin's controls, or press it in the plugin's own window. "
+                             "On a knob, Make it a button moves it here.", dontSendNotification);
+        addChildComponent (buttonPicker);
+        buttonPicker.onChange = [this] { addButton (buttonPicker.getSelectedId() - 2); };
+        addChildComponent (buttonFromWindow);
+        buttonFromWindow.setTooltip ("Opens the plugin's window: press the button you want there, and it is added here");
+        buttonFromWindow.onClick = [this]
+        {
+            if (! stillHere() || livePlugin() == nullptr) return;
+            waitingForButton = ! waitingForButton;
+            waitingForWindow = false;
+            if (waitingForButton)
+                if (const auto problem = engine.openPluginWindow (input, program, slot, -1); problem.isNotEmpty())
+                { status.setText (problem, dontSendNotification); waitingForButton = false; }
+            showButtonSelected();
+        };
+        addChildComponent (buttonNameEd);
+        buttonNameEd.setTextToShowWhenEmpty ("Name on the button (the control's own when empty)", textDim);
+        buttonNameEd.onReturnKey = buttonNameEd.onFocusLost = [this]
+        {
+            const int row = buttonsList.getSelectedRow();
+            if (row < 0 || row >= (int) edit.buttons.size() || edit.buttons[(size_t) row].label == buttonNameEd.getText().trim()) return;
+            makeOwn();
+            edit.buttons[(size_t) row].label = buttonNameEd.getText().trim();
+            saveAndShow();
+            buttonsList.selectRow (row);
+        };
+        for (auto* b : { &buttonEarlier, &buttonLater, &buttonRemove }) addChildComponent (b);
+        buttonEarlier.onClick = [this] { moveButton (-1); };
+        buttonLater.onClick = [this] { moveButton (1); };
+        buttonRemove.onClick = [this]
+        {
+            const int row = buttonsList.getSelectedRow();
+            if (row < 0 || row >= (int) edit.buttons.size()) return;
+            makeOwn();
+            edit.buttons.erase (edit.buttons.begin() + row);
+            saveAndShow();
+            buttonsList.selectRow (jmin (row, (int) edit.buttons.size() - 1));
+        };
 
         addAndMakeVisible (caption (keysCap, "KEY COLOURS: keyswitches, a kit's pads, the range that plays"));
         addAndMakeVisible (keysView);
@@ -171,6 +236,8 @@ public:
         auto r = getLocalBounds().reduced (14);
         auto top = r.removeFromTop (26);
         keysTab.setBounds (top.removeFromRight (110));
+        top.removeFromRight (4);
+        buttonsTab.setBounds (top.removeFromRight (80));
         top.removeFromRight (4);
         knobsTab.setBounds (top.removeFromRight (80));
         title.setBounds (top);
@@ -220,6 +287,26 @@ public:
         shownAs.setBounds (row.removeFromRight (74));
         row.removeFromRight (4);
         labelEd.setBounds (row);
+
+        // Buttons.
+        {
+            auto b = r;
+            buttonsCap.setBounds (b.removeFromTop (22));
+            auto add = b.removeFromBottom (28);
+            buttonFromWindow.setBounds (add.removeFromRight (220));
+            add.removeFromRight (8);
+            buttonPicker.setBounds (add);
+            b.removeFromBottom (6);
+            auto acts = b.removeFromBottom (26);
+            buttonRemove.setBounds (acts.removeFromRight (80)); acts.removeFromRight (4);
+            buttonLater.setBounds (acts.removeFromRight (70)); acts.removeFromRight (4);
+            buttonEarlier.setBounds (acts.removeFromRight (70)); acts.removeFromRight (8);
+            buttonNameEd.setBounds (acts);
+            b.removeFromBottom (6);
+            buttonsHelp.setBounds (b.removeFromBottom (48));
+            b.removeFromBottom (4);
+            buttonsList.setBounds (b);
+        }
 
         // Keys.
         auto keysArea = r;
@@ -365,8 +452,11 @@ private:
         params = p != nullptr ? p->getParameters() : ParamInfoList();
         paramPicker.clear (dontSendNotification);
         paramPicker.addItem ("(nothing)", 1);
+        buttonPicker.clear (dontSendNotification);
+        buttonPicker.addItem ("Add a button: choose the control...", 1);
         for (const auto& prm : params)
-            if (prm.midiController < 0) paramPicker.addItem (prm, prm.index + 2);
+            if (prm.midiController < 0) { paramPicker.addItem (prm, prm.index + 2); buttonPicker.addItem (prm, prm.index + 2); }
+        buttonPicker.setSelectedId (1, dontSendNotification);
     }
 
     int paramIndexOf (const ControlKnob& knob) const
@@ -471,6 +561,9 @@ private:
 
     void showAll()
     {
+        buttonsList.updateContent();
+        buttonsList.repaint();
+        showButtonSelected();
         // Page tabs: made again only when the pages change, never from inside a tab's own click.
         StringArray tabNames;
         for (int i = 0; i < (int) edit.pages.size(); ++i)
@@ -680,6 +773,11 @@ private:
     // Engine::Listener: a control moved in the plugin's window, while one is waited for.
     void parameterTouched (int in, int prog, int sl, int effect, int paramIndex) override
     {
+        if (waitingForButton && in == input && prog == program && sl == slot && effect < 0)
+        {
+            MessageManager::callAsync ([sp = SafePointer<ControlMapEditor> (this), paramIndex] { if (sp != nullptr && sp->waitingForButton) sp->addButton (paramIndex); });
+            return;
+        }
         if (! waitingForWindow || in != input || prog != program || sl != slot || effect >= 0) return;
         pickParam (paramIndex);
         status.setText ("Knob " + String (selected + 1) + " turns " + (paramIndex >= 0 && paramIndex < (int) params.size() ? params[(size_t) paramIndex].name : String ("it")) + ".",
@@ -707,7 +805,58 @@ private:
             c->setVisible (knobs);
         for (auto& t : tiles) t.setVisible (knobs);
         layoutPageTabs();
-        for (auto* c : std::initializer_list<Component*> { &keysCap, &keysView, &addKeysBtn }) c->setVisible (! knobs);
+        const bool buttons = buttonsTab.getToggleState();
+        for (auto* c : std::initializer_list<Component*> { &keysCap, &keysView, &addKeysBtn }) c->setVisible (! knobs && ! buttons);
+        for (auto* c : std::initializer_list<Component*> { &buttonsCap, &buttonsList, &buttonsHelp, &buttonPicker, &buttonFromWindow, &buttonNameEd,
+                                                           &buttonEarlier, &buttonLater, &buttonRemove }) c->setVisible (buttons);
+        if (buttons) { buttonsList.updateContent(); buttonsList.repaint(); showButtonSelected(); }
+    }
+
+    void showButtonSelected()
+    {
+        const int row = buttonsList.getSelectedRow(), n = (int) edit.buttons.size();
+        const bool have = row >= 0 && row < n;
+        buttonNameEd.setEnabled (have);
+        buttonNameEd.setText (have ? edit.buttons[(size_t) row].label : String(), dontSendNotification);
+        buttonEarlier.setEnabled (have && row > 0);
+        buttonLater.setEnabled (have && row < n - 1);
+        buttonRemove.setEnabled (have);
+        const bool running = livePlugin() != nullptr;
+        buttonPicker.setEnabled (running);
+        buttonFromWindow.setEnabled (running);
+        buttonFromWindow.setButtonText (waitingForButton ? "Press it in the plugin now..." : "Pick it in the plugin's window");
+        buttonsTab.setButtonText (n > 0 ? "Buttons (" + String (n) + ")" : String ("Buttons"));
+    }
+
+    void addButton (int idx)
+    {
+        buttonPicker.setSelectedId (1, dontSendNotification);
+        waitingForButton = false;
+        if (idx < 0 || idx >= (int) params.size()) { showButtonSelected(); return; }
+        const auto& prm = params[(size_t) idx];
+        for (size_t i = 0; i < edit.buttons.size(); ++i)
+            if (paramIndexOf (edit.buttons[i]) == idx)
+            {
+                buttonsList.selectRow ((int) i);
+                status.setText (prm.name + " is a button already.", dontSendNotification);
+                showButtonSelected();
+                return;
+            }
+        if ((int) edit.buttons.size() >= ControlMap::maxButtons) { status.setText ("There is no room for another button.", dontSendNotification); return; }
+        makeOwn();
+        edit.buttons.push_back ({ prm.id, prm.name, {}, true });
+        saveAndShow();
+        buttonsList.selectRow ((int) edit.buttons.size() - 1);
+    }
+
+    void moveButton (int delta)
+    {
+        const int row = buttonsList.getSelectedRow(), to = row + delta;
+        if (row < 0 || row >= (int) edit.buttons.size() || to < 0 || to >= (int) edit.buttons.size()) return;
+        makeOwn();
+        std::swap (edit.buttons[(size_t) row], edit.buttons[(size_t) to]);
+        saveAndShow();
+        buttonsList.selectRow (to);
     }
 
     void showKeys()
@@ -879,12 +1028,42 @@ private:
     int page = 0, selected = 0;
 
     Label title, subtitle, layoutCap, editCap, keysCap, where, status;
-    TextButton knobsTab { "Knobs" }, keysTab { "Key colours" };
+    TextButton knobsTab { "Knobs" }, buttonsTab { "Buttons" }, keysTab { "Key colours" };
+
+    /** The Buttons tab: the instrument's on/off controls, in the order they are shown. */
+    struct ButtonsModel : public ListBoxModel
+    {
+        explicit ButtonsModel (ControlMapEditor& o) : owner (o) {}
+        int getNumRows() override { return (int) owner.edit.buttons.size(); }
+        void paintListBoxItem (int row, Graphics& g, int w, int h, bool selected) override
+        {
+            if (row < 0 || row >= (int) owner.edit.buttons.size()) return;
+            const auto& b = owner.edit.buttons[(size_t) row];
+            g.fillAll (selected ? accentDim : (row % 2 == 0 ? bgRow : bgRow.brighter (0.03f)));
+            const int idx = owner.paramIndexOf (b);
+            const auto param = idx >= 0 ? owner.params[(size_t) idx].name : b.paramName;
+            g.setColour (Colours::white);
+            g.setFont (FontOptions (14.0f, Font::bold));
+            g.drawText (String (row + 1) + ".   " + (b.label.isNotEmpty() ? b.label : param), 10, 0, w / 2, h, Justification::centredLeft);
+            g.setColour (idx >= 0 ? textDim : Colours::orange);
+            g.setFont (FontOptions (12.0f));
+            g.drawText (idx >= 0 ? (b.label.isNotEmpty() ? "presses " + param : String()) : "not in this plugin: " + param, w / 2, 0, w / 2 - 10, h, Justification::centredRight);
+        }
+        void selectedRowsChanged (int) override { owner.showButtonSelected(); }
+        ControlMapEditor& owner;
+    };
+    ButtonsModel buttonsModel { *this };
+    ListBox buttonsList;
+    Label buttonsCap, buttonsHelp;
+    ParamPicker buttonPicker;
+    TextEditor buttonNameEd;
+    TextButton buttonEarlier { "Earlier" }, buttonLater { "Later" }, buttonRemove { "Remove" }, buttonFromWindow { "Pick it in the plugin's window" };
+    bool waitingForButton = false;
     ComboBox layoutBox, pageBox;
     TextButton shareBtn { "Share..." }, addPageBtn { "+ Page" }, removePageBtn { "Remove page" }, fromWindowBtn, clearBtn { "Clear" }, addKeysBtn { "+ Keys" };
     TextEditor pageNameEd, labelEd;
     Label shownAs;
-    TextButton asKnobBtn { "Knob" }, asButtonBtn { "Button (on / off)" };
+    TextButton asKnobBtn { "Knob" }, asButtonBtn { "Make it a button" };
     std::vector<std::unique_ptr<TextButton>> pageTabs;
     Rectangle<int> pageTabsArea;
     std::array<Tile, ControlPage::numKnobs> tiles;

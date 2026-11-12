@@ -600,6 +600,8 @@ int main()
         sound.knobs.push_back ({ "1002", "Sustain", "Pedal", true });      // on or off, though the plugin gives a range
         m.pages.push_back (sound);
         m.pages.push_back ({ "Empty", {} });
+        m.buttons.push_back ({ "2001", "Sustain Pedal", "Sustain" });     // the instrument's buttons, in their order
+        m.buttons.push_back ({ {}, "Lid", {} });
         m.keys.push_back ({ 24, 35, 0xff8a00, "Articulations" });
         m.keys.push_back ({ 108, 100, 0x00b4ff, {} });      // backwards: put right on load
 
@@ -610,6 +612,7 @@ int main()
         CHECK (back.pages[0].knobs[2].isSwitch && ! back.pages[0].knobs[0].isSwitch && ! back.pages[0].knobs[1].isSwitch);
         CHECK (back.pages[0].knobs[0].paramId == "1001" && back.pages[0].knobs[0].paramName == "Reverb" && back.pages[0].knobs[0].label == "Room");
         CHECK (back.pages[0].knobs[1].paramId.isEmpty() && back.pages[0].knobs[1].paramName == "Tone");
+        CHECK (back.buttons.size() == 2 && back.buttons[0].paramId == "2001" && back.buttons[0].label == "Sustain" && back.buttons[1].paramName == "Lid");
         CHECK (back.keys.size() == 2 && back.keys[0].low == 24 && back.keys[0].high == 35 && back.keys[0].colour == 0xff8a00 && back.keys[0].label == "Articulations");
         CHECK (back.keys[1].low == 100 && back.keys[1].high == 108);
         CHECK (ControlMap::colourToText (0x00b4ff) == "#00b4ff" && ControlMap::colourFromText ("#FF8A00", 0) == 0xff8a00 && ControlMap::colourFromText ("red", 7) == 7);

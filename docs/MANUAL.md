@@ -791,13 +791,18 @@ in Options > Your keyboards; those with a screen show the names and values.
   list is searchable -- or press **Pick it in the plugin's window** and move
   the control in the plugin's own window. Give it a short name for the
   screen if the plugin's own name is long. **Clear** empties it.
-  **Shown as** says whether it is a **Knob** (it turns through a range) or
-  a **Button** (on or off): a button is a switch on the Stage view and the
-  tablet, flipped with one click or tap. A control the plugin says is on or
-  off is a button already; Kontakt gives every control as a range, so its
-  buttons need choosing. The same choice is a right-click away on any knob
-  of the Stage view (**A knob** / **A button**), where a knob that should
-  have been a button is seen.
+  **Make it a button** is for a control that is on or off rather than a
+  range: it leaves the knobs and joins the instrument's buttons (below).
+- **Buttons** (its own tab): the instrument's on/off controls, in the order
+  they are shown, the ones you want most first. A button takes none of the
+  keyboard's eight knobs. On the Stage view the buttons sit beside the
+  instrument's name, green when on; on the tablet they are a row of large
+  buttons above the knobs. Add one from the list of the plugin's controls,
+  or press **Pick it in the plugin's window** and press it there -- the way
+  to find a Kontakt instrument's buttons, which Kontakt gives as ranges.
+  Name it, move it **Earlier** or **Later**, or **Remove** it. The same is
+  a right-click away on the Stage view: on a knob, **Make it a button**; on
+  a button, **Move earlier**, **Move later**, **Take it out of the buttons**.
 - **Key colours** (the other tab): runs of keys with a colour and a name,
   such as keyswitches, a drum kit's pads, or the range a sampled instrument
   has. Notes are as the plugin hears them (**C1**, **F#2**, or a number),

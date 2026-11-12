@@ -211,27 +211,64 @@ private:
         const bool isSwitch = hub->viewFor (in).knobSwitches[(size_t) k];
         const bool byPlugin = hub->knobIsSwitchByPlugin (in, k);
         juce::PopupMenu m;
-        if (byPlugin) m.addItem (3, "A button: the plugin says this one is on or off", false, true);
-        else
-        {
-            m.addItem (1, "A knob  (turns through a range)", true, ! isSwitch);
-            m.addItem (4, "A button  (on or off, one click)", true, isSwitch);
-        }
+        m.addItem (1, "Make it a button  (on or off: it joins this instrument's buttons)");
+        if (byPlugin) m.addItem (3, "The plugin says this one is on or off: it is shown as a switch here", false, false);
+        else if (isSwitch) m.addItem (5, "Back to a knob  (turns through a range)");
         m.addSeparator();
         m.addItem (2, "Change what the knobs turn...  (the Knobs window)");
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target),
-                         [sp = juce::Component::SafePointer<StagePanel> (this), in, program, sl, k, isSwitch] (int r)
+                         [sp = juce::Component::SafePointer<StagePanel> (this), in, program, sl, k] (int r)
         {
-            if (sp == nullptr || sp->hub == nullptr) return;
+            if (sp == nullptr || sp->hub == nullptr || r == 0) return;
             if (r == 2) { if (sp->onOpenKnobs) sp->onOpenKnobs (in, program, sl); return; }
-            if ((r != 1 && r != 4) || (r == 4) == isSwitch) return;
-            if (const auto wrong = sp->hub->setKnobIsSwitch (in, k, r == 4); wrong.isNotEmpty())
+            if (r == 1) sp->said (sp->hub->knobToButton (in, k));
+            if (r == 5) sp->said (sp->hub->setKnobIsSwitch (in, k, false));
+        });
+    }
+
+    /** One of the instrument's buttons: a click turns it on or off, a right-click is its menu. */
+    struct PressButton : public juce::TextButton
+    {
+        std::function<void()> onRightClick;
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            right = e.mods.isPopupMenu();
+            if (right) { if (onRightClick) onRightClick(); return; }
+            juce::TextButton::mouseDown (e);
+        }
+        void mouseUp (const juce::MouseEvent& e) override     { if (! right) juce::TextButton::mouseUp (e); right = false; }
+        bool right = false;
+    };
+
+    void said (const juce::String& wrong)
+    {
+        if (wrong.isNotEmpty()) juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Knobs and buttons", wrong);
+        for (auto& p : panels) p->key.clear();
+        if (wrong.isEmpty() && onEdited) onEdited();
+    }
+
+    /** A right-click on one of the instrument's buttons: its place among them, and out of them. */
+    void buttonMenu (int in, int b, juce::Component* target)
+    {
+        if (hub == nullptr) return;
+        const int count = hub->viewFor (in).buttonNames.size();
+        juce::PopupMenu m;
+        m.addItem (1, "Move earlier", b > 0);
+        m.addItem (2, "Move later", b < count - 1);
+        m.addSeparator();
+        m.addItem (3, "Take it out of the buttons");
+        m.addItem (4, "Names, and adding buttons...  (the Knobs window)");
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target),
+                         [sp = juce::Component::SafePointer<StagePanel> (this), in, b] (int r)
+        {
+            if (sp == nullptr || sp->hub == nullptr || r == 0) return;
+            if (r == 4)
             {
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Knob or button", wrong);
+                const auto& inputs = sp->engine.getSetup().inputs;
+                if (sp->onOpenKnobs && in >= 0 && in < (int) inputs.size()) sp->onOpenKnobs (in, inputs[(size_t) in].currentProgram, sp->hub->getFocusSlot (in));
                 return;
             }
-            for (auto& p : sp->panels) p->key.clear();
-            if (sp->onEdited) sp->onEdited();
+            sp->said (r == 1 ? sp->hub->moveButton (in, b, -1) : r == 2 ? sp->hub->moveButton (in, b, 1) : sp->hub->removeButton (in, b));
         });
     }
 
@@ -272,7 +309,21 @@ private:
             }
             const int bw = juce::jmin (big ? 200 : 120, top.getWidth() / juce::jmax (1, (int) slotButtons.size()) - 4);    // each the same width
             for (auto& b : slotButtons) { b->setBounds (top.removeFromLeft (bw)); top.removeFromLeft (4); }
-            slotLabel.setBounds (top);
+            if (buttons.empty()) slotLabel.setBounds (top);
+            else
+            {
+                // The name, then the buttons, as many as the strip holds (the first are the ones wanted most).
+                if (slotLabel.isVisible())
+                    slotLabel.setBounds (top.removeFromLeft (juce::jmin (top.getWidth() / 3, 24 + juce::GlyphArrangement::getStringWidthInt (slotLabel.getFont(), slotLabel.getText()))));
+                top.removeFromLeft (16);
+                const int each = big ? 124 : 86;
+                for (auto& b : buttons)
+                {
+                    const bool fits = top.getWidth() >= each;
+                    b->setVisible (fits);
+                    if (fits) { b->setBounds (top.removeFromLeft (each).reduced (2, big ? 1 : 0)); }
+                }
+            }
             r.removeFromTop (big ? 6 : 2);
             if (big && knobs.size() > 2)
             {
@@ -321,6 +372,7 @@ private:
         juce::String key;
         std::vector<std::unique_ptr<Knob>> knobs;       // level, pan, then the page's eight
         std::vector<std::unique_ptr<juce::TextButton>> slotButtons;
+        std::vector<std::unique_ptr<PressButton>> buttons;     // the instrument's on/off controls, in the top strip
         juce::TextButton pagePrev { "<" }, pageNext { ">" };
         juce::Label pageLabel, slotLabel;
     };
@@ -394,7 +446,7 @@ private:
         const auto& prog = def.programs[(size_t) program];
         if (prog.slots.empty() || hub == nullptr)
         {
-            p.key = {}; p.knobs.clear(); p.slotButtons.clear(); p.program = program; p.slot = -1;
+            p.key = {}; p.knobs.clear(); p.slotButtons.clear(); p.buttons.clear(); p.program = program; p.slot = -1;
             p.slotLabel.setVisible (false); p.pageLabel.setVisible (false); p.pagePrev.setVisible (false); p.pageNext.setVisible (false);
             return;
         }
@@ -407,13 +459,29 @@ private:
         const bool hasPage = sd.isPlugin() && view.knobLevels != SurfaceView().knobLevels;
 
         juce::String key;
-        key << program << "|" << slot << "|" << (int) prog.slots.size() << "|" << (int) hasPage << "|" << view.pluginNames.joinIntoString ("/") << "|" << view.pageCount;
+        key << program << "|" << slot << "|" << (int) prog.slots.size() << "|" << (int) hasPage << "|" << view.pluginNames.joinIntoString ("/") << "|" << view.pageCount
+            << "|" << view.buttonNames.joinIntoString ("/");
         if (key != p.key)
         {
             p.key = key;
             p.program = program;
             p.slot = slot;
-            p.knobs.clear(); p.slotButtons.clear();
+            p.knobs.clear(); p.slotButtons.clear(); p.buttons.clear();
+            // The instrument's buttons: its on/off controls, each a button to press.
+            for (int b = 0; b < view.buttonNames.size(); ++b)
+            {
+                auto btn = std::make_unique<PressButton>();
+                btn->setButtonText (view.buttonNames[b]);
+                // Green when on: not to be taken for the instrument buttons beside them, which are blue for "this one".
+                btn->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff30343c));
+                btn->setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2f7d4f));
+                btn->setTooltip (view.buttonNames[b] + ": on or off. Right-click to move it earlier or later, or take it out of the buttons");
+                const int inB = p.input;
+                btn->onClick = [this, inB, b, raw = btn.get()] { if (hub != nullptr) hub->setButton (inB, b, ! raw->getToggleState()); if (onEdited) onEdited(); };
+                btn->onRightClick = [this, inB, b, raw = btn.get()] { buttonMenu (inB, b, raw); };
+                p.addAndMakeVisible (*btn);
+                p.buttons.push_back (std::move (btn));
+            }
             p.slotLabel.setVisible (false);
             // Which instrument, when the program has more than one: the keyboard's knobs follow the choice.
             if (prog.slots.size() > 1)
@@ -483,6 +551,8 @@ private:
             p.knobs[0]->set ((sd.gainDb + 60.0) / 72.0);
             p.knobs[1]->set ((sd.pan + 1.0) / 2.0);
         }
+        for (size_t b = 0; b < p.buttons.size() && b < view.buttonOn.size(); ++b)
+            p.buttons[b]->setToggleState (view.buttonOn[b], juce::dontSendNotification);
         if (hasPage)
         {
             for (int k = 0; k < SurfaceView::numKnobs && (size_t) k + 2 < p.knobs.size(); ++k)

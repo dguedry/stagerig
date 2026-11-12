@@ -32,6 +32,9 @@ struct SurfaceView
     std::array<juce::String, numKnobs> knobNames, knobValues;
     std::array<float, numKnobs> knobLevels;        // 0..1, or -1 for no parameter
     std::array<bool, numKnobs> knobSwitches {};     // a two-state parameter (a Leslie's slow/fast): shown as a switch, not a dial
+    /** The instrument's buttons (its layout's on/off controls), in order: their names and whether each is on. */
+    juce::StringArray buttonNames;
+    std::vector<bool> buttonOn;
     std::array<juce::uint32, 128> keyColours {};    // per note, 0xRRGGBB; 0 = dark
 
     /** The eight programs this one is among (bankFirst..bankFirst + 7), by
@@ -57,7 +60,7 @@ struct SurfaceView
     {
         return inputName == o.inputName && program == o.program && programName == o.programName && instrument == o.instrument
             && pageName == o.pageName && page == o.page && pageCount == o.pageCount && knobNames == o.knobNames && knobValues == o.knobValues
-            && knobLevels == o.knobLevels && knobSwitches == o.knobSwitches && bankFirst == o.bankFirst && bankNames == o.bankNames && programBefore == o.programBefore
+            && knobLevels == o.knobLevels && knobSwitches == o.knobSwitches && buttonNames == o.buttonNames && buttonOn == o.buttonOn && bankFirst == o.bankFirst && bankNames == o.bankNames && programBefore == o.programBefore
             && programAfter == o.programAfter && bankBefore == o.bankBefore && bankAfter == o.bankAfter && pluginNames == o.pluginNames && focusPlugin == o.focusPlugin
             && programs == o.programs && channel == o.channel && knobControllers == o.knobControllers;
     }
@@ -133,10 +136,15 @@ public:
 
     // What the knobs turn ---------------------------------------------------------
     struct Knob { int paramIndex = -1; juce::String name; bool isSwitch = false; };
+    /** The layout in use by `input`'s instrument as one to change and keep: the player's
+        own, or the automatic one under a new name. `change` works on it (page: the one
+        showing) and says what is wrong, or nothing; then it is saved and takes effect. */
+    juce::String changeLayout (int input, const std::function<juce::String (ControlMap&, int page)>& change);
     struct Page { juce::String name; std::array<Knob, SurfaceView::numKnobs> knobs; };
     struct Layout
     {
         std::optional<ControlMap> map;     // the user's layout in use, a copy; none for the maker's or the automatic pages
+        std::vector<Knob> buttons;         // the layout's buttons, each found in the plugin (paramIndex -1 when it is not there)
         bool fromNks = false;              // the maker's pages, from its NKS presets
         std::vector<Page> pages;
     };
@@ -159,6 +167,17 @@ public:
         off) or a knob (a range), wherever it is shown. An automatic layout becomes the
         player's own first, as with any change to it. Says what went wrong, or nothing. */
     juce::String setKnobIsSwitch (int input, int knob, bool isSwitch);
+    /** The instrument's buttons, for `input` (the instrument the knobs are on). A press: */
+    void setButton (int input, int button, bool on);
+    /** ...and the list itself. Each makes an automatic layout the player's own first,
+        and says what went wrong, or nothing.
+        knobToButton: the knob on the page showing leaves its place and joins the buttons.
+        addButton: that parameter of the plugin, on the end. moveButton: earlier (-1) or later (+1). */
+    juce::String knobToButton (int input, int knob);
+    juce::String addButton (int input, int paramIndex);
+    juce::String removeButton (int input, int button);
+    juce::String moveButton (int input, int button, int delta);
+    juce::String renameButton (int input, int button, const juce::String& label);
     /** Whether that knob is a button because the plugin says so (nothing to choose). */
     bool knobIsSwitchByPlugin (int input, int knob);
     /** The instrument and page each input's knobs are on, as text to keep between runs, and back. The page

@@ -79,6 +79,14 @@ SurfaceHub::Layout SurfaceHub::layoutFor (int input, int program, int slot, bool
             }
             layout.pages.push_back (std::move (page));
         }
+        for (const auto& mb : map.buttons)
+        {
+            int idx = mb.paramId.isNotEmpty() ? plugin->findParameterIndex (mb.paramId) : -1;
+            if (idx < 0 && mb.paramName.isNotEmpty())
+                for (const auto& p : params)
+                    if (p.name.equalsIgnoreCase (mb.paramName)) { idx = p.index; break; }
+            layout.buttons.push_back ({ idx, mb.label.isNotEmpty() ? mb.label : idx >= 0 ? params[(size_t) idx].name : mb.paramName, true });
+        }
     };
     if (! automatic)
         if (const auto* m = library.find (sd.plugin, sd.controlMap)) layout.map = *m;
@@ -233,13 +241,14 @@ bool SurfaceHub::knobIsSwitchByPlugin (int input, int knob)
     return prm.boolean || prm.numSteps == 2;
 }
 
-String SurfaceHub::setKnobIsSwitch (int input, int knob, bool isSwitch)
+String SurfaceHub::changeLayout (int input, const std::function<String (ControlMap&, int page)>& change)
 {
     const auto& inputs = engine.getSetup().inputs;
     if (input < 0 || input >= (int) inputs.size()) return "That keyboard is not there.";
     const int program = inputs[(size_t) input].currentProgram, slot = getFocusSlot (input), page = getFocusPage (input);
     const auto& prog = inputs[(size_t) input].programs[(size_t) program];
-    if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return "That instrument has no knobs to change.";
+    if (slot < 0 || slot >= (int) prog.slots.size() || ! prog.slots[(size_t) slot].isPlugin()) return "That instrument has no knobs or buttons to change.";
+    if (! engine.isPluginAlive (input, program, slot)) return "The plugin is not running.";
     const auto& sd = prog.slots[(size_t) slot];
 
     ControlMap map;
@@ -251,14 +260,107 @@ String SurfaceHub::setKnobIsSwitch (int input, int knob, bool isSwitch)
         map = automaticMapFor (input, program, slot);
         map.name = newLayoutNameFor (input, program, slot);
     }
-    if (page < 0 || page >= (int) map.pages.size()) return "That page has no knobs to change.";
-    auto& knobs = map.pages[(size_t) page].knobs;
-    if (knob < 0 || knob >= (int) knobs.size() || knobs[(size_t) knob].isEmpty()) return "That knob turns nothing yet.";
-    knobs[(size_t) knob].isSwitch = isSwitch;
+    if (const auto wrong = change (map, page); wrong.isNotEmpty()) return wrong;
     if (const auto r = library.save (map); r.failed()) return r.getErrorMessage();
     engine.setSlotControlMap (input, program, slot, map.name);
     libraryChanged();
     return {};
+}
+
+String SurfaceHub::setKnobIsSwitch (int input, int knob, bool isSwitch)
+{
+    return changeLayout (input, [knob, isSwitch] (ControlMap& map, int page) -> String
+    {
+        if (page < 0 || page >= (int) map.pages.size()) return "That page has no knobs to change.";
+        auto& knobs = map.pages[(size_t) page].knobs;
+        if (knob < 0 || knob >= (int) knobs.size() || knobs[(size_t) knob].isEmpty()) return "That knob turns nothing yet.";
+        knobs[(size_t) knob].isSwitch = isSwitch;
+        return {};
+    });
+}
+
+String SurfaceHub::knobToButton (int input, int knob)
+{
+    return changeLayout (input, [knob] (ControlMap& map, int page) -> String
+    {
+        if (page < 0 || page >= (int) map.pages.size()) return "That page has no knobs to change.";
+        auto& knobs = map.pages[(size_t) page].knobs;
+        if (knob < 0 || knob >= (int) knobs.size() || knobs[(size_t) knob].isEmpty()) return "That knob turns nothing yet.";
+        if ((int) map.buttons.size() >= ControlMap::maxButtons) return "There is no room for another button.";
+        auto b = knobs[(size_t) knob];
+        b.isSwitch = true;
+        for (const auto& have : map.buttons)
+            if (have.paramId == b.paramId && have.paramName == b.paramName) { knobs[(size_t) knob] = {}; return {}; }    // a button already: the knob just leaves
+        map.buttons.push_back (b);
+        knobs[(size_t) knob] = {};
+        while (! knobs.empty() && knobs.back().isEmpty()) knobs.pop_back();
+        return {};
+    });
+}
+
+String SurfaceHub::addButton (int input, int paramIndex)
+{
+    const auto& inputs = engine.getSetup().inputs;
+    if (input < 0 || input >= (int) inputs.size()) return "That keyboard is not there.";
+    const int program = inputs[(size_t) input].currentProgram, slot = getFocusSlot (input);
+    auto* p = engine.isPluginAlive (input, program, slot) ? engine.getPlugin (input, program, slot) : nullptr;
+    if (p == nullptr || paramIndex < 0 || paramIndex >= (int) p->getParameters().size()) return "That control is not there.";
+    const auto prm = p->getParameters()[(size_t) paramIndex];
+    return changeLayout (input, [prm] (ControlMap& map, int) -> String
+    {
+        if ((int) map.buttons.size() >= ControlMap::maxButtons) return "There is no room for another button.";
+        for (const auto& have : map.buttons)
+            if (have.paramId == prm.id && have.paramName == prm.name) return prm.name + " is a button already.";
+        map.buttons.push_back ({ prm.id, prm.name, {}, true });
+        return {};
+    });
+}
+
+String SurfaceHub::removeButton (int input, int button)
+{
+    return changeLayout (input, [button] (ControlMap& map, int) -> String
+    {
+        if (button < 0 || button >= (int) map.buttons.size()) return "That button is not there.";
+        map.buttons.erase (map.buttons.begin() + button);
+        return {};
+    });
+}
+
+String SurfaceHub::moveButton (int input, int button, int delta)
+{
+    return changeLayout (input, [button, delta] (ControlMap& map, int) -> String
+    {
+        const int to = button + delta;
+        if (button < 0 || button >= (int) map.buttons.size() || to < 0 || to >= (int) map.buttons.size()) return "It is at the end already.";
+        std::swap (map.buttons[(size_t) button], map.buttons[(size_t) to]);
+        return {};
+    });
+}
+
+String SurfaceHub::renameButton (int input, int button, const String& label)
+{
+    return changeLayout (input, [button, label] (ControlMap& map, int) -> String
+    {
+        if (button < 0 || button >= (int) map.buttons.size()) return "That button is not there.";
+        map.buttons[(size_t) button].label = label.trim();
+        return {};
+    });
+}
+
+void SurfaceHub::setButton (int input, int button, bool on)
+{
+    if (input < 0 || input >= (int) engine.getSetup().inputs.size()) return;
+    const int program = engine.getSetup().inputs[(size_t) input].currentProgram;
+    const int slot = getFocusSlot (input);
+    const auto& layout = currentLayout (input);
+    if (button < 0 || button >= (int) layout.buttons.size() || slot < 0) return;
+    const int idx = layout.buttons[(size_t) button].paramIndex;
+    if (idx < 0 || ! engine.isPluginAlive (input, program, slot)) return;
+    if (auto* plugin = engine.getPlugin (input, program, slot))
+    {
+        plugin->setParameterValue (idx, on ? 1.0f : 0.0f, 50);
+        editedSinceTick = true;
+    }
 }
 
 const SurfaceHub::Layout& SurfaceHub::currentLayout (int input)
@@ -369,6 +471,13 @@ SurfaceView SurfaceHub::viewFor (int input)
     }
     v.pageCount = (int) layout.pages.size();
     v.page = jlimit (0, jmax (0, v.pageCount - 1), v.page);
+    if (auto* plugin = slot >= 0 && engine.isPluginAlive (input, program, slot) ? engine.getPlugin (input, program, slot) : nullptr)
+        for (const auto& b : layout.buttons)
+        {
+            v.buttonNames.add (b.name);
+            v.buttonOn.push_back (b.paramIndex >= 0 && b.paramIndex < (int) plugin->getParameters().size()
+                                  && plugin->getCachedParameterValue (b.paramIndex) >= 0.5f);
+        }
     if (v.page < v.pageCount)
     {
         const auto& page = layout.pages[(size_t) v.page];

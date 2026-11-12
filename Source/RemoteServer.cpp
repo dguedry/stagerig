@@ -161,6 +161,11 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .knob .kv { grid-area:v; color:var(--dim); font-size:13px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .knob input[type=range], .knob .ksw { grid-area:s; }
   .knob.off { opacity:.4; }
+  /* The instrument's buttons: on or off, each big enough for a thumb, above the knobs. */
+  .kbtns { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px; }
+  .kbtns button { font:inherit; font-size:15px; font-weight:600; padding:12px 14px; min-width:96px; border-radius:10px;
+                  border:1px solid #3a3f4a; background:#2a2d35; color:#fff; }
+  .kbtns button.on { background:#2f7d4f; border-color:#4fbf7f; }
   .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:6px 0; margin:3px 0; border-radius:8px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; width:100%; }
   .knob .ksw.on { background:#2f5f9a; border-color:#2f5f9a; }
   .kname { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
@@ -1313,7 +1318,8 @@ async function loadPanel(i) {
   let data;
   try { data = await api("/api/panel?input=" + i); } catch (e) { return; } finally { panelBusy[i] = false; }
   const knobs = data.knobs || [], instruments = data.instruments || [];
-  const key = JSON.stringify([data.slot, !!data.sounds, instruments.map(s => s.name), data.page, data.pageCount, data.pageName, knobs.map(k => k.id + k.name)]);
+  const btns = data.buttons || [];
+  const key = JSON.stringify([data.slot, !!data.sounds, btns.map(b => b.name), instruments.map(s => s.name), data.page, data.pageCount, data.pageName, knobs.map(k => k.id + k.name)]);
   if (host.dataset.key !== key) {
     host.dataset.key = key;
     host.innerHTML = "";
@@ -1346,8 +1352,24 @@ async function loadPanel(i) {
       title.appendChild(pg);
     }
     sec.appendChild(title);
+    if (btns.length) {
+      const row = document.createElement("div"); row.className = "kbtns";
+      btns.forEach((bt, n) => {
+        const b = document.createElement("button"); b.textContent = bt.name; b.dataset.btn = n;
+        b.classList.toggle("on", !!bt.on);
+        b.onclick = () => {
+          const on = !b.classList.contains("on");
+          b.classList.toggle("on", on); b.dataset.at = Date.now();          // at once; the poll confirms it
+          api("/api/knob?input=" + i + "&program=" + data.program + "&slot=" + data.slot + "&id=b:" + n + "&value=" + (on ? "1" : "0"), { method: "POST" })
+            .catch(e => { b.classList.toggle("on", !on); if (!e.gate) show(e.message); });
+        };
+        row.appendChild(b);
+      });
+      sec.appendChild(row);
+    }
     const grid = document.createElement("div"); grid.className = "kgrid"; sec.appendChild(grid);
     knobs.forEach(k => {
+      if (!k.name && k.value < 0) return;                 // a knob that turns nothing: a place on the keyboard, nothing to show here
       const row = document.createElement("label"); row.className = "knob" + (k.value < 0 ? " off" : "");
       if (k.switch) {
         // A two-state parameter (a Leslie's slow/fast) is a button, not a slider: one tap flips it.
@@ -1380,6 +1402,10 @@ async function loadPanel(i) {
     });
     host.appendChild(sec);
   }
+  btns.forEach((bt, n) => {
+    const b = host.querySelector('button[data-btn="' + n + '"]');
+    if (b && !(b.dataset.at && Date.now() - b.dataset.at < 1500)) b.classList.toggle("on", !!bt.on);     // not while a tap is on its way
+  });
   knobs.forEach(k => {
     const tkey = i + "/" + k.id;
     if (knobTouch[tkey] || k.value < 0) return;
@@ -2489,6 +2515,17 @@ String RemoteServer::panelJson (int input) const
         for (int k = 0; k < SurfaceView::numKnobs; ++k)
             knob ("k:" + String (k), view.knobNames[(size_t) k], view.knobLevels[(size_t) k], view.knobValues[(size_t) k], view.knobSwitches[(size_t) k]);
     o->setProperty ("knobs", knobs);
+    // The instrument's buttons (its on/off controls), in their order: pressed with id b:<n>.
+    Array<var> buttons;
+    if (sd.isPlugin())
+        for (int b = 0; b < view.buttonNames.size() && b < (int) view.buttonOn.size(); ++b)
+        {
+            DynamicObject::Ptr bo (new DynamicObject());
+            bo->setProperty ("name", view.buttonNames[b]);
+            bo->setProperty ("on", (bool) view.buttonOn[(size_t) b]);
+            buttons.add (var (bo.get()));
+        }
+    o->setProperty ("buttons", buttons);
     return JSON::toString (var (o.get()), true);
 }
 
@@ -3063,6 +3100,8 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
             else if (id == "pan") engine.setSlotPan (input, program, slot, (float) (value * 2.0 - 1.0));
             else if (id.startsWith ("k:") && hub != nullptr)
                 hub->setKnob (input, id.substring (2).getIntValue(), (float) value);     // the page's knob: the same the keyboard turns
+            else if (id.startsWith ("b:") && hub != nullptr)
+                hub->setButton (input, id.substring (2).getIntValue(), value >= 0.5);    // one of the instrument's buttons
         });
         sendJson (sock, "200 OK", "{\"ok\":true}");
         return;

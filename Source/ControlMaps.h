@@ -69,6 +69,12 @@ struct ControlMap
     juce::String pluginName, pluginManufacturer;
     juce::String author, notes;
     std::vector<ControlPage> pages;
+    /** The instrument's buttons: its on/off controls, in the order they are
+        shown (the first are the ones wanted most). Apart from the knobs: a
+        button does not take one of a keyboard's eight knobs, and on the
+        Stage view and the tablet it is a button to press, not a thing to turn. */
+    std::vector<ControlKnob> buttons;
+    static constexpr int maxButtons = 64;
     std::vector<KeyZone> keys;
 
     /** Made for this plugin: the same name, and the same maker when both say. */
