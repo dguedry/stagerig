@@ -164,6 +164,7 @@ private:
     bool request (ipc::Msg, const juce::MemoryBlock& payload, int timeoutMs, juce::MemoryBlock* response = nullptr,
                   bool killIfLate = false);
     bool waitForReply (Pending&, int timeoutMs);
+    bool waitForReplyUntil (Pending&, int timeoutMs);
     /** True once the host process has exited; reaps it the first time. */
     bool hostExited();
     void killHost();

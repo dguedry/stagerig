@@ -1,4 +1,5 @@
 #include "RemotePlugin.h"
+#include "Ipc/ProcWork.h"
 #include <spawn.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -19,6 +20,7 @@ namespace
 {
     constexpr int kLoadTimeoutMs     = 120000;
     constexpr int kStateTimeoutMs    = 30000;
+    constexpr int kSlowGraceMs       = 180000;   // on top of a request's own limit, only while the plugin is seen working
     constexpr int kControlTimeoutMs  = 10000;
     constexpr int kEditorTimeoutMs   = 15000;
     constexpr int kQuitTimeoutMs     = 2000;
@@ -225,6 +227,17 @@ bool RemotePlugin::spawn (String& error)
     return true;
 }
 
+/** The longer wait a slow request is given, on the thread making it: only
+    the request it is set around, never one another thread makes meanwhile
+    (the autosave's look at a plugin's state keeps its own short limit). */
+static thread_local int tlGraceMs = 0;
+struct GraceFor
+{
+    explicit GraceFor (int ms) : before (tlGraceMs) { tlGraceMs = ms; }
+    ~GraceFor() { tlGraceMs = before; }
+    int before;
+};
+
 bool RemotePlugin::load (const PluginDescription& desc, double sampleRate, int blockSize, String& error)
 {
     description = desc;
@@ -241,6 +254,7 @@ bool RemotePlugin::load (const PluginDescription& desc, double sampleRate, int b
     out.writeDouble (sampleRate);
     out.writeInt (blockSize);
 
+    const GraceFor slow (kSlowGraceMs);
     if (! request (ipc::Msg::load, out.getMemoryBlock(), kLoadTimeoutMs))
     {
         error = getLastError();
@@ -395,6 +409,7 @@ void RemotePlugin::requestQuit()
 
 bool RemotePlugin::setState (const MemoryBlock& state)
 {
+    const GraceFor slow (kSlowGraceMs);
     const bool ok = request (ipc::Msg::setState, state, kStateTimeoutMs, nullptr, true);
     if (ok) stateDirty.store (false);          // the model and the plugin agree
     return ok;
@@ -442,6 +457,8 @@ bool RemotePlugin::showEditor (const String& title)
 {
     MemoryOutputStream out;
     out.writeString (title);
+    // A window that takes its time to come up (a sampler loading its pictures and samples) is waited for while it works.
+    const GraceFor slow (kSlowGraceMs);
     const bool ok = request (ipc::Msg::showEditor, out.getMemoryBlock(), kEditorTimeoutMs, nullptr, true);
     if (ok) { editorOpen.store (true); stateDirty.store (true); }    // a window is where things get changed
     return ok;
@@ -525,6 +542,22 @@ bool RemotePlugin::request (ipc::Msg type, const MemoryBlock& payload, int timeo
 }
 
 bool RemotePlugin::waitForReply (Pending& p, int timeoutMs)
+{
+    if (waitForReplyUntil (p, timeoutMs)) return true;
+    /* Out of time. Slow is not stuck: a plugin still reading its samples, or
+       working flat out, is given longer -- as long as it is seen at it, up
+       to the grace this request has. One that has gone quiet is not. */
+    const int grace = tlGraceMs;
+    for (int waited = 0; waited < grace && ! hostExited() && alive.load(); waited += 2000)
+    {
+        const auto before = procwork::measure (getHostPid());
+        if (waitForReplyUntil (p, 2000)) return true;
+        if (! procwork::busyBetween (before, procwork::measure (getHostPid()), 2.0)) return false;
+    }
+    return false;
+}
+
+bool RemotePlugin::waitForReplyUntil (Pending& p, int timeoutMs)
 {
     /* Wait in slices and look at the process between them. A dead host
        normally shows as end-of-file on the socket, but not while some other

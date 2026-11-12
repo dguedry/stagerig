@@ -1876,7 +1876,8 @@ int main()
                     for (const auto& part : StringArray::fromTokens (String (more), ":", ""))
                         for (const auto& bundle : yabridgeDir.findChildFiles (File::findFilesAndDirectories, true, "*.vst3"))
                             if (part.isNotEmpty() && bundle.getFileName().containsIgnoreCase (part)
-                                && (bundle.getParentDirectory().getFileName() == "yabridge" || bundle.getParentDirectory().getParentDirectory().getFileName() == "yabridge"))
+                                && (bundle.getParentDirectory().getFileName() == "yabridge" || bundle.getParentDirectory().getParentDirectory().getFileName() == "yabridge"
+                                    || (bundle.isDirectory() && bundle.getChildFile ("Contents").isDirectory())))     // a bundle further down (KORG/Contents/x86_64-win/TRITON.vst3)
                                 skipped.addIfNotAlreadyThere (bundle.getFullPathName());     // the bundle, not the DLL inside it
             }
             for (const auto& f : skipped) std::printf ("     (skipping %s: switched off on this rig)\n", File (f).getFileName().toRawUTF8());

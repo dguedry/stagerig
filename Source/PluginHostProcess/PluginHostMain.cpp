@@ -16,6 +16,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "../Ipc/Protocol.h"
+#include "../Ipc/ProcWork.h"
 #include "BinaryData.h"
 #if JUCE_PLUGINHOST_VST3
  // Headers only: the IIDs are defined inside JUCE's own VST3 host translation unit.
@@ -916,13 +917,22 @@ public:
             // have been collected, waiting for a Wine process that won't exit. If the
             // probe runs suspiciously long, kill our Wine descendants: the unload then
             // returns and the results still get printed.
+            // Long is not hung, though: a plugin that reads its samples as it is loaded
+            // (KORG's TRITON, most of a minute in Wine) is left to it for as long as it
+            // is seen working, up to four minutes. Killed at 30 s it could never be scanned.
             static std::atomic<bool> probeDone { false };
             std::thread ([]
             {
                 std::this_thread::sleep_for (std::chrono::seconds (30));
+                for (int waited = 30; ! probeDone.load() && waited < 240; waited += 3)
+                {
+                    const auto before = procwork::measure (::getpid());
+                    std::this_thread::sleep_for (std::chrono::seconds (3));
+                    if (! procwork::busyBetween (before, procwork::measure (::getpid()), 3.0)) break;
+                }
                 if (! probeDone.load())
                 {
-                    std::cerr << "stagerig-plugin-host: probe still running after 30 s, killing bridge processes\n";
+                    std::cerr << "stagerig-plugin-host: probe still running and no longer working, killing bridge processes\n";
                     killDescendants (::getpid());
                 }
             }).detach();
