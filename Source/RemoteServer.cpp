@@ -790,6 +790,24 @@ document.addEventListener("visibilitychange", syncTransportPolling);
 
 /* The set list. Drawn from the state the page already polls, so it follows a
    footswitch press or a change made on the laptop without doing anything. */
+/* The rows of `fresh` take the place of the rows of `live` -- except a row
+   that is the same as one already there, which stays where it stands (and is
+   only moved if its place changed). Stepping to the next song changes two
+   rows and a line of text; the rest of the list is not touched. A row is the
+   same when it was built to the same HTML: its handlers hold nothing else. */
+function settle(live, fresh) {
+  const have = new Map();
+  Array.from(live.children).forEach(n => { const k = n._made || ""; if (!have.has(k)) have.set(k, []); have.get(k).push(n); });
+  let at = live.firstChild;
+  Array.from(fresh.children).forEach(n => {
+    if (!n._made) n._made = n.outerHTML;
+    const same = have.get(n._made);
+    const use = same && same.length ? same.shift() : n;
+    if (use === at) at = at.nextSibling; else live.insertBefore(use, at);
+  });
+  have.forEach(list => list.forEach(n => n.remove()));
+}
+
 function renderSets(s) {
   const host = document.getElementById("setview");
   {
@@ -799,9 +817,9 @@ function renderSets(s) {
     if (made === setsKey) return;
     setsKey = made;
   }
-  host.innerHTML = "";
   const sets = s.sets || [], songs = s.songs || [];
   if (!sets.length) {
+    host.innerHTML = "";
     const e = document.createElement("div"); e.className = "empty";
     e.textContent = "No set list yet. On the computer: capture each song (its programs and tempo) with the + button under SONGS, then put the songs in order in a set list. They appear here.";
     host.appendChild(e);
@@ -809,8 +827,24 @@ function renderSets(s) {
   }
 
   const wrap = document.createElement("div"); wrap.className = "setwrap";
+  const liveWrap = host.querySelector(":scope > .setwrap");
+  /* Into the page: the first time as it is, after that row by row. */
+  const commit = () => {
+    if (!liveWrap) { for (const n of wrap.children) n._made = n.outerHTML; host.innerHTML = ""; host.appendChild(wrap); }
+    else {
+      settle(liveWrap, wrap);
+      for (const n of Array.from(host.children)) if (n !== liveWrap) n.remove();
+    }
+    const box = host.querySelector("input.find");
+    if (box && songFilter && document.activeElement !== box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+  };
 
-  if (s.track || s.scenes) {
+  const tKind = s.scenes ? "scenes" : s.track ? "track" : "";
+  if (tKind && liveWrap && transportUi && transportUi.kind === tKind && transportUi.bar.parentNode === liveWrap) {
+    // The transport that is there stays, with what it is showing: the next poll puts the new song in it.
+    wrap.appendChild(transportUi.bar); wrap.appendChild(transportUi.sections); wrap.appendChild(transportUi.caption);
+    transportUi.key = ""; transportUi.tickKey = "";
+  } else if (s.track || s.scenes) {
     const bar = document.createElement("div"); bar.className = "transport stopped";
     const row = document.createElement("div"); row.className = "trow";
     const b = document.createElement("button"); b.className = "play"; b.textContent = s.scenes ? "Next scene ▸" : "▶ Play";
@@ -851,7 +885,7 @@ function renderSets(s) {
     const cap = document.createElement("div"); cap.className = "sections-help";
     wrap.appendChild(cap);
     transportUi = { bar, button: b, word, song, pos, track, fill, vampGo, sections: secs, partsBtn: parts, clickBtn: click,
-                    parts: [], key: "", tickKey: "", caption: cap };
+                    parts: [], key: "", tickKey: "", caption: cap, kind: tKind };
   } else {
     transportUi = null;
   }
@@ -870,8 +904,6 @@ function renderSets(s) {
       box.value = songFilter;
       box.oninput = () => { songFilter = box.value; renderSets(lastState); };
       row.appendChild(box);
-      /* Put the caret back where it was: this runs inside a full redraw. */
-      if (songFilter) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
     }
     /* Editing the set lists from the stand: add, take out, reorder, make and
        name them. A mode rather than buttons on every row, so a row tapped in
@@ -909,6 +941,7 @@ function renderSets(s) {
      list, and for the one chosen a rename, a copy and a delete. */
   if (editMode || sets.length > 1 || !sets[s.currentSet]) {
     const pick = document.createElement("div"); pick.className = "setpick";
+    pick.dataset.k = String(sets.length);
     sets.forEach((st, i) => {
       const b = document.createElement("button");
       b.textContent = st.name || ("Set list " + (i + 1));
@@ -926,6 +959,7 @@ function renderSets(s) {
   if (editMode && sets[s.currentSet]) {
     const cur = sets[s.currentSet], i = s.currentSet, curName = cur.name || ("Set list " + (i + 1));
     const bar = document.createElement("div"); bar.className = "editbar";
+    bar.dataset.k = i + ":" + curName + ":" + sets.length;       // what its buttons act on: a row is only kept when that is the same
     const mk = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; bar.appendChild(b); };
     mk("Rename", () => { const name = prompt("Name for this set list", curName); if (name !== null && name.trim()) setEdit("do=rename&index=" + i + "&name=" + encodeURIComponent(name.trim())); });
     mk("Duplicate", () => { const name = prompt("Name for the copy", curName + " copy"); if (name !== null) setEdit("do=duplicate&index=" + i + "&name=" + encodeURIComponent(name.trim())); });
@@ -948,6 +982,7 @@ function renderSets(s) {
        or among the songs outside it when it was tapped there. */
     const playing = songIndex === s.playingSong && (pos < 0 || pos === s.currentSong);
     b.className = "song" + (playing ? " on" : "");
+    b.dataset.k = songIndex + ":" + pos + ":" + s.currentSet;    // what a tap on it does: a row is only kept when that is the same
 
     if (pos >= 0) {
       const n = document.createElement("span"); n.className = "n";
@@ -1036,7 +1071,7 @@ function renderSets(s) {
   if (!cur) {
     const e = document.createElement("div"); e.className = "empty";
     e.textContent = editMode ? "Make a set list above, or choose one." : "Choose a set list above.";
-    wrap.appendChild(e); host.appendChild(wrap); return;
+    wrap.appendChild(e); commit(); return;
   }
 
   let shownInSet = 0;
@@ -1094,7 +1129,7 @@ function renderSets(s) {
       : cur.songs.length + (cur.songs.length === 1 ? " song" : " songs") + " in this set list — tap one to start";
   wrap.appendChild(where);
 
-  host.appendChild(wrap);
+  commit();
 }
 
 /* The audio inputs' meters. Polled only while the page is showing one, ten
