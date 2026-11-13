@@ -646,18 +646,21 @@ std::vector<StringArray> nksGroupsFor (std::vector<NksSound>& sounds)
         groups.push_back (group);
     }
     constexpr int tooLong = 60;
-    std::map<String, std::pair<int, int>> sizes;         // a group's sounds, and how many of them say their kind
+    struct Size { int sounds = 0, withKind = 0; StringArray kinds; };
+    std::map<String, Size> sizes;
     auto keyOf = [] (const StringArray& g) { return g.joinIntoString ("\n"); };
     for (size_t i = 0; i < sounds.size(); ++i)
     {
         auto& n = sizes[keyOf (groups[i])];
-        ++n.first;
-        if (sounds[i].kind.isNotEmpty()) ++n.second;
+        ++n.sounds;
+        if (sounds[i].kind.isNotEmpty()) ++n.withKind;
+        n.kinds.addIfNotAlreadyThere (sounds[i].kind);
     }
     for (size_t i = 0; i < sounds.size(); ++i)
     {
-        const auto n = sizes[keyOf (groups[i])];
-        if (n.first > tooLong && n.second * 2 >= n.first) groups[i].add (sounds[i].kind.isNotEmpty() ? sounds[i].kind : String ("Other"));
+        // By kind only where that divides it: a bank of leads is all one kind.
+        const auto& n = sizes[keyOf (groups[i])];
+        if (n.sounds > tooLong && n.withKind * 2 >= n.sounds && n.kinds.size() > 1) groups[i].add (sounds[i].kind.isNotEmpty() ? sounds[i].kind : String ("Other"));
     }
     // In the order they are read: group by group, and by name inside one.
     std::vector<size_t> order (sounds.size());

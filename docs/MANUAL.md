@@ -382,6 +382,13 @@ plugin, in one place, whoever made it:
   with their banks and kinds. StageRig finds these by itself, a minute or so
   after it starts.
 
+A plugin whose maker gave it no NKS sounds may still have a library someone
+else made: players share them, free, in the *NKS User Library* on Native
+Instruments' community site, and some are sold. Download one, unpack it into
+the `Sounds` folder beside the settings (in a folder of any name), and start
+StageRig again: its sounds are listed like the maker's own. You need the
+plugin itself, in its VST3 version.
+
 A plugin with only a few sounds shows them all. One with many shows them a
 group at a time, as its maker groups them: a library (one Kontakt plays
 several), then its banks, and a bank too long to read through by kind of

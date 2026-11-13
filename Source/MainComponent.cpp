@@ -3139,7 +3139,16 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     if (const auto old = settings.getFile().getParentDirectory().getChildFile ("Controller setups"); old.isDirectory() && ! layoutsFolder.exists())
         old.moveFileTo (layoutsFolder);
     controlMaps = std::make_unique<ControlMapLibrary> (layoutsFolder);
-    controlMaps->startNksSearch (ControlMapLibrary::defaultNksFolders());
+    {
+        /* Where the makers install their sounds, and the Sounds folder beside
+           the settings: a sound library downloaded for a plugin (the NKS
+           libraries people share) goes in there, in a folder of any name. */
+        auto folders = ControlMapLibrary::defaultNksFolders();
+        const auto own = controlMaps->getFolder().getParentDirectory().getChildFile ("Sounds");
+        own.createDirectory();
+        folders.addIfNotAlreadyThere (own);
+        controlMaps->startNksSearch (folders);
+    }
     surfaceHub = std::make_unique<SurfaceHub> (engine, *controlMaps, settings);
     stagePanel->setHub (surfaceHub.get());
     controlsPanel->setHub (surfaceHub.get());
@@ -3326,7 +3335,8 @@ std::vector<SoundChoice> MainComponent::soundChoicesFor (int input, int program,
         all.push_back ({ SoundChoice::From::vst3Preset, f.getFileNameWithoutExtension(), {}, f, -1, group });
     }
 
-    auto makers = controlMaps->soundsFor (desc);
+    // The maker's sounds load into the plugin's VST3 version only: not offered to another.
+    auto makers = desc.pluginFormatName == "VST3" ? controlMaps->soundsFor (desc) : std::vector<NksSound>();
     const auto groups = nksGroupsFor (makers);
     const size_t firstMakers = all.size();
     StringArray products;
