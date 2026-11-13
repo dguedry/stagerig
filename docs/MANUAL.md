@@ -382,7 +382,15 @@ plugin, in one place, whoever made it:
   with their banks and kinds. StageRig finds these by itself, a minute or so
   after it starts.
 
-Type to narrow the list (`pad warm`, `bass analog`). Click a sound, or walk
+A plugin with only a few sounds shows them all. One with many shows them a
+group at a time, as its maker groups them: a library (one Kontakt plays
+several), then its banks, and a bank too long to read through by kind of
+sound (*Piano / Keys*, *Bass*). Click a group to go into it; the line at the
+top (`<  All sounds`) comes back out. Each group says how many sounds it
+holds, and the list opens in the group of the sound playing now.
+
+Type to search every group at once (`pad warm`, `bass analog`); each sound
+found says which group it is in. Click a sound, or walk
 the list with the arrow keys, and the plugin plays it at once, so you can try
 sounds while you play. The program keeps the last one chosen, and the
 instrument's row shows its name (`Super 8: Moon Harp`). **The sound before**
@@ -1437,9 +1445,9 @@ anywhere else moves the slider once a second, unless a thumb is on it.
 
 **Sounds...** beside the instrument's name lists that plugin's sounds, the
 same list as **Sounds...** on the computer: the ones you kept, the plugin's
-own programs, VST3 presets and the maker's sounds. Type to narrow it, tap
-one and the instrument plays it at once; the program keeps the last one
-tapped. An instrument chosen inside a plugin's own window (a Kontakt
+own programs, VST3 presets and the maker's sounds, in the same groups. Tap a
+group to go into it, or type to search them all; tap a sound and the
+instrument plays it at once. The program keeps the last one tapped. An instrument chosen inside a plugin's own window (a Kontakt
 instrument not in the list) is still chosen there, through **GUI**.
 
 The page changes only what changed: picking a program or a song relights

@@ -89,6 +89,11 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .dlg .file b { flex:1; font-weight:600; overflow-wrap:anywhere; }
   .dlg .file i { font-style:normal; color:var(--dim); font-size:12px; white-space:nowrap; }
   .dlg .file.on { outline:2px solid var(--accent); }
+  .dlg .file.grp i { font-size:14px; }
+  .dlg .file.out { background:transparent; color:var(--dim); padding-left:4px; }
+  .dlg .file.out b { font-weight:400; }
+  .dlg .where { color:var(--dim); font-size:12px; margin:0 0 8px; overflow-wrap:anywhere; }
+  .dlg .where:empty { display:none; }
   .dlg .note { color:var(--dim); font-size:13px; margin:10px 0 0; }
   .dlg .file { flex-wrap:wrap; }
   .dlg .file small { flex-basis:100%; color:var(--dim); font-size:12px; font-weight:400; margin-top:2px; }
@@ -346,7 +351,8 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 <div id="snd" class="dlg"><div class="box">
   <h2>SOUNDS</h2>
   <div class="head"><p class="cur" id="sndName"></p><button id="sndClose">Close</button></div>
-  <input class="find" id="sndFind" placeholder="Search: name, bank or kind (pad warm)" autocomplete="off" spellcheck="false">
+  <input class="find" id="sndFind" placeholder="Search every group (pad warm)" autocomplete="off" spellcheck="false">
+  <p class="where" id="sndWhere"></p>
   <div id="sndList"></div>
   <p class="note" id="sndNote"></p>
 </div></div>
@@ -476,19 +482,66 @@ sheet.onclick = (e) => { if (e.target === sheet) sheet.style.display = "none"; }
    program keeps the last one tapped. */
 const snd = document.getElementById("snd");
 let sndCtx = null;
+const under = (g, path) => g.length >= path.length && path.every((x, i) => g[i] === x);
+/* The groups straight under a path, in the order they first come, and whether sounds sit there too. */
+function sndGroups(path) {
+  const names = []; let here = false;
+  for (const c of sndCtx.sounds) {
+    if (!under(c.group, path)) continue;
+    if (c.group.length > path.length) { if (!names.includes(c.group[path.length])) names.push(c.group[path.length]); }
+    else here = true;
+  }
+  return { names: names, here: here };
+}
+const sndThrough = (path) => { const g = sndGroups(path); return g.names.length === 1 && !g.here; };
+function sndGo(path) { sndCtx.at = path; document.getElementById("sndFind").value = ""; drawSounds(); document.querySelector("#snd .box").scrollTop = 0; }
 function drawSounds() {
   if (!sndCtx) return;
   const words = document.getElementById("sndFind").value.toLowerCase().split(/\s+/).filter(w => w);
   const host = document.getElementById("sndList"); host.innerHTML = "";
+  // A short list is shown whole; a long one a group at a time, as its maker groups it.
+  const grouped = sndCtx.sounds.length > 24 && sndGroups([]).names.length > 0;
+  let floor = [];
+  if (grouped) while (sndThrough(floor)) floor = floor.concat(sndGroups(floor).names[0]);
+  let at = grouped ? sndCtx.at : [];
+  if (grouped) {
+    if (!under(at, floor)) at = floor;
+    while (sndThrough(at)) at = at.concat(sndGroups(at).names[0]);
+  }
+  sndCtx.at = at;
+  const browsing = grouped && !words.length;
+  const row = (cls, name, small, side) => {
+    const b = document.createElement("button"); b.className = "file " + cls;
+    const n = document.createElement("b"); n.textContent = name; b.appendChild(n);
+    if (side) { const i = document.createElement("i"); i.textContent = side; b.appendChild(i); }
+    if (small) { const d = document.createElement("small"); d.textContent = small; b.appendChild(d); }
+    host.appendChild(b); return b;
+  };
+  if (browsing) {
+    if (at.length > floor.length) {
+      let above = at.slice(0, -1);
+      while (above.length > floor.length && sndThrough(above)) above = above.slice(0, -1);
+      row("out", "‹  " + (above.length > floor.length ? above[above.length - 1] : "All sounds"), "", "").onclick = () => sndGo(above);
+    }
+    for (const name of sndGroups(at).names) {
+      const path = at.concat(name);
+      const count = sndCtx.sounds.filter(c => under(c.group, path)).length;
+      row("grp", name, "", count + "  ›").onclick = () => sndGo(path);
+    }
+  }
   let shown = 0, more = 0;
   sndCtx.sounds.forEach((c, idx) => {
-    const text = (c.name + " " + c.detail).toLowerCase();
-    if (!words.every(w => text.includes(w))) return;
+    let detail = c.detail;
+    if (browsing) { if (c.group.length !== at.length || !under(c.group, at)) return; }
+    else {
+      const where = c.group.join(" › ");
+      detail = !where ? c.detail : !c.detail ? where : where + "  -  " + c.detail;
+      const text = (c.name + " " + detail).toLowerCase();
+      if (!words.every(w => text.includes(w))) return;
+    }
     if (shown >= 150) { ++more; return; }
     ++shown;
-    const b = document.createElement("button"); b.className = "file" + (c.name === sndCtx.current ? " on" : "");
-    const n = document.createElement("b"); n.textContent = c.name; b.appendChild(n);
-    const d = document.createElement("small"); d.textContent = c.detail; b.appendChild(d);
+    const b = row(c.name === sndCtx.current ? "on" : "", c.name, detail, "");
     b.onclick = async () => {
       const note = document.getElementById("sndNote"); note.textContent = "Loading " + c.name + "...";
       try {
@@ -499,16 +552,17 @@ function drawSounds() {
         loadPanel(sndCtx.input);
       } catch (e) { if (!e.gate) note.textContent = e.message; }
     };
-    host.appendChild(b);
   });
+  document.getElementById("sndWhere").textContent = browsing && at.length ? at.join(" › ") : "";
   document.getElementById("sndNote").textContent = !sndCtx.sounds.length ? "No sounds were found to list for " + sndCtx.plugin + ". Choose one in its own window (GUI)."
-    : more ? more + " more: type to narrow the list." : shown ? "" : "Nothing matches.";
+    : more ? more + " more: type to narrow the list." : browsing || shown ? "" : "Nothing matches.";
 }
 async function openSounds(input, slot) {
   let d;
   try { d = await api("/api/sounds?input=" + input + "&slot=" + slot); } catch (e) { if (!e.gate) show(e.message); return; }
   if (!d.plugin) { show("That instrument has no sounds to list."); return; }
-  sndCtx = { input: input, slot: slot, program: d.program, plugin: d.plugin, current: d.current || "", sounds: d.sounds || [] };
+  sndCtx = { input: input, slot: slot, program: d.program, plugin: d.plugin, current: d.current || "", sounds: (d.sounds || []).map(c => Object.assign(c, { group: c.group || [] })), at: [] };
+  const now = sndCtx.sounds.find(c => c.name === sndCtx.current); if (now) sndCtx.at = now.group;     // opens where the sound playing now is
   document.getElementById("sndName").textContent = d.plugin;
   document.getElementById("sndFind").value = "";
   drawSounds();

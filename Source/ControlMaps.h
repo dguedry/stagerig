@@ -129,6 +129,8 @@ struct NksSound
     juce::File file;
     juce::String name, bank;               // bank: the maker's sub-banks, "Factory / Leads"
     juce::StringArray tags;                // the maker's types and characters: "Synth Lead", "Analog"
+    juce::StringArray banks;               // the sub-banks one by one, outermost first: "Factory", "Leads"
+    juce::String kind;                     // the maker's first type for it: "Piano / Keys", "Bass"
     juce::String vendor, product, pluginName, pluginVendor;
     /** JUCE's id for the VST3 the file names (PluginDescription::uniqueId), when it names one. */
     int vst3UniqueId = 0;

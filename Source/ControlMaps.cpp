@@ -587,6 +587,12 @@ Result NksSound::read (const File& f, NksSound& out)
             if (const auto part = chain->getReference (i).toString().trim(); part.isNotEmpty())
                 (i == 0 ? s.product = part : (parts.add (part), s.product));
         s.bank = parts.joinIntoString (" / ");
+        s.banks = parts;
+    }
+    if (auto* types = info["types"].getArray(); types != nullptr && ! types->isEmpty())
+    {
+        const auto& first = types->getReference (0);
+        s.kind = (first.isArray() ? (first.size() > 0 ? first[0].toString() : String()) : first.toString()).trim();
     }
     auto addTags = [&s] (const var& list)
     {

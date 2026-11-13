@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include <map>
 #include "TimeText.h"
 #include "Theme.h"
 #include "GmSynth.h"
@@ -3312,24 +3313,53 @@ std::vector<SoundChoice> MainComponent::soundChoicesFor (int input, int program,
     auto kept = folder.findChildFiles (File::findFiles, false, "*.stagerig-sound");
     kept.sort();
     for (const auto& f : kept)
-        all.push_back ({ SoundChoice::From::kept, f.getFileNameWithoutExtension(), "Kept by you", f, -1 });
+        all.push_back ({ SoundChoice::From::kept, f.getFileNameWithoutExtension(), {}, f, -1, { "Kept by you" } });
     const auto programs = plugin->getProgramNames();
     for (int i = 0; i < programs.size(); ++i)
         if (programs[i].isNotEmpty())
-            all.push_back ({ SoundChoice::From::program, programs[i], "The plugin's own program " + String (i + 1), {}, i });
+            all.push_back ({ SoundChoice::From::program, programs[i], "Program " + String (i + 1), {}, i, { "The plugin's own programs" } });
     for (const auto& f : vst3PresetFilesFor (desc))
     {
         const auto bank = f.getParentDirectory().getFileName();
-        all.push_back ({ SoundChoice::From::vst3Preset, f.getFileNameWithoutExtension(),
-                         "VST3 preset" + (bank.equalsIgnoreCase (desc.name) ? String() : "  -  " + bank), f, -1 });
+        StringArray group { "VST3 presets" };
+        if (! bank.equalsIgnoreCase (desc.name)) group.add (bank);
+        all.push_back ({ SoundChoice::From::vst3Preset, f.getFileNameWithoutExtension(), {}, f, -1, group });
     }
-    for (const auto& s : controlMaps->soundsFor (desc))
+
+    /* The maker's sounds, grouped as the maker groups them: by library when
+       one plugin plays several (Kontakt), then by the maker's banks; and a
+       group still too long to read through is split by kind of sound
+       ("Piano / Keys", "Bass"). */
+    auto makers = controlMaps->soundsFor (desc);
+    std::stable_sort (makers.begin(), makers.end(), [] (const NksSound& a, const NksSound& b) { return a.product.compareNatural (b.product) < 0; });
+    const size_t firstMakers = all.size();
+    StringArray products;
+    for (const auto& s : makers) if (s.product.isNotEmpty()) products.addIfNotAlreadyThere (s.product);
+    for (const auto& s : makers)
     {
-        StringArray under;
-        if (s.bank.isNotEmpty()) under.add (s.bank);
-        if (! s.tags.isEmpty()) under.add (s.tags.joinIntoString (", "));
-        all.push_back ({ SoundChoice::From::nks, s.name, under.isEmpty() ? String ("The maker's sound") : under.joinIntoString ("  -  "), s.file, -1 });
+        StringArray group;
+        if (products.size() > 1) group.add (s.product.isNotEmpty() ? s.product : String ("Other"));
+        group.addArray (s.banks);
+        all.push_back ({ SoundChoice::From::nks, s.name, s.tags.joinIntoString (", "), s.file, -1, group });
     }
+    constexpr int tooLong = 60;
+    std::map<String, std::pair<int, int>> sizes;         // a group's sounds, and how many of them say their kind
+    auto keyOf = [] (const StringArray& g) { return g.joinIntoString ("\n"); };
+    for (size_t i = 0; i < makers.size(); ++i)
+    {
+        auto& n = sizes[keyOf (all[firstMakers + i].group)];
+        ++n.first;
+        if (makers[i].kind.isNotEmpty()) ++n.second;
+    }
+    for (size_t i = 0; i < makers.size(); ++i)
+    {
+        auto& c = all[firstMakers + i];
+        const auto n = sizes[keyOf (c.group)];
+        if (n.first > tooLong && n.second * 2 >= n.first) c.group.add (makers[i].kind.isNotEmpty() ? makers[i].kind : String ("Other"));
+    }
+    // Beside your own and the plugin's programs they go under one heading, unless they are whole libraries.
+    if (firstMakers > 0 && products.size() <= 1)
+        for (size_t i = firstMakers; i < all.size(); ++i) all[i].group.insert (0, "The maker's sounds");
     return all;
 }
 
@@ -3426,7 +3456,7 @@ void MainComponent::showSoundsFor (int slot)
         sp->markDirty();
         sp->showStatus (pluginName + ": kept \"" + name + "\"");
         if (sp->slotsPanel != nullptr) sp->slotsPanel->refresh();
-        return SoundChoice { SoundChoice::From::kept, file.getFileNameWithoutExtension(), "Kept by you", file, -1 };
+        return SoundChoice { SoundChoice::From::kept, file.getFileNameWithoutExtension(), {}, file, -1, { "Kept by you" } };
     };
     cb.forget = [] (const SoundChoice& s) { return s.file.deleteFile(); };
 
@@ -4365,6 +4395,9 @@ bool MainComponent::startRemote()
                 DynamicObject::Ptr e (new DynamicObject());
                 e->setProperty ("name", c.name);
                 e->setProperty ("detail", c.detail);
+                Array<var> group;
+                for (const auto& g : c.group) group.add (g);
+                e->setProperty ("group", group);
                 list.add (var (e.get()));
             }
             o->setProperty ("sounds", list);
