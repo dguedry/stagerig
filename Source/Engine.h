@@ -944,6 +944,19 @@ private:
     /** The song last selected, whether from the set list or outside it: the one in play. -1 = none yet. */
     int songInPlay = -1;
     juce::String saidNoInputsOn;         // the device last said to have no inputs, to say it once
+
+    /** Every MIDI input there is, held open and read from the moment StageRig
+        starts to the moment it is gone, whether or not an input uses it. A
+        port nobody has open is a port the computer does not read, and some
+        keyboards take that for a dead computer: a Studiologic SL restarts
+        its USB connection every fifteen seconds until something reads it,
+        and its sound card goes with it each time. What arrives here is
+        thrown away; the inputs hear their keyboards through their own ports. */
+    void keepMidiPortsRead();
+    struct UnheardMidi : juce::MidiInputCallback { void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override {} };
+    UnheardMidi unheardMidi;
+    std::vector<std::unique_ptr<juce::MidiInput>> keptPorts;
+    bool keepsMidiPortsRead = false;      // not in the tests, which run without the sound card or the keyboards
     int currentScene = -1;       // of the song in play, when it has scenes
     std::atomic<int> lateBlocks { 0 };
     std::atomic<int> lastBlockSamples { 0 };

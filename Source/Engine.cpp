@@ -360,6 +360,10 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     link->enableStartStopSync (settings.getBoolValue ("linkStartStop", false));
     link->enable (settings.getBoolValue ("linkEnabled", false));
 
+    // Before the sound card and the plugins: a keyboard is read from the first moment.
+    keepsMidiPortsRead = startAudioDevice;
+    if (keepsMidiPortsRead) keepMidiPortsRead();
+
     if (startAudioDevice)
     {
         std::unique_ptr<XmlElement> savedAudio (settings.getXmlValue ("audioDeviceState"));
@@ -2390,6 +2394,7 @@ void Engine::midiDevicesChanged (const StringArray& reconnected)
             appeared = true;
             outsAgain.addIfNotAlreadyThere (d.identifier);      // its old connection, if it had one, is dead too
         }
+    if (appeared) keptPorts.clear();       // theirs too: opened again, alive, in openMidiDevices
     if (appeared)
         listeners.call ([] (Listener& l) { l.midiDevicesReconnected(); });
     for (const auto& d : ins)
@@ -2433,9 +2438,34 @@ void Engine::refreshMidiDevices()
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
+void Engine::keepMidiPortsRead()
+{
+    const auto available = MidiInput::getAvailableDevices();
+    // Gone ones go, new ones are opened; one that stayed is left alone.
+    keptPorts.erase (std::remove_if (keptPorts.begin(), keptPorts.end(), [&] (const std::unique_ptr<MidiInput>& p)
+    {
+        for (const auto& d : available) if (d.identifier == p->getIdentifier()) return false;
+        return true;
+    }), keptPorts.end());
+    for (const auto& d : available)
+    {
+        // Not the loopback, and not ports of our own making.
+        if (d.name.containsIgnoreCase ("Midi Through") || d.name.startsWith ("StageRig")) continue;
+        bool have = false;
+        for (const auto& p : keptPorts) if (p->getIdentifier() == d.identifier) { have = true; break; }
+        if (have) continue;
+        if (auto port = MidiInput::openDevice (d.identifier, &unheardMidi))
+        {
+            port->start();
+            keptPorts.push_back (std::move (port));
+        }
+    }
+}
+
 void Engine::openMidiDevices (const StringArray& reconnected)
 {
     auto available = MidiInput::getAvailableDevices();
+    if (keepsMidiPortsRead) keepMidiPortsRead();
 
     /* The name says which keyboard; the identifier only separates two of the same
        name. An identifier is a port number that changes between plug-ins and boots,
