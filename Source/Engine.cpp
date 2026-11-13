@@ -2182,6 +2182,20 @@ bool Engine::ensureAudioInputsOpen()
 
     auto s = deviceManager.getAudioDeviceSetup();
     if (s.inputDeviceName.isEmpty()) s.inputDeviceName = s.outputDeviceName;
+    /* Only a device that has inputs is asked for them. Asking one that has
+       none (a keyboard whose USB audio only plays) fails, and JUCE answers a
+       failed change by closing the device altogether: the sound went, the
+       watch brought it back seconds later, and the keyboard squealed at
+       having its stream cut and restarted while it was starting up. */
+    if (auto* type = deviceManager.getCurrentDeviceTypeObject(); type != nullptr && ! type->getDeviceNames (true).contains (s.inputDeviceName))
+    {
+        if (saidNoInputsOn != s.inputDeviceName)
+        {
+            saidNoInputsOn = s.inputDeviceName;
+            std::fprintf (stderr, "[audio] '%s' has no inputs: the audio inputs stay silent until an input device is chosen in Audio...\n", s.inputDeviceName.toRawUTF8());
+        }
+        return false;
+    }
     /* The first two channels, named: "default input channels" means as many
        as initialise() asked for, which is none -- the device opened fine
        with no inputs at all the first time round. */

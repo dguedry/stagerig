@@ -943,6 +943,7 @@ private:
     std::atomic<int> liveTranspose { 0 };
     /** The song last selected, whether from the set list or outside it: the one in play. -1 = none yet. */
     int songInPlay = -1;
+    juce::String saidNoInputsOn;         // the device last said to have no inputs, to say it once
     int currentScene = -1;       // of the song in play, when it has scenes
     std::atomic<int> lateBlocks { 0 };
     std::atomic<int> lastBlockSamples { 0 };
