@@ -68,21 +68,29 @@ public:
 
         addAndMakeVisible (addBtn);
         addAndMakeVisible (removeBtn);
-        addBtn.setTooltip ("Add a keyboard, an audio input or the backing track");
+        addBtn.setTooltip ("Add a keyboard or an audio input");
         removeBtn.setTooltip ("Remove this input and all its programs");
         addBtn.onClick = [this]
         {
             PopupMenu m;
             m.addItem (1, "Keyboard (MIDI)");
             m.addItem (2, "Audio input (microphone, guitar, hardware synth)");
-            m.addItem (3, "Backing track (the songs' MIDI files)", engine.getTrackInput() < 0);
+            // The songs' MIDI files play through an input of their own, set from each song's Backing track window: only shown when asked for.
+            if (engine.getTrackInput() >= 0)
+            {
+                m.addSeparator();
+                m.addItem (3, "Show the backing track's instruments here", true, showsTrack());
+            }
             m.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this] (int r)
             {
                 if (r == 0) return;
                 if (r == 3)
                 {
-                    lastNotified = -1; setSelected (engine.ensureTrackInput());
-                    owner.showStatus ("The backing track is an input: each song's program here decides what its MIDI file's parts play");
+                    const bool show = ! showsTrack();
+                    owner.getSettings().setValue ("showTrackInput", show);
+                    refresh();
+                    lastNotified = -1; setSelected (show ? engine.getTrackInput() : 0);
+                    if (show) owner.showStatus ("The backing track's instruments for the song in play: what plays each part is chosen in the song's Backing track window");
                     return;
                 }
                 const bool audio = r == 2;
@@ -96,9 +104,11 @@ public:
         };
         removeBtn.onClick = [this]
         {
-            const int sel = list.getSelectedRow();
+            const int sel = selectedInput();
             if (sel < 0 || sel >= (int) engine.getSetup().inputs.size()) return;
             const auto& in = engine.getSetup().inputs[(size_t) sel];
+            // The backing track's row is put away, not thrown away with what plays every song's parts.
+            if (in.isTrack()) { owner.getSettings().setValue ("showTrackInput", false); refresh(); lastNotified = -1; setSelected (0); return; }
             confirm ("Remove input", "Remove \"" + in.name + "\"" + (in.isAudio() || in.isTrack() ? String (" and its programs?") : String (" and all of its programs?"))
                        + "\n\nThe songs that used it forget it. There is no undo.", "Remove", [this, sel]
             {
@@ -110,21 +120,21 @@ public:
         nameEditor.setTextToShowWhenEmpty ("Name", textDim);
         nameEditor.onTextChange = [this]
         {
-            int sel = list.getSelectedRow();
-            if (sel >= 0) { engine.setInputName (sel, nameEditor.getText()); list.repaintRow (sel); }
+            int sel = selectedInput();
+            if (sel >= 0) { engine.setInputName (sel, nameEditor.getText()); list.repaint(); }
         };
 
         addAndMakeVisible (deviceBox);
         deviceBox.setTooltip ("The MIDI device this keyboard is plugged in as. Missing? Plug it in, then Options > Rescan MIDI devices.");
         deviceBox.onChange = [this]
         {
-            int sel = list.getSelectedRow();
+            int sel = selectedInput();
             if (sel < 0) return;
             int id = deviceBox.getSelectedId();
             MidiDeviceInfo info;
             if (id >= 2 && id - 2 < devices.size()) info = devices[id - 2];
             engine.setInputMidiDevice (sel, info);
-            list.repaintRow (sel);
+            list.repaint();
         };
 
         addAndMakeVisible (findBtn);
@@ -133,10 +143,10 @@ public:
         findBtn.onClick = [this]
         {
             if (finder != nullptr) { stopFinding ({}); return; }
-            if (list.getSelectedRow() < 0) return;
+            if (selectedInput() < 0) return;
             devices = MidiInput::getAvailableDevices();
             finder = std::make_unique<KeyFinder>();
-            finder->forInput = list.getSelectedRow();
+            finder->forInput = selectedInput();
             finder->until = Time::getMillisecondCounter() + 20000;
             for (const auto& d : devices)
                 if (auto in = MidiInput::openDevice (d.identifier, finder.get()))
@@ -159,7 +169,7 @@ public:
                                  "Any channel accepts them from anywhere on this MIDI port, which is the setting to try if program changes are not getting through.");
         pcChannelBox.onChange = [this]
         {
-            int sel = list.getSelectedRow();
+            int sel = selectedInput();
             if (sel < 0) return;
             const int id = pcChannelBox.getSelectedId();
             engine.setInputProgramChangeChannel (sel, id == 1 ? InputDef::pcChannelSameAsNotes
@@ -173,15 +183,15 @@ public:
         for (int c = 1; c <= 16; ++c) channelBox.addItem ("Ch " + String (c), c + 1);
         channelBox.onChange = [this]
         {
-            int sel = list.getSelectedRow();
-            if (sel >= 0) { engine.setInputChannel (sel, channelBox.getSelectedId() - 1); list.repaintRow (sel); }
+            int sel = selectedInput();
+            if (sel >= 0) { engine.setInputChannel (sel, channelBox.getSelectedId() - 1); list.repaint(); }
         };
 
         addAndMakeVisible (pcToggle);
         pcToggle.setTooltip ("When your keyboard sends a program change, switch this input to that program");
         pcToggle.onClick = [this]
         {
-            int sel = list.getSelectedRow();
+            int sel = selectedInput();
             if (sel >= 0) engine.setInputRespondToProgramChange (sel, pcToggle.getToggleState());
             pcChannelBox.setEnabled (pcToggle.getToggleState());
         };
@@ -190,7 +200,7 @@ public:
         outputBox.setTooltip ("Which output this input's sound goes to. An output is a pair of interface channels with its own master effects and volume. Set them up under Options > Outputs & master effects.");
         outputBox.onChange = [this]
         {
-            int sel = list.getSelectedRow();
+            int sel = selectedInput();
             if (sel >= 0 && outputBox.getSelectedId() > 0) { engine.setInputOutput (sel, outputBox.getSelectedId() - 1); owner.markDirty(); }
         };
 
@@ -199,13 +209,13 @@ public:
                              "or a pair. Only channels ticked in Audio... are offered.");
         audioBox.onChange = [this]
         {
-            int sel = list.getSelectedRow();
+            int sel = selectedInput();
             const int id = audioBox.getSelectedId();
             if (sel < 0 || id <= 0) return;
             if (id >= 2000) engine.setInputAudioChannels (sel, id - 2000, id - 2000 + 1);
             else            engine.setInputAudioChannels (sel, id - 1000, -1);
             owner.markDirty();
-            list.repaintRow (sel);
+            list.repaint();
         };
 
         for (auto* l : { &deviceLabel, &channelLabel, &pcChannelLabel, &audioLabel, &outputLabel })
@@ -218,13 +228,17 @@ public:
 
     void setSelected (int idx)
     {
-        list.selectRow (idx, false, true);
+        rebuildShown();
+        // An input that has no row (the backing track, put away): the first that has one.
+        if (rowOf (idx) < 0 && ! shown.empty()) { owner.selectInput (shown.front()); return; }
+        list.selectRow (rowOf (idx), false, true);
         refreshEditor();
     }
 
     void refresh()
     {
         devices = MidiInput::getAvailableDevices();
+        rebuildShown();
         list.updateContent();
         list.repaint();
         refreshEditor();
@@ -232,7 +246,7 @@ public:
 
     void refreshEditor()
     {
-        int sel = list.getSelectedRow();
+        int sel = selectedInput();
         auto& inputs = engine.getSetup().inputs;
         const bool valid = sel >= 0 && sel < (int) inputs.size();
         for (auto* c : std::initializer_list<Component*> { &nameEditor, &deviceBox, &channelBox, &pcToggle, &removeBtn })
@@ -360,12 +374,13 @@ public:
     }
 
     // ListBoxModel
-    int getNumRows() override { return (int) engine.getSetup().inputs.size(); }
+    int getNumRows() override { return (int) shown.size(); }
 
     void paintListBoxItem (int row, Graphics& g, int w, int, bool selected) override
     {
         auto& inputs = engine.getSetup().inputs;
-        if (row < 0 || row >= (int) inputs.size()) return;
+        if (row < 0 || row >= (int) shown.size() || shown[(size_t) row] >= (int) inputs.size()) return;
+        row = shown[(size_t) row];
         auto& def = inputs[(size_t) row];
 
         g.fillAll (selected ? accentDim : bgRow);
@@ -377,7 +392,18 @@ public:
         g.setColour (textDim);
         String info;
         if (def.isTrack())
-            info = "plays the songs' MIDI files";
+        {
+            // What it is doing for the song in play, which is all it ever does.
+            const auto& songs = engine.getSongs();
+            const int song = engine.currentSongIndex();
+            int parts = 0;
+            if (song >= 0 && song < (int) songs.size())
+                if (const int p = songs[(size_t) song].programFor (row); p >= 0 && p < InputDef::numPrograms)
+                    parts = (int) def.programs[(size_t) p].slots.size();
+            info = song < 0 || song >= (int) songs.size() ? String ("plays the MIDI files of the song in play")
+                 : parts == 0 ? songs[(size_t) song].name + ": no MIDI parts"
+                              : songs[(size_t) song].name + ": " + String (parts) + (parts == 1 ? " instrument" : " instruments");
+        }
         else if (def.isAudio())
         {
             info << "audio in " << (def.audioLeft + 1);
@@ -387,7 +413,7 @@ public:
         else
             info = def.midiDeviceName.isNotEmpty() ? def.midiDeviceName : "no MIDI device";
         if (def.channel > 0 && ! def.isTrack()) info << "  ch " << def.channel;
-        g.drawText (info, 8, 22, w - 80, 16, Justification::centredLeft, true);
+        g.drawText (info, 8, 22, def.isTrack() ? w - 16 : w - 80, 16, Justification::centredLeft, true);
 
         if (! def.isTrack())      // its program follows the song, not a number anyone sends
         {
@@ -400,7 +426,7 @@ public:
             LevelMeterPainter::paint (g, { w - 104, 6, 96, 12 }, engine.getInputLevel (row));
     }
 
-    void selectedRowsChanged (int row) override { owner_select (row); }
+    void selectedRowsChanged (int row) override { if (row >= 0 && row < (int) shown.size()) owner_select (shown[(size_t) row]); }
 
 private:
     void timerCallback() override
@@ -415,7 +441,7 @@ private:
             const int key = (int) (LevelMeterPainter::position (l.left) * 100) * 1000
                           + (int) (LevelMeterPainter::position (l.right) * 100) * 2 + (l.clipped ? 1 : 0);
             if (meterKeys.size() <= (size_t) i) meterKeys.resize ((size_t) i + 1, -1);
-            if (meterKeys[(size_t) i] != key) { meterKeys[(size_t) i] = key; list.repaintRow (i); }
+            if (meterKeys[(size_t) i] != key) { meterKeys[(size_t) i] = key; list.repaint(); }
         }
     }
     std::vector<int> meterKeys;
@@ -425,11 +451,28 @@ public:
     void followSelection (int row)
     {
         lastNotified = row;
-        list.selectRow (row);
+        rebuildShown();
+        if (rowOf (row) >= 0) list.selectRow (rowOf (row)); else list.deselectAllRows();
         refreshEditor();
     }
 
 private:
+    /* The rows: every input but the backing track's, which is how the
+       songs' MIDI files reach instruments and has nothing of its own to
+       set. It gets a row when asked for (+ Add), for the tweaks the song's
+       Backing track window does not have: effects, pan, the output. */
+    bool showsTrack() const { return owner.getSettings().getBoolValue ("showTrackInput", false); }
+    void rebuildShown()
+    {
+        shown.clear();
+        const auto& inputs = engine.getSetup().inputs;
+        const bool track = showsTrack();
+        for (int i = 0; i < (int) inputs.size(); ++i) if (track || ! inputs[(size_t) i].isTrack()) shown.push_back (i);
+    }
+    int rowOf (int input) const { for (size_t r = 0; r < shown.size(); ++r) if (shown[r] == input) return (int) r; return -1; }
+    int selectedInput() const { const int r = list.getSelectedRow(); return r >= 0 && r < (int) shown.size() ? shown[(size_t) r] : -1; }
+    std::vector<int> shown;
+
     void owner_select (int row)
     {
         if (row < 0 || row == lastNotified) return;

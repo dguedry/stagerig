@@ -140,7 +140,7 @@ whichever section answers what you typed.
 |---|---|
 | **Toolbar** (top) | **New**, **Open...**, **Save**, **Save As...**, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options**, the tempo and **Tap**, **Tail** with its seconds box, the **Songs**, **Perform**, **Stage** and **Keys** toggles, **PANIC**. |
 | **Songs** (far left, on by default) | Every song on top, the running order of the chosen set list below, and the backing track's **Play**. |
-| **Inputs** (left) | Your keyboards, audio inputs, and the Backing track. Select one to edit its programs; its name, device, channel and Program Change settings are below the list. |
+| **Inputs** (left) | Your keyboards and audio inputs. Select one to edit its programs; its name, device, channel and Program Change settings are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, the group box, **Copy**, **Paste** and **Clear** are below. |
 | **Instruments** (right, top) | The instruments of the current program, each with its controls, MIDI chain and effects, then **PROGRAM EFFECTS**. |
 | **MIDI mappings** (right, bottom) | Knobs and pedals mapped to plugin parameters in this program, with Learn and Suggest. |
@@ -200,11 +200,13 @@ others: it has 128 programs, it changes them from a footswitch, a song or the
 tablet, its effects take MIDI mappings, and a program change leaves the
 outgoing effects to ring out for the tail. See *Audio inputs* below.
 
-The **Backing track** is the input the songs' MIDI files play into. It
-appears by itself when the first MIDI file is added to a song, and each song
-has its own program there, made for it by StageRig: the instruments in that
-program are what the file's parts play -- see *MIDI files* under *Backing
-tracks*. It has no device or channel of its own.
+The songs' MIDI files play into an input of their own, the **Backing
+track**, made by StageRig when the first MIDI file is added to a song. It has
+no device or channel and nothing you need to set, so it has no row in the
+list: what plays each part of a file is chosen in the song's **Backing
+track...** window (see *MIDI files* under *Backing tracks*). **+ Add ▸ Show
+the backing track's instruments here** gives it a row, for the few things
+that window does not have.
 
 Each keyboard input has, below the list:
 
@@ -1115,13 +1117,16 @@ bar, to mute one or open its plugin from the stand (see *The tablet*).
 
 ### The Backing track input's program
 
-To add effects to a MIDI file's instrument, or see all of them at once, select
-**Backing track** under INPUTS: INSTRUMENTS shows them, with their effects,
+To add effects to a MIDI file's instrument, or see all of them at once, choose
+**+ Add ▸ Show the backing track's instruments here** under INPUTS and select
+the **Backing track** row it adds. The row says which song it is playing for
+and how many instruments that song has. INSTRUMENTS shows them, with their effects,
 MIDI chains and everything else an instrument has. They are ordinary
 instruments in a program that StageRig makes for the song on that input --
 you never choose its number, the song does. The parts window is the short way
 to the same thing. To remove a part's instrument altogether, press its **X**
-here.
+here. **- Remove** on the row, or the same menu line again, puts the row away;
+nothing is deleted.
 
 **Count-in** clicks a number of beats at the song's tempo before the files
 start: **No count-in** or **1** to **8 beats**. **Click** adds a metronome
@@ -1143,10 +1148,12 @@ Once a song knows the tempo its files were made at (**Files at**, which
 **Find the tempo** fills in), its files follow the song's own tempo: set the
 song to 110 where the files are 117.4 (**Edit...** on the song) and they play
 stretched to 110, drums, bass and all, with the click and the bar lines
-along. The window says so (*files stretched -6%*). **Transpose the files with
-the song** makes the song's transpose move the files' pitch too, and the MIDI
+along. The window says so (*files stretched -6%*). **Shift the files too, by
+the song's transpose** moves the files by the number of semitones the song is
+transposed by (**Edit...** on the song): the audio's pitch, and the MIDI
 files' notes (drums aside), so one setting takes the whole band down a step
-for the singer. Either change re-reads the files, which takes a few seconds,
+for the singer. It is a shift from wherever the files are, so nothing needs
+to know their key; with the song not transposed it does nothing, and says so. Either change re-reads the files, which takes a few seconds,
 so make it at the sound check, not between the verse and the chorus.
 
 The stretching is StageRig's own and needs nothing installed. It is made for

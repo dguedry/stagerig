@@ -1004,8 +1004,9 @@ public:
             refreshTempoRow();
         };
         addAndMakeVisible (transposeTrackBtn);
-        transposeTrackBtn.setTooltip ("The song's transpose (Edit... on the song) also moves the files' pitch, and the MIDI files' notes "
-                                      "(drums aside): one setting takes the whole band down a step. The files are re-read when it changes.");
+        transposeTrackBtn.setTooltip ("A song can be transposed, up or down a number of semitones (Edit... on the song), to suit a singer. "
+                                      "Ticked, these files move by the same amount: the audio's pitch, and the MIDI files' notes (drums aside). "
+                                      "Nothing needs to know what key the files are in. With the song not transposed, this does nothing.");
         transposeTrackBtn.onClick = [this] { engine.setSongTransposeTrack (songIndex, transposeTrackBtn.getToggleState()); refreshTempoRow(); };
         addAndMakeVisible (halfBtn);
         addAndMakeVisible (doubleBtn);
@@ -1236,7 +1237,7 @@ public:
         startLabel.setBounds (c.removeFromLeft (66));
         startText.setBounds (c.removeFromLeft (90));
         c.removeFromLeft (16);
-        transposeTrackBtn.setBounds (c.removeFromLeft (250));
+        transposeTrackBtn.setBounds (c.removeFromLeft (jmin (c.getWidth(), 380)));
         r.removeFromTop (10);
         hint.setBounds (r.removeFromTop (60));
     }
@@ -1792,10 +1793,14 @@ private:
                                         : "The tempo the click, the count-in and the bar lines use. Edit... on the song sets it by hand.");
         fileBpmText.setText (sg.trackBpm > 0.0 ? String (sg.trackBpm, 1) : String ("?"), dontSendNotification);
         fileBpmText.setColour (Label::textColourId, sg.trackBpm > 0.0 ? Colours::white : textDim);
+        /* It moves the files by the song's own transpose, which is a number
+           of semitones and nothing to do with what key the files are in:
+           say the number, and say so when there is none to move them by. */
+        const auto steps = String (sg.transpose > 0 ? "+" : "") + String (sg.transpose) + (std::abs (sg.transpose) == 1 ? " semitone" : " semitones");
         transposeTrackBtn.setToggleState (sg.transposeTrack, dontSendNotification);
-        transposeTrackBtn.setButtonText (sg.transposeTrack && sg.transpose != 0
-                                           ? "Transpose the files with the song  (" + String (sg.transpose > 0 ? "+" : "") + String (sg.transpose) + " st now)"
-                                           : "Transpose the files with the song");
+        transposeTrackBtn.setEnabled (sg.transpose != 0 || sg.transposeTrack);
+        transposeTrackBtn.setButtonText (sg.transpose != 0 ? "Shift the files too, by the song's transpose (" + steps + ")"
+                                                           : "Shift the files too (the song is not transposed)");
         const int m = (int) (sg.firstBeat / 60.0);
         firstBeatText.setText (String (m) + ":" + String (sg.firstBeat - m * 60.0, 2).paddedLeft ('0', 5), dontSendNotification);
         if (sg.startSeconds > 0.0)
@@ -1920,7 +1925,7 @@ private:
     ComboBox countInBox, clickBox, barBox, countInOutBox;
     Label tempoLabel { {}, "Tempo" }, tempoText, fileBpmLabel { {}, "Files at" }, fileBpmText, firstBeatLabel { {}, "First beat" }, firstBeatText,
           startLabel { {}, "Starts at" }, startText;
-    ToggleButton transposeTrackBtn { "Transpose the files with the song" };
+    ToggleButton transposeTrackBtn { "Shift the files too, by the song's transpose" };
     TextButton findTempoBtn { "Find the tempo in the audio..." }, halfBtn { "/2" }, doubleBtn { "x2" }, beatBackBtn { "< beat" }, beatFwdBtn { "beat >" };
     std::thread detectThread;
     std::shared_ptr<std::atomic<bool>> detectStop;

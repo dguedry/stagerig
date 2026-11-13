@@ -53,6 +53,7 @@ public:
     void showKnobsFor (int slot);
     void showKnobsFor (int input, int program, int slot);
     /** Sounds...: an instrument's sounds, from wherever they can be found, to try and keep (SoundBrowser). */
+    juce::PropertiesFile& getSettings() { return settings; }
     void showSoundsFor (int slot);
     /** Every sound StageRig can find for the plugin there: yours, its own programs, VST3 presets, the maker's. */
     std::vector<struct SoundChoice> soundChoicesFor (int input, int program, int slot);
