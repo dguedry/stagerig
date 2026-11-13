@@ -147,6 +147,32 @@ static int probeKompleteKontrol (int seconds)
     return 0;
 }
 
+/* STAGERIG_TEST_GROUPS=1: finds this computer's NKS sounds and prints, for
+   each plugin in the rig's plugin list that has any, the groups Sounds...
+   shows them in. Only reads files; starts no plugin. */
+static int probeGroups()
+{
+    ControlMapLibrary library (File::getSpecialLocation (File::tempDirectory).getChildFile ("stagerig-nks-probe"));
+    library.startNksSearch (ControlMapLibrary::defaultNksFolders());
+    if (! library.waitForNks (600000)) { std::printf ("groups: the search did not finish\n"); return 1; }
+    KnownPluginList list;
+    if (auto xml = parseXML (File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("StageRig/StageRig.settings")))
+        for (auto* v : xml->getChildWithTagNameIterator ("VALUE"))
+            if (v->getStringAttribute ("name") == "pluginList")
+                if (auto* kp = v->getChildByName ("KNOWNPLUGINS")) list.recreateFromXml (*kp);
+    for (const auto& d : list.getTypes())
+    {
+        auto sounds = library.soundsFor (d);
+        if (sounds.empty()) continue;
+        const auto groups = nksGroupsFor (sounds);
+        std::printf ("%s (%s): %d sounds\n", d.name.toRawUTF8(), d.pluginFormatName.toRawUTF8(), (int) sounds.size());
+        StringArray order; std::map<String, int> count;
+        for (const auto& g : groups) { const auto k = g.joinIntoString (" > "); if (count[k]++ == 0) order.add (k); }
+        for (const auto& k : order) std::printf ("    %5d  %s\n", count[k], k.isEmpty() ? "(no group)" : k.toRawUTF8());
+    }
+    return 0;
+}
+
 /* STAGERIG_TEST_NKS=<part of a plugin's name>: finds this computer's NKS
    presets, then loads each plugin of that name from the rig's plugin list and
    prints how its maker's knobs were found among its parameters. */
@@ -651,6 +677,8 @@ int main()
         return checkMidiCi() == 0 ? 0 : 1;
     if (const char* k = std::getenv ("STAGERIG_TEST_KONTROL_SECONDS"); k != nullptr && *k != 0)
         return probeKompleteKontrol (String (k).getIntValue());
+    if (const char* n = std::getenv ("STAGERIG_TEST_GROUPS"); n != nullptr && *n != 0)
+        return probeGroups();
     if (const char* n = std::getenv ("STAGERIG_TEST_NKS"); n != nullptr && *n != 0)
         return probeNks (String (n));
     if (const char* n = std::getenv ("STAGERIG_TEST_SOUNDS"); n != nullptr && *n != 0)

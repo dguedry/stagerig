@@ -141,6 +141,13 @@ struct NksSound
     int matches (const juce::PluginDescription&) const;
 };
 
+/** Where each of one plugin's sounds sits, as the maker groups them: by
+    library when the plugin plays several (Kontakt), then by the maker's
+    banks; and a group still too long to read through is split by kind of
+    sound ("Piano / Keys", "Bass"). Puts the sounds in library order first;
+    the answer is a path for each, outermost group first. */
+std::vector<juce::StringArray> nksGroupsFor (std::vector<NksSound>& sounds);
+
 /** The state to give a plugin for an NKS sound, in the form JUCE's VST3 host
     takes (AudioProcessor::setStateInformation). `current` is the plugin's
     own state now, whose form says how its maker reads a sound: Native

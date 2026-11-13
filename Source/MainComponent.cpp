@@ -3326,37 +3326,13 @@ std::vector<SoundChoice> MainComponent::soundChoicesFor (int input, int program,
         all.push_back ({ SoundChoice::From::vst3Preset, f.getFileNameWithoutExtension(), {}, f, -1, group });
     }
 
-    /* The maker's sounds, grouped as the maker groups them: by library when
-       one plugin plays several (Kontakt), then by the maker's banks; and a
-       group still too long to read through is split by kind of sound
-       ("Piano / Keys", "Bass"). */
     auto makers = controlMaps->soundsFor (desc);
-    std::stable_sort (makers.begin(), makers.end(), [] (const NksSound& a, const NksSound& b) { return a.product.compareNatural (b.product) < 0; });
+    const auto groups = nksGroupsFor (makers);
     const size_t firstMakers = all.size();
     StringArray products;
-    for (const auto& s : makers) if (s.product.isNotEmpty()) products.addIfNotAlreadyThere (s.product);
-    for (const auto& s : makers)
-    {
-        StringArray group;
-        if (products.size() > 1) group.add (s.product.isNotEmpty() ? s.product : String ("Other"));
-        group.addArray (s.banks);
-        all.push_back ({ SoundChoice::From::nks, s.name, s.tags.joinIntoString (", "), s.file, -1, group });
-    }
-    constexpr int tooLong = 60;
-    std::map<String, std::pair<int, int>> sizes;         // a group's sounds, and how many of them say their kind
-    auto keyOf = [] (const StringArray& g) { return g.joinIntoString ("\n"); };
+    for (const auto& m : makers) if (m.product.isNotEmpty()) products.addIfNotAlreadyThere (m.product);
     for (size_t i = 0; i < makers.size(); ++i)
-    {
-        auto& n = sizes[keyOf (all[firstMakers + i].group)];
-        ++n.first;
-        if (makers[i].kind.isNotEmpty()) ++n.second;
-    }
-    for (size_t i = 0; i < makers.size(); ++i)
-    {
-        auto& c = all[firstMakers + i];
-        const auto n = sizes[keyOf (c.group)];
-        if (n.first > tooLong && n.second * 2 >= n.first) c.group.add (makers[i].kind.isNotEmpty() ? makers[i].kind : String ("Other"));
-    }
+        all.push_back ({ SoundChoice::From::nks, makers[i].name, makers[i].tags.joinIntoString (", "), makers[i].file, -1, groups[i] });
     // Beside your own and the plugin's programs they go under one heading, unless they are whole libraries.
     if (firstMakers > 0 && products.size() <= 1)
         for (size_t i = firstMakers; i < all.size(); ++i) all[i].group.insert (0, "The maker's sounds");

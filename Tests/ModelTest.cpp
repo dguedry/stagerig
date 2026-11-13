@@ -687,6 +687,27 @@ int main()
         dir.deleteRecursively();
     }
 
+    // ---- A maker's sounds, in the groups Sounds... shows ----------------------
+    {
+        auto sound = [] (const juce::String& name, const juce::String& product, juce::StringArray banks, const juce::String& kind)
+        {
+            NksSound n; n.name = name; n.product = product; n.banks = banks; n.kind = kind; return n;
+        };
+        // One library, no banks, few sounds: no groups at all.
+        std::vector<NksSound> few { sound ("B", "Synth", {}, "Bass"), sound ("A", "Synth", {}, "Pad") };
+        auto g = nksGroupsFor (few);
+        CHECK (g.size() == 2 && g[0].isEmpty() && g[1].isEmpty() && few[0].name == "A");
+        // Too many to read through: by kind, the kinds in order.
+        std::vector<NksSound> many;
+        for (int i = 0; i < 90; ++i) many.push_back (sound ("S" + juce::String (i), "Synth", {}, i % 2 == 0 ? "Pad" : "Bass"));
+        g = nksGroupsFor (many);
+        CHECK (g.size() == 90 && g.front() == juce::StringArray { "Bass" } && g.back() == juce::StringArray { "Pad" } && many.front().name == "S1");
+        // Several libraries on one plugin: the library first, then its banks.
+        std::vector<NksSound> libs { sound ("Tine", "Mark I", { "Factory", "Clean" }, "Piano / Keys"), sound ("Grand", "Grandeur", {}, "Piano / Keys") };
+        g = nksGroupsFor (libs);
+        CHECK (g.size() == 2 && g[0] == juce::StringArray { "Grandeur" } && g[1] == juce::StringArray ({ "Mark I", "Factory", "Clean" }) && libs[0].name == "Grand");
+    }
+
     // ---- NKS presets: a maker's knob pages -----------------------------------
     {
         // A little MessagePack, enough to write what an .nksf holds.

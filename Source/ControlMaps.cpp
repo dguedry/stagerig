@@ -631,6 +631,52 @@ int NksSound::matches (const PluginDescription& d) const
     return nksNameMatch (d, product, pluginName, vendor, pluginVendor);
 }
 
+std::vector<StringArray> nksGroupsFor (std::vector<NksSound>& sounds)
+{
+    std::stable_sort (sounds.begin(), sounds.end(), [] (const NksSound& a, const NksSound& b) { return a.product.compareNatural (b.product) < 0; });
+    StringArray products;
+    for (const auto& s : sounds) if (s.product.isNotEmpty()) products.addIfNotAlreadyThere (s.product);
+    std::vector<StringArray> groups;
+    groups.reserve (sounds.size());
+    for (const auto& s : sounds)
+    {
+        StringArray group;
+        if (products.size() > 1) group.add (s.product.isNotEmpty() ? s.product : String ("Other"));
+        group.addArray (s.banks);
+        groups.push_back (group);
+    }
+    constexpr int tooLong = 60;
+    std::map<String, std::pair<int, int>> sizes;         // a group's sounds, and how many of them say their kind
+    auto keyOf = [] (const StringArray& g) { return g.joinIntoString ("\n"); };
+    for (size_t i = 0; i < sounds.size(); ++i)
+    {
+        auto& n = sizes[keyOf (groups[i])];
+        ++n.first;
+        if (sounds[i].kind.isNotEmpty()) ++n.second;
+    }
+    for (size_t i = 0; i < sounds.size(); ++i)
+    {
+        const auto n = sizes[keyOf (groups[i])];
+        if (n.first > tooLong && n.second * 2 >= n.first) groups[i].add (sounds[i].kind.isNotEmpty() ? sounds[i].kind : String ("Other"));
+    }
+    // In the order they are read: group by group, and by name inside one.
+    std::vector<size_t> order (sounds.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort (order.begin(), order.end(), [&] (size_t a, size_t b)
+    {
+        const auto& ga = groups[a]; const auto& gb = groups[b];
+        for (int i = 0; i < jmin (ga.size(), gb.size()); ++i)
+            if (const int c = ga[i].compareNatural (gb[i]); c != 0) return c < 0;
+        if (ga.size() != gb.size()) return ga.size() < gb.size();
+        return sounds[a].name.compareNatural (sounds[b].name) < 0;
+    });
+    std::vector<NksSound> sortedSounds; std::vector<StringArray> sortedGroups;
+    sortedSounds.reserve (order.size()); sortedGroups.reserve (order.size());
+    for (const auto i : order) { sortedSounds.push_back (std::move (sounds[i])); sortedGroups.push_back (std::move (groups[i])); }
+    sounds = std::move (sortedSounds);
+    return sortedGroups;
+}
+
 namespace
 {
     /** A VST3 preset: "VST3", version, the class id as 32 characters, where
