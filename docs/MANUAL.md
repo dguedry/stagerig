@@ -132,7 +132,9 @@ words onto these.
 **Help** in the toolbar opens this manual inside StageRig, so the answer to
 "why won't the tablet connect" is reachable from the stage without finding a
 browser. The list on the left jumps to a section, and the search box narrows to
-whichever section answers what you typed.
+whichever section answers what you typed. To copy from it, click a paragraph,
+a step or a command (drag or Shift-click for several) and press Ctrl+C, or
+right-click for **Copy** and **Copy this whole section**.
 
 ## The main window
 

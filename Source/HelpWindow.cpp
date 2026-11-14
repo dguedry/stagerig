@@ -290,10 +290,70 @@ private:
 class ManualView : public Component
 {
 public:
-    explicit ManualView (Array<Block> b) : blocks (std::move (b)) {}
+    explicit ManualView (Array<Block> b) : blocks (std::move (b))
+    {
+        setWantsKeyboardFocus (true);
+        setMouseCursor (MouseCursor::IBeamCursor);
+    }
+
+    //==========================================================================
+    /* Copying. Text is chosen a piece at a time -- a paragraph, a step, a
+       command, a table row -- which is what gets copied out of a manual, and
+       cannot go wrong half-way through a word. Drag or shift-click for more
+       than one; Ctrl+C or the right-click menu copies. */
+    void mouseDown (const MouseEvent& e) override
+    {
+        grabKeyboardFocus();
+        const int at = pieceAt (e.y);
+
+        if (e.mods.isPopupMenu())
+        {
+            if (at >= 0 && ! isChosen (at)) { anchor = last = at; repaint(); }
+
+            PopupMenu m;
+            m.addItem (1, "Copy", anchor >= 0);
+            m.addItem (2, "Copy this whole section", at >= 0);
+            m.addSeparator();
+            m.addItem (3, "Select everything");
+            m.showMenuAsync (PopupMenu::Options().withMousePosition(),
+                             [safe = Component::SafePointer<ManualView> (this), at] (int choice)
+            {
+                if (safe == nullptr) return;
+                if (choice == 1) safe->copyChosen();
+                if (choice == 2) safe->chooseSection (at), safe->copyChosen();
+                if (choice == 3) safe->chooseAll();
+            });
+            return;
+        }
+
+        if (e.mods.isShiftDown() && anchor >= 0 && at >= 0) last = at;
+        else                                                anchor = last = at;
+        repaint();
+    }
+
+    void mouseDrag (const MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() || anchor < 0) return;
+        if (const int at = pieceAt (e.y); at >= 0 && at != last) { last = at; repaint(); }
+
+        if (auto* vp = findParentComponentOfClass<Viewport>())
+        {
+            const auto inVp = e.getEventRelativeTo (vp);
+            vp->autoScroll (inVp.x, inVp.y, 24, 14);
+        }
+    }
+
+    bool keyPressed (const KeyPress& k) override
+    {
+        if (k == KeyPress ('c', ModifierKeys::commandModifier, 0)) { copyChosen(); return true; }
+        if (k == KeyPress ('a', ModifierKeys::commandModifier, 0)) { chooseAll();  return true; }
+        if (k == KeyPress::escapeKey && anchor >= 0) { anchor = last = -1; repaint(); return true; }
+        return false;
+    }
 
     void setFilter (const String& f)
     {
+        anchor = last = -1;
         filter = f.trim();
         layout (getWidth());
         repaint();
@@ -349,9 +409,16 @@ public:
         g.fillAll (bgDark);
         const auto clip = g.getClipBounds();
 
-        for (const auto& b : visible)
+        for (int i = 0; i < visible.size(); ++i)
         {
+            const auto& b = visible.getReference (i);
             if (b.y + b.height < clip.getY() || b.y > clip.getBottom()) continue;
+
+            if (isChosen (i) && b.height > 1)
+            {
+                g.setColour (accent.withAlpha (0.28f));
+                g.fillRect (14, b.y - 3, getWidth() - 28, b.height + 5);
+            }
             paintBlock (g, b);
         }
 
@@ -678,8 +745,82 @@ private:
         s.draw (g, area.toFloat());
     }
 
+    //==========================================================================
+    bool isChosen (int i) const
+    {
+        return anchor >= 0 && i >= jmin (anchor, last) && i <= jmax (anchor, last);
+    }
+
+    /** The piece under y, or the nearest one above it; -1 above the first. */
+    int pieceAt (int y) const
+    {
+        int found = -1;
+        for (int i = 0; i < visible.size(); ++i)
+        {
+            if (visible.getReference (i).y - 4 > y) break;
+            found = i;
+        }
+        return found;
+    }
+
+    void chooseAll()
+    {
+        if (visible.isEmpty()) return;
+        anchor = 0; last = visible.size() - 1;
+        repaint();
+    }
+
+    /** From the heading above piece `at` down to the next heading of its level
+        or higher. */
+    void chooseSection (int at)
+    {
+        if (! isPositiveAndBelow (at, visible.size())) return;
+        auto level = [] (Block::Kind k) { return k == Block::Kind::heading1 ? 1 : k == Block::Kind::heading2 ? 2
+                                               : k == Block::Kind::heading3 ? 3 : 9; };
+        int from = at;
+        while (from > 0 && ! isHeading (visible.getReference (from).kind)) --from;
+        const int top = level (visible.getReference (from).kind);
+        int to = from;
+        while (to + 1 < visible.size() && level (visible.getReference (to + 1).kind) > top) ++to;
+        anchor = from; last = to;
+        repaint();
+    }
+
+    void copyChosen()
+    {
+        if (anchor < 0) return;
+        String out;
+        bool wasRow = false;
+
+        for (int i = jmin (anchor, last); i <= jmax (anchor, last) && i < visible.size(); ++i)
+        {
+            const auto& b = visible.getReference (i);
+            String line;
+            switch (b.kind)
+            {
+                case Block::Kind::rule:
+                case Block::Kind::image:    continue;
+                case Block::Kind::bullet:   line = "- " + b.text; break;
+                case Block::Kind::numbered: line = b.marker + " " + b.text; break;
+                case Block::Kind::tableRow: line = b.cells.joinIntoString ("\t"); break;
+                default:                    line = b.text; break;
+            }
+
+            // List items and table rows sit on consecutive lines; everything
+            // else is set apart by an empty one.
+            const bool row = b.kind == Block::Kind::bullet || b.kind == Block::Kind::numbered
+                             || b.kind == Block::Kind::tableRow;
+            if (out.isNotEmpty()) out << (row && wasRow ? "\n" : "\n\n");
+            out << line;
+            wasRow = row;
+        }
+
+        if (out.isNotEmpty()) SystemClipboard::copyTextToClipboard (out);
+    }
+
     Array<Block> blocks;
     Array<Placed> visible;
+    int anchor = -1, last = -1;     // the chosen pieces, as indexes into `visible`
     String filter;
     StringArray wantedSections;
 };
