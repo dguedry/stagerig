@@ -28,10 +28,11 @@ struct Block
     Image image;
     String sectionKey;      // the heading this block sits under
     StringArray cells;      // tableRow only
-    Array<Array<Range<int>>> cellBold, cellMono;
+    bool header = false;    // tableRow only: the row that names the columns
+    Array<Array<Range<int>>> cellBold, cellMono, cellItalic;
 
-    // Ranges within `text` that are bold or inline code, as (start, length).
-    Array<Range<int>> bold, mono;
+    // Ranges within `text` that are bold, inline code or italic, as (start, length).
+    Array<Range<int>> bold, mono, italic;
 };
 
 //==============================================================================
@@ -162,8 +163,14 @@ public:
                 if (body.startsWith ("|")) body = body.substring (1);
                 if (body.endsWith ("|"))   body = body.dropLastCharacters (1);
 
-                // A separator row carries no content.
-                if (body.removeCharacters ("-: |").isEmpty()) continue;
+                // A separator row carries no content, but it says the row
+                // above it names the columns.
+                if (body.removeCharacters ("-: |").isEmpty())
+                {
+                    if (! blocks.isEmpty() && blocks.getReference (blocks.size() - 1).kind == Block::Kind::tableRow)
+                        blocks.getReference (blocks.size() - 1).header = true;
+                    continue;
+                }
 
                 Block b; b.kind = Block::Kind::tableRow;
                 for (auto& cell : StringArray::fromTokens (body, "|", ""))
@@ -172,6 +179,7 @@ public:
                     b.cells.add (parsed.text);
                     b.cellBold.add (parsed.bold);
                     b.cellMono.add (parsed.mono);
+                    b.cellItalic.add (parsed.italic);
                 }
                 blocks.add (b);
                 continue;
@@ -223,6 +231,20 @@ private:
                     b.bold.add (Range<int>::withStartAndLength (out.length(), inner.length()));
                     out << inner;
                     i = end + 2;
+                    continue;
+                }
+            }
+            /* *italic*: a single star hard against a word, closed by one hard
+               against a word. A star standing alone is left as it is. */
+            if (src[i] == '*' && i + 1 < src.length() && src[i + 1] != '*' && src[i + 1] != ' ')
+            {
+                const auto end = src.indexOf (i + 1, "*");
+                if (end > i + 1 && src[end - 1] != ' ' && ! src.substring (i + 1, end).containsChar ('`'))
+                {
+                    const auto inner = src.substring (i + 1, end);
+                    b.italic.add (Range<int>::withStartAndLength (out.length(), inner.length()));
+                    out << inner;
+                    i = end + 1;
                     continue;
                 }
             }
@@ -372,14 +394,14 @@ private:
        disagree about how wide a line is. */
     static void appendStyled (AttributedString& s, const String& text,
                               const Array<Range<int>>& bold, const Array<Range<int>>& mono,
-                              const Font& base, Colour colour)
+                              const Array<Range<int>>& italic, const Font& base, Colour colour)
     {
         const int len = text.length();
         int pos = 0;
         while (pos < len)
         {
             int next = len;
-            bool isBold = false, isMono = false;
+            bool isBold = false, isMono = false, isItalic = false;
 
             for (const auto& r : bold)
             {
@@ -392,13 +414,58 @@ private:
                 else if (r.getStart() > pos) next = jmin (next, r.getStart());
             }
 
+            for (const auto& r : italic)
+            {
+                if (pos >= r.getStart() && pos < r.getEnd()) { isItalic = true; next = jmin (next, r.getEnd()); }
+                else if (r.getStart() > pos) next = jmin (next, r.getStart());
+            }
+
             auto f = base;
             if (isMono) f = Font (FontOptions (Font::getDefaultMonospacedFontName(), base.getHeight() - 1.0f, Font::plain));
             else if (isBold) f = base.boldened();
+            else if (isItalic) f = base.italicised();
 
             s.append (text.substring (pos, next), f, isMono ? Colour (0xffb8d4a8) : colour);
             pos = next;
         }
+    }
+
+    /** Where each column of a table row sits within `avail`, as (x, width).
+        Two columns are a narrow label and its description; with more, the
+        columns after the first share what is left, so none is drawn over
+        another. */
+    static Array<Range<int>> columnsFor (int count, int avail)
+    {
+        const int gap = 16;
+        Array<Range<int>> cols;
+        if (count <= 0) return cols;
+
+        const int first = count == 1 ? avail
+                        : count == 2 ? jmin (190, avail / 3)
+                                     : jmin (230, avail / (count + 1));
+        cols.add (Range<int>::withStartAndLength (0, first));
+
+        const int rest = count - 1;
+        const int each = rest > 0 ? (avail - first - gap * rest) / rest : 0;
+        for (int c = 0; c < rest; ++c)
+            cols.add (Range<int>::withStartAndLength (first + gap + c * (each + gap), jmax (40, each)));
+        return cols;
+    }
+
+    static AttributedString cellText (const Block& b, int c, Colour colour)
+    {
+        const Array<Range<int>> none;
+        auto font = fontFor (Block::Kind::paragraph);
+        if (b.header) font = Font (FontOptions (12.5f, Font::bold));
+
+        AttributedString as;
+        appendStyled (as, b.header ? b.cells[c].toUpperCase() : b.cells[c],
+                      c < b.cellBold.size() ? b.cellBold[c] : none,
+                      c < b.cellMono.size() ? b.cellMono[c] : none,
+                      c < b.cellItalic.size() ? b.cellItalic[c] : none,
+                      font, colour);
+        as.setLineSpacing (3.0f);
+        return as;
     }
 
     /** True when the block belongs to a section we are showing. Computed from a
@@ -476,23 +543,16 @@ private:
 
         if (b.kind == Block::Kind::tableRow)
         {
-            // Two columns: a narrow label and the description beside it. Height
-            // is whichever cell wraps taller.
-            const int labelW = jmin (190, avail / 3);
+            // Height is whichever cell wraps tallest.
+            const auto cols = columnsFor (b.cells.size(), avail);
             int tallest = 0;
             for (int c = 0; c < b.cells.size(); ++c)
             {
-                AttributedString as;
-                appendStyled (as, b.cells[c],
-                              c < b.cellBold.size() ? b.cellBold[c] : Array<Range<int>>(),
-                              c < b.cellMono.size() ? b.cellMono[c] : Array<Range<int>>(),
-                              fontFor (Block::Kind::paragraph), Colours::white);
-                as.setLineSpacing (3.0f);
                 TextLayout tl;
-                tl.createLayout (as, (float) (c == 0 ? labelW : avail - labelW - 16));
+                tl.createLayout (cellText (b, c, Colours::white), (float) cols[c].getLength());
                 tallest = jmax (tallest, (int) std::ceil (tl.getHeight()));
             }
-            p.height = tallest + 8;
+            p.height = tallest + (b.header ? 12 : 8);
         }
         else if (b.kind == Block::Kind::rule)     p.height = 1;
         else if (b.kind == Block::Kind::image)    p.height = b.image.isValid()
@@ -510,7 +570,7 @@ private:
                than the plain text, and measuring plain then painting bold is
                what makes a long item overlap whatever follows it. */
             AttributedString s;
-            appendStyled (s, b.text, b.bold, b.mono, fontFor (b.kind), Colours::white);
+            appendStyled (s, b.text, b.bold, b.mono, b.italic, fontFor (b.kind), Colours::white);
             s.setLineSpacing (3.0f);
             TextLayout tl;
             tl.createLayout (s, (float) avail);
@@ -574,24 +634,19 @@ private:
 
             case Block::Kind::tableRow:
             {
-                const int labelW = jmin (190, area.getWidth() / 3);
+                const auto cols = columnsFor (b.cells.size(), area.getWidth());
                 g.setColour (Colours::white.withAlpha (0.06f));
                 g.fillRect (area.withHeight (1));
 
                 for (int c = 0; c < b.cells.size(); ++c)
                 {
-                    auto cellArea = c == 0 ? area.withWidth (labelW)
-                                           : area.withTrimmedLeft (labelW + 16);
-                    cellArea = cellArea.withTrimmedTop (5);
+                    const auto cellArea = Rectangle<int> (area.getX() + cols[c].getStart(), area.getY(),
+                                                          cols[c].getLength(), area.getHeight())
+                                              .withTrimmedTop (b.header ? 8 : 5);
 
-                    AttributedString as;
-                    appendStyled (as, b.cells[c],
-                                  c < b.cellBold.size() ? b.cellBold[c] : Array<Range<int>>(),
-                                  c < b.cellMono.size() ? b.cellMono[c] : Array<Range<int>>(),
-                                  fontFor (Block::Kind::paragraph),
-                                  c == 0 ? Colours::white : Colour (0xffd7dbe2));
-                    as.setLineSpacing (3.0f);
-                    as.draw (g, cellArea.toFloat());
+                    cellText (b, c, b.header ? textDim
+                                  : c == 0   ? Colours::white : Colour (0xffd7dbe2))
+                        .draw (g, cellArea.toFloat());
                 }
                 return;
             }
@@ -618,7 +673,7 @@ private:
                           : textDim;
 
         AttributedString s;
-        appendStyled (s, b.text, b.bold, b.mono, base, colour);
+        appendStyled (s, b.text, b.bold, b.mono, b.italic, base, colour);
         s.setLineSpacing (3.0f);
         s.draw (g, area.toFloat());
     }
