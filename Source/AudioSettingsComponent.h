@@ -137,7 +137,7 @@ public:
         // As tall as what it says: on ALSA that is a line or two, not the eight JACK can need.
         status.setBounds (r.removeFromTop (onPipeWire() ? 118 : 62));
         r.removeFromTop (8);
-        typeNote.setBounds (r.removeFromTop (64));
+        typeNote.setBounds (r.removeFromTop (80));
         r.removeFromTop (4);
         auto bottom = r.removeFromBottom (28);
         applyBtn.setBounds (bottom.removeFromRight (150));
@@ -453,10 +453,11 @@ private:
     juce::TextButton applyBtn { "Reopen audio" }, fullBtn { "100%" };
     juce::Label volumeLabel { {}, "Computer volume" }, volumeNote,
                 keptNote { {}, "Every change here takes effect at once and is kept." },
-                typeNote { {}, "Device type: on stage, choose ALSA and your interface. StageRig then has it to itself, "
-                               "with nothing in between: the least delay and the fewest things that can go wrong (other apps "
-                               "can't play through it meanwhile). JACK shares the interface with other apps through the "
-                               "computer's sound system. Either way StageRig reconnects a device switched off and on." };
+                typeNote { {}, "Device type: choose JACK for the least delay. It plays through the computer's sound system, "
+                               "which keeps little sound waiting and shares the interface with other apps. ALSA gives StageRig "
+                               "the interface to itself, with nothing in between, but keeps four buffers of sound waiting: more "
+                               "delay at the same buffer size. Use it when the sound system itself is the trouble. Either way "
+                               "StageRig reconnects a device switched off and on." };
     juce::Slider volumeSlider;
     std::vector<std::pair<juce::String, juce::String>> sinks;   // { name, description }
     std::vector<int> volumes;

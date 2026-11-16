@@ -1840,17 +1840,21 @@ below 128 samples sounds like a broken cable there (256 is safe, 128 often
 works), and the status line warns about it. A keyboard's built-in USB audio
 is the least forgiving kind: start it at 256.
 
-**JACK or ALSA?** On stage, choose **ALSA** and your interface. StageRig then
-has the interface to itself, with nothing in between: the least delay and the
-fewest things that can go wrong. On ALSA the list shows each interface once by
+**JACK or ALSA?** Choose **JACK** for the least delay. It plays through the
+computer's sound system (PipeWire), which keeps little sound waiting to be
+played and shares the interface with other apps. **ALSA** gives StageRig the
+interface to itself, with nothing in between, so there is less that can go
+wrong; but it keeps four buffers of sound waiting, which at a buffer of 256
+samples is about 16 ms more between a key and its note. Use ALSA when the
+sound system itself is the trouble, and halve the buffer there if the
+interface can take it. On ALSA the list shows each interface once by
 a plain name (the SL73 is **SL — USB Audio**) and always opens it directly;
 monitors' HDMI sound and digital S/PDIF sockets are left out, and a USB
 interface comes first. When you switch to ALSA the input starts as none:
 choose one only if you use a mic or line input, and on the same interface as
 the output. StageRig asks the desktop's sound system for the interface, which
 lets go of it: other apps can't play through it while StageRig runs, and it is
-handed back when you switch to JACK or quit. **JACK** shares the interface with
-other apps through the computer's sound system. Either way a device switched
+handed back when you switch to JACK or quit. Either way a device switched
 off and on is reconnected, and a choice saved under one of ALSA's older names
 is moved to the new one by itself.
 

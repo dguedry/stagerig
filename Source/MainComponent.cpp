@@ -4278,7 +4278,7 @@ void MainComponent::showAudioSettings()
 {
     auto* content = new AudioSettingsComponent (engine, settings, [this] (const String& s) { showStatus (s); });
     // ALSA shows less (no sound-system buffer, no computer volume): a shorter window, not the same one half empty.
-    content->setSize (640, engine.getDeviceManager().getCurrentAudioDeviceType() == "ALSA" ? 600 : 782);
+    content->setSize (640, engine.getDeviceManager().getCurrentAudioDeviceType() == "ALSA" ? 616 : 798);
     perf::theme::launchDialog (content, "Audio settings", 0, 0);
 }
 
