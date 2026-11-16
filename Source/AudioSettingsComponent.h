@@ -66,8 +66,8 @@ public:
         addAndMakeVisible (applyBtn);
         applyBtn.setTooltip ("Close and reopen the audio device. Use it when the sound has stopped: after the computer's "
                              "sound system restarted, or an audio device came back.");
-        quantumBox.onChange = [this] { apply(); };
-        takeover.onClick = [this] { holdSystem (takeover.getToggleState()); apply(); };
+        quantumBox.onChange = [this] { whileBusy ([this] { apply(); }); };
+        takeover.onClick = [this] { whileBusy ([this] { holdSystem (takeover.getToggleState()); apply(); }); };
         addAndMakeVisible (keptNote);
         keptNote.setFont (juce::FontOptions (12.0f));
         addAndMakeVisible (typeNote);
@@ -75,7 +75,7 @@ public:
         typeNote.setJustificationType (juce::Justification::topLeft);
         typeNote.setColour (juce::Label::textColourId, juce::Colour (0xffc8ccd4));
         keptNote.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
-        applyBtn.onClick = [this] { apply(); };
+        applyBtn.onClick = [this] { whileBusy ([this] { apply(); }); };
 
         addAndMakeVisible (status);
         status.setFont (juce::FontOptions (12.0f));
@@ -83,6 +83,9 @@ public:
         status.setJustificationType (juce::Justification::topLeft);
 
         addAndMakeVisible (selector);
+        addChildComponent (busy);
+        busy.setAlwaysOnTop (true);
+        watchLists (selector);
         engine.getDeviceManager().addChangeListener (this);
         /* A click here, or in a list dropped down from here, is someone
            choosing: the engine keeps what is chosen and leaves the device
@@ -142,6 +145,7 @@ public:
         keptNote.setBounds (bottom);
         r.removeFromBottom (6);
         selector.setBounds (r);
+        busy.setBounds (getLocalBounds());
     }
 
 private:
@@ -338,7 +342,7 @@ private:
         });
     }
 
-    void timerCallback() override { refreshStatus(); refreshVolume(); }
+    void timerCallback() override { refreshStatus(); refreshVolume(); watchLists (selector); }
     void changeListenerCallback (juce::ChangeBroadcaster*) override
     {
         /* Just switched to ALSA: no input to start with. An input on another card
@@ -362,8 +366,82 @@ private:
         showForType();
         refreshStatus();
         refreshVolume();
+        // The device section has made its lists anew: they say "reopening" as well.
+        juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<AudioSettingsComponent> (this)]
+                                         { if (sp != nullptr) sp->watchLists (sp->selector); });
     }
     juce::String lastType;
+
+    //==============================================================================
+    /* Changing the device type, the device, its rate or its buffer closes the
+       audio and opens it again, and every plugin is prepared for the new rate
+       and buffer in turn: seconds, on this thread, with the window unable to
+       draw. So the window says what it is doing first. The notice is drawn at
+       once (nothing is painted again until the work is done, which is why it
+       stands still) and taken away when the audio is open. */
+    struct BusyNotice final : juce::Component
+    {
+        BusyNotice() { setInterceptsMouseClicks (true, true); }
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (juce::Colour (0xd0101216));
+            auto box = getLocalBounds().withSizeKeepingCentre (300, 96);
+            g.setColour (juce::Colour (0xff23262d));
+            g.fillRoundedRectangle (box.toFloat(), 8.0f);
+            g.setColour (juce::Colour (0xff4a4f5a));
+            g.drawRoundedRectangle (box.toFloat().reduced (0.5f), 8.0f, 1.0f);
+            auto wheel = box.removeFromLeft (84).withSizeKeepingCentre (36, 36);
+            getLookAndFeel().drawSpinningWaitAnimation (g, juce::Colours::white, wheel.getX(), wheel.getY(), wheel.getWidth(), wheel.getHeight());
+            g.setColour (juce::Colours::white);
+            g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+            g.drawText ("Reopening audio...", box.removeFromTop (54).withTrimmedTop (22), juce::Justification::centredLeft);
+            g.setColour (juce::Colour (0xff9aa0ab));
+            g.setFont (juce::FontOptions (12.5f));
+            g.drawText ("Getting every plugin ready.", box.withTrimmedBottom (20), juce::Justification::centredLeft);
+        }
+    };
+
+    /** Does `work` with the notice up. `work` may delete the list it was called from. */
+    void whileBusy (std::function<void()> work)
+    {
+        if (busy.isVisible()) { work(); return; }      // already inside one: the notice is up
+        juce::Component::SafePointer<AudioSettingsComponent> sp (this);
+        busy.setVisible (true);
+        busy.toFront (false);
+        if (auto* peer = getPeer()) peer->performAnyPendingRepaintsNow();
+        work();
+        if (sp != nullptr) sp->busy.setVisible (false);
+    }
+
+    /** A list's own work, done with the notice up. */
+    struct BusyCall
+    {
+        juce::Component::SafePointer<AudioSettingsComponent> owner;
+        std::function<void()> then;
+        void operator()() const
+        {
+            auto work = then;       // copies: the list, and this with it, may be gone before the work is done
+            auto sp = owner;
+            if (auto* self = sp.getComponent()) self->whileBusy (work);
+            else work();
+        }
+    };
+
+    /** Every list in the device section does its work with the notice up. JUCE
+        makes these lists again, or gives them their work again, as devices
+        change, so this is asked again after each change and once a second;
+        a list that already has the notice is left as it is. */
+    void watchLists (juce::Component& parent)
+    {
+        for (auto* child : parent.getChildren())
+        {
+            if (auto* box = dynamic_cast<juce::ComboBox*> (child))
+                if (box->onChange && box->onChange.target<BusyCall>() == nullptr)
+                    box->onChange = BusyCall { this, std::move (box->onChange) };
+            watchLists (*child);
+        }
+    }
+    BusyNotice busy;
 
     Engine& engine;
     juce::PropertiesFile& settings;
