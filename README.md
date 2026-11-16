@@ -272,7 +272,7 @@ programs from a music stand instead of the laptop.
 The Programs tab is the same page's other half -- every program on every
 keyboard, grouped, with a GUI button per input:
 
-![The tablet showing the programs of both keyboards, grouped by kind](docs/images/tablet-app.png)
+![The tablet showing the programs of both keyboards, grouped by kind, with the Hammond's buttons and drawbars under the program in play](docs/images/tablet-app.png)
 
 ![The Tablet control dialog](docs/images/tablet-control.png)
 

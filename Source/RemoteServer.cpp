@@ -57,14 +57,17 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#15161c">
+<meta name="theme-color" content="#121318">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="/manifest.webmanifest">
 <title>StageRig</title>
 <style>
-  :root { --bg:#15161c; --panel:#1e1f24; --row:#272931; --accent:#5aa9ff; --dim:#9aa0ab; }
+  /* The page's colours, by job. One look for "on" everywhere: the accent. */
+  :root { --bg:#121318; --panel:#1b1c22; --row:#24262e; --raise:#2c2f38; --line:#2a2d36; --border:#3a3e48;
+          --accent:#5aa9ff; --on-accent:#06121f; --dim:#8e95a2; --faint:#5a606c;
+          --ok:#2fbf71; --on-ok:#06180d; --warn:#e0a030; --on-warn:#1a1204; --danger:#c4363c; --note:#d8a657; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   body { margin:0; background:var(--bg); color:#fff; font:16px/1.4 system-ui,sans-serif;
          padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
@@ -82,26 +85,32 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .dlg .cur { font-size:19px; font-weight:700; margin:0 0 12px; overflow-wrap:anywhere; }
   .dlg .acts { display:flex; gap:8px; margin-bottom:16px; }
   .dlg .acts button { flex:1; border:0; border-radius:10px; padding:14px 8px; font-size:16px; font-weight:700; background:var(--row); color:#fff; }
-  .dlg .acts button.go { background:var(--accent); color:#06121f; }
+  .dlg .acts button.go { background:var(--accent); color:var(--on-accent); }
   .dlg .acts button:disabled { opacity:.4; }
-  .dlg .file { display:flex; align-items:baseline; gap:10px; width:100%; text-align:left; border:0; border-radius:10px; background:var(--row); color:#fff;
-                 padding:13px 12px; margin-top:6px; font-size:16px; }
-  .dlg .file b { flex:1; font-weight:600; overflow-wrap:anywhere; }
+  .dlg .list { background:var(--row); border-radius:12px; overflow:hidden; }
+  .dlg .list:empty { display:none; }
+  .dlg .file { display:flex; align-items:baseline; gap:10px; width:100%; text-align:left; border:0; border-top:1px solid var(--line); background:none; color:#fff;
+                 padding:14px 14px; font-size:16px; }
+  .dlg .list > .file:first-child, .dlg .ghead + .file { border-top:0; }
+  .dlg .file b { flex:1; font-weight:500; overflow-wrap:anywhere; }
   .dlg .file i { font-style:normal; color:var(--dim); font-size:12px; white-space:nowrap; }
-  .dlg .file.on { outline:2px solid var(--accent); }
+  .dlg .file.on { background:#5aa9ff1f; box-shadow:inset 4px 0 0 var(--accent); }
+  .dlg .file.on b { color:var(--accent); font-weight:700; }
+  .dlg .ghead { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:14px 14px 6px; background:var(--panel); }
+  .dlg .list > .ghead:first-child { padding-top:4px; }
   .dlg .file.grp i { font-size:14px; }
-  .dlg .file.out { background:transparent; color:var(--dim); padding-left:4px; }
+  .dlg .file.out { color:var(--dim); }
   .dlg .file.out b { font-weight:400; }
   .dlg .where { color:var(--dim); font-size:12px; margin:0 0 8px; overflow-wrap:anywhere; }
   .dlg .where:empty { display:none; }
   .dlg .note { color:var(--dim); font-size:13px; margin:10px 0 0; }
   .dlg .file { flex-wrap:wrap; }
   .dlg .file small { flex-basis:100%; color:var(--dim); font-size:12px; font-weight:400; margin-top:2px; }
-  .dlg .find { width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid #3a3d47; background:var(--bg,#14161b); color:#fff; margin-bottom:8px; }
+  .dlg .find { width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:#fff; margin-bottom:8px; }
   .dlg .head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
   .dlg .head .cur { flex:1; margin:0; }
   .dlg .head button { border:0; border-radius:10px; padding:11px 16px; font-size:15px; font-weight:700; background:var(--row); color:#fff; }
-  #panic { background:#a3282d; color:#fff; border:0; border-radius:8px; padding:10px 16px; font-weight:700; font-size:14px; }
+  #panic { background:var(--danger); color:#fff; border:0; border-radius:8px; padding:10px 16px; font-weight:700; font-size:14px; }
   .input { margin:14px 12px 22px; }
   .now { background:var(--panel); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
   .now .name { font-size:12px; color:var(--dim); letter-spacing:.08em; font-weight:700; }
@@ -115,7 +124,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .now .gui { margin-left:auto; flex:none; background:var(--row); color:#fff; border:0;
               border-radius:10px; padding:10px 16px; font-size:13px; font-weight:800;
               letter-spacing:.04em; align-self:center; }
-  .now .gui:active { background:var(--accent); color:#06121f; }
+  .now .gui:active { background:var(--accent); color:var(--on-accent); }
   .now .gui:disabled { opacity:.6; }
   /* An audio input's meter: two bars on a dB scale, and a clip mark that stays
      lit a moment, so a hot microphone is seen from the stand. */
@@ -123,7 +132,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .meter .bars { flex:1; display:flex; flex-direction:column; gap:3px; }
   .meter i { display:block; height:6px; background:#1a1d24; border-radius:3px; overflow:hidden; }
   .meter i span { display:block; height:100%; width:0; border-radius:3px;
-                  background:linear-gradient(to right, #4fb86a 0 80%, #d8a657 80% 95%, #e04a4a 95%); background-size:100% 100%; }
+                  background:linear-gradient(to right, #4fb86a 0 80%, var(--note) 80% 95%, #e04a4a 95%); background-size:100% 100%; }
   .meter b { flex:none; width:10px; height:15px; border-radius:3px; background:#2a2e38; }
   .meter.clip b { background:#ff3b3b; }
 
@@ -144,15 +153,15 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .sheet .part .who b { display:block; font-size:16px; }
   .sheet .part .who span { display:block; color:var(--dim); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .sheet .part button { flex:none; padding:10px 14px; font-size:14px; background:var(--bg); }
-  .sheet .part button.on { background:#a3282d; }
+  .sheet .part button.on { background:var(--danger); }
   .sheet .part.muted .who { opacity:.45; }
-  .loading { color:#d8a657; font-size:14px; }
+  .loading { color:var(--note); font-size:14px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
   button.p { background:var(--row); color:#fff; border:0; border-radius:10px; padding:14px 12px; text-align:left;
              font-size:15px; display:flex; gap:10px; align-items:baseline; min-height:56px; }
   button.p .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700; font-size:13px; }
-  button.p.on { background:var(--accent); color:#06121f; }
-  button.p.on .n { color:#06121f; }
+  button.p.on { background:var(--accent); color:var(--on-accent); }
+  button.p.on .n { color:var(--on-accent); }
   .knobs { padding:4px 12px 10px; }
   .kslot { margin-top:8px; }
   .kname { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin:0 0 4px; }
@@ -169,16 +178,16 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   /* The instrument's buttons: on or off, each big enough for a thumb, above the knobs. */
   .kbtns { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px; }
   .kbtns button { font:inherit; font-size:15px; font-weight:600; padding:12px 14px; min-width:96px; border-radius:10px;
-                  border:1px solid #3a3f4a; background:#2a2d35; color:#fff; }
-  .kbtns button.on { background:#2f7d4f; border-color:#4fbf7f; }
-  .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:6px 0; margin:3px 0; border-radius:8px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; width:100%; }
-  .knob .ksw.on { background:#2f5f9a; border-color:#2f5f9a; }
+                  border:1px solid var(--border); background:var(--raise); color:#fff; }
+  .kbtns button.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+  .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:6px 0; margin:3px 0; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#fff; width:100%; }
+  .knob .ksw.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   .kname { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-  .kinst { font:inherit; text-transform:none; letter-spacing:0; padding:3px 10px; border-radius:6px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; }
-  .kinst.on { background:#2f5f9a; border-color:#2f5f9a; }
+  .kinst { font:inherit; font-size:13px; text-transform:none; letter-spacing:0; padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#fff; }
+  .kinst.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   .kinst:disabled { opacity:.4; }
   .kpage { margin-left:auto; display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:0; }
-  .kpage button { font:inherit; padding:2px 10px; border-radius:6px; border:1px solid #3a3f4a; background:#2a2d35; color:#fff; }
+  .kpage button { font:inherit; font-size:15px; padding:8px 16px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#fff; }
   .kpage button:disabled { opacity:.3; }
   .knob input[type=range] { width:100%; height:34px; margin:0; accent-color:var(--accent); touch-action:pan-y; }
   /* Tempo lives in the header beside PANIC: it is worth a glance and a tap, not
@@ -189,21 +198,26 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .hdr .bpm i { font-size:10px; color:var(--dim); font-style:normal; font-weight:600; margin-left:2px; }
   #tap { background:var(--row); color:#fff; border:0; border-radius:8px;
          padding:9px 14px; font-size:13px; font-weight:800; letter-spacing:.04em; }
-  #tap:active { background:var(--accent); color:#06121f; }
+  #tap:active { background:var(--accent); color:var(--on-accent); }
 
   /* Tabs: the set list is what you look at during a gig, the programs are
      what you look at while building one. */
-  .tabs { display:flex; gap:8px; padding:10px 12px 0; }
-  .tabs button { flex:1; background:var(--panel); color:var(--dim); border:0; border-radius:10px 10px 0 0;
-                 padding:12px; font-size:14px; font-weight:800; letter-spacing:.04em; }
-  .tabs button.on { background:var(--row); color:#fff; }
+  .tabs { display:flex; margin:10px 12px 0; padding:4px; background:var(--panel); border-radius:12px; }
+  .tabs button { flex:1; background:none; color:var(--dim); border:0; border-radius:9px;
+                 padding:11px; font-size:14px; font-weight:800; letter-spacing:.04em; }
+  .tabs button.on { background:var(--raise); color:#fff; }
   #controls { padding:8px 12px 24px; }
-  #controls .csec { margin-top:14px; }
-  #controls .cname { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin:0 0 4px; }
-  #controls .crow { display:grid; grid-template-columns:1fr auto; gap:12px; padding:7px 10px; background:var(--row); border-radius:8px; margin-bottom:4px; font-size:14px; }
-  #controls .crow .what { color:var(--dim); text-align:right; }
-  #controls .crow.unset .what { opacity:.5; }
-  #controls .hint { color:var(--dim); font-size:12px; margin:8px 0 0; }
+  /* Lists -- the controls, a plugin's sounds, the setup files -- are one panel
+     per group with hairlines between rows, not a stack of separate boxes. */
+  #controls .csec { background:var(--panel); border-radius:14px; margin-top:14px; overflow:hidden; }
+  #controls .cname { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:12px 16px 8px; }
+  #controls .crow { display:grid; grid-template-columns:1fr auto; gap:12px; padding:13px 16px; border-top:1px solid var(--line); font-size:15px; }
+  #controls .crow .what { color:var(--accent); font-weight:600; text-align:right; }
+  #controls .crow.unset { color:var(--dim); }
+  #controls .crow.unset .what { color:var(--faint); font-weight:400; }
+  #controls button.crow { width:100%; background:none; border-left:0; border-right:0; border-bottom:0; color:var(--dim); font:inherit; font-size:15px; text-align:left; }
+  #controls button.crow .what { color:var(--dim); font-weight:400; }
+  #controls .hint { color:var(--dim); font-size:12px; margin:12px 4px 0; }
 
   /* The set list. The current song is the thing you must be able to read at a
      glance from a stand, so it is the one that is big. */
@@ -215,46 +229,46 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
      that shifts under a finger mid-song is the wrong one pressed. */
   .transport { background:var(--panel); border-radius:12px; padding:10px 12px; margin-bottom:10px;
                border-left:6px solid #5b606b; }
-  .transport.playing  { border-left-color:#2fbf71; }
-  .transport.counting, .transport.vamping { border-left-color:#e0a030; }
+  .transport.playing  { border-left-color:var(--ok); }
+  .transport.counting, .transport.vamping { border-left-color:var(--warn); }
   .transport .trow { display:flex; align-items:center; gap:12px; }
   .transport button { flex:none; border:0; border-radius:10px; padding:12px 18px; font-size:16px; font-weight:800;
                       background:var(--row); color:#fff; }
-  .transport button.play { min-width:118px; padding:16px 18px; font-size:18px; background:#2fbf71; color:#06180d; }
-  .transport button.play.running { background:#c4363c; color:#fff; }
+  .transport button.play { min-width:118px; padding:16px 18px; font-size:18px; background:var(--ok); color:var(--on-ok); }
+  .transport button.play.running { background:var(--danger); color:#fff; }
   .transport button.play:disabled { opacity:.4; }
-  .transport button.vampgo { background:#e0a030; color:#1a1204; }
+  .transport button.vampgo { background:var(--warn); color:var(--on-warn); }
   .transport button.click { font-weight:700; color:var(--dim); }
-  .transport button.click.on { color:#fff; box-shadow:inset 0 0 0 2px #2fbf71; }
+  .transport button.click.on { color:#fff; box-shadow:inset 0 0 0 2px var(--ok); }
   .transport button.parts { font-weight:700; }
   .transport .tt { flex:1; min-width:0; font-variant-numeric:tabular-nums; }
   .transport .tstate { display:flex; align-items:baseline; gap:8px; white-space:nowrap; overflow:hidden; }
-  .transport .tstate b { font-size:12px; letter-spacing:.1em; color:#9aa0ab; flex:none; }
-  .transport.playing .tstate b { color:#2fbf71; }
-  .transport.counting .tstate b, .transport.vamping .tstate b { color:#e0a030; }
+  .transport .tstate b { font-size:12px; letter-spacing:.1em; color:var(--dim); flex:none; }
+  .transport.playing .tstate b { color:var(--ok); }
+  .transport.counting .tstate b, .transport.vamping .tstate b { color:var(--warn); }
   .transport .tsong { font-size:17px; font-weight:800; color:#fff; overflow:hidden; text-overflow:ellipsis; }
   .transport .tpos { font-size:15px; color:var(--dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .transport .tpos em { font-style:normal; color:#e0a030; font-weight:700; }
+  .transport .tpos em { font-style:normal; color:var(--warn); font-weight:700; }
   .tbar { position:relative; height:8px; background:var(--row); border-radius:4px; margin-top:10px; overflow:hidden; }
   .tbar .fill { position:absolute; left:0; top:0; bottom:0; background:#5b606b; }
-  .transport.playing .tbar .fill { background:#2fbf71; }
-  .transport.vamping .tbar .fill { background:#e0a030; }
+  .transport.playing .tbar .fill { background:var(--ok); }
+  .transport.vamping .tbar .fill { background:var(--warn); }
   .tbar .tick { position:absolute; top:0; bottom:0; width:2px; background:var(--panel); }
-  .tbar .tick.next { background:#e0a030; width:3px; }
+  .tbar .tick.next { background:var(--warn); width:3px; }
   .sections { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 6px; }
   .sections button { background:var(--row); color:#fff; border:2px solid transparent; border-radius:10px;
                      padding:10px 14px; font-size:15px; font-weight:700; }
   .sections button.past { color:var(--dim); }
   .sections button.cue { border-color:#fff; }
-  .sections button.on { background:#2fbf71; color:#06180d; }
-  .sections button.on.vamp { background:#e0a030; color:#1a1204; }
-  .sections button.queued { border-color:#e0a030; }
+  .sections button.on { background:var(--ok); color:var(--on-ok); }
+  .sections button.on.vamp { background:var(--warn); color:var(--on-warn); }
+  .sections button.queued { border-color:var(--warn); }
   .sections button.go { background:var(--row); border-color:var(--accent); }
   .sections-help { color:var(--dim); font-size:13px; padding:0 4px 12px; }
   .setpick { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
   .setpick button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
                     padding:10px 18px; font-size:13px; font-weight:700; }
-  .setpick button.on { background:var(--accent); color:#06121f; }
+  .setpick button.on { background:var(--accent); color:var(--on-accent); }
 
   .song { display:flex; align-items:baseline; gap:12px; background:var(--panel);
           border-radius:12px; padding:14px 16px; margin-bottom:8px; width:100%;
@@ -267,30 +281,30 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .song .bpm { color:var(--dim); font-size:13px; font-weight:700; }
 
   /* The one you are on. */
-  .song.on { background:var(--accent); color:#06121f; padding:18px 16px; }
-  .song.on .n, .song.on .bpm { color:#06121f; }
+  .song.on { background:var(--accent); color:var(--on-accent); padding:18px 16px; }
+  .song.on .n, .song.on .bpm { color:var(--on-accent); }
   .song.on .t { font-size:26px; font-weight:800; }
-  .song.on .parts { color:#06121f; }
+  .song.on .parts { color:var(--on-accent); }
   .find { width:100%; box-sizing:border-box; margin:0 0 12px; padding:14px 16px;
-          font-size:16px; border-radius:12px; border:1px solid #3a3d47;
+          font-size:16px; border-radius:12px; border:1px solid var(--border);
           background:var(--panel); color:#fff; }
   .find:focus { outline:none; border-color:var(--accent); }
   .findrow { display:flex; gap:8px; align-items:stretch; margin-bottom:12px; }
   .findrow .find { margin:0; flex:1; }
-  .findrow .editmode { flex:0 0 auto; background:var(--row); color:var(--dim); border:1px solid #3a3d47;
+  .findrow .editmode { flex:0 0 auto; background:var(--row); color:var(--dim); border:1px solid var(--border);
                        border-radius:12px; padding:0 18px; font-size:15px; font-weight:700; }
-  .findrow .editmode.on { background:var(--accent); color:#06121f; border-color:var(--accent); }
-  .setpick button.new { border:1px dashed #3a3d47; background:none; }
+  .findrow .editmode.on { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
+  .setpick button.new { border:1px dashed var(--border); background:none; }
   .editbar { display:flex; gap:8px; margin-bottom:12px; }
   .editbar button { flex:1; background:var(--row); color:#fff; border:0; border-radius:12px; padding:12px; font-size:15px; font-weight:700; }
   .song .ctl { display:flex; gap:6px; flex:0 0 auto; align-self:center; }
-  .song .ctl span { padding:10px 14px; border-radius:10px; background:#2b2d35; color:#d7dbe2; font-size:15px; font-weight:700; }
+  .song .ctl span { padding:10px 14px; border-radius:10px; background:var(--raise); color:#d7dbe2; font-size:15px; font-weight:700; }
   .song .ctl span.off { opacity:.3; }
-  .song.on .ctl span { background:#06121f; color:#fff; }
+  .song.on .ctl span { background:var(--on-accent); color:#fff; }
   .otherhead { color:var(--dim); font-size:11px; font-weight:800; letter-spacing:.1em;
                margin:18px 0 8px; }
   .parts { font-size:13px; color:var(--dim); margin-top:4px; }
-  .notes { font-size:14px; color:#d8a657; margin-top:4px; font-style:italic; }
+  .notes { font-size:14px; color:var(--note); margin-top:4px; font-style:italic; }
   .notes .key { font-style:normal; font-weight:700; padding:3px 9px; border-radius:8px; background:#d8a65722;
                 border:1px solid #d8a65766; cursor:pointer; }
   .song.on .notes .key { background:#06121f1a; border-color:#06121f66; }
@@ -298,18 +312,18 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .sheet .scales { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin-top:6px; }
   .sheet .keys button, .sheet .scales button { padding:12px 6px; text-align:center; font-size:15px; }
   .sheet .keys button.none { grid-column: span 2; }
-  .sheet .keys button.on, .sheet .scales button.on { background:var(--accent); color:#06121f; }
-  .song .chart { margin-left:10px; padding:8px 14px; border-radius:10px; background:#2b2d35; color:#d7dbe2;
+  .sheet .keys button.on, .sheet .scales button.on { background:var(--accent); color:var(--on-accent); }
+  .song .chart { margin-left:10px; padding:8px 14px; border-radius:10px; background:var(--raise); color:#d7dbe2;
                  font-size:14px; font-weight:600; flex:0 0 auto; }
-  .song.on .chart { background:#06121f; color:#fff; }
-  .song.on .notes { color:#06121f; }
+  .song.on .chart { background:var(--on-accent); color:#fff; }
+  .song.on .notes { color:var(--on-accent); }
   .songbody { flex:1; min-width:0; }
 
   /* Step buttons: big, far apart, hard to hit the wrong one. */
   .step { display:flex; gap:10px; margin-top:14px; }
   .step button { flex:1; background:var(--row); color:#fff; border:0; border-radius:12px;
                  padding:20px; font-size:17px; font-weight:800; letter-spacing:.04em; }
-  .step button:active { background:var(--accent); color:#06121f; }
+  .step button:active { background:var(--accent); color:var(--on-accent); }
   .step button:disabled { opacity:.35; }
 
   .empty { color:var(--dim); font-size:15px; padding:20px 4px; line-height:1.5; }
@@ -317,17 +331,17 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .groups { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
   .groups button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
                    padding:9px 16px; font-size:13px; font-weight:700; letter-spacing:.02em; }
-  .groups button.on { background:var(--accent); color:#06121f; }
+  .groups button.on { background:var(--accent); color:var(--on-accent); }
 
-  #err { display:none; background:#a3282d; padding:10px 16px; font-size:14px; }
+  #err { display:none; background:var(--danger); padding:10px 16px; font-size:14px; }
   #gate { display:none; align-items:center; justify-content:center; min-height:70vh; padding:20px; }
   #gate form { text-align:center; max-width:320px; width:100%; }
   #gate p { color:var(--dim); font-size:15px; margin:0 0 14px; }
-  #gate .hint { font-size:13px; color:#d8a657; margin-top:14px; min-height:18px; }
+  #gate .hint { font-size:13px; color:var(--note); margin-top:14px; min-height:18px; }
   #code { width:100%; font-size:34px; text-align:center; letter-spacing:.25em; text-transform:uppercase;
-          padding:14px; border-radius:12px; border:2px solid #3a3d47; background:var(--panel); color:#fff; }
+          padding:14px; border-radius:12px; border:2px solid var(--border); background:var(--panel); color:#fff; }
   #code:focus { outline:none; border-color:var(--accent); }
-  #gate button { margin-top:14px; width:100%; background:var(--accent); color:#06121f; border:0;
+  #gate button { margin-top:14px; width:100%; background:var(--accent); color:var(--on-accent); border:0;
                  border-radius:12px; padding:16px; font-size:17px; font-weight:700; }
 </style></head>
 <body>
@@ -345,7 +359,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   <p class="cur" id="sheetName"></p>
   <div class="acts"><button class="go" id="sheetSave">Save</button><button id="sheetSaveAs">Save as...</button><button id="sheetClose">Close</button></div>
   <h2 id="sheetOpenHead">OPEN ANOTHER</h2>
-  <div id="sheetFiles"></div>
+  <div id="sheetFiles" class="list"></div>
   <p class="note" id="sheetNote"></p>
 </div></div>
 <div id="snd" class="dlg"><div class="box">
@@ -353,7 +367,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   <div class="head"><p class="cur" id="sndName"></p><button id="sndClose">Close</button></div>
   <input class="find" id="sndFind" placeholder="Search every group (pad warm)" autocomplete="off" spellcheck="false">
   <p class="where" id="sndWhere"></p>
-  <div id="sndList"></div>
+  <div id="sndList" class="list"></div>
   <p class="note" id="sndNote"></p>
 </div></div>
 <div id="gate">
@@ -529,19 +543,22 @@ function drawSounds() {
       row("grp", name, "", count + "  ›").onclick = () => sndGo(path);
     }
   }
-  let shown = 0, more = 0;
+  let shown = 0, more = 0, heading = null;
   sndCtx.sounds.forEach((c, idx) => {
-    let detail = c.detail;
     if (browsing) { if (c.group.length !== at.length || !under(c.group, at)) return; }
     else {
-      const where = c.group.join(" › ");
-      detail = !where ? c.detail : !c.detail ? where : where + "  -  " + c.detail;
-      const text = (c.name + " " + detail).toLowerCase();
+      const text = (c.name + " " + c.group.join(" ") + " " + (c.detail || "")).toLowerCase();
       if (!words.every(w => text.includes(w))) return;
     }
     if (shown >= 150) { ++more; return; }
     ++shown;
-    const b = row(c.name === sndCtx.current ? "on" : "", c.name, detail, "");
+    // Outside a group, the group is said once, as a heading where it changes.
+    const where = c.group.join(" › ");
+    if (!browsing && where !== heading) {
+      heading = where;
+      if (where) { const h = document.createElement("div"); h.className = "ghead"; h.textContent = where; host.appendChild(h); }
+    }
+    const b = row(c.name === sndCtx.current ? "on" : "", c.name, c.detail, "");
     b.onclick = async () => {
       const note = document.getElementById("sndNote"); note.textContent = "Loading " + c.name + "...";
       try {
@@ -600,24 +617,44 @@ function syncTabs() {
 /* The Controls panel, to read from the stand: what every pedal, knob and
    button does, in the laptop's sections. Read-only: Learn needs a hand on
    the keyboard, which is at the laptop. */
-let controlsKey = "";
+/* What is taught is the news; the jobs nothing is taught for fold into one
+   row per section, a tap away for anyone looking for something to teach. */
+let controlsKey = "", controlsData = null;
+const controlsOpen = new Set();
 async function loadControls() {
   let data;
   try { data = await api("/api/controls"); } catch (e) { return; }
   const key = JSON.stringify(data);
   if (key === controlsKey) return;
-  controlsKey = key;
+  controlsKey = key; controlsData = data;
+  drawControls();
+}
+function drawControls() {
+  const data = controlsData; if (!data) return;
   const host = document.getElementById("controls");
   host.innerHTML = "";
   (data.sections || []).forEach(sec => {
     const d = document.createElement("div"); d.className = "csec";
     const n = document.createElement("div"); n.className = "cname"; n.textContent = sec.name; d.appendChild(n);
-    (sec.rows || []).forEach(r => {
-      const row = document.createElement("div"); row.className = "crow" + (r.what ? "" : " unset");
+    const taught = r => r.what && r.what !== "-";            // "-": a note, like "No mappings in this program"
+    const rows = sec.rows || [], unset = rows.filter(r => !taught(r)), open = controlsOpen.has(sec.name);
+    const line = r => {
+      const row = document.createElement("div"); row.className = "crow" + (taught(r) ? "" : " unset");
       const job = document.createElement("span"); job.textContent = r.job;
-      const what = document.createElement("span"); what.className = "what"; what.textContent = r.what || "not taught";
+      const what = document.createElement("span"); what.className = "what"; what.textContent = r.what === "-" ? "" : r.what || "not taught";
       row.appendChild(job); row.appendChild(what); d.appendChild(row);
-    });
+    };
+    rows.filter(taught).forEach(line);
+    if (unset.length && (open || unset.length === 1)) unset.forEach(line);
+    if (unset.length > 1) {
+      const t = document.createElement("button"); t.className = "crow";
+      const job = document.createElement("span");
+      job.textContent = open ? "Hide the ones not taught" : unset.length + (unset.length === rows.length ? " jobs, none taught yet" : " more, not taught");
+      const what = document.createElement("span"); what.className = "what"; what.textContent = open ? "\u2303" : "\u203A";
+      t.appendChild(job); t.appendChild(what);
+      t.onclick = () => { if (open) controlsOpen.delete(sec.name); else controlsOpen.add(sec.name); drawControls(); };
+      d.appendChild(t);
+    }
     host.appendChild(d);
   });
   const h = document.createElement("p"); h.className = "hint"; h.textContent = "To teach or change one: the Controls panel on the computer, under the instruments.";
@@ -1614,7 +1651,7 @@ if ('serviceWorker' in navigator)
 static const char* kManifest = R"JSON({
   "name": "StageRig", "short_name": "StageRig",
   "start_url": ".", "display": "standalone",
-  "background_color": "#15161c", "theme_color": "#15161c",
+  "background_color": "#121318", "theme_color": "#121318",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icon.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },

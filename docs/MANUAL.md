@@ -1340,8 +1340,9 @@ network does the same job. It has three tabs: **Set list** (the running order
 and the backing track), **Programs** (every program on every keyboard, with
 what each keyboard is on now at the top, and its front panel) and
 **Controls** (what every pedal, knob and button does, in the laptop's
-Controls panel's sections, to check from the stand; teaching is done at the
-laptop). **TAP TEMPO** and **PANIC** are in the header.
+Controls panel's sections, to check from the stand; the jobs nothing is
+taught for fold into one line per section, tapped to see them; teaching is
+done at the laptop). **TAP TEMPO** and **PANIC** are in the header.
 
 The header's title is the setup's name. Tap it to **Save** the setup,
 **Save as...** under a new name, or **open another** of the setups saved in
@@ -1447,7 +1448,7 @@ laptop, in the song's Backing track window; the tablet reads it.
 **Programs** shows every program on every keyboard, with a row of group
 buttons to filter by (**Ungrouped** for programs with no group):
 
-![The tablet showing the programs of both keyboards, grouped by kind](images/tablet-app.png)
+![The tablet showing the programs of both keyboards, grouped by kind, with the Hammond's buttons and drawbars under the program in play](images/tablet-app.png)
 
 The current program for each input is highlighted, and the big number at the top
 of each block is what a keyboard would send as a Program Change. Tapping a
