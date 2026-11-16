@@ -249,6 +249,19 @@ talks to it.
 
 ![Your keyboards: a Komplete Kontrol S88 MK1 over its USB connection with names on its screen, its keys lit and its knobs working by themselves; a Saffire's MIDI port as plain MIDI](docs/images/your-keyboards.png)
 
+**Backing track...** under the songs list holds the song's audio and MIDI
+files. Each audio file has its output and level; each part of a MIDI file
+says what plays it -- here the keys, bass and drums on the General MIDI
+player and the strings on one of your own programs. Below, the sections on a
+timeline of the files: the intro vamps until a pedal lets it go on, and the
+chorus puts Upper on its strings by itself.
+
+![Backing track for one song: three audio stems on the main output, a MIDI file whose keys, bass and drums play on General MIDI and whose strings play Upper's Strings program, and the sections on a timeline of waveforms and notes, with the intro marked as a vamp](docs/images/backing-track.png)
+
+**Edit notes...** opens the MIDI file in a piano roll, part by part.
+
+![The piano roll: the file's four parts listed at the top with what each plays on, the bass line's notes under the section markers, and their velocities below](docs/images/piano-roll.png)
+
 ## Tablet control
 
 **Tablet** in the toolbar starts a small web app on your network, for picking

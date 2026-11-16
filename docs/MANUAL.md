@@ -1052,6 +1052,8 @@ on the song in the songs panel). Like charts, they are copied into the folder
 beside the setup, so the setup and its tracks travel together. Adding a file
 also selects the song, so **Play** plays it straight away.
 
+![Backing track for one song: three audio stems on the main output, a MIDI file whose keys, bass and drums play on General MIDI and whose strings play Upper's Strings program, and the sections on a timeline of waveforms and notes, with the intro marked as a vamp](images/backing-track.png)
+
 ### Audio files
 
 - **Output** -- which output it plays on. Files go through that output's
@@ -1108,6 +1110,8 @@ demo.mid                                              [Edit notes...] [X]
    unsaved edits asks **Save** or **Discard**. The first version of the file
    is kept beside it as *.orig.mid*; to go back to it, replace the file with
    that copy by hand.
+
+![The piano roll: the file's four parts listed at the top with what each plays on, the bass line's notes under the section markers, and their velocities below](images/piano-roll.png)
 
 Notes follow sections, vamps and jumps like the audio does, every note is let
 go when the track stops or jumps, and starting from a section in the middle
