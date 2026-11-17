@@ -69,9 +69,9 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
           --accent:#5aa9ff; --on-accent:#06121f; --dim:#8e95a2; --faint:#5a606c;
           --ok:#2fbf71; --on-ok:#06180d; --warn:#e0a030; --on-warn:#1a1204; --danger:#c4363c; --note:#d8a657; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  body { margin:0; background:var(--bg); color:#fff; font:16px/1.4 system-ui,sans-serif;
+  body { margin:0; background:var(--bg) radial-gradient(900px 380px at 50% -140px, #1c2644, transparent 70%) no-repeat; color:#fff; font:16px/1.4 system-ui,sans-serif;
          padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
-  header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:var(--panel); position:sticky; top:0; z-index:2; }
+  header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:linear-gradient(#22242d, #191a20); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
   header h1 { font-size:15px; margin:0; flex:1; min-width:0; color:var(--dim); font-weight:600; letter-spacing:.06em; }
   /* The title is the setup's name, and the way to its file: save it, open another. */
   #setupBtn { font:inherit; color:inherit; letter-spacing:inherit; background:none; border:0; padding:8px 0; max-width:100%;
@@ -110,12 +110,18 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .dlg .head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
   .dlg .head .cur { flex:1; margin:0; }
   .dlg .head button { border:0; border-radius:10px; padding:11px 16px; font-size:15px; font-weight:700; background:var(--row); color:#fff; }
-  #panic { background:var(--danger); color:#fff; border:0; border-radius:8px; padding:10px 16px; font-weight:700; font-size:14px; }
+  #panic { background:linear-gradient(#e2474e, #b92b32); box-shadow:0 2px 12px #c4363c66; color:#fff; border:0; border-radius:8px; padding:10px 16px; font-weight:800; font-size:14px; letter-spacing:.04em; }
   .input { margin:14px 12px 22px; }
-  .now { background:var(--panel); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
-  .now .name { font-size:12px; color:var(--dim); letter-spacing:.08em; font-weight:700; }
+  /* Each keyboard has a colour of its own (--accent, set on its .input): its
+     number, its program in play, its sliders and buttons all wear it, so the
+     eye knows whose controls a thumb is on. color-mix is the newer browsers'
+     way to a tint; the plain colour before it is what an old tablet gets. */
+  .now { background:var(--panel); background:linear-gradient(115deg, color-mix(in srgb, var(--accent) 24%, var(--panel)), var(--panel) 60%);
+         border-left:5px solid var(--accent); border-radius:14px; padding:16px 18px; margin-bottom:10px; }
+  .now .name { font-size:12px; color:var(--accent); letter-spacing:.14em; font-weight:800; }
   .now .prog { display:flex; align-items:baseline; gap:12px; margin-top:4px; }
-  .now .num { font-size:34px; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .now .num { font-size:46px; line-height:1; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums;
+              text-shadow:0 0 24px color-mix(in srgb, var(--accent) 50%, transparent); }
   .now .title { font-size:22px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
                 flex:1; min-width:0; }
   /* The plugin's interface, reachable from the header rather than from the slot
@@ -126,6 +132,8 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
               letter-spacing:.04em; align-self:center; }
   .now .gui:active { background:var(--accent); color:var(--on-accent); }
   .now .gui:disabled { opacity:.6; }
+  .now .title { font-size:26px; font-weight:800; }
+  .now .gui { background:var(--raise); border:1px solid var(--border); }
   /* An audio input's meter: two bars on a dB scale, and a clip mark that stays
      lit a moment, so a hot microphone is seen from the stand. */
   .meter { display:flex; align-items:center; gap:6px; margin-top:10px; }
@@ -160,11 +168,16 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   button.p { background:var(--row); color:#fff; border:0; border-radius:10px; padding:14px 12px; text-align:left;
              font-size:15px; display:flex; gap:10px; align-items:baseline; min-height:56px; }
   button.p .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700; font-size:13px; }
-  button.p.on { background:var(--accent); color:var(--on-accent); }
+  button.p.on { background:var(--accent); background:linear-gradient(160deg, color-mix(in srgb, var(--accent) 78%, #fff), var(--accent));
+                box-shadow:0 4px 18px color-mix(in srgb, var(--accent) 42%, transparent); color:var(--on-accent); font-weight:700; }
+  button.p:active { transform:scale(.97); }
   button.p.on .n { color:var(--on-accent); }
-  .knobs { padding:4px 12px 10px; }
-  .kslot { margin-top:8px; }
-  .kname { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin:0 0 4px; }
+  .knobs { padding:0; }
+  .knobs:empty { display:none; }
+  /* The instrument in play: its name, its sound, its buttons and its knobs in one card. */
+  .kslot { margin-top:10px; background:var(--panel); border-radius:14px; padding:12px 16px 14px;
+           border-top:2px solid var(--accent); border-top-color:color-mix(in srgb, var(--accent) 60%, transparent); }
+  .kname { color:#fff; font-size:16px; font-weight:800; margin:0 0 10px; }
   /* A knob is its whole name over its slider, and as many side by side as the
      screen has room for: one row each was a name cut to a few letters beside
      a slider the width of a tablet. */
@@ -172,7 +185,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .knob { display:grid; grid-template-columns:1fr auto; grid-template-areas:"n v" "s s"; align-items:end; gap:0 10px; padding:6px 0 2px; min-width:0; }
   .knob .kn { grid-area:n; color:#fff; font-size:14px; font-weight:600; line-height:1.2; overflow-wrap:anywhere;
               display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-  .knob .kv { grid-area:v; color:var(--dim); font-size:13px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .knob .kv { grid-area:v; color:var(--accent); font-size:13px; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .knob input[type=range], .knob .ksw { grid-area:s; }
   .knob.off { opacity:.4; }
   /* The instrument's buttons: on or off, each big enough for a thumb, above the knobs. */
@@ -182,14 +195,27 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .kbtns button.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:6px 0; margin:3px 0; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#fff; width:100%; }
   .knob .ksw.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
-  .kname { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .kname { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .kinst { font:inherit; font-size:13px; text-transform:none; letter-spacing:0; padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#fff; }
   .kinst.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   .kinst:disabled { opacity:.4; }
-  .kpage { margin-left:auto; display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:0; }
+  .kinst.snd { border-radius:999px; padding:9px 16px; font-weight:800; color:var(--accent); border-color:var(--accent);
+               background:var(--raise); background:color-mix(in srgb, var(--accent) 16%, var(--raise)); }
+  .kinst.snd:active { background:var(--accent); color:var(--on-accent); }
+  .kpage { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--dim); }
   .kpage button { font:inherit; font-size:15px; padding:8px 16px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#fff; }
   .kpage button:disabled { opacity:.3; }
-  .knob input[type=range] { width:100%; height:34px; margin:0; accent-color:var(--accent); touch-action:pan-y; }
+  /* A slider drawn for a thumb: a thick track filled to where it is (--p, kept
+     by the script), and a thumb that can be found without looking twice. */
+  .knob input[type=range] { -webkit-appearance:none; appearance:none; width:100%; height:36px; margin:0; background:none; touch-action:pan-y; --p:0%; }
+  .knob input[type=range]::-webkit-slider-runnable-track { height:10px; border-radius:5px; background:linear-gradient(to right, var(--accent) var(--p), var(--raise) var(--p)); }
+  .knob input[type=range]::-moz-range-track { height:10px; border-radius:5px; background:var(--raise); }
+  .knob input[type=range]::-moz-range-progress { height:10px; border-radius:5px; background:var(--accent); }
+  .knob input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:24px; height:24px; margin-top:-7px; border-radius:50%; background:#fff; border:0;
+                                                   box-shadow:0 0 0 4px #5aa9ff55, 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
+  .knob input[type=range]::-moz-range-thumb { width:24px; height:24px; border-radius:50%; background:#fff; border:0;
+                                              box-shadow:0 0 0 4px #5aa9ff55, 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
+  .knob input[type=range]:disabled { opacity:.5; }
   /* Tempo lives in the header beside PANIC: it is worth a glance and a tap, not
      a band across the top of the screen. */
   .hdr { display:flex; align-items:center; gap:8px; }
@@ -205,7 +231,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .tabs { display:flex; margin:10px 12px 0; padding:4px; background:var(--panel); border-radius:12px; }
   .tabs button { flex:1; background:none; color:var(--dim); border:0; border-radius:9px;
                  padding:11px; font-size:14px; font-weight:800; letter-spacing:.04em; }
-  .tabs button.on { background:var(--raise); color:#fff; }
+  .tabs button.on { background:var(--raise); color:#fff; box-shadow:inset 0 -3px 0 var(--accent); }
   #controls { padding:8px 12px 24px; }
   /* Lists -- the controls, a plugin's sounds, the setup files -- are one panel
      per group with hairlines between rows, not a stack of separate boxes. */
@@ -215,6 +241,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   #controls .crow .what { color:var(--accent); font-weight:600; text-align:right; }
   #controls .crow.unset { color:var(--dim); }
   #controls .crow.unset .what { color:var(--faint); font-weight:400; }
+  #controls .crow:not(.unset):not(button) { box-shadow:inset 4px 0 0 var(--accent); font-weight:600; }
   #controls button.crow { width:100%; background:none; border-left:0; border-right:0; border-bottom:0; color:var(--dim); font:inherit; font-size:15px; text-align:left; }
   #controls button.crow .what { color:var(--dim); font-weight:400; }
   #controls .hint { color:var(--dim); font-size:12px; margin:12px 4px 0; }
@@ -281,7 +308,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .song .bpm { color:var(--dim); font-size:13px; font-weight:700; }
 
   /* The one you are on. */
-  .song.on { background:var(--accent); color:var(--on-accent); padding:18px 16px; }
+  .song.on { background:var(--accent); background:linear-gradient(135deg, #86c1ff, #4c98f3); box-shadow:0 6px 26px #5aa9ff55; color:var(--on-accent); padding:18px 16px; }
   .song.on .n, .song.on .bpm { color:var(--on-accent); }
   .song.on .t { font-size:26px; font-weight:800; }
   .song.on .parts { color:var(--on-accent); }
@@ -304,6 +331,8 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .otherhead { color:var(--dim); font-size:11px; font-weight:800; letter-spacing:.1em;
                margin:18px 0 8px; }
   .parts { font-size:13px; color:var(--dim); margin-top:4px; }
+  .parts b { font-weight:700; }
+  .song.on .parts b { color:inherit !important; }
   .notes { font-size:14px; color:var(--note); margin-top:4px; font-style:italic; }
   .notes .key { font-style:normal; font-weight:700; padding:3px 9px; border-radius:8px; background:#d8a65722;
                 border:1px solid #d8a65766; cursor:pointer; }
@@ -325,6 +354,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
                  padding:20px; font-size:17px; font-weight:800; letter-spacing:.04em; }
   .step button:active { background:var(--accent); color:var(--on-accent); }
   .step button:disabled { opacity:.35; }
+  .step button { border:1px solid var(--border); background:linear-gradient(var(--raise), var(--row)); }
 
   .empty { color:var(--dim); font-size:15px; padding:20px 4px; line-height:1.5; }
 
@@ -581,6 +611,7 @@ async function openSounds(input, slot) {
   sndCtx = { input: input, slot: slot, program: d.program, plugin: d.plugin, current: d.current || "", sounds: (d.sounds || []).map(c => Object.assign(c, { group: c.group || [] })), at: [] };
   const now = sndCtx.sounds.find(c => c.name === sndCtx.current); if (now) sndCtx.at = now.group;     // opens where the sound playing now is
   document.getElementById("sndName").textContent = d.plugin;
+  snd.style.setProperty("--accent", hue(input));
   document.getElementById("sndFind").value = "";
   drawSounds();
   snd.style.display = "flex";
@@ -592,6 +623,10 @@ snd.onclick = (e) => { if (e.target === snd) { snd.style.display = "none"; sndCt
 let lastState = null;
 let editMode = false;        // the Set list tab in its editing dress: build and reorder set lists from the stand
 const filters = {};          // input index -> chosen group, "" for all
+/* A colour per keyboard, in the order the setup lists them: whose program,
+   whose sliders, whose line in a song, known by colour before it is read. */
+const HUES = ["#5aa9ff", "#b78cff", "#35d0b5", "#ffb454", "#ff7aa8", "#9bd35a"];
+const hue = i => HUES[(i >= 0 ? i : 0) % HUES.length];
 
 /* Which tab is showing. Remembered per device: someone building a set works in
    Programs, someone playing a gig works in the set list, and neither should
@@ -1096,8 +1131,13 @@ function renderSets(s) {
        the same name apart, which a list of captures tends to produce. */
     if (sg.parts && sg.parts.length) {
       const pl = document.createElement("div"); pl.className = "parts";
-      pl.textContent = sg.parts.map(x => x.input + ": " + String(x.program).padStart(3, "0")
-                                      + (x.name ? " " + x.name : "")).join("  \u00b7  ");
+      sg.parts.forEach((x, n) => {
+        if (n) pl.appendChild(document.createTextNode("  \u00b7  "));
+        const who = document.createElement("b"); who.textContent = x.input;
+        who.style.color = hue(s.inputs.findIndex(inp => inp.name === x.input));
+        pl.appendChild(who);
+        pl.appendChild(document.createTextNode(": " + String(x.program).padStart(3, "0") + (x.name ? " " + x.name : "")));
+      });
       body.appendChild(pl);
     }
     /* The key, and the stage notes. The key is a chip: tap it to change the
@@ -1306,6 +1346,7 @@ function render(s) {
   s.inputs.forEach((inp, i) => {
     if (inp.track) return;
     const wrap = document.createElement("div"); wrap.className = "input";
+    wrap.style.setProperty("--accent", hue(i));
     const now = document.createElement("div"); now.className = "now";
     now.innerHTML = '<div class="name"></div><div class="prog"><span class="num"></span><span class="title"></span></div>';
     now.querySelector(".name").textContent = inp.name.toUpperCase();
@@ -1428,7 +1469,7 @@ async function loadPanel(i) {
       });
     } else title.textContent = data.instrument || "";
     if (data.sounds) {
-      const sb = document.createElement("button"); sb.className = "kinst"; sb.textContent = "Sounds\u2026";
+      const sb = document.createElement("button"); sb.className = "kinst snd"; sb.textContent = "\u266A Sounds\u2026";
       sb.title = "Choose one of this plugin's sounds";
       sb.onclick = () => openSounds(i, data.slot);
       title.appendChild(sb);
@@ -1485,6 +1526,7 @@ async function loadPanel(i) {
       r.oninput = () => {
         pending = (r.value / 1000).toFixed(3);
         row.querySelector(".kv").textContent = k.id === "level" ? dbText(r.value / 1000) : k.id === "pan" ? panText(r.value / 1000) : Math.round(r.value / 10) + "%";
+        r.style.setProperty("--p", r.value / 10 + "%");
         if (!timer) timer = setTimeout(send, 60);
       };
       r.onpointerdown = () => { knobTouch[tkey] = true; };
@@ -1508,6 +1550,7 @@ async function loadPanel(i) {
     const r = host.querySelector('input[data-id="' + k.id + '"]');
     if (!r) return;
     r.value = Math.round(k.value * 1000);
+    r.style.setProperty("--p", r.value / 10 + "%");
     r.parentElement.querySelector(".kv").textContent = k.text;
   });
 }
