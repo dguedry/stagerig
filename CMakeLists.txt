@@ -44,6 +44,7 @@ target_include_directories(ClapHeaders INTERFACE "${_clap_include}")
 
 juce_add_binary_data(StageRigAssets
     SOURCES Resources/stagerig-512.png Resources/stagerig-256.png Resources/stagerig-64.png
+            Resources/stagerig-32.png
             docs/MANUAL.md)
 
 target_sources(StageRig PRIVATE

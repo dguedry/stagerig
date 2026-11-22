@@ -61,6 +61,9 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <title>StageRig</title>
 <style>
@@ -1741,6 +1744,9 @@ static const char* kChartHtml = R"HTML(<!DOCTYPE html>
 <meta name="theme-color" content="#000712">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <title>Chart</title>
 <style>
   :root { color-scheme: dark; }
@@ -1940,6 +1946,9 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <title>Plugin</title>
 <style>
@@ -3003,7 +3012,9 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
 
     // The app icon, so an installed web app has one. Chrome wants at least 192
     // before it will offer to install, and 512 for the splash screen.
-    if (path.startsWith ("/icon"))
+    // /favicon.ico is what a browser asks for by itself, on any page that names
+    // no icon; a PNG under that name is taken by all of them.
+    if (path.startsWith ("/icon") || path.startsWith ("/favicon"))
     {
         const void* src = BinaryData::stagerig256_png;
         int srcSize = BinaryData::stagerig256_pngSize;
@@ -3013,6 +3024,12 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         {
             src = BinaryData::stagerig512_png;
             srcSize = BinaryData::stagerig512_pngSize;
+        }
+        else if (path.startsWith ("/icon-32") || path.startsWith ("/favicon"))
+        {
+            // Drawn at this size, not scaled: a browser tab shows it at 16 or 32.
+            src = BinaryData::stagerig32_png;
+            srcSize = BinaryData::stagerig32_pngSize;
         }
         else if (path.startsWith ("/icon-192"))
         {
