@@ -95,6 +95,7 @@ struct Engine::SlotRuntime : public PluginNode
     /** The General MIDI player: the synth lives here instead of in a process. */
     bool isGm = false;
     std::unique_ptr<GmSynth> gm;                 // set by the loader, swapped under the lock
+    juce::File gmSoundfont;                      // its own soundfont; File() for the rig's (message thread)
     std::atomic<int> gmProgram[16], gmVolume[16], gmPan[16];
     std::atomic<bool> gmMuted[16];
     std::atomic<bool> gmDirty { true };          // its mixer changed: tell the synth
@@ -3963,6 +3964,7 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
     else if (def.isGm())
     {
         slot->isGm = true;
+        slot->gmSoundfont = def.gmSoundfont.isNotEmpty() && File::isAbsolutePath (def.gmSoundfont) ? File (def.gmSoundfont) : File();
         slot->gmMidi.ensureSize (32768);
         queueGmLoad (*slot);
     }
@@ -4023,7 +4025,16 @@ void Engine::queueGmLoad (SlotRuntime& slot)
     job.sampleRate = sampleRate;
     job.blockSize = blockSize;
     job.gm = true;
-    job.soundfont = GmSynth::findSoundfont (getGmSoundfont());
+    // Its own soundfont; one that is not there (another computer) gives way to the rig's, and says so.
+    if (slot.gmSoundfont.existsAsFile())
+        job.soundfont = slot.gmSoundfont;
+    else
+    {
+        job.soundfont = GmSynth::findSoundfont (getGmSoundfont());
+        if (slot.gmSoundfont != File() && job.soundfont != File())
+            listeners.call ([&] (Listener& l) { l.statusMessage ("Soundfont " + slot.gmSoundfont.getFileName() + " is not on this computer: playing "
+                                                                 + job.soundfont.getFileName() + " instead"); });
+    }
     {
         std::lock_guard<std::mutex> l (loaderMutex);
         loadQueue.push_back (std::move (job));
@@ -4418,6 +4429,22 @@ bool Engine::addGmSlot (int inputIndex, int program)
     }
     notifyContent (inputIndex, program);
     return true;
+}
+
+void Engine::setGmSlotSoundfont (int inputIndex, int program, int slotIndex, const File& f)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size() || ! def.slots[(size_t) slotIndex].isGm()) return;
+    def.slots[(size_t) slotIndex].gmSoundfont = f == File() ? String() : f.getFullPathName();
+    if (auto* rt = getLoaded (inputIndex, program))
+        if (slotIndex < (int) rt->slots.size())
+        {
+            auto& s = *rt->slots[(size_t) slotIndex];
+            s.gmSoundfont = f;
+            queueGmLoad (s);       // the old one plays until the new one is read
+        }
+    notifyContent (inputIndex, program);
 }
 
 void Engine::setGmChannel (int inputIndex, int program, int slotIndex, int channel, const SlotDef::GmChannel& c)

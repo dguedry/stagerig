@@ -4369,6 +4369,35 @@ int main()
             const float gmAfter = levels (8)[0];
             std::printf ("     after stopping the GM player: %.5f\n", gmAfter);
             CHECK (gmAfter < 1e-3f);
+
+            /* A soundfont of this player's own: it is read in place of the
+               rig's and sounds different; one that is not on this computer
+               gives way to the rig's and still plays; none again is as before. */
+            File other;
+            for (const auto& f : GmSynth::installedSoundfonts ({}))
+                if (f.getSize() != GmSynth::findSoundfont().getSize() && f.getFileName().containsIgnoreCase ("GM")) { other = f; break; }   // not a link to the usual one
+            if (other == File())
+                std::printf ("     skip own-soundfont check (only one General MIDI soundfont here)\n");
+            else
+            {
+                engine.setGmSlotSoundfont (track, trackProg, 0, other);
+                CHECK (trackProgram().slots[0].gmSoundfont == other.getFullPathName());
+                CHECK (waitReady()); settle();
+                const float own = playAndStop (24);
+                std::printf ("     its own soundfont (%s): %.3f\n", other.getFileName().toRawUTF8(), own);
+                CHECK (own > 0.01f && std::abs (own - gmLevel) > 1e-4f);
+
+                engine.setGmSlotSoundfont (track, trackProg, 0, File ("/nowhere/Not Here.sf2"));
+                CHECK (waitReady()); settle();
+                const float fallback = playAndStop (24);
+                std::printf ("     a soundfont that is not here: %.3f\n", fallback);
+                CHECK (engine.isPluginAlive (track, trackProg, 0) && std::abs (fallback - gmLevel) < 1e-4f);
+                CHECK (trackProgram().slots[0].gmSoundfont == "/nowhere/Not Here.sf2");      // kept, for the computer that has it
+
+                engine.setGmSlotSoundfont (track, trackProg, 0, File());
+                CHECK (waitReady()); settle();
+                CHECK (trackProgram().slots[0].gmSoundfont.isEmpty() && std::abs (playAndStop (24) - gmLevel) < 1e-4f);
+            }
         }
         CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);    // the file's program change is not Upper's business
 

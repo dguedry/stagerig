@@ -180,7 +180,7 @@ public:
 
         addAndMakeVisible (targetLabel);
         targetLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-        targetLabel.setColour (juce::Label::textColourId, perf::theme::amber);
+        targetLabel.setColour (juce::Label::textColourId, perf::theme::heading);
 
         addChildComponent (chBtn);
         chBtn.setTooltip ("Which of the input's channels these keys play on, and so which instrument. Clicking an instrument above chooses it too.");

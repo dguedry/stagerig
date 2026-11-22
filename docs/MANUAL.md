@@ -152,15 +152,21 @@ right-click for **Copy** and **Copy this whole section**.
 **New** starts an empty setup, and asks first when the current one has unsaved
 changes. **Open...** opens a setup file.
 
-**Options** holds the things set once, in four groups. *Keyboards and
+**Options** holds the things set once, in five groups. *Keyboards and
 pedals*: **Your keyboards...** (what is connected and how StageRig talks to
 each), **Pedals and buttons** (the Controls panel's Everywhere tab, below
 the instruments) and **Rescan MIDI devices**. *Playing*: **Preload all programs** and **Let
 held notes ring through a program change**. *Sound and sync*: **Outputs &
 master effects...**, **General MIDI sounds...**, **Send MIDI clock to** and
 **Ableton Link**. *The show*: **Pre-show check...**, **Print the program
-list...** and **Record the gig**. Each is
+list...** and **Record the gig**. *The look*: **Colours**. Each is
 explained where it matters below.
+
+**Options ▸ Colours** chooses how StageRig looks: **Calm** (nearly black,
+soft blue, amber only on what is live now), **Vivid** (deep blue and bright
+amber, as in the StageRig picture) or **Classic** (plain dark grey with one
+blue). The tablet takes the new colours the next time its page is opened;
+the computer's own window takes them the next time StageRig starts.
 
 Starting up is simple: StageRig comes back on the same song, scene, programs,
 tempo, chosen input and knob page, in the same window, and a keyboard switched on
@@ -444,7 +450,13 @@ such pages: StageRig picks from the parameters the plugin shows, and
   **Sound...** on the instrument picks the one it plays -- a piano, strings, a
   kit on channel 10 -- or leaves it *as the notes say*, which lets program
   changes in the notes choose: what a MIDI file's parts do (see *Backing
-  tracks*). A quick sound with nothing to install.
+  tracks*). A quick sound with nothing to install. **Sound... ▸ Soundfont**
+  chooses the file those sounds come from, for this player alone: the rig's
+  usual one (**Options ▸ General MIDI sounds**), any other soundfont on the
+  computer, or a file you pick. So one program can have FluidR3's piano and
+  another a drum kit from a different soundfont. Each different soundfont
+  in use takes its own memory. Open the setup on a computer that lacks the
+  file and the player uses the usual one, and says so.
 - **Another keyboard's program** -- the notes go to one of that input's
   programs by name (*Upper: Big Strings*), kept loaded and playing beside
   whatever Upper itself is on; or to **whatever that keyboard is playing**.
@@ -2232,6 +2244,7 @@ problem, include the log and say what you were doing and when.
 | `~/.config/StageRig/mapping-templates.json` | Your saved per-plugin mapping templates. |
 | `~/.config/StageRig/Knob layouts/` | Your knob layouts, one `*.stagerig-controls` file each: import and export them from an instrument's **Knobs** button. |
 | `~/.config/StageRig/icons/` | Cached plugin icons. |
+| `~/.config/StageRig/Looks/` | Colours of your own, if you want them: see below. |
 | `~/.config/StageRig/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |
 | your `*.stagerig.json` | Your setup. Keep it wherever you like. |
 | `<your setup>.charts/` beside it | The songs' charts and backing-track files, copied in when you add them, so the setup and its files travel together. An edited MIDI file keeps its first version here as `<name>.orig.mid`. |
@@ -2240,6 +2253,21 @@ The General MIDI player is FluidSynth (*libfluidsynth3*, Fedora's
 *fluidsynth-libs*) with the soundfont your distribution installs
 (*fluid-soundfont-gm*); **Options ▸ General MIDI sounds (soundfont file)...**
 chooses another, such as GeneralUser GS.
+
+To make a look of your own, put a text file in the `Looks` folder, named as
+it should appear under **Options ▸ Colours** (`Dusk.txt`), with a line for
+each colour you change:
+
+    from Vivid
+    accent #35d0b5
+    amber  #ffb000
+
+`from` names the look to start from (Calm if left out). The colours are
+`bgDark`, `bgPanel`, `bgRow`, `bgRaised`, `bgPane`, `bgPaneRow`, `border`,
+`accent`, `accentDim`, `amber`, `amberDim`, `gold`, `text`, `textDim`,
+`selected` (the row chosen in a list) and `heading`; `glow yes` puts the
+soft light behind the tablet's header. A line StageRig cannot read is left
+out, never an error.
 
 Advanced options can be set in `StageRig.settings`: `parallelLoads` (how many
 plugins load at once; default half the machine's threads, 4 to 12),

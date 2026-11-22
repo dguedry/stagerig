@@ -85,6 +85,23 @@ File GmSynth::findSoundfont (const File& preferred)
     return {};
 }
 
+Array<File> GmSynth::installedSoundfonts (const File& settingsFolder)
+{
+    Array<File> found;
+    for (const auto& dir : { File ("/usr/share/sounds/sf2"), File ("/usr/share/soundfonts"), File ("/usr/share/sounds/sf3"),
+                             File::getSpecialLocation (File::userHomeDirectory).getChildFile (".local/share/sounds/sf2"),
+                             File::getSpecialLocation (File::userHomeDirectory).getChildFile (".local/share/soundfonts"),
+                             settingsFolder.getChildFile ("Soundfonts") })
+        for (const auto& f : dir.findChildFiles (File::findFiles, false, "*.sf2;*.sf3"))
+        {
+            bool seen = false;       // one folder is often a link to the other, and default-GM a link to the real one
+            for (const auto& g : found) seen = seen || g.getFileName() == f.getFileName() || g.getLinkedTarget() == f.getLinkedTarget();
+            if (! seen) found.add (f);
+        }
+    std::sort (found.begin(), found.end(), [] (const File& a, const File& b) { return a.getFileName().compareIgnoreCase (b.getFileName()) < 0; });
+    return found;
+}
+
 String GmSynth::unavailableReason (const File& preferred)
 {
     if (! isAvailable())

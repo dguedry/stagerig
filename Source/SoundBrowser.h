@@ -118,7 +118,7 @@ private:
     void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool selected) override
     {
         if (row < 0 || row >= (int) rows.size()) return;
-        g.fillAll (selected ? theme::amberDim : (row % 2 == 0 ? theme::bgDark : theme::bgDark.brighter (0.03f)));
+        g.fillAll (selected ? theme::selected : (row % 2 == 0 ? theme::bgDark : theme::bgDark.brighter (0.03f)));
         const auto& r = rows[(size_t) row];
         if (r.sound < 0)
         {

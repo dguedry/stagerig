@@ -576,6 +576,8 @@ public:
     bool addGmSlot (int inputIndex, int program);
     /** The GM player's mixer for one channel: instrument, volume, pan, mute over the file's. */
     void setGmChannel (int inputIndex, int program, int slot, int channel, const SlotDef::GmChannel&);
+    /** The soundfont one General MIDI player reads; File() for the rig's usual one. It is read again at once. */
+    void setGmSlotSoundfont (int inputIndex, int program, int slot, const juce::File&);
     /** Another input's sounds: the slot's notes go to that input's current program. */
     /** An instrument that is another input's sounds: its program number
         `targetProgram`, or whatever that input is playing (-1). */

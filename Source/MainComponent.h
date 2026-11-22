@@ -40,6 +40,8 @@ public:
     void openPluginEditor (int inputIndex, int program, int slot, int effect = -1);
 
     void showStatus (const juce::String&);
+    /** A file chooser for one General MIDI player's own soundfont. */
+    void chooseSlotSoundfont (int inputIndex, int program, int slot);
     /** Marks the setup as changed so the periodic autosave picks it up. */
     void markDirty()                        { dirty = true; }
     /** ARA-only plugins need an ARA host; they may show an empty editor and can hang. */

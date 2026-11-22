@@ -161,6 +161,9 @@ struct SlotDef
         bool isDefault() const { return program < 0 && volume < 0 && pan < 0 && ! muted; }
     };
     std::array<GmChannel, 16> gmChannels {};
+    /** The soundfont this player reads, as a full path; empty for the rig's
+        usual one (Options). A file that is not there falls back to that one. */
+    juce::String gmSoundfont;
 
     // An external instrument ----------------------------------------------------
     juce::String midiOutIdentifier, midiOutName;   // the port it plays through

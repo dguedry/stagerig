@@ -11,6 +11,7 @@
 #include <thread>
 #include <fcntl.h>
 #include "BinaryData.h"
+#include "Theme.h"
 #include <juce_graphics/juce_graphics.h>
 
 #if JUCE_LINUX || JUCE_MAC
@@ -73,11 +74,13 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   :root { --bg:#000712; --panel:#001025; --row:#0d1c33; --raise:#00224b; --line:#10233d; --border:#1a3555;
           --accent:#0087fc; --on-accent:#000712; --text:#faf4eb; --dim:#9aa9bc; --faint:#5d7391;
           --amber:#f08a14; --on-amber:#000712; --gold:#cea04a;
-          --ok:#2fbf71; --on-ok:#06180d; --warn:#e0a030; --on-warn:#1a1204; --danger:#c4363c; --note:#cea04a; }
+          --ok:#2fbf71; --on-ok:#06180d; --warn:#e0a030; --on-warn:#1a1204; --danger:#c4363c; --note:#cea04a; --track:#2a4a75;
+          --glow-a:#0087fc3d; --glow-b:#f08a1433; }
+  /*LOOK*/
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  body { margin:0; background:radial-gradient(700px 360px at 12% -140px, #0087fc3d, transparent 70%) no-repeat, radial-gradient(700px 360px at 88% -140px, #f08a1433, transparent 70%) no-repeat, var(--bg); color:#faf4eb; font:16px/1.4 system-ui,sans-serif;
+  body { margin:0; background:radial-gradient(700px 360px at 12% -140px, var(--glow-a), transparent 70%) no-repeat, radial-gradient(700px 360px at 88% -140px, var(--glow-b), transparent 70%) no-repeat, var(--bg); color:var(--text); font:16px/1.4 system-ui,sans-serif;
          padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
-  header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:linear-gradient(#0d1c33, #001025); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
+  header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:linear-gradient(var(--row), var(--panel)); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
   header h1 { font-size:15px; margin:0; flex:1; min-width:0; color:var(--dim); font-weight:600; letter-spacing:.06em; }
   /* The title is the setup's name, and the way to its file: save it, open another. */
   #setupBtn { font:inherit; color:inherit; letter-spacing:inherit; background:none; border:0; padding:8px 0; max-width:100%;
@@ -86,21 +89,21 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   #setupBtn::after { content:"\25BE"; color:var(--amber); flex:none; }
   @media (max-width:480px) { header { gap:8px; padding:12px; } #tap i { display:none; } }
   .dlg { display:none; position:fixed; inset:0; z-index:5; background:rgba(0,0,0,.6); align-items:flex-start; justify-content:center; padding:60px 14px 14px; }
-  .dlg .box { background:var(--panel); border-radius:14px; width:100%; max-width:460px; max-height:calc(100vh - 80px); overflow:auto; padding:16px; scrollbar-color:#1a3555 transparent; }
+  .dlg .box { background:var(--panel); border-radius:14px; width:100%; max-width:460px; max-height:calc(100vh - 80px); overflow:auto; padding:16px; scrollbar-color:var(--border) transparent; }
   .dlg h2 { font-size:12px; color:var(--dim); letter-spacing:.08em; margin:0 0 4px; }
   .dlg .cur { font-size:19px; font-weight:700; margin:0 0 12px; overflow-wrap:anywhere; }
   .dlg .acts { display:flex; gap:8px; margin-bottom:16px; }
-  .dlg .acts button { flex:1; border:0; border-radius:10px; padding:14px 8px; font-size:16px; font-weight:700; background:var(--row); color:#faf4eb; }
+  .dlg .acts button { flex:1; border:0; border-radius:10px; padding:14px 8px; font-size:16px; font-weight:700; background:var(--row); color:var(--text); }
   .dlg .acts button.go { background:var(--accent); color:var(--on-accent); }
   .dlg .acts button:disabled { opacity:.4; }
   .dlg .list { background:var(--row); border-radius:12px; overflow:hidden; }
   .dlg .list:empty { display:none; }
-  .dlg .file { display:flex; align-items:baseline; gap:10px; width:100%; text-align:left; border:0; border-top:1px solid var(--line); background:none; color:#faf4eb;
+  .dlg .file { display:flex; align-items:baseline; gap:10px; width:100%; text-align:left; border:0; border-top:1px solid var(--line); background:none; color:var(--text);
                  padding:14px 14px; font-size:16px; }
   .dlg .list > .file:first-child, .dlg .ghead + .file { border-top:0; }
   .dlg .file b { flex:1; font-weight:500; overflow-wrap:anywhere; }
   .dlg .file i { font-style:normal; color:var(--dim); font-size:12px; white-space:nowrap; }
-  .dlg .file.on { background:#0087fc1f; box-shadow:inset 4px 0 0 var(--accent); }
+  .dlg .file.on { background:color-mix(in srgb, var(--accent) 12%, transparent); box-shadow:inset 4px 0 0 var(--accent); }
   .dlg .file.on b { color:var(--accent); font-weight:700; }
   .dlg .ghead { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:14px 14px 6px; background:var(--panel); }
   .dlg .list > .ghead:first-child { padding-top:4px; }
@@ -112,11 +115,11 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .dlg .note { color:var(--dim); font-size:13px; margin:10px 0 0; }
   .dlg .file { flex-wrap:wrap; }
   .dlg .file small { flex-basis:100%; color:var(--dim); font-size:12px; font-weight:400; margin-top:2px; }
-  .dlg .find { width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:#faf4eb; margin-bottom:8px; }
+  .dlg .find { width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:var(--text); margin-bottom:8px; }
   .dlg .head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
   .dlg .head .cur { flex:1; margin:0; }
-  .dlg .head button { border:0; border-radius:10px; padding:11px 16px; font-size:15px; font-weight:700; background:var(--row); color:#faf4eb; }
-  #panic { background:linear-gradient(#e2474e, #b92b32); box-shadow:0 2px 12px #c4363c66; color:#faf4eb; border:0; border-radius:8px; padding:10px 16px; font-weight:800; font-size:14px; letter-spacing:.04em; }
+  .dlg .head button { border:0; border-radius:10px; padding:11px 16px; font-size:15px; font-weight:700; background:var(--row); color:var(--text); }
+  #panic { background:linear-gradient(#e2474e, #b92b32); box-shadow:0 2px 12px #c4363c66; color:var(--text); border:0; border-radius:8px; padding:10px 16px; font-weight:800; font-size:14px; letter-spacing:.04em; }
   .input { margin:14px 12px 22px; }
   /* Each keyboard has a colour of its own (--accent, set on its .input): its
      number, its program in play, its sliders and buttons all wear it, so the
@@ -133,7 +136,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   /* The plugin's interface, reachable from the header rather than from the slot
      rows further down: this is the one you want mid-set. Pushed to the right so
      it never crowds the program name, which is what the eye comes here for. */
-  .now .gui { margin-left:auto; flex:none; background:var(--row); color:#faf4eb; border:0;
+  .now .gui { margin-left:auto; flex:none; background:var(--row); color:var(--text); border:0;
               border-radius:10px; padding:10px 16px; font-size:13px; font-weight:800;
               letter-spacing:.04em; align-self:center; }
   .now .gui:active { background:var(--accent); color:var(--on-accent); }
@@ -144,10 +147,10 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
      lit a moment, so a hot microphone is seen from the stand. */
   .meter { display:flex; align-items:center; gap:6px; margin-top:10px; }
   .meter .bars { flex:1; display:flex; flex-direction:column; gap:3px; }
-  .meter i { display:block; height:6px; background:#000712; border-radius:3px; overflow:hidden; }
+  .meter i { display:block; height:6px; background:var(--bg); border-radius:3px; overflow:hidden; }
   .meter i span { display:block; height:100%; width:0; border-radius:3px;
                   background:linear-gradient(to right, #4fb86a 0 80%, var(--note) 80% 95%, #e04a4a 95%); background-size:100% 100%; }
-  .meter b { flex:none; width:10px; height:15px; border-radius:3px; background:#1a3555; }
+  .meter b { flex:none; width:10px; height:15px; border-radius:3px; background:var(--border); }
   .meter.clip b { background:#ff3b3b; }
 
   /* Choosing between the instruments of a split. A sheet, not a dropdown: this
@@ -159,7 +162,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
                  max-width:420px; display:flex; flex-direction:column; gap:8px; }
   .sheet .sheet-title { color:var(--dim); font-size:12px; font-weight:700;
                         letter-spacing:.08em; text-transform:uppercase; padding:4px 4px 6px; }
-  .sheet button { background:var(--row); color:#faf4eb; border:0; border-radius:12px;
+  .sheet button { background:var(--row); color:var(--text); border:0; border-radius:12px;
                   padding:16px; font-size:16px; font-weight:700; text-align:left; }
   .sheet button.cancel { background:none; color:var(--dim); text-align:center; font-size:15px; }
   .sheet .part { display:flex; align-items:center; gap:8px; background:var(--row); border-radius:12px; padding:10px 12px; }
@@ -171,10 +174,10 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .sheet .part.muted .who { opacity:.45; }
   .loading { color:var(--note); font-size:14px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
-  button.p { background:var(--row); color:#faf4eb; border:0; border-radius:10px; padding:14px 12px; text-align:left;
+  button.p { background:var(--row); color:var(--text); border:0; border-radius:10px; padding:14px 12px; text-align:left;
              font-size:15px; display:flex; gap:10px; align-items:baseline; min-height:56px; }
   button.p .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700; font-size:13px; }
-  button.p.on { background:var(--accent); background:linear-gradient(160deg, color-mix(in srgb, var(--accent) 78%, #faf4eb), var(--accent));
+  button.p.on { background:var(--accent); background:linear-gradient(160deg, color-mix(in srgb, var(--accent) 78%, var(--text)), var(--accent));
                 box-shadow:0 4px 18px color-mix(in srgb, var(--accent) 42%, transparent); color:var(--on-accent); font-weight:700; }
   button.p:active { transform:scale(.97); }
   button.p.on .n { color:var(--on-accent); }
@@ -183,13 +186,13 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   /* The instrument in play: its name, its sound, its buttons and its knobs in one card. */
   .kslot { margin-top:10px; background:var(--panel); border-radius:14px; padding:12px 16px 14px;
            border-top:2px solid var(--accent); border-top-color:color-mix(in srgb, var(--accent) 60%, transparent); }
-  .kname { color:#faf4eb; font-size:16px; font-weight:800; margin:0 0 10px; }
+  .kname { color:var(--text); font-size:16px; font-weight:800; margin:0 0 10px; }
   /* A knob is its whole name over its slider, and as many side by side as the
      screen has room for: one row each was a name cut to a few letters beside
      a slider the width of a tablet. */
   .kgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:4px 22px; }
   .knob { display:grid; grid-template-columns:1fr auto; grid-template-areas:"n v" "s s"; align-items:end; gap:0 10px; padding:6px 0 2px; min-width:0; }
-  .knob .kn { grid-area:n; color:#faf4eb; font-size:14px; font-weight:600; line-height:1.2; overflow-wrap:anywhere;
+  .knob .kn { grid-area:n; color:var(--text); font-size:14px; font-weight:600; line-height:1.2; overflow-wrap:anywhere;
               display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .knob .kv { grid-area:v; color:var(--accent); font-size:13px; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .knob input[type=range], .knob .ksw { grid-area:s; }
@@ -197,12 +200,12 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   /* The instrument's buttons: on or off, each big enough for a thumb, above the knobs. */
   .kbtns { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px; }
   .kbtns button { font:inherit; font-size:15px; font-weight:600; padding:12px 14px; min-width:96px; border-radius:10px;
-                  border:1px solid var(--border); background:var(--raise); color:#faf4eb; }
+                  border:1px solid var(--border); background:var(--raise); color:var(--text); }
   .kbtns button.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
-  .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:6px 0; margin:3px 0; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#faf4eb; width:100%; }
+  .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:6px 0; margin:3px 0; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:var(--text); width:100%; }
   .knob .ksw.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   .kname { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .kinst { font:inherit; font-size:13px; text-transform:none; letter-spacing:0; padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#faf4eb; }
+  .kinst { font:inherit; font-size:13px; text-transform:none; letter-spacing:0; padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:var(--text); }
   .kinst.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   .kinst:disabled { opacity:.4; }
   .kinst.snd { border-radius:999px; padding:9px 16px; font-weight:800; color:var(--accent); border-color:var(--accent);
@@ -210,7 +213,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .kinst.snd { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .kinst.snd:active { background:var(--accent); color:var(--on-accent); }
   .kpage { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--dim); }
-  .kpage button { font:inherit; font-size:15px; padding:8px 16px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#faf4eb; }
+  .kpage button { font:inherit; font-size:15px; padding:8px 16px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:var(--text); }
   .kpage button:disabled { opacity:.3; }
   /* A slider drawn for a thumb: a thick track filled to where it is (--p, kept
      by the script), and a thumb that can be found without looking twice. */
@@ -218,10 +221,10 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .knob input[type=range]::-webkit-slider-runnable-track { height:10px; border-radius:5px; background:linear-gradient(to right, var(--accent) var(--p), var(--raise) var(--p)); }
   .knob input[type=range]::-moz-range-track { height:10px; border-radius:5px; background:var(--raise); }
   .knob input[type=range]::-moz-range-progress { height:10px; border-radius:5px; background:var(--accent); }
-  .knob input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:24px; height:24px; margin-top:-7px; border-radius:50%; background:#faf4eb; border:0;
-                                                   box-shadow:0 0 0 4px #0087fc55, 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
-  .knob input[type=range]::-moz-range-thumb { width:24px; height:24px; border-radius:50%; background:#faf4eb; border:0;
-                                              box-shadow:0 0 0 4px #0087fc55, 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
+  .knob input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:24px; height:24px; margin-top:-7px; border-radius:50%; background:var(--text); border:0;
+                                                   box-shadow:0 0 0 4px var(--accent), 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
+  .knob input[type=range]::-moz-range-thumb { width:24px; height:24px; border-radius:50%; background:var(--text); border:0;
+                                              box-shadow:0 0 0 4px var(--accent), 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
   .knob input[type=range]:disabled { opacity:.5; }
   /* Tempo lives in the header beside PANIC: it is worth a glance and a tap, not
      a band across the top of the screen. */
@@ -229,7 +232,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .hdr .bpm { font-size:15px; font-weight:800; color:var(--amber);
               font-variant-numeric:tabular-nums; white-space:nowrap; }
   .hdr .bpm i { font-size:10px; color:var(--dim); font-style:normal; font-weight:600; margin-left:2px; }
-  #tap { background:var(--row); color:#faf4eb; border:0; border-radius:8px;
+  #tap { background:var(--row); color:var(--text); border:0; border-radius:8px;
          padding:9px 14px; font-size:13px; font-weight:800; letter-spacing:.04em; }
   #tap:active { background:var(--accent); color:var(--on-accent); }
 
@@ -238,7 +241,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .tabs { display:flex; margin:10px 12px 0; padding:4px; background:var(--panel); border-radius:12px; }
   .tabs button { flex:1; background:none; color:var(--dim); border:0; border-radius:9px;
                  padding:11px; font-size:14px; font-weight:800; letter-spacing:.04em; }
-  .tabs button.on { background:var(--raise); color:#faf4eb; box-shadow:inset 0 -3px 0 var(--amber); }
+  .tabs button.on { background:var(--raise); color:var(--text); box-shadow:inset 0 -3px 0 var(--amber); }
   #controls { padding:8px 12px 24px; }
   /* Lists -- the controls, a plugin's sounds, the setup files -- are one panel
      per group with hairlines between rows, not a stack of separate boxes. */
@@ -262,38 +265,38 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
      where it is among its sections. Nothing moves while it plays: a button
      that shifts under a finger mid-song is the wrong one pressed. */
   .transport { background:var(--panel); border-radius:12px; padding:10px 12px; margin-bottom:10px;
-               border-left:6px solid #2a4a75; }
+               border-left:6px solid var(--track); }
   .transport.playing  { border-left-color:var(--ok); }
   .transport.counting, .transport.vamping { border-left-color:var(--warn); }
   .transport .trow { display:flex; align-items:center; gap:12px; }
   .transport button { flex:none; border:0; border-radius:10px; padding:12px 18px; font-size:16px; font-weight:800;
-                      background:var(--row); color:#faf4eb; }
+                      background:var(--row); color:var(--text); }
   .transport button.play { min-width:118px; padding:16px 18px; font-size:18px; background:var(--ok); color:var(--on-ok); }
-  .transport button.play.running { background:var(--danger); color:#faf4eb; }
+  .transport button.play.running { background:var(--danger); color:var(--text); }
   .transport button.play:disabled { opacity:.4; }
   .transport button.vampgo { background:var(--warn); color:var(--on-warn); }
   .transport button.click { font-weight:700; color:var(--dim); }
-  .transport button.click.on { color:#faf4eb; box-shadow:inset 0 0 0 2px var(--ok); }
+  .transport button.click.on { color:var(--text); box-shadow:inset 0 0 0 2px var(--ok); }
   .transport button.parts { font-weight:700; }
   .transport .tt { flex:1; min-width:0; font-variant-numeric:tabular-nums; }
   .transport .tstate { display:flex; align-items:baseline; gap:8px; white-space:nowrap; overflow:hidden; }
   .transport .tstate b { font-size:12px; letter-spacing:.1em; color:var(--dim); flex:none; }
   .transport.playing .tstate b { color:var(--ok); }
   .transport.counting .tstate b, .transport.vamping .tstate b { color:var(--warn); }
-  .transport .tsong { font-size:17px; font-weight:800; color:#faf4eb; overflow:hidden; text-overflow:ellipsis; }
+  .transport .tsong { font-size:17px; font-weight:800; color:var(--text); overflow:hidden; text-overflow:ellipsis; }
   .transport .tpos { font-size:15px; color:var(--dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .transport .tpos em { font-style:normal; color:var(--warn); font-weight:700; }
   .tbar { position:relative; height:8px; background:var(--row); border-radius:4px; margin-top:10px; overflow:hidden; }
-  .tbar .fill { position:absolute; left:0; top:0; bottom:0; background:#2a4a75; }
+  .tbar .fill { position:absolute; left:0; top:0; bottom:0; background:var(--track); }
   .transport.playing .tbar .fill { background:var(--ok); }
   .transport.vamping .tbar .fill { background:var(--warn); }
   .tbar .tick { position:absolute; top:0; bottom:0; width:2px; background:var(--panel); }
   .tbar .tick.next { background:var(--warn); width:3px; }
   .sections { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 6px; }
-  .sections button { background:var(--row); color:#faf4eb; border:2px solid transparent; border-radius:10px;
+  .sections button { background:var(--row); color:var(--text); border:2px solid transparent; border-radius:10px;
                      padding:10px 14px; font-size:15px; font-weight:700; }
   .sections button.past { color:var(--dim); }
-  .sections button.cue { border-color:#faf4eb; }
+  .sections button.cue { border-color:var(--text); }
   .sections button.on { background:var(--ok); color:var(--on-ok); }
   .sections button.on.vamp { background:var(--warn); color:var(--on-warn); }
   .sections button.queued { border-color:var(--warn); }
@@ -306,7 +309,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 
   .song { display:flex; align-items:baseline; gap:12px; background:var(--panel);
           border-radius:12px; padding:14px 16px; margin-bottom:8px; width:100%;
-          border:0; text-align:left; color:#faf4eb; }
+          border:0; text-align:left; color:var(--text); }
   .song .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700;
              font-size:14px; min-width:24px; }
   /* Two lines for a long title before it is cut: on a phone one line holds four words. */
@@ -315,13 +318,13 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .song .bpm { color:var(--dim); font-size:13px; font-weight:700; }
 
   /* The one you are on. */
-  .song.on { background:var(--amber); background:linear-gradient(135deg, #fbb04a, #f08a14); box-shadow:0 6px 26px #f08a1455; color:var(--on-amber); padding:18px 16px; }
+  .song.on { background:var(--amber); background:linear-gradient(135deg, color-mix(in srgb, var(--amber) 72%, #fff), var(--amber)); box-shadow:0 6px 26px color-mix(in srgb, var(--amber) 33%, transparent); color:var(--on-amber); padding:18px 16px; }
   .song.on .n, .song.on .bpm { color:var(--on-accent); }
   .song.on .t { font-size:26px; font-weight:800; }
   .song.on .parts { color:var(--on-accent); }
   .find { width:100%; box-sizing:border-box; margin:0 0 12px; padding:14px 16px;
           font-size:16px; border-radius:12px; border:1px solid var(--border);
-          background:var(--panel); color:#faf4eb; }
+          background:var(--panel); color:var(--text); }
   .find:focus { outline:none; border-color:var(--accent); }
   .findrow { display:flex; gap:8px; align-items:stretch; margin-bottom:12px; }
   .findrow .find { margin:0; flex:1; }
@@ -330,34 +333,34 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .findrow .editmode.on { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
   .setpick button.new { border:1px dashed var(--border); background:none; }
   .editbar { display:flex; gap:8px; margin-bottom:12px; }
-  .editbar button { flex:1; background:var(--row); color:#faf4eb; border:0; border-radius:12px; padding:12px; font-size:15px; font-weight:700; }
+  .editbar button { flex:1; background:var(--row); color:var(--text); border:0; border-radius:12px; padding:12px; font-size:15px; font-weight:700; }
   .song .ctl { display:flex; gap:6px; flex:0 0 auto; align-self:center; }
-  .song .ctl span { padding:10px 14px; border-radius:10px; background:var(--raise); color:#e9e4dc; font-size:15px; font-weight:700; }
+  .song .ctl span { padding:10px 14px; border-radius:10px; background:var(--raise); color:var(--text); font-size:15px; font-weight:700; }
   .song .ctl span.off { opacity:.3; }
-  .song.on .ctl span { background:var(--on-accent); color:#faf4eb; }
+  .song.on .ctl span { background:var(--on-accent); color:var(--text); }
   .otherhead { color:var(--dim); font-size:11px; font-weight:800; letter-spacing:.1em;
                margin:18px 0 8px; }
   .parts { font-size:13px; color:var(--dim); margin-top:4px; }
   .parts b { font-weight:700; }
   .song.on .parts b { color:inherit !important; }
   .notes { font-size:14px; color:var(--note); margin-top:4px; font-style:italic; }
-  .notes .key { font-style:normal; font-weight:700; padding:3px 9px; border-radius:8px; background:#cea04a22;
-                border:1px solid #cea04a66; cursor:pointer; }
-  .song.on .notes .key { background:#0007121a; border-color:#00071266; }
+  .notes .key { font-style:normal; font-weight:700; padding:3px 9px; border-radius:8px; background:color-mix(in srgb, var(--gold) 13%, transparent);
+                border:1px solid color-mix(in srgb, var(--gold) 40%, transparent); cursor:pointer; }
+  .song.on .notes .key { background:color-mix(in srgb, var(--on-amber) 10%, transparent); border-color:color-mix(in srgb, var(--on-amber) 40%, transparent); }
   .sheet .keys { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; }
   .sheet .scales { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin-top:6px; }
   .sheet .keys button, .sheet .scales button { padding:12px 6px; text-align:center; font-size:15px; }
   .sheet .keys button.none { grid-column: span 2; }
   .sheet .keys button.on, .sheet .scales button.on { background:var(--accent); color:var(--on-accent); }
-  .song .chart { margin-left:10px; padding:8px 14px; border-radius:10px; background:var(--raise); color:#e9e4dc;
+  .song .chart { margin-left:10px; padding:8px 14px; border-radius:10px; background:var(--raise); color:var(--text);
                  font-size:14px; font-weight:600; flex:0 0 auto; }
-  .song.on .chart { background:var(--on-accent); color:#faf4eb; }
+  .song.on .chart { background:var(--on-accent); color:var(--text); }
   .song.on .notes { color:var(--on-accent); }
   .songbody { flex:1; min-width:0; }
 
   /* Step buttons: big, far apart, hard to hit the wrong one. */
   .step { display:flex; gap:10px; margin-top:14px; }
-  .step button { flex:1; background:var(--row); color:#faf4eb; border:0; border-radius:12px;
+  .step button { flex:1; background:var(--row); color:var(--text); border:0; border-radius:12px;
                  padding:20px; font-size:17px; font-weight:800; letter-spacing:.04em; }
   .step button:active { background:var(--accent); color:var(--on-accent); }
   .step button:disabled { opacity:.35; }
@@ -376,7 +379,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   #gate p { color:var(--dim); font-size:15px; margin:0 0 14px; }
   #gate .hint { font-size:13px; color:var(--note); margin-top:14px; min-height:18px; }
   #code { width:100%; font-size:34px; text-align:center; letter-spacing:.25em; text-transform:uppercase;
-          padding:14px; border-radius:12px; border:2px solid var(--border); background:var(--panel); color:#faf4eb; }
+          padding:14px; border-radius:12px; border:2px solid var(--border); background:var(--panel); color:var(--text); }
   #code:focus { outline:none; border-color:var(--accent); }
   #gate button { margin-top:14px; width:100%; background:var(--accent); color:var(--on-accent); border:0;
                  border-radius:12px; padding:16px; font-size:17px; font-weight:700; }
@@ -633,7 +636,9 @@ let editMode = false;        // the Set list tab in its editing dress: build and
 const filters = {};          // input index -> chosen group, "" for all
 /* A colour per keyboard, in the order the setup lists them: whose program,
    whose sliders, whose line in a song, known by colour before it is read. */
-const HUES = ["#0087fc", "#f08a14", "#35d0b5", "#b78cff", "#ff7aa8", "#9bd35a"];
+// The first two keyboards take the look's own blue and amber; the rest keep fixed colours.
+const lookColour = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+const HUES = [lookColour("--accent", "#0087fc"), lookColour("--amber", "#f08a14"), "#35d0b5", "#b78cff", "#ff7aa8", "#9bd35a"];
 const hue = i => HUES[(i >= 0 ? i : 0) % HUES.length];
 
 /* Which tab is showing. Remembered per device: someone building a set works in
@@ -1715,6 +1720,21 @@ static const char* kManifest = R"JSON({
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 })JSON";
+
+/** The chosen look (Theme.h) as the tablet page's variables. */
+static String lookCss (PropertiesFile& settings)
+{
+    const auto l = perf::theme::findLook (settings.getFile().getParentDirectory(), settings.getValue ("look"));
+    auto hex = [] (Colour c) { return "#" + c.toDisplayString (false).toLowerCase(); };
+    auto faint = [&hex] (Colour c, float alpha) { return hex (c) + String::toHexString ((int) (alpha * 255.0f)).paddedLeft ('0', 2); };
+    return ":root { --bg:" + hex (l.bgDark) + "; --panel:" + hex (l.bgPanel) + "; --row:" + hex (l.bgRow) + "; --raise:" + hex (l.bgRaised)
+         + "; --line:" + hex (l.bgPanel.interpolatedWith (l.border, 0.5f)) + "; --border:" + hex (l.border)
+         + "; --accent:" + hex (l.accent) + "; --on-accent:" + hex (l.bgDark) + "; --text:" + hex (l.text) + "; --dim:" + hex (l.textDim)
+         + "; --faint:" + hex (l.textDim.interpolatedWith (l.bgRow, 0.45f)) + "; --amber:" + hex (l.amber) + "; --on-amber:" + hex (l.bgDark)
+         + "; --gold:" + hex (l.gold) + "; --note:" + hex (l.gold) + "; --track:" + hex (l.accentDim.interpolatedWith (l.border, 0.4f))
+         + "; --glow-a:" + (l.glow ? faint (l.accent, 0.24f) : String ("transparent"))
+         + "; --glow-b:" + (l.glow ? faint (l.amber, 0.20f) : String ("transparent")) + "; }";
+}
 
 //==============================================================================
 RemoteServer::RemoteServer (Engine& e, PropertiesFile& s)
@@ -3575,7 +3595,12 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         sendJson (sock, "200 OK", "{\"ok\":true}");
         return;
     }
-    send (sock, "200 OK", "text/html; charset=utf-8", kIndexHtml, (int) strlen (kIndexHtml));
+    {
+        /* The page in the look chosen on the computer (Options): the same
+           colours, written over the page's own where the mark is. */
+        const auto page = String (CharPointer_UTF8 (kIndexHtml)).replace ("/*LOOK*/", lookCss (settings));
+        send (sock, "200 OK", "text/html; charset=utf-8", page.toRawUTF8(), (int) page.getNumBytesAsUTF8());
+    }
 }
 
 void RemoteServer::run()

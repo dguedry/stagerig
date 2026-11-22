@@ -383,7 +383,7 @@ public:
         row = shown[(size_t) row];
         auto& def = inputs[(size_t) row];
 
-        g.fillAll (selected ? amberDim : bgRow);
+        g.fillAll (selected ? perf::theme::selected : bgRow);
         g.setColour (Colours::white);
         g.setFont (FontOptions (15.0f, Font::bold));
         g.drawText (def.name, 8, 4, w - 16, 18, Justification::centredLeft, true);
@@ -693,7 +693,7 @@ public:
         const bool audio = inputs[(size_t) in].isAudio();
         const bool blank = audio ? prog.effects.empty() && prog.name.isEmpty() : prog.isEmpty();
 
-        g.fillAll (selected ? amberDim : (row % 2 ? bgRow : bgPanel));
+        g.fillAll (selected ? perf::theme::selected : (row % 2 ? bgRow : bgPanel));
         g.setColour (blank ? textDim : Colours::white);
         g.setFont (FontOptions (13.0f, blank ? Font::plain : Font::bold));
         g.drawText (programTitle (row, prog), 8, 0, w - 60, h, Justification::centredLeft, true);
@@ -1386,7 +1386,7 @@ public:
             l->setFont (FontOptions (12.0f));
         }
         chainLabel.setFont (FontOptions (13.0f, Font::bold));
-        chainLabel.setColour (Label::textColourId, amber);
+        chainLabel.setColour (Label::textColourId, perf::theme::heading);
 
         addAndMakeVisible (chain);
         chain.address = [this] { return std::make_pair (Engine::outputAddress (list.getSelectedRow()), 0); };
@@ -1458,7 +1458,7 @@ public:
         const auto& outs = engine.getSetup().outputs;
         if (row < 0 || row >= (int) outs.size()) return;
         const auto& d = outs[(size_t) row];
-        g.fillAll (selected ? amberDim : bgRow);
+        g.fillAll (selected ? perf::theme::selected : bgRow);
         g.setColour (Colours::white);
         g.setFont (FontOptions (14.0f, Font::bold));
         g.drawText (d.name, 8, 3, w - 16, 18, Justification::centredLeft, true);
@@ -1649,7 +1649,9 @@ public:
             }
             else if (gm)
             {
-                name.setText ("General MIDI player: " + gmSoundName (def) + (loading ? "   loading..." : String()), dontSendNotification);
+                name.setText ("General MIDI player: " + gmSoundName (def)
+                                  + (def.gmSoundfont.isNotEmpty() ? "  [" + File (def.gmSoundfont).getFileNameWithoutExtension() + "]" : String())
+                                  + (loading ? "   loading..." : String()), dontSendNotification);
                 name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
                 name.setTooltip (error.isNotEmpty() ? error : "The built-in General MIDI player: the standard 128 sounds and drum kits. Sound... picks the one this plays; "
                                                              "\"As the notes say\" lets the program changes in the notes choose, which is how a MIDI file's parts work (each part's sound is then set in the song's Backing track window).");
@@ -1850,10 +1852,43 @@ public:
             auto& e = panel.engine;
             auto& o = panel.owner;
             auto& p = panel;
+            /* Which soundfont those sounds come from: the rig's usual one
+               (Options), or one of this player's own. */
+            const auto fonts = GmSynth::installedSoundfonts (o.getSettings().getFile().getParentDirectory());
+            {
+                const auto usual = GmSynth::findSoundfont (e.getGmSoundfont());
+                const File own = def.gmSoundfont.isNotEmpty() ? File (def.gmSoundfont) : File();
+                PopupMenu sf;
+                sf.addItem (3000, "The rig's usual one" + (usual != File() ? "  (" + usual.getFileNameWithoutExtension() + ")" : String()), true, own == File());
+                sf.addSeparator();
+                bool listed = false;
+                for (int i = 0; i < fonts.size(); ++i)
+                {
+                    sf.addItem (3001 + i, fonts[i].getFileNameWithoutExtension(), true, fonts[i] == own);
+                    listed = listed || fonts[i] == own;
+                }
+                if (own != File() && ! listed)
+                    sf.addItem (-1, own.getFileNameWithoutExtension() + (own.existsAsFile() ? String() : String ("  (not on this computer)")), false, true);
+                sf.addSeparator();
+                sf.addItem (2999, "Choose a file...");
+                m.addSeparator();
+                m.addSubMenu ("Soundfont  (" + (own != File() ? own.getFileNameWithoutExtension() : String ("the rig's usual one")) + ")", sf);
+            }
             const int in = o.getSelectedInput(), prog = o.getEditedProgram(), slot = index;
-            m.showMenuAsync (PopupMenu::Options().withTargetComponent (&guiBtn), [&e, &o, &p, in, prog, slot, def] (int r)
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (&guiBtn), [&e, &o, &p, in, prog, slot, def, fonts] (int r)
             {
                 if (r < 1) return;
+                if (r == 2999) { o.chooseSlotSoundfont (in, prog, slot); return; }
+                if (r >= 3000)
+                {
+                    const File f = r == 3000 ? File() : fonts[r - 3001];
+                    e.setGmSlotSoundfont (in, prog, slot, f);
+                    o.showStatus (f == File() ? String ("This General MIDI player uses the rig's usual soundfont again")
+                                              : "This General MIDI player now plays " + f.getFileNameWithoutExtension());
+                    o.markDirty();
+                    p.refresh();
+                    return;
+                }
                 for (int c = 1; c <= 16; ++c)
                 {
                     if (! def.hears (c)) continue;
@@ -1940,7 +1975,7 @@ public:
             addAndMakeVisible (header);
             addAndMakeVisible (chain);
             header.setFont (FontOptions (13.0f, Font::bold));
-            header.setColour (Label::textColourId, amber);
+            header.setColour (Label::textColourId, perf::theme::heading);
         }
         int preferredHeight() const { return 26 + chain.preferredHeight() + 6; }
         void paint (Graphics& g) override
@@ -2350,7 +2385,7 @@ public:
         learnBtn.setTooltip ("Press, then move the knob, pedal or wheel on your keyboard");
         learnBtn.setColour (TextButton::buttonOnColourId, Colours::orangered);
         learnBtn.onClick = [this] { engine.setLearnArmed (learnBtn.getToggleState()); if (learnBtn.getToggleState()) owner.showStatus ("Move a MIDI controller..."); };
-        sourceLabel.setColour (Label::textColourId, amber);
+        sourceLabel.setColour (Label::textColourId, perf::theme::heading);
         sourceLabel.setFont (FontOptions (13.0f, Font::bold));
         for (auto* s : { &minSlider, &maxSlider })
         {
@@ -2529,7 +2564,7 @@ public:
 
     void paintRowBackground (Graphics& g, int row, int, int, bool selected) override
     {
-        g.fillAll (selected ? amberDim : (row % 2 ? bgRow : bgPanel));
+        g.fillAll (selected ? perf::theme::selected : (row % 2 ? bgRow : bgPanel));
     }
 
     void paintCell (Graphics& g, int row, int col, int w, int h, bool) override
@@ -2933,10 +2968,32 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         m.addItem (4, "Print the program list (for the stand)...");
         m.addItem (8, engine.isRecording() ? "Stop recording the gig  (" + formatElapsed (engine.getRecordingSeconds()) + ")"
                                             : "Record the gig  (every output to WAV, the keyboards to MIDI)");
+        {
+            /* The look: a few named sets of colours, the one in use ticked. */
+            const auto folder = settings.getFile().getParentDirectory();
+            const auto now = perf::theme::findLook (folder, settings.getValue ("look")).name;
+            PopupMenu looks;
+            int id = 200;
+            for (const auto& l : perf::theme::allLooks (folder))
+                looks.addItem (id++, l.name, true, l.name == now);
+            m.addSectionHeader ("The look");
+            m.addSubMenu ("Colours  (" + now + ")", looks);
+        }
         m.showMenuAsync (PopupMenu::Options().withTargetComponent (optionsBtn), [this] (int r)
         {
             const auto& s = engine.getSetup();
             if (r == 8) { toggleRecording(); return; }
+            if (r >= 200)
+            {
+                const auto looks = perf::theme::allLooks (settings.getFile().getParentDirectory());
+                if (r - 200 < (int) looks.size())
+                {
+                    settings.setValue ("look", looks[(size_t) (r - 200)].name);
+                    settings.saveIfNeeded();
+                    showStatus ("Colours: " + looks[(size_t) (r - 200)].name + ". The tablet has them now; this window takes them the next time StageRig starts.");
+                }
+                return;
+            }
             if (r == 9)
             {
                 engine.setLinkEnabled (! engine.isLinkEnabled());
@@ -4726,6 +4783,21 @@ void MainComponent::chooseGmSoundfont()
         engine.setGmSoundfont (f);
         showStatus ("MIDI files now play through " + f.getFileName()
                     + (GmSynth::isAvailable() ? String() : String (" -- once FluidSynth is installed (libfluidsynth3)")));
+    });
+}
+
+void MainComponent::chooseSlotSoundfont (int inputIndex, int program, int slot)
+{
+    const auto current = GmSynth::findSoundfont (engine.getGmSoundfont());
+    gmChooser = std::make_unique<FileChooser> ("Soundfont for this General MIDI player",
+                                               current != File() ? current : File ("/usr/share/sounds/sf2"), "*.sf2;*.sf3");
+    gmChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this, inputIndex, program, slot] (const FileChooser& fc)
+    {
+        const auto f = fc.getResult();
+        if (f == File()) return;
+        engine.setGmSlotSoundfont (inputIndex, program, slot, f);
+        markDirty();
+        showStatus ("This General MIDI player now plays " + f.getFileNameWithoutExtension());
     });
 }
 

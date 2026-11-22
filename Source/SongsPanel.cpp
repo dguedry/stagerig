@@ -1160,7 +1160,7 @@ public:
         countInOutBox.onChange = [this] { applyCountIn(); };
 
         addAndMakeVisible (sectionsHeader);
-        sectionsHeader.setColour (Label::textColourId, amber);
+        sectionsHeader.setColour (Label::textColourId, perf::theme::heading);
         sectionsHeader.setFont (FontOptions (13.0f, Font::bold));
 
         timeline = std::make_unique<TrackTimeline> (engine, songIndex);

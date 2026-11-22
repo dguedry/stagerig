@@ -92,6 +92,7 @@ int main()
     InputDef track; track.name = InputDef::trackName; track.kind = InputDef::Kind::track; track.channel = 0; track.respondToProgramChange = false;
     SlotDef gm; gm.kind = SlotDef::Kind::gm; gm.listensTo = SlotDef::kAllChannels & ~(1 << 1);
     gm.gmChannels[9].program = 8; gm.gmChannels[9].volume = 90; gm.gmChannels[0].muted = true;
+    gm.gmSoundfont = "/usr/share/sounds/sf2/Black_Pearl_4_LV2.sf2";
     SlotDef keys; keys.kind = SlotDef::Kind::input; keys.targetInput = 1; keys.targetInputName = "Lower"; keys.listensTo = 1 << 1;
     SlotDef pad; pad.kind = SlotDef::Kind::input; pad.targetInput = 0; pad.targetInputName = "Upper"; pad.targetProgram = 4; pad.targetProgramName = "Big pad"; pad.listensTo = 1 << 4;
     track.programs[0].name = "With a track";
@@ -179,7 +180,8 @@ int main()
                && tp.slots[2].displayName() == "Upper: Big pad" && tp.slots[2].listensToText() == "Channel 5" && tp.slots[1].targetProgram == -1);
         CHECK (tp.slots[0].isGm() && ! tp.slots[0].hears (2) && tp.slots[0].hears (1) && tp.slots[0].hears (16)
                && tp.slots[0].gmChannels[9].program == 8 && tp.slots[0].gmChannels[9].volume == 90 && tp.slots[0].gmChannels[9].pan == -1
-               && tp.slots[0].gmChannels[0].muted && tp.slots[0].gmChannels[1].isDefault() && tp.slots[0].displayName() == "General MIDI player");
+               && tp.slots[0].gmChannels[0].muted && tp.slots[0].gmChannels[1].isDefault() && tp.slots[0].displayName() == "General MIDI player"
+               && tp.slots[0].gmSoundfont == "/usr/share/sounds/sf2/Black_Pearl_4_LV2.sf2");
         CHECK (tp.slots[1].isInput() && tp.slots[1].targetInput == 1 && tp.slots[1].targetInputName == "Lower" && tp.slots[1].hears (2)
                && ! tp.slots[1].hears (1) && tp.slots[1].displayName() == "Lower's sounds" && tp.slots[1].listensToText() == "Channel 2");
 

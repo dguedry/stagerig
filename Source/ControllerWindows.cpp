@@ -1039,7 +1039,7 @@ private:
         {
             if (row < 0 || row >= (int) owner.edit.buttons.size()) return;
             const auto& b = owner.edit.buttons[(size_t) row];
-            g.fillAll (selected ? amberDim : (row % 2 == 0 ? bgRow : bgRow.brighter (0.03f)));
+            g.fillAll (selected ? perf::theme::selected : (row % 2 == 0 ? bgRow : bgRow.brighter (0.03f)));
             const int idx = owner.paramIndexOf (b);
             const auto param = idx >= 0 ? owner.params[(size_t) idx].name : b.paramName;
             g.setColour (Colours::white);

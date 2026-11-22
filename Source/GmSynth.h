@@ -26,6 +26,9 @@ public:
     /** The soundfont to use: `preferred` if it exists, else the system's GM
         soundfont (FluidR3_GM, then default-GM, then TimGM6mb). None found: empty. */
     static juce::File findSoundfont (const juce::File& preferred = {});
+    /** Every soundfont on this computer, by name: the system's folders and
+        the "Soundfonts" folder beside the settings. */
+    static juce::Array<juce::File> installedSoundfonts (const juce::File& settingsFolder);
     /** Why there is no GM player, in words for the status line; empty when there is one. */
     static juce::String unavailableReason (const juce::File& preferred = {});
 

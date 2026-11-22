@@ -114,6 +114,11 @@ public:
         }
         settings = std::make_unique<juce::PropertiesFile> (opts);
 
+        // The look the player chose (Options), before any window is made.
+        perf::theme::applyLook (perf::theme::findLook (settings->getFile().getParentDirectory(), settings->getValue ("look")));
+        if (auto* look = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
+            look->setColourScheme (perf::theme::colourScheme());
+
         // Optional: `StageRig path/to/setup.stagerig.json` opens that setup instead of the last one.
         juce::File initialSetup;
         juce::ArgumentList args ("StageRig", commandLine);

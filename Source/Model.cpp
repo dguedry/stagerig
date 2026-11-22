@@ -246,6 +246,7 @@ var SlotDef::toVar() const
             mix.add (var (co));
         }
         if (! mix.isEmpty()) o->setProperty ("gmChannels", mix);
+        if (gmSoundfont.isNotEmpty()) o->setProperty ("soundfont", gmSoundfont);
     }
     else if (isInput())
     {
@@ -312,6 +313,7 @@ SlotDef SlotDef::fromVar (const var& v)
     if (kind == "gm")
     {
         s.kind = Kind::gm;
+        s.gmSoundfont = propStr (v, "soundfont");
         if (auto* mix = obj (v)->getProperty ("gmChannels").getArray())
             for (auto& cv : *mix)
             {
