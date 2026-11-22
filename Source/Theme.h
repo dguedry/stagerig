@@ -14,8 +14,8 @@ namespace perf::theme
    that are on, sliders, where typing goes. Amber is for what is live now --
    the program a keyboard is on, the song playing. They are variables, not
    constants, because the player chooses a look (Options): applyLook() sets
-   them once at the start, before any window is made, and they are not changed
-   after. The tablet page is given the same ones (RemoteServer.cpp). */
+   them at the start, before any window is made, and changeLook() when
+   another is chosen. The tablet page is given the same ones (RemoteServer.cpp). */
 struct Look
 {
     juce::String name;
@@ -35,7 +35,9 @@ struct Look
     bool glow = false;        // the tablet's blue and amber haze behind its header
 };
 
-/** The looks that come with StageRig. The first is the one a new rig has. */
+/** The looks that come with StageRig. The first is the one a new rig has.
+    No two colours of a look are exactly the same (a chosen row is a shade off
+    accentDim, not accentDim): changeLook() tells which is which by its value. */
 inline std::vector<Look> builtInLooks()
 {
     using C = juce::Colour;
@@ -43,15 +45,15 @@ inline std::vector<Look> builtInLooks()
         // Calm: a near-black that is only faintly blue, softer blue and amber, amber kept for what is live.
         { "Calm", C (0xff0b0e13), C (0xff12161d), C (0xff1a2029), C (0xff232b37), C (0xff080a0e), C (0xff0f1318),
           C (0xff2a3442), C (0xff3d8fe6), C (0xff1f4573), C (0xffe39a3c), C (0xff7a5220), C (0xffc9a45c),
-          C (0xfff2efea), C (0xff98a2ae), C (0xff1f4573), C (0xffc9d3df), false },
+          C (0xfff2efea), C (0xff98a2ae), C (0xff1f4674), C (0xffc9d3df), false },
         // Vivid: the wallpaper's own picture -- midnight blue, electric blue and the amber of "Rig", headings and chosen rows in amber.
         { "Vivid", C (0xff000712), C (0xff001025), C (0xff0d1c33), C (0xff10294d), C (0xff00040b), C (0xff000c1d),
           C (0xff1a3555), C (0xff0087fc), C (0xff0a3770), C (0xfff08a14), C (0xff8a4a08), C (0xffcea04a),
-          C (0xfffaf4eb), C (0xff9aa9bc), C (0xff8a4a08), C (0xfff08a14), true },
+          C (0xfffaf4eb), C (0xff9aa9bc), C (0xff8a4b08), C (0xfff08b14), true },
         // Classic: plain dark grey with one blue, as StageRig was before it had colours of its own.
         { "Classic", C (0xff1e1f24), C (0xff26282f), C (0xff2e313a), C (0xff373b46), C (0xff1b1d22), C (0xff23262d),
           C (0xff3c404b), C (0xff4f9dff), C (0xff2b4f80), C (0xffe0a030), C (0xff6e5320), C (0xffcea04a),
-          C (0xffffffff), C (0xff9aa0ab), C (0xff2b4f80), C (0xff4f9dff), false },
+          C (0xfffefefe), C (0xff9aa0ab), C (0xff2b5080), C (0xff4f9eff), false },
     };
 }
 
@@ -108,7 +110,7 @@ inline Look findLook (const juce::File& settingsFolder, const juce::String& name
 inline juce::Colour bgDark, bgPanel, bgRow, bgRaised, bgPane, bgPaneRow, border, accent, accentDim,
                     amber, amberDim, gold, text, textDim, selected, heading;
 
-/** Sets the colours above. Once, at the start: windows read them as they are made. */
+/** Sets the colours above. At the start; changeLook() is the one for later. */
 inline void applyLook (const Look& l)
 {
     bgDark = l.bgDark; bgPanel = l.bgPanel; bgRow = l.bgRow; bgRaised = l.bgRaised; bgPane = l.bgPane; bgPaneRow = l.bgPaneRow;
@@ -116,10 +118,54 @@ inline void applyLook (const Look& l)
     text = l.text; textDim = l.textDim; selected = l.selected; heading = l.heading;
 }
 
+/** The same colours for everything JUCE draws by itself: buttons, boxes, menus, sliders. */
+inline juce::LookAndFeel_V4::ColourScheme colourScheme();
+
+/** A colour given to a component when it was made (setColour) is still the
+    old look's: where it is one of the old look's colours, it becomes the new
+    look's colour of the same name, keeping how see-through it was. */
+inline void recolour (juce::Component& c, const std::vector<std::pair<juce::Colour, juce::Colour>>& oldToNew)
+{
+    std::vector<std::pair<int, juce::Colour>> changes;
+    const auto& props = c.getProperties();
+    for (int i = 0; i < props.size(); ++i)
+    {
+        const auto name = props.getName (i).toString();
+        if (! name.startsWith ("jcclr_")) continue;          // how JUCE keeps a component's own colours
+        const juce::Colour now ((juce::uint32) (int) props.getValueAt (i));
+        for (const auto& [from, to] : oldToNew)
+            if (now.withAlpha (1.0f) == from) { changes.push_back ({ (int) name.substring (6).getHexValue32(), to.withAlpha (now.getAlpha()) }); break; }
+    }
+    for (const auto& [id, colour] : changes) c.setColour (id, colour);
+    for (auto* child : c.getChildren()) recolour (*child, oldToNew);
+}
+
+/** Another look, now, in every window that is open: the colours above, what
+    JUCE draws by itself, and the colours components were given when made. */
+inline void changeLook (const Look& next)
+{
+    const std::vector<std::pair<juce::Colour, juce::Colour>> oldToNew = {
+        { selected, next.selected }, { heading, next.heading },
+        { bgDark, next.bgDark }, { bgPanel, next.bgPanel }, { bgRow, next.bgRow }, { bgRaised, next.bgRaised },
+        { bgPane, next.bgPane }, { bgPaneRow, next.bgPaneRow }, { border, next.border }, { accent, next.accent },
+        { accentDim, next.accentDim }, { amber, next.amber }, { amberDim, next.amberDim }, { gold, next.gold },
+        { text, next.text }, { textDim, next.textDim } };
+    applyLook (next);
+    if (auto* look = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
+        look->setColourScheme (colourScheme());
+    auto& desktop = juce::Desktop::getInstance();
+    for (int i = 0; i < desktop.getNumComponents(); ++i)
+        if (auto* window = desktop.getComponent (i))
+        {
+            recolour (*window, oldToNew);
+            window->sendLookAndFeelChange();
+            window->repaint();
+        }
+}
+
 /* Until a look is chosen the colours are the first look's, so nothing is ever drawn with none. */
 inline const bool lookSet = (applyLook (builtInLooks().front()), true);
 
-/** The same colours for everything JUCE draws by itself: buttons, boxes, menus, sliders. */
 inline juce::LookAndFeel_V4::ColourScheme colourScheme()
 {
     return { bgDark,                    // windowBackground

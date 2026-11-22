@@ -165,8 +165,8 @@ explained where it matters below.
 **Options ▸ Colours** chooses how StageRig looks: **Calm** (nearly black,
 soft blue, amber only on what is live now), **Vivid** (deep blue and bright
 amber, as in the StageRig picture) or **Classic** (plain dark grey with one
-blue). The tablet takes the new colours the next time its page is opened;
-the computer's own window takes them the next time StageRig starts.
+blue). The windows change at once; the tablet takes the new colours the
+next time its page is opened.
 
 Starting up is simple: StageRig comes back on the same song, scene, programs,
 tempo, chosen input and knob page, in the same window, and a keyboard switched on

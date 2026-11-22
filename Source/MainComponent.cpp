@@ -2990,7 +2990,8 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
                 {
                     settings.setValue ("look", looks[(size_t) (r - 200)].name);
                     settings.saveIfNeeded();
-                    showStatus ("Colours: " + looks[(size_t) (r - 200)].name + ". The tablet has them now; this window takes them the next time StageRig starts.");
+                    perf::theme::changeLook (looks[(size_t) (r - 200)]);
+                    showStatus ("Colours: " + looks[(size_t) (r - 200)].name + ". The tablet takes them when its page is opened again.");
                 }
                 return;
             }
