@@ -586,7 +586,7 @@ void LaneRow::paint (Graphics& g)
     const bool selected = editor.selectedChannel == channel;
     g.setColour (selected ? bgRow.brighter (0.12f) : bgRow);
     g.fillRect (getLocalBounds().reduced (0, 1));
-    if (selected) { g.setColour (accent); g.fillRect (0, 1, 3, getHeight() - 2); }
+    if (selected) { g.setColour (amber); g.fillRect (0, 1, 3, getHeight() - 2); }
 
     // The part's notes across the whole song, the roll's view and the playhead over them.
     auto ov = getLocalBounds().withTrimmedLeft (headerWidth).reduced (4, 6).toFloat();
@@ -742,7 +742,7 @@ void RollView::paint (Graphics& g)
     {
         const float y = yOf (k);
         if (y > (float) gr.getBottom() || y + kKeyH < (float) gr.getY()) continue;
-        g.setColour (isBlackKey (k) ? Colour (0xff17191d) : Colour (0xff1f2227));
+        g.setColour (isBlackKey (k) ? Colour (0xff000a18) : Colour (0xff051730));
         g.fillRect ((float) gr.getX(), y, (float) gr.getWidth(), kKeyH);
         if (k % 12 == 0) { g.setColour (Colours::white.withAlpha (0.12f)); g.drawHorizontalLine ((int) (y + kKeyH), (float) gr.getX(), (float) gr.getRight()); }
     }
@@ -790,7 +790,7 @@ void RollView::paint (Graphics& g)
     g.restoreState();
 
     // Velocity lane.
-    g.setColour (Colour (0xff15171b));
+    g.setColour (Colour (0xff000712));
     g.fillRect (va);
     g.saveState();
     g.reduceClipRegion (va);

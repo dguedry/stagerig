@@ -135,6 +135,17 @@ private:
     void showChartMenu();
     void attachChartFile (const juce::File&, int songIndex);
     void newChordChart (int songIndex);
+    void newChordChartFromClipboard (int songIndex);
+    void findChordsOnTheWeb (int songIndex);
+    void offerChartFromCopiedChords();
+
+    /* After "Find chords on the web...": which song the search was for, what was
+       on the clipboard then, and until when coming back with chords copied is
+       taken as the answer. */
+    int chordSearchSong = -1;
+    juce::String chordSearchName, chordSearchClipboard;
+    juce::int64 chordSearchUntilMs = 0;
+    bool chordSearchAway = false;
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 

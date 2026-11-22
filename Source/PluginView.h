@@ -46,6 +46,10 @@ public:
         `error` set. Safe to call again for a window already being served. */
     static Session start (const juce::String& title, juce::String& error);
 
+    /** Brings an editor's window to the front of the computer's own screen,
+        without mirroring it: for a browser running on the computer itself. */
+    static void bringToFront (const juce::String& title);
+
     /** Stops serving one window, or everything. */
     static void stop (const juce::String& title);
     static void stopAll();

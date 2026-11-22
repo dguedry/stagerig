@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.h"
+#include "Theme.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 
 namespace perf
@@ -179,7 +180,7 @@ public:
 
         addAndMakeVisible (targetLabel);
         targetLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-        targetLabel.setColour (juce::Label::textColourId, juce::Colour (0xff4f9dff));
+        targetLabel.setColour (juce::Label::textColourId, perf::theme::amber);
 
         addChildComponent (chBtn);
         chBtn.setTooltip ("Which of the input's channels these keys play on, and so which instrument. Clicking an instrument above chooses it too.");
@@ -187,7 +188,7 @@ public:
 
         addAndMakeVisible (hint);
         hint.setFont (juce::FontOptions (11.0f));
-        hint.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
+        hint.setColour (juce::Label::textColourId, perf::theme::textDim);
         hint.setText ("Click keys, or focus the keyboard and play A S D F G H J K (W E T Y U for sharps), Z / X to change octave.", juce::dontSendNotification);
 
         /* A LinearBar with a value near its minimum draws as an almost empty
@@ -201,7 +202,7 @@ public:
             s.setRange (min, max, step);
             s.setSliderStyle (juce::Slider::LinearVertical);
             s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 34, 16);
-            s.setColour (juce::Slider::textBoxTextColourId, juce::Colour (0xffc7ccd6));
+            s.setColour (juce::Slider::textBoxTextColourId, perf::theme::text.withAlpha (0.85f));
             s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
             s.setTooltip (tip);
         };
@@ -212,8 +213,8 @@ public:
             s.setRange (min, max, step);
             s.setSliderStyle (juce::Slider::LinearHorizontal);
             s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 20);
-            s.setColour (juce::Slider::backgroundColourId, juce::Colour (0xff15161c));
-            s.setColour (juce::Slider::trackColourId,      juce::Colour (0xff4f9dff));
+            s.setColour (juce::Slider::backgroundColourId, perf::theme::bgPane);
+            s.setColour (juce::Slider::trackColourId,      perf::theme::accent);
             s.setColour (juce::Slider::thumbColourId,      juce::Colour (0xffd7dbe2));
             s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
             s.setTooltip (tip);
@@ -263,7 +264,7 @@ public:
            how the + ended up half drawn. */
         ccNumber.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 52, 22);
         ccNumber.setIncDecButtonsMode (juce::Slider::incDecButtonsDraggable_Vertical);
-        ccNumber.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0xff3a3d47));
+        ccNumber.setColour (juce::Slider::textBoxOutlineColourId, perf::theme::border);
         ccNumber.setValue (74, juce::dontSendNotification);
         ccNumber.setTooltip ("Which controller to send. Set it, then use Learn MIDI on a plugin parameter.");
         addAndMakeVisible (ccValue);
@@ -273,13 +274,13 @@ public:
         for (auto* l : { &velocityLabel, &ccLabel })
         {
             l->setFont (juce::FontOptions (12.0f));
-            l->setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
+            l->setColour (juce::Label::textColourId, perf::theme::textDim);
             l->setJustificationType (juce::Justification::centredRight);
         }
         for (auto* l : { &bendLabel, &modLabel })
         {
             l->setFont (juce::FontOptions (11.0f));
-            l->setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
+            l->setColour (juce::Label::textColourId, perf::theme::textDim);
             l->setJustificationType (juce::Justification::centred);
         }
     }
@@ -395,7 +396,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff26282f));
+        g.fillAll (perf::theme::bgPanel);
     }
 
 private:

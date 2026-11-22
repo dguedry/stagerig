@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.h"
+#include "Theme.h"
 #include "LevelMeter.h"
 #include "Surfaces.h"
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -55,7 +56,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto& inputs = engine.getSetup().inputs;
-        g.setColour (juce::Colour (0xff101116));
+        g.setColour (perf::theme::bgPane);
         g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
         for (const auto& [i, column] : columns())
         {
@@ -72,7 +73,7 @@ public:
             // the program that needs reading. The one the on-screen keys play is marked, and says so.
             const bool chosen = selectedInput && selectedInput() == (int) i;
             g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-            g.setColour (chosen ? juce::Colour (0xff5aa9ff) : juce::Colour (0xff9aa0ab));
+            g.setColour (chosen ? perf::theme::amber : perf::theme::textDim);
             auto nameRow = cell.removeFromTop (16);
             g.drawText (def.name.toUpperCase() + (chosen ? "   -  THE ON-SCREEN KEYS PLAY THIS ONE" : ""), nameRow, juce::Justification::centredLeft, true);
             if (chosen) g.fillRect (column.withHeight (3).reduced (6, 0));
@@ -81,7 +82,7 @@ public:
             const int big = juce::jmin (cell.getHeight() - 4, 190, (int) (cell.getWidth() * 0.22f));
             auto numberArea = cell.removeFromLeft (juce::jmin (cell.getWidth() / 2, (int) (big * 1.95f)));
             g.setFont (juce::FontOptions ((float) big, juce::Font::bold));
-            g.setColour (empty ? juce::Colour (0xff4a4d57) : juce::Colour (0xff5aa9ff));
+            g.setColour (empty ? perf::theme::border.brighter (0.25f) : perf::theme::accent);
             g.drawText (juce::String (program).paddedLeft ('0', 3), numberArea, juce::Justification::centredLeft, false);
 
             // An audio input shows what is arriving, under its program name.
@@ -92,7 +93,7 @@ public:
             if (loading) name += "  ...loading";
             // "empty program" is a note, not a name: small, so it is never squeezed to fit like one.
             g.setFont (juce::FontOptions ((float) juce::jmin (empty ? big / 3 : big * 2 / 3, cell.getHeight() - 4), juce::Font::bold));
-            g.setColour (empty ? juce::Colour (0xff6b7079) : (loading ? juce::Colour (0xffd8a657) : juce::Colours::white));
+            g.setColour (empty ? perf::theme::textDim.darker (0.35f) : (loading ? perf::theme::gold : perf::theme::text));
             g.drawFittedText (name, cell, juce::Justification::centredLeft, big > 60 ? 3 : 2, 0.8f);
         }
     }
@@ -119,8 +120,8 @@ private:
             slider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
             slider.setRange (0.0, 1.0, 0.0);
             slider.setPopupMenuEnabled (false);
-            slider.setColour (juce::Slider::rotarySliderFillColourId, juce::Colour (0xff5aa9ff));
-            slider.setColour (juce::Slider::rotarySliderOutlineColourId, juce::Colour (0xff2c3038));
+            slider.setColour (juce::Slider::rotarySliderFillColourId, perf::theme::accent);
+            slider.setColour (juce::Slider::rotarySliderOutlineColourId, perf::theme::border);
             slider.setColour (juce::Slider::thumbColourId, juce::Colours::white);
             slider.onValueChange = [this] { if (! silent && onMove) onMove (slider.getValue()); showValue(); };
             slider.onDragStart = [this] { dragging = true; };
@@ -128,7 +129,7 @@ private:
             addAndMakeVisible (slider);
             addChildComponent (sw);
             sw.setClickingTogglesState (false);
-            sw.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2f5f9a));
+            sw.setColour (juce::TextButton::buttonOnColourId, perf::theme::accentDim);
             sw.onClick = [this] { if (rightDown) { rightDown = false; return; } if (onMove) onMove (sw.getToggleState() ? 0.0 : 1.0); };
             sw.addMouseListener (this, false);          // a right-click on the button is the same menu as on the knob
             slider.onRightClick = [this] { if (onMenu) onMenu(); };
@@ -140,7 +141,7 @@ private:
                 l->setInterceptsMouseClicks (false, false);
             }
             name.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-            name.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
+            name.setColour (juce::Label::textColourId, perf::theme::textDim);
             value.setFont (juce::FontOptions (11.0f));
             value.setColour (juce::Label::textColourId, juce::Colours::white);
         }
@@ -284,12 +285,12 @@ private:
             }
             addChildComponent (pageLabel);
             pageLabel.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-            pageLabel.setColour (juce::Label::textColourId, juce::Colour (0xff6b7079));
+            pageLabel.setColour (juce::Label::textColourId, perf::theme::textDim.darker (0.35f));
             pageLabel.setJustificationType (juce::Justification::centred);
             pageLabel.setMinimumHorizontalScale (0.6f);
             addChildComponent (slotLabel);
             slotLabel.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-            slotLabel.setColour (juce::Label::textColourId, juce::Colour (0xff6b7079));
+            slotLabel.setColour (juce::Label::textColourId, perf::theme::textDim.darker (0.35f));
         }
         void resized() override
         {
@@ -473,7 +474,7 @@ private:
                 auto btn = std::make_unique<PressButton>();
                 btn->setButtonText (view.buttonNames[b]);
                 // Green when on: not to be taken for the instrument buttons beside them, which are blue for "this one".
-                btn->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff30343c));
+                btn->setColour (juce::TextButton::buttonColourId, perf::theme::bgRaised);
                 btn->setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2f7d4f));
                 btn->setTooltip (view.buttonNames[b] + ": on or off. Right-click to move it earlier or later, or take it out of the buttons");
                 const int inB = p.input;
@@ -490,7 +491,7 @@ private:
                     auto b = std::make_unique<juce::TextButton> (slotName (prog.slots[(size_t) s]));
                     b->setClickingTogglesState (false);
                     b->setToggleState (s == slot, juce::dontSendNotification);
-                    b->setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2f5f9a));
+                    b->setColour (juce::TextButton::buttonOnColourId, perf::theme::accentDim);
                     b->setTooltip (prog.slots[(size_t) s].isPlugin() ? "Give the knobs -- here and on the keyboard -- to this instrument" : "This instrument has no knobs to give");
                     b->setEnabled (prog.slots[(size_t) s].isPlugin());
                     /* Later, not now: rebuilding the panel deletes this button,

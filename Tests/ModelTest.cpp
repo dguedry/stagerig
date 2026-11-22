@@ -6,6 +6,7 @@
 #include <cstdio>
 #include "ClapPluginFormat.h"
 #include "ControlMaps.h"
+#include "Charts.h"
 
 using namespace perf;
 
@@ -635,10 +636,58 @@ int main()
         juce::PluginDescription other; other.name = "Kontakt 8"; other.manufacturerName = "Someone Else";
         CHECK (m.appliesTo (k8) && m.appliesTo (k8bare) && ! m.appliesTo (other));
 
-        // Note names, as StageRig writes them: middle C is C3.
-        CHECK (parseNoteName ("C3") == 60 && parseNoteName ("A-1") == 21 && parseNoteName ("A-2") == 9 && parseNoteName ("F#2") == 54 && parseNoteName ("Bb1") == 46);
-        CHECK (parseNoteName ("c-2") == 0 && parseNoteName ("G8") == 127 && parseNoteName ("61") == 61);
-        CHECK (parseNoteName ("") == -1 && parseNoteName ("H2") == -1 && parseNoteName ("C") == -1 && parseNoteName ("200") == -1 && parseNoteName ("G#8") == -1);
+        // A chart typed with its chords above the words becomes ChordPro, so it can follow the song's key.
+        {
+            const juce::String web = "C                C     D\n"
+                               "    Let me rock you, rock you\n"
+                               " \n"
+                               "Dmaj7   E\n"
+                               "Dmaj7   E       D  D\n"
+                               " \n"
+                               "[Verse]\n"
+                               "E                     Amaj7\n"
+                               "  Baby, baby, when I look at you\n"
+                               "           Dmaj7          E    C C\n"
+                               "  I get a warm feeling inside\n"
+                               "E                     Amaj7\n"
+                               "  There's something about the things you do\n"
+                               "           Dmaj7          E    C C\n"
+                               "  That keeps me satisfied\n"
+                               " \n"
+                               "[Pre-Chorus]\n"
+                               "D                         E\n"
+                               "  I wouldn't lie to you, baby\n"
+                               "        F#m       G#m      A\n"
+                               "  It's mainly a physical thing\n"
+                               "        Dmaj7                       E\n"
+                               "  This feeling that i got for you, baby\n"
+                               "   A        G#m   F#m\n"
+                               "  Makes me wanna sing\n"
+                               " \n"
+                               "[Chorus]\n"
+                               "     E Eadd9    E\n"
+                               "  I feel for you\n"
+                               "             D       Dsus4 D Dsus4 D\n"
+                               "  I think I love you\n";
+            CHECK (hasChordsOverWords (web) && ! hasChordsOverWords ("A line of words\nAnd another one\n") && ! hasChordsOverWords (""));
+            CHECK (guessKeyOfChordsOverWords (web) == "E" && guessKeyOfChordsOverWords ("no chords here") == "");
+            CHECK (guessKeyOfChordsOverWords ("Am  F  C  G\nAm  Dm  E\nAm\n") == "Am" && guessKeyOfChordsOverWords ("Bb Eb F\nBb Gm\n") == "Bb");
+            const juce::String cho = chordProFromChordsOverWords (web, "I Feel for You", "E");
+            CHECK (cho.startsWith ("{title: I Feel for You}\n{key: E}\n\n[C]    Let me rock [C]you, [D]rock you\n\n[Dmaj7]   [E]\n[Dmaj7]   [E]       [D]  [D]\n\n{comment: Verse}\n"));
+            CHECK (cho.contains ("[E]  Baby, baby, when I [Amaj7]look at you\n"));
+            CHECK (cho.contains ("  I get a [Dmaj7]warm feeling ins[E]ide [C] [C]\n"));
+            CHECK (cho.contains ("{comment: Pre-Chorus}\n[D]  I wouldn't lie to you, [E]baby\n"));
+            CHECK (cho.contains ("  I [E]fee[Eadd9]l for you [E]\n") && cho.endsWith ("love you [Dsus4] [D] [Dsus4] [D]\n"));
+            CHECK (chordProKeyRoot (cho) == 4 && transposeChordPro (cho, 7, false).contains ("[G]  Baby, baby, when I [Cmaj7]look at you\n"));
+            // Words that begin like chords are still words; a chord already in brackets is not a heading; tabs are eight columns.
+            CHECK (! hasChordsOverWords ("A Day in the Life\nAm I the only one\n") && chordProFromChordsOverWords ("[Am]\nG  N.C.  | x2\n", {}, {}) == "[Am]\n[G]  N.C.  | x2\n");
+            CHECK (chordProFromChordsOverWords ("\tG\nOne two three\n", {}, {}) == "One two [G]three\n");
+        }
+
+        // Note names, as StageRig writes them: middle C is C4.
+        CHECK (parseNoteName ("C4") == 60 && parseNoteName ("A0") == 21 && parseNoteName ("A-1") == 9 && parseNoteName ("F#3") == 54 && parseNoteName ("Bb2") == 46);
+        CHECK (parseNoteName ("c-1") == 0 && parseNoteName ("G9") == 127 && parseNoteName ("61") == 61);
+        CHECK (parseNoteName ("") == -1 && parseNoteName ("H2") == -1 && parseNoteName ("C") == -1 && parseNoteName ("200") == -1 && parseNoteName ("G#9") == -1 && parseNoteName ("C-2") == -1);
 
         // The library: a folder of files.
         juce::TemporaryFile tmpDir;

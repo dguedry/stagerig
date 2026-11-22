@@ -23,7 +23,7 @@ using namespace juce;
 
 namespace
 {
-    using perf::theme::accent; using perf::theme::accentDim; using perf::theme::textDim;
+    using perf::theme::accent; using perf::theme::accentDim; using perf::theme::amber; using perf::theme::amberDim; using perf::theme::textDim;
     const Colour bgPanel = perf::theme::bgPane, bgRow = perf::theme::bgPaneRow;   // set into the ground, not raised from it
 }
 
@@ -302,7 +302,7 @@ void SongsPanel::refreshLoopButton()
     loopBtn.setButtonText (st == Engine::LoopState::recording ? "Rec..." : st == Engine::LoopState::playing ? String (bars) + (bars == 1 ? " bar" : " bars")
                          : st == Engine::LoopState::stopped ? "Loop >" : "Loop");
     loopBtn.setColour (TextButton::buttonColourId, st == Engine::LoopState::recording ? Colour (0xffa3282d)
-                                                 : st == Engine::LoopState::playing ? accentDim : getLookAndFeel().findColour (TextButton::buttonColourId));
+                                                 : st == Engine::LoopState::playing ? amberDim : getLookAndFeel().findColour (TextButton::buttonColourId));
 }
 
 void SongsPanel::showLoopMenu()
@@ -322,6 +322,7 @@ void SongsPanel::showLoopMenu()
 void SongsPanel::timerCallback()
 {
     refreshLoopButton();
+    offerChartFromCopiedChords();
     /* Follow the set moving under us. Only the highlight and the headers can
        change without a click here, so this is cheap. */
     static int lastSet = -2, lastPos = -2, lastSongs = -1, lastSets = -1, lastPlaying = -2;
@@ -349,8 +350,8 @@ void SongsPanel::refreshTransport()
     const bool vamping = engine.isTrackVamping();
     nextBtn.setEnabled ((has && engine.getTrackSectionCount() > 1) || (scenes && engine.getScene() + 1 < engine.getSceneCount()));
     nextBtn.setButtonText (vamping ? "End vamp" : scenes ? "Next scene" : "Next");
-    nextBtn.setColour (TextButton::buttonColourId, vamping ? Colour (0xff8a5a12) : getLookAndFeel().findColour (TextButton::buttonColourId));
-    playBtn.setColour (TextButton::buttonColourId, engine.isTrackRunning() ? accentDim : getLookAndFeel().findColour (TextButton::buttonColourId));
+    nextBtn.setColour (TextButton::buttonColourId, vamping ? perf::theme::gold.darker (0.45f) : getLookAndFeel().findColour (TextButton::buttonColourId));
+    playBtn.setColour (TextButton::buttonColourId, engine.isTrackRunning() ? amberDim : getLookAndFeel().findColour (TextButton::buttonColourId));
 
     String text;
     if (scenes)
@@ -418,9 +419,9 @@ void SongsPanel::ListProxy::paintListBoxItem (int row, Graphics& g, int w, int h
     const auto& sg = songs[(size_t) songIndex];
 
     // The song being played is the one that has to be findable at a glance.
-    g.fillAll (playing ? accentDim : (selected ? Colour (0xff3a3f4c) : bgRow));
+    g.fillAll (playing ? amberDim : (selected ? perf::theme::border : bgRow));
     // The chosen one, when it is not the one playing: the song Edit..., Chart... and Capture act on.
-    if (selected && ! playing) { g.setColour (accent); g.fillRect (0, 0, 3, h); }
+    if (selected && ! playing) { g.setColour (amber); g.fillRect (0, 0, 3, h); }
 
     auto r = Rectangle<int> (0, 0, w, h).reduced (6, 0);
 
@@ -815,6 +816,8 @@ void SongsPanel::showChartMenu()
         m.addItem (200 + i, "Open " + sg.charts[(size_t) i].displayName() + "...");
     if (! sg.charts.empty()) m.addSeparator();
     m.addItem (3, "New chord chart...");
+    m.addItem (4, "New chord chart from copied text  (chords above the words)");
+    m.addItem (5, "Find chords on the web...");
     m.addItem (1, "Attach a file...  (PDF, image, text, ChordPro)");
     if (! sg.charts.empty())
     {
@@ -840,6 +843,14 @@ void SongsPanel::showChartMenu()
         else if (r == 3)
         {
             newChordChart (idx);
+        }
+        else if (r == 4)
+        {
+            newChordChartFromClipboard (idx);
+        }
+        else if (r == 5)
+        {
+            findChordsOnTheWeb (idx);
         }
         else if (r >= 200)
         {
@@ -874,6 +885,84 @@ void SongsPanel::newChordChart (int songIndex)
                         "{comment: Verse}\n[C]Chords go in square [G]brackets,\n[Am]before the syllable they [F]fall on.\n"
                         "A line without brackets is just words.\n";
     if (! dest.replaceWithText (text)) return;
+    engine.addSongChart (songIndex, { dest.getFileName(), {} });
+    refresh();
+    showChartViewer (engine, songIndex, (int) engine.getSongs()[(size_t) songIndex].charts.size() - 1);
+}
+
+void SongsPanel::findChordsOnTheWeb (int songIndex)
+{
+    /* The browser opens on a search for the song's chords. Which version is
+       right is the player's call, so nothing is fetched from here: they copy
+       the one they trust, and on coming back StageRig offers to make the chart
+       of it (offerChartFromCopiedChords). */
+    const auto& songs = engine.getSongs();
+    if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+    const auto name = songs[(size_t) songIndex].name.trim();
+    if (name.isEmpty())
+    {
+        AlertWindow::showMessageBoxAsync (MessageBoxIconType::InfoIcon, "Find chords on the web", "Give the song a name first: that is what is searched for.");
+        return;
+    }
+    chordSearchSong = songIndex;
+    chordSearchName = songs[(size_t) songIndex].name;
+    chordSearchClipboard = SystemClipboard::getTextFromClipboard();
+    chordSearchUntilMs = Time::currentTimeMillis() + 20 * 60 * 1000;
+    chordSearchAway = false;
+    URL ("https://www.google.com/search?q=" + URL::addEscapeChars (name + " chords", true)).launchInDefaultBrowser();
+}
+
+void SongsPanel::offerChartFromCopiedChords()
+{
+    if (chordSearchSong < 0) return;
+    if (Time::currentTimeMillis() > chordSearchUntilMs) { chordSearchSong = -1; return; }
+    // Looked at once each time the player comes back from the browser, not while they are away.
+    if (! Process::isForegroundProcess()) { chordSearchAway = true; return; }
+    if (! chordSearchAway) return;
+    chordSearchAway = false;
+
+    const auto copied = SystemClipboard::getTextFromClipboard();
+    if (copied == chordSearchClipboard || ! hasChordsOverWords (copied)) return;      // nothing new, or not a chart: they may go back for another
+    const int song = chordSearchSong;
+    const auto name = chordSearchName;
+    chordSearchSong = -1;
+    const auto& songs = engine.getSongs();
+    if (song >= (int) songs.size() || songs[(size_t) song].name != name) return;       // the song list changed meanwhile
+    AlertWindow::showOkCancelBox (MessageBoxIconType::QuestionIcon, "Chords copied",
+                                  "Make a chord chart for \"" + name + "\" from what you copied?",
+                                  "Make the chart", "Not now", this,
+                                  ModalCallbackFunction::create ([safe = Component::SafePointer<SongsPanel> (this), song, name] (int ok)
+    {
+        if (ok == 0 || safe == nullptr) return;
+        const auto& now = safe->engine.getSongs();
+        if (song < (int) now.size() && now[(size_t) song].name == name) safe->newChordChartFromClipboard (song);
+    }));
+}
+
+void SongsPanel::newChordChartFromClipboard (int songIndex)
+{
+    /* Charts on the web are typed with the chords on a line above the words.
+       Copied from there, they become a ChordPro chart here: the chords go into
+       the words, so the chart can follow the song's key like any other. The
+       key it is written in is a guess from its chords, shown in its {key:}
+       line at the top of the editor to be put right if it is wrong. */
+    const auto& songs = engine.getSongs();
+    if (songIndex < 0 || songIndex >= (int) songs.size()) return;
+    const auto copied = SystemClipboard::getTextFromClipboard();
+    if (! hasChordsOverWords (copied))
+    {
+        AlertWindow::showMessageBoxAsync (MessageBoxIconType::InfoIcon, "New chord chart from copied text",
+                                          "Nothing copied looks like a chord chart.\n\n"
+                                          "Select the chords and words where you found them -- chords on a line of their own, "
+                                          "above the words -- copy them, and choose this again.");
+        return;
+    }
+    const auto folder = engine.getChartsFolder();
+    if (folder == File()) return;
+    folder.createDirectory();
+    const auto& sg = songs[(size_t) songIndex];
+    const File dest = folder.getNonexistentChildFile (File::createLegalFileName (sg.name.isNotEmpty() ? sg.name : "Chart"), ".cho", false);
+    if (! dest.replaceWithText (chordProFromChordsOverWords (copied, sg.name, guessKeyOfChordsOverWords (copied)))) return;
     engine.addSongChart (songIndex, { dest.getFileName(), {} });
     refresh();
     showChartViewer (engine, songIndex, (int) engine.getSongs()[(size_t) songIndex].charts.size() - 1);
@@ -1071,7 +1160,7 @@ public:
         countInOutBox.onChange = [this] { applyCountIn(); };
 
         addAndMakeVisible (sectionsHeader);
-        sectionsHeader.setColour (Label::textColourId, accent);
+        sectionsHeader.setColour (Label::textColourId, amber);
         sectionsHeader.setFont (FontOptions (13.0f, Font::bold));
 
         timeline = std::make_unique<TrackTimeline> (engine, songIndex);

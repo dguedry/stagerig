@@ -391,7 +391,10 @@ else made: players share them, free, in the *NKS User Library* on Native
 Instruments' community site, and some are sold. Download one, unpack it into
 the `Sounds` folder beside the settings (in a folder of any name), and start
 StageRig again: its sounds are listed like the maker's own. You need the
-plugin itself, in its VST3 version.
+plugin itself. These libraries are made for a plugin's VST3 version; Surge
+XT's also load into its CLAP and LV2 versions, and so do those of any plugin
+that keeps its sounds the same way in each. Where a plugin's other version
+lists no sounds, use its VST3 version.
 
 A plugin with only a few sounds shows them all. One with many shows them a
 group at a time, as its maker groups them: a library (one Kontakt plays
@@ -415,8 +418,9 @@ it. Kept sounds live in the `Sounds` folder beside the settings, a folder per
 plugin; copy it to take them to another computer.
 
 A sound chosen here is the plugin's whole state, as if picked in its own
-window: change it there afterwards and the program keeps the change. NKS
-sounds and VST3 presets load into the plugin's VST3 version.
+window: change it there afterwards and the program keeps the change. VST3
+presets load into the plugin's VST3 version; NKS sounds into that one, and
+into a CLAP or LV2 version that reads the same sounds (Surge XT's do).
 
 **The knobs follow the sound.** A plugin that holds many instruments --
 Kontakt above all -- has no one set of knobs: each instrument inside it puts
@@ -1029,7 +1033,24 @@ The tablet shows the saved version from then on. **Chart... ▸ New chord
 chart...** starts one from a few lines that show the ChordPro way: chords in
 square brackets before the syllable they fall on, `{title: ...}`,
 `{subtitle: ...}` and `{comment: ...}` for the headings; a line without
-brackets is just words. Writing notation -- a score with staves -- is a job
+brackets is just words.
+
+**Chart... ▸ New chord chart from copied text** makes one from a chart typed
+the way they are on the web, with the chords on a line of their own above the
+words. Select the chords and words where you found them, copy, and choose it:
+each chord goes into the words under it, a `[Verse]` heading becomes a
+heading, and the chart opens in the editor. Its `{key: ...}` line is a guess
+from the chords -- check it, since that is the key the chart is moved *from*
+when the song is in another. If a chord sits a syllable off, the copied text
+was spaced that way; move its bracket.
+
+**Chart... ▸ Find chords on the web...** opens your browser on a search for
+the song's chords. Pick the version you trust, select its chords and words,
+and copy them. When you come back to StageRig it asks whether to make the
+chart from what you copied: one press, and it is on the song. StageRig fetches
+nothing by itself -- which version is right is your call.
+
+Writing notation -- a score with staves -- is a job
 for MuseScore or the like; export its PDF and attach that.
 
 On the tablet, a song with a chart shows a **Chart** button on its row. It
@@ -1464,11 +1485,12 @@ on, named as the instrument's layout names them, with the page arrows. A
 slider moved on the stand moves the parameter at once; a parameter moved
 anywhere else moves the slider once a second, unless a thumb is on it.
 
-**Sounds...** beside the instrument's name lists that plugin's sounds, the
+The button beside the instrument's name shows the sound it has now
+(`♪ Crispy Pop Piano`), or **Sounds...** when none was chosen. Tap it for that plugin's sounds, the
 same list as **Sounds...** on the computer: the ones you kept, the plugin's
 own programs, VST3 presets and the maker's sounds, in the same groups. Tap a
 group to go into it, or type to search them all; tap a sound and the
-instrument plays it at once. The program keeps the last one tapped. An instrument chosen inside a plugin's own window (a Kontakt
+instrument plays it at once: the list closes and the button shows its name. The program keeps it. An instrument chosen inside a plugin's own window (a Kontakt
 instrument not in the list) is still chosen there, through **GUI**.
 
 The page changes only what changed: picking a program or a song relights
@@ -1489,6 +1511,10 @@ That is the plugin itself, not a drawing of it: pull those drawbars, kick the
 Leslie from slow to fast, open a menu, load a different patch. What you see is
 the plugin's own window, so what it shows is always true, and there is nothing
 to set up for each plugin.
+
+If the page is open in a browser on the computer itself, there is nothing to
+mirror: **GUI** brings the plugin's real window up on that screen, above the
+browser, and opens no tab. Close the window when you are done.
 
 This needs `x11vnc`, `websockify`, `xdotool` and `novnc` installed; StageRig
 says so if any are missing. Works on X11 and Wayland desktops. If the tablet

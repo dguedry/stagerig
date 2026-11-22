@@ -425,15 +425,16 @@ StringArray RemotePlugin::getProgramNames()
     for (int i = 0; i < n && ! in.isExhausted(); ++i)
     {
         /* A name that is only a number is no sound: "Program 3", "Default",
-           and Kontakt's 128 "MIDI channel 0 program 5", which are slots for
-           program changes. Left blank, so the rest keep their numbers. */
+           Kontakt's 128 "MIDI channel 0 program 5", Analog Lab's "ProgramChange 5"
+           and FM8's "<disabled>", which are slots for program changes. Left blank, so the rest keep their numbers. */
         auto name = in.readString().trim();
         auto words = StringArray::fromTokens (name.toLowerCase(), " _-:#.", "");
         words.removeEmptyStrings();
         bool generic = true;
         for (const auto& w : words)
             if (! w.containsOnly ("0123456789") && ! StringArray { "midi", "channel", "ch", "program", "prog", "preset", "patch",
-                                                                   "default", "init", "initial", "unnamed", "untitled", "empty" }.contains (w))
+                                                                   "default", "init", "initial", "unnamed", "untitled", "empty",
+                                                                   "programchange", "disabled", "<disabled>" }.contains (w))
                 generic = false;
         names.add (generic ? String() : name);
     }

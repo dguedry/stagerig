@@ -1021,7 +1021,7 @@ String MidiFx::describe (const EffectDef& d)
             const float b = d.phraseBeats;
             const String beats = std::abs (b - 1.0f) < 0.01f ? "a beat" : std::abs (b - 4.0f) < 0.01f ? "a bar" : std::abs (b - std::round (b)) < 0.01f ? String ((int) std::round (b)) + " beats" : String (b, 2) + " beats";
             return d.phraseName + ": " + String (n) + (n == 1 ? " note" : " notes") + " over " + beats
-                   + (d.phraseRoot == -2 ? ", as written whatever the key" : d.phraseRoot < 0 ? ", starting on the key" : ", as written from " + MidiMessage::getMidiNoteName (d.phraseRoot, true, true, 3))
+                   + (d.phraseRoot == -2 ? ", as written whatever the key" : d.phraseRoot < 0 ? ", starting on the key" : ", as written from " + MidiMessage::getMidiNoteName (d.phraseRoot, true, true, 4))
                    + (d.phraseLoop ? ", repeating" : "") + (d.phraseStop ? ", stops with the key" : "");
         }
         default: return {};

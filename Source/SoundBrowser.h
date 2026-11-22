@@ -118,7 +118,7 @@ private:
     void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool selected) override
     {
         if (row < 0 || row >= (int) rows.size()) return;
-        g.fillAll (selected ? theme::accentDim : (row % 2 == 0 ? theme::bgDark : theme::bgDark.brighter (0.03f)));
+        g.fillAll (selected ? theme::amberDim : (row % 2 == 0 ? theme::bgDark : theme::bgDark.brighter (0.03f)));
         const auto& r = rows[(size_t) row];
         if (r.sound < 0)
         {
@@ -136,7 +136,7 @@ private:
         }
         const auto& s = sounds[(size_t) r.sound];
         const bool before = s.from == SoundChoice::From::before;
-        g.setColour (! before && s.name == playing ? theme::accent.brighter (0.4f) : juce::Colours::white);
+        g.setColour (! before && s.name == playing ? theme::amber : juce::Colours::white);
         g.setFont (juce::FontOptions (14.0f, before ? juce::Font::italic : juce::Font::bold));
         if (r.detail.isEmpty()) { g.drawText (s.name, 10, 0, w - 20, h, juce::Justification::centredLeft); return; }
         g.drawText (s.name, 10, 2, w - 20, 17, juce::Justification::centredLeft);

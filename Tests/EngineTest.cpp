@@ -242,9 +242,14 @@ static int probeSounds (const String& wanted)
     PluginHost host (settings);
 
     ControlMapLibrary library (scratch.getChildFile ("maps"));
-    library.startNksSearch (ControlMapLibrary::defaultNksFolders());
+    auto nksFolders = ControlMapLibrary::defaultNksFolders();
+    // The libraries people share, where StageRig keeps them.
+    if (const auto own = File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("StageRig/Sounds"); own.isDirectory()) nksFolders.add (own);
+    library.startNksSearch (nksFolders);
     CHECK (library.waitForNks (600000));
 
+    // STAGERIG_TEST_SOUNDS_FORMAT=CLAP (or LV2): that version of the plugin, not its VST3.
+    const String wantedFormat (std::getenv ("STAGERIG_TEST_SOUNDS_FORMAT") != nullptr ? std::getenv ("STAGERIG_TEST_SOUNDS_FORMAT") : "VST3");
     PluginDescription desc;
     bool found = false;
     if (auto xml = parseXML (File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("StageRig/StageRig.settings")))
@@ -255,7 +260,7 @@ static int probeSounds (const String& wanted)
                     KnownPluginList list;
                     list.recreateFromXml (*kp);
                     for (const auto& d : list.getTypes())
-                        if (d.name.equalsIgnoreCase (wanted) && (! found || d.pluginFormatName == "VST3")) { desc = d; found = true; }
+                        if (d.name.equalsIgnoreCase (wanted) && (! found || d.pluginFormatName == wantedFormat)) { desc = d; found = true; }
                 }
     if (! found) { std::printf ("SKIP: no plugin called %s in StageRig's plugin list\n", wanted.toRawUTF8()); return 77; }
     std::printf ("     %s (%s)\n", desc.name.toRawUTF8(), desc.pluginFormatName.toRawUTF8());
@@ -301,6 +306,75 @@ static int probeSounds (const String& wanted)
         CHECK (engine.setPluginState (0, 0, 0, -1, fromFile, "Kept").isEmpty());
         CHECK (slot().soundName == "Kept");
     }
+    // And it plays: a chord held, heard, started afresh or not.
+    auto heard = [&engine]
+    {
+        for (int n : { 48, 60, 64, 67 }) engine.injectMidi (0, MidiMessage::noteOn (1, n, (uint8) 110));
+        float peak = 0.0f;
+        for (int i = 0; i < 40; ++i) { peak = jmax (peak, render (engine, 8)); pump (20); }
+        for (int n : { 48, 60, 64, 67 }) engine.injectMidi (0, MidiMessage::noteOff (1, n));
+        render (engine, 20);
+        return peak;
+    };
+    auto heardInTime = [&heard] { float peak = 0.0f; for (int t = 0; t < 20 && peak <= 0.001f; ++t) peak = heard(); return peak; };
+
+    /* The sounds kept on this computer for this plugin (Sounds/<plugin> (<format>)): each
+       chosen, heard; then the plugin started afresh from what the program kept, heard again. */
+    {
+        const auto keptFolder = File::getSpecialLocation (File::userApplicationDataDirectory)
+                                    .getChildFile ("StageRig/Sounds").getChildFile (File::createLegalFileName (desc.name + " (" + desc.pluginFormatName + ")"));
+        auto files = keptFolder.findChildFiles (File::findFiles, false, "*.stagerig-sound");
+        files.sort();
+        for (int i = 0; i < jmin (3, files.size()); ++i)
+        {
+            MemoryBlock fromFile;
+            CHECK (files[i].loadFileAsData (fromFile));
+            const auto name = files[i].getFileNameWithoutExtension();
+            /* How long the change takes, which is what decides whether a sound can be changed
+               while playing: the plugin taking the state, then a held chord being heard. */
+            for (int n : { 48, 60, 64, 67 }) engine.injectMidi (0, MidiMessage::noteOff (1, n));
+            const auto t0 = Time::getMillisecondCounterHiRes();
+            /* The audio goes on while the sound is taken, as it does on stage: a device
+               asks for blocks whatever the message thread is doing. (Kontakt waits for it.) */
+            std::atomic<bool> taking { true };
+            std::thread audio ([&] { while (taking.load()) { render (engine, 1); Thread::sleep (5); } });
+            const auto wrong = engine.setPluginState (0, 0, 0, -1, fromFile, name);
+            taking.store (false);
+            audio.join();
+            const auto tookMs = Time::getMillisecondCounterHiRes() - t0;
+            if (wrong.isNotEmpty()) std::printf ("     \"%s\" was not taken: %s (%s)\n", name.toRawUTF8(), wrong.toRawUTF8(), plugin->getLastError().toRawUTF8());
+            CHECK (wrong.isEmpty());
+            double heardMs = -1.0;
+            for (int n : { 48, 60, 64, 67 }) engine.injectMidi (0, MidiMessage::noteOn (1, n, (uint8) 110));
+            for (const auto t1 = Time::getMillisecondCounterHiRes(); Time::getMillisecondCounterHiRes() - t1 < 30000.0;)
+            {
+                if (render (engine, 2) > 0.001f) { heardMs = Time::getMillisecondCounterHiRes() - t1; break; }
+                pump (5);
+                if ((int) (Time::getMillisecondCounterHiRes() - t1) % 500 < 12)     // a sampler may have missed the notes while loading
+                    for (int n : { 48, 60, 64, 67 }) engine.injectMidi (0, MidiMessage::noteOn (1, n, (uint8) 110));
+            }
+            for (int n : { 48, 60, 64, 67 }) engine.injectMidi (0, MidiMessage::noteOff (1, n));
+            render (engine, 20);
+            std::printf ("     \"%s\": taken in %.0f ms, heard %.0f ms after that\n", name.toRawUTF8(), tookMs, heardMs);
+            const float chosen = heardInTime();
+            const auto keptSize = slot().state.getSize();
+            // STAGERIG_TEST_SOUNDS_NORELOAD=1: one sound after another into the same running plugin.
+            float afresh = chosen;
+            if (std::getenv ("STAGERIG_TEST_SOUNDS_NORELOAD") == nullptr)
+            {
+                engine.reloadPlugin (0, 0, 0);
+                settle();
+                plugin = engine.getPlugin (0, 0, 0);
+                afresh = heardInTime();
+                // STAGERIG_TEST_SOUNDS_WAIT=<ms>: that long left alone before the next sound.
+                if (const char* w = std::getenv ("STAGERIG_TEST_SOUNDS_WAIT")) pump (String (w).getIntValue());
+            }
+            std::printf ("     kept \"%s\" (file %d bytes, program keeps %d): chosen %.4f, started afresh %.4f\n",
+                         name.toRawUTF8(), (int) fromFile.getSize(), (int) keptSize, chosen, afresh);
+            CHECK (chosen > 0.001f);
+            CHECK (afresh > 0.001f);
+        }
+    }
     if (sounds.size() < 2) { std::printf ("SOUNDS %s: %d failure(s)\n", wanted.toRawUTF8(), failures); std::fflush (stdout); std::_Exit (failures == 0 ? 0 : 1); }
 
     const auto& a = sounds.front();
@@ -325,6 +399,17 @@ static int probeSounds (const String& wanted)
     CHECK (reloaded.getSize() > 0);
     CHECK (reloaded == keptB || reloaded != keptA);
     std::printf ("     reloaded %s: %s\n", b.name.toRawUTF8(), reloaded == keptB ? "the same state" : "a state of its own (not the other sound)");
+
+    // A sampler goes on loading after it has said it is ready: asked again for a while.
+    float afterReload = 0.0f;
+    int tries = 0;
+    for (; tries < 20 && afterReload <= 0.001f; ++tries) afterReload = heard();
+    std::printf ("     after starting afresh, a chord peaks at %.4f (try %d)\n", afterReload, tries);
+    CHECK (engine.setPluginSound (0, 0, 0, -1, b.file, b.name).isEmpty());
+    const float afterChoosing = heard();
+    std::printf ("     after choosing the sound again, %.4f\n", afterChoosing);
+    CHECK (afterChoosing > 0.001f);
+    CHECK (afterReload > 0.001f);
 
     // The sound before, put back.
     CHECK (engine.setPluginState (0, 0, 0, -1, before, {}).isEmpty());

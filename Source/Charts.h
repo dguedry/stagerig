@@ -60,4 +60,18 @@ juce::String transposeChordName (const juce::String& chord, int semitones, bool 
     Unchanged when it names no key, or is in that key already. The words are never touched. */
 juce::String transposeChordPro (const juce::String& text, int toRoot, bool flats);
 
+/** True when the text has chords written on lines of their own above the words -- the way charts are
+    typed on the web -- so it can be turned into ChordPro. */
+bool hasChordsOverWords (const juce::String& text);
+
+/** The key a list of chord lines is most likely in ("E", "F#m"): a guess from which chords are there and
+    how often. Empty when there are no chords to go by. */
+juce::String guessKeyOfChordsOverWords (const juce::String& text);
+
+/** Chords-above-the-words text as ChordPro: each chord goes into the line of words under it, at the
+    column it stood over; a line of chords with no words under it keeps its chords, in brackets; a
+    [Verse] heading becomes {comment: Verse}. With a title and a key ({key:} is what lets the chart
+    follow the song's key), which are left out when empty. */
+juce::String chordProFromChordsOverWords (const juce::String& text, const juce::String& title, const juce::String& key);
+
 } // namespace perf

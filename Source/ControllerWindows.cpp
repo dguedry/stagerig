@@ -12,7 +12,7 @@ namespace
 {
     using namespace perf::theme;
 
-    String noteName (int n) { return MidiMessage::getMidiNoteName (n, true, true, 3); }
+    String noteName (int n) { return MidiMessage::getMidiNoteName (n, true, true, 4); }
 
     struct NamedColour { const char* name; uint32 rgb; };
     const NamedColour keyColourChoices[] = {
@@ -331,9 +331,9 @@ private:
         void paint (Graphics& g) override
         {
             auto r = getLocalBounds().toFloat().reduced (1.0f);
-            g.setColour (lit ? Colour (0xff3a4f6e) : bgRow);
+            g.setColour (lit ? accentDim : bgRow);
             g.fillRoundedRectangle (r, 6.0f);
-            g.setColour (selected ? Colour (0xff5fa8ff) : Colour (0xff444852));
+            g.setColour (selected ? accent : border.brighter (0.25f));
             g.drawRoundedRectangle (r, 6.0f, selected ? 2.0f : 1.0f);
 
             auto inner = getLocalBounds().reduced (6);
@@ -347,9 +347,9 @@ private:
                 // A button: lit when on.
                 const auto pill = dial.withSizeKeepingCentre (56.0f, 26.0f);
                 const bool on = level >= 0.5f;
-                g.setColour (on ? Colour (0xff2f5f9a) : Colour (0xff3a3e48));
+                g.setColour (on ? accentDim : border);
                 g.fillRoundedRectangle (pill, 6.0f);
-                g.setColour (on ? Colour (0xff5fa8ff) : Colour (0xff50555f));
+                g.setColour (on ? accent : border.brighter (0.4f));
                 g.drawRoundedRectangle (pill, 6.0f, 1.5f);
                 g.setColour (Colours::white);
                 g.setFont (FontOptions (12.0f, Font::bold));
@@ -361,13 +361,13 @@ private:
             const float range = MathConstants<float>::pi * 1.5f;
             Path track;
             track.addCentredArc (dial.getCentreX(), dial.getCentreY(), 17.0f, 17.0f, 0.0f, -range / 2.0f, range / 2.0f, true);
-            g.setColour (Colour (0xff50555f));
+            g.setColour (border.brighter (0.4f));
             g.strokePath (track, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
             if (level >= 0.0f)
             {
                 Path on;
                 on.addCentredArc (dial.getCentreX(), dial.getCentreY(), 17.0f, 17.0f, 0.0f, -range / 2.0f, -range / 2.0f + range * level, true);
-                g.setColour (Colour (0xff5fa8ff));
+                g.setColour (accent);
                 g.strokePath (on, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
             }
             }
@@ -1039,7 +1039,7 @@ private:
         {
             if (row < 0 || row >= (int) owner.edit.buttons.size()) return;
             const auto& b = owner.edit.buttons[(size_t) row];
-            g.fillAll (selected ? accentDim : (row % 2 == 0 ? bgRow : bgRow.brighter (0.03f)));
+            g.fillAll (selected ? amberDim : (row % 2 == 0 ? bgRow : bgRow.brighter (0.03f)));
             const int idx = owner.paramIndexOf (b);
             const auto param = idx >= 0 ? owner.params[(size_t) idx].name : b.paramName;
             g.setColour (Colours::white);

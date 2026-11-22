@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.h"
+#include "Theme.h"
 #include "LowLatency.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 
@@ -61,7 +62,7 @@ public:
         fullBtn.onClick = [this] { volumeSlider.setValue (100.0, juce::sendNotificationSync); };
         addAndMakeVisible (volumeNote);
         volumeNote.setFont (juce::FontOptions (12.0f));
-        volumeNote.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
+        volumeNote.setColour (juce::Label::textColourId, perf::theme::textDim);
 
         addAndMakeVisible (applyBtn);
         applyBtn.setTooltip ("Close and reopen the audio device. Use it when the sound has stopped: after the computer's "
@@ -73,13 +74,13 @@ public:
         addAndMakeVisible (typeNote);
         typeNote.setFont (juce::FontOptions (12.5f));
         typeNote.setJustificationType (juce::Justification::topLeft);
-        typeNote.setColour (juce::Label::textColourId, juce::Colour (0xffc8ccd4));
-        keptNote.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
+        typeNote.setColour (juce::Label::textColourId, perf::theme::text.withAlpha (0.85f));
+        keptNote.setColour (juce::Label::textColourId, perf::theme::textDim);
         applyBtn.onClick = [this] { whileBusy ([this] { apply(); }); };
 
         addAndMakeVisible (status);
         status.setFont (juce::FontOptions (12.0f));
-        status.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
+        status.setColour (juce::Label::textColourId, perf::theme::textDim);
         status.setJustificationType (juce::Justification::topLeft);
 
         addAndMakeVisible (selector);
@@ -237,7 +238,7 @@ private:
         if (! onPipeWire())
         {
             status.setText (txt, juce::dontSendNotification);
-            status.setColour (juce::Label::textColourId, LowLatency::realtimeSchedulingAvailable() ? juce::Colour (0xff9aa0ab) : juce::Colours::orange);
+            status.setColour (juce::Label::textColourId, LowLatency::realtimeSchedulingAvailable() ? perf::theme::textDim : juce::Colours::orange);
             return;
         }
         const auto clock = LowLatency::readClock();
@@ -250,7 +251,7 @@ private:
         else if (clock.quantum.isNotEmpty())
             txt << "\nSystem buffer " << clock.quantum << " samples at " << clock.rate << " Hz (not forced)";
         status.setText (txt, juce::dontSendNotification);
-        status.setColour (juce::Label::textColourId, LowLatency::realtimeSchedulingAvailable() ? juce::Colour (0xff9aa0ab) : juce::Colours::orange);
+        status.setColour (juce::Label::textColourId, LowLatency::realtimeSchedulingAvailable() ? perf::theme::textDim : juce::Colours::orange);
     }
 
     //==============================================================================
@@ -384,18 +385,18 @@ private:
         BusyNotice() { setInterceptsMouseClicks (true, true); }
         void paint (juce::Graphics& g) override
         {
-            g.fillAll (juce::Colour (0xd0101216));
+            g.fillAll (perf::theme::bgPane.withAlpha (0.82f));
             auto box = getLocalBounds().withSizeKeepingCentre (300, 96);
-            g.setColour (juce::Colour (0xff23262d));
+            g.setColour (perf::theme::bgPanel);
             g.fillRoundedRectangle (box.toFloat(), 8.0f);
-            g.setColour (juce::Colour (0xff4a4f5a));
+            g.setColour (perf::theme::border.brighter (0.25f));
             g.drawRoundedRectangle (box.toFloat().reduced (0.5f), 8.0f, 1.0f);
             auto wheel = box.removeFromLeft (84).withSizeKeepingCentre (36, 36);
             getLookAndFeel().drawSpinningWaitAnimation (g, juce::Colours::white, wheel.getX(), wheel.getY(), wheel.getWidth(), wheel.getHeight());
             g.setColour (juce::Colours::white);
             g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
             g.drawText ("Reopening audio...", box.removeFromTop (54).withTrimmedTop (22), juce::Justification::centredLeft);
-            g.setColour (juce::Colour (0xff9aa0ab));
+            g.setColour (perf::theme::textDim);
             g.setFont (juce::FontOptions (12.5f));
             g.drawText ("Getting every plugin ready.", box.withTrimmedBottom (20), juce::Justification::centredLeft);
         }

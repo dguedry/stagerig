@@ -303,7 +303,13 @@ private:
                 if (instance == nullptr) return fail ("no plugin");
                 suppressNotifications = true;
                 {
-                    const std::lock_guard<std::mutex> l (processMutex);
+                    /* Not under processMutex: the audio goes on being asked for while the
+                       sound is taken, as in any host. Kontakt, given a second sound while it
+                       was still loading the first, waited for the audio to come round and
+                       never answered -- the audio was waiting here for it -- and was put
+                       down as stuck thirty seconds later, the program left with the old
+                       sound. What it plays meanwhile is not let out (takingSound). */
+                    const TakingSound taking (takingSound);
                     instance->setStateInformation (payload.getData(), (int) payload.getSize());
                 }
                 suppressNotifications = false;
@@ -385,7 +391,7 @@ private:
                 if (index < 0 || index >= instance->getNumPrograms()) return fail ("no such program");
                 suppressNotifications = true;
                 {
-                    const std::lock_guard<std::mutex> l (processMutex);
+                    const TakingSound taking (takingSound);      // as setState: the audio keeps running, unheard
                     instance->setCurrentProgram (index);
                 }
                 suppressNotifications = false;
@@ -784,8 +790,22 @@ private:
 
         const int nOut = instance->getMainBusNumOutputChannels();
         if (nOut <= 0) return;
+        /* While a sound is being taken the plugin is between two of them, and what it
+           makes is not for hearing: faded out over the first block, silent (as cleared
+           above) until it is done, faded in over the first block after. */
+        const bool taking = takingSound.load (std::memory_order_acquire) > 0;
+        if (taking && unheard) return;
+        const float from = unheard ? 0.0f : 1.0f, to = taking ? 0.0f : 1.0f;
+        unheard = taking;
         FloatVectorOperations::copy (shm->outL, view.getReadPointer (0), n);
         FloatVectorOperations::copy (shm->outR, view.getReadPointer (nOut == 1 ? 0 : 1), n);
+        if (from != to)
+            for (int i = 0; i < n; ++i)
+            {
+                const float g = from + (to - from) * (float) (i + 1) / (float) n;
+                shm->outL[i] *= g;
+                shm->outR[i] *= g;
+            }
     }
 
     //==============================================================================
@@ -798,6 +818,15 @@ private:
     std::unique_ptr<AudioThread> audioThread;
     std::thread control;
     std::mutex sendMutex, processMutex;
+    /** A sound is being given to the plugin (a state, a program of its own): its audio runs, unheard. */
+    std::atomic<int> takingSound { 0 };
+    struct TakingSound
+    {
+        explicit TakingSound (std::atomic<int>& c) : count (c) { count.fetch_add (1, std::memory_order_release); }
+        ~TakingSound() { count.fetch_sub (1, std::memory_order_release); }
+        std::atomic<int>& count;
+    };
+    bool unheard = false;        // the audio thread's: the last block went out silent
     std::atomic<bool> suppressNotifications { false };
     /* Which thread renders blocks. A parameter notification arriving on it is
        dropped, because sending one takes a lock; anything else -- the message

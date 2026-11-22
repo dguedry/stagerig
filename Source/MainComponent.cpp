@@ -34,7 +34,7 @@ namespace
         return s;
     }
 
-    String noteName (int n) { return MidiMessage::getMidiNoteName (n, true, true, 3); }
+    String noteName (int n) { return MidiMessage::getMidiNoteName (n, true, true, 4); }
 
     String araWarning (const String& name)
     {
@@ -358,7 +358,7 @@ public:
         editor.removeFromTop (6);
         auto chRow = editor.removeFromTop (24);
         channelLabel.setBounds (chRow.removeFromLeft (56));
-        channelBox.setBounds (chRow.removeFromLeft (90));
+        channelBox.setBounds (chRow);      // the row's whole width, as Output below: 90 across cut "All channels" short
         editor.removeFromTop (6);
         pcToggle.setBounds (editor.removeFromTop (22));
         editor.removeFromTop (6);
@@ -366,7 +366,7 @@ public:
            the same kind of control, and it was the only one a size smaller. */
         auto pcRow = editor.removeFromTop (24);
         pcChannelLabel.setBounds (pcRow.removeFromLeft (56));
-        pcChannelBox.setBounds (pcRow.removeFromLeft (130));
+        pcChannelBox.setBounds (pcRow);
         editor.removeFromTop (6);
         auto outRow = editor.removeFromTop (24);
         outputLabel.setBounds (outRow.removeFromLeft (56));
@@ -383,7 +383,7 @@ public:
         row = shown[(size_t) row];
         auto& def = inputs[(size_t) row];
 
-        g.fillAll (selected ? accentDim : bgRow);
+        g.fillAll (selected ? amberDim : bgRow);
         g.setColour (Colours::white);
         g.setFont (FontOptions (15.0f, Font::bold));
         g.drawText (def.name, 8, 4, w - 16, 18, Justification::centredLeft, true);
@@ -417,7 +417,7 @@ public:
 
         if (! def.isTrack())      // its program follows the song, not a number anyone sends
         {
-            g.setColour (accent);
+            g.setColour (selected ? text : amber);
             g.setFont (FontOptions (13.0f, Font::bold));
             g.drawText (String (def.currentProgram).paddedLeft ('0', 3), w - 72, 22, 64, 16, Justification::centredRight, true);
         }
@@ -693,7 +693,7 @@ public:
         const bool audio = inputs[(size_t) in].isAudio();
         const bool blank = audio ? prog.effects.empty() && prog.name.isEmpty() : prog.isEmpty();
 
-        g.fillAll (selected ? accentDim : (row % 2 ? bgRow : bgPanel));
+        g.fillAll (selected ? amberDim : (row % 2 ? bgRow : bgPanel));
         g.setColour (blank ? textDim : Colours::white);
         g.setFont (FontOptions (13.0f, blank ? Font::plain : Font::bold));
         g.drawText (programTitle (row, prog), 8, 0, w - 60, h, Justification::centredLeft, true);
@@ -720,7 +720,7 @@ public:
         // Dropped when the pane is squeezed: the name is what the row is for.
         if (prog.group.isNotEmpty() && w >= 240)
         {
-            g.setColour (Colour (0xff7f8896));
+            g.setColour (textDim.darker (0.2f));
             g.setFont (FontOptions (10.5f));
             g.drawText (prog.group.toUpperCase(), 8, 0, w - 80, h, Justification::centredRight, true);
         }
@@ -1386,7 +1386,7 @@ public:
             l->setFont (FontOptions (12.0f));
         }
         chainLabel.setFont (FontOptions (13.0f, Font::bold));
-        chainLabel.setColour (Label::textColourId, accent);
+        chainLabel.setColour (Label::textColourId, amber);
 
         addAndMakeVisible (chain);
         chain.address = [this] { return std::make_pair (Engine::outputAddress (list.getSelectedRow()), 0); };
@@ -1458,7 +1458,7 @@ public:
         const auto& outs = engine.getSetup().outputs;
         if (row < 0 || row >= (int) outs.size()) return;
         const auto& d = outs[(size_t) row];
-        g.fillAll (selected ? accentDim : bgRow);
+        g.fillAll (selected ? amberDim : bgRow);
         g.setColour (Colours::white);
         g.setFont (FontOptions (14.0f, Font::bold));
         g.drawText (d.name, 8, 3, w - 16, 18, Justification::centredLeft, true);
@@ -1940,7 +1940,7 @@ public:
             addAndMakeVisible (header);
             addAndMakeVisible (chain);
             header.setFont (FontOptions (13.0f, Font::bold));
-            header.setColour (Label::textColourId, accent);
+            header.setColour (Label::textColourId, amber);
         }
         int preferredHeight() const { return 26 + chain.preferredHeight() + 6; }
         void paint (Graphics& g) override
@@ -2350,7 +2350,7 @@ public:
         learnBtn.setTooltip ("Press, then move the knob, pedal or wheel on your keyboard");
         learnBtn.setColour (TextButton::buttonOnColourId, Colours::orangered);
         learnBtn.onClick = [this] { engine.setLearnArmed (learnBtn.getToggleState()); if (learnBtn.getToggleState()) owner.showStatus ("Move a MIDI controller..."); };
-        sourceLabel.setColour (Label::textColourId, accent);
+        sourceLabel.setColour (Label::textColourId, amber);
         sourceLabel.setFont (FontOptions (13.0f, Font::bold));
         for (auto* s : { &minSlider, &maxSlider })
         {
@@ -2529,7 +2529,7 @@ public:
 
     void paintRowBackground (Graphics& g, int row, int, int, bool selected) override
     {
-        g.fillAll (selected ? accentDim : (row % 2 ? bgRow : bgPanel));
+        g.fillAll (selected ? amberDim : (row % 2 ? bgRow : bgPanel));
     }
 
     void paintCell (Graphics& g, int row, int col, int w, int h, bool) override
@@ -3378,8 +3378,16 @@ std::vector<SoundChoice> MainComponent::soundChoicesFor (int input, int program,
         all.push_back ({ SoundChoice::From::vst3Preset, f.getFileNameWithoutExtension(), {}, f, -1, group });
     }
 
-    // The maker's sounds load into the plugin's VST3 version only: not offered to another.
-    auto makers = desc.pluginFormatName == "VST3" ? controlMaps->soundsFor (desc) : std::vector<NksSound>();
+    /* The maker's sounds are made for the plugin's VST3 version. Another
+       version is offered them only when it reads the same sound (Surge XT's
+       CLAP and LV2 do): tried here on the first, so none is listed that
+       would not load. */
+    auto makers = controlMaps->soundsFor (desc);
+    if (desc.pluginFormatName != "VST3" && ! makers.empty())
+    {
+        MemoryBlock now, made;
+        if (! plugin->getState (now, 10000) || nksStateFor (makers.front().file, now, made).failed()) makers.clear();
+    }
     const auto groups = nksGroupsFor (makers);
     const size_t firstMakers = all.size();
     StringArray products;
@@ -4580,20 +4588,20 @@ void MainComponent::showRemote()
         void paint (Graphics& g) override
         {
             auto r = getLocalBounds().reduced (18);
-            g.fillAll (Colour (0xff1e1f24));
+            g.fillAll (bgDark);
 
             // Point a camera at this and skip the typing entirely.
             if (qr.isValid())
             {
                 auto box = r.removeFromRight (128);
                 qr.draw (g, box.removeFromTop (128), Colours::black, Colours::white);
-                g.setColour (Colour (0xff9aa0ab));
+                g.setColour (textDim);
                 g.setFont (FontOptions (11.5f));
                 g.drawFittedText ("or scan this", box.removeFromTop (18), Justification::centred, 1);
                 r.removeFromRight (14);
             }
 
-            g.setColour (Colour (0xff9aa0ab));
+            g.setColour (textDim);
             g.setFont (FontOptions (13.0f, Font::bold));
             g.drawFittedText ("1.  OPEN THIS ON YOUR TABLET", r.removeFromTop (20), Justification::centredLeft, 1);
             g.setColour (Colours::white);
@@ -4601,18 +4609,18 @@ void MainComponent::showRemote()
             g.drawFittedText (url, r.removeFromTop (34), Justification::centredLeft, 1);
 
             r.removeFromTop (18);
-            g.setColour (Colour (0xff9aa0ab));
+            g.setColour (textDim);
             g.setFont (FontOptions (13.0f, Font::bold));
             g.drawFittedText ("2.  ENTER THIS CODE", r.removeFromTop (20), Justification::centredLeft, 1);
             auto codeBox = r.removeFromTop (74);
-            g.setColour (Colour (0xff15161c));
+            g.setColour (bgPane);
             g.fillRoundedRectangle (codeBox.toFloat(), 8.0f);
-            g.setColour (Colour (0xff5aa9ff));
+            g.setColour (accent);
             g.setFont (FontOptions (48.0f, Font::bold));
             g.drawFittedText (code, codeBox, Justification::centred, 1);
 
             r.removeFromTop (14);
-            g.setColour (Colour (0xff9aa0ab));
+            g.setColour (textDim);
             g.setFont (FontOptions (12.5f));
 
             const auto note = network.isNotEmpty()
@@ -4680,7 +4688,7 @@ void MainComponent::showRemote()
         editBtn->setBounds (18, content->getHeight() + 6, 484, 24);
         editBtn->setToggleState (settings.getBoolValue ("remoteEditing", true), dontSendNotification);
         editBtn->setColour (ToggleButton::textColourId, Colours::white);
-        editBtn->setColour (ToggleButton::tickColourId, Colour (0xff5aa9ff));
+        editBtn->setColour (ToggleButton::tickColourId, accent);
         editBtn->setTooltip ("Off: the tablet still picks songs, programs, keys and scenes, but cannot build or change set lists or scenes");
         editBtn->onClick = [this, b = Component::SafePointer<ToggleButton> (editBtn)]
         {

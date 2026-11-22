@@ -5,6 +5,7 @@
     plugin now and then hangs loading; name one plugin to run it alone
     ("PresetTest SWAM"). */
 #include "ControlMaps.h"
+#include "ClapPluginFormat.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
 #include <iostream>
@@ -24,17 +25,36 @@ static MemoryBlock part (const MemoryBlock& state, const char* name)
 {
     MemoryBlock m;
     if (auto xml = AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize()))
+    {
         if (auto* c = xml->getChildByName (name)) m.fromBase64Encoding (c->getAllSubText());
-    return m;
+        return m;
+    }
+    return state;       // a CLAP or LV2 state: all of it
 }
 
-static void tryPlugin (ControlMapLibrary& lib, const File& bundle)
+/** `named`: the one plugin wanted from a bundle that holds several (Surge XT's holds its effects too). */
+static void tryPlugin (ControlMapLibrary& lib, AudioPluginFormat& fmt, const File& bundle, const String& named = {})
 {
-    std::cout << "\n" << bundle.getFileNameWithoutExtension() << std::endl;
+    std::cout << "\n" << bundle.getFileNameWithoutExtension() << " (" << fmt.getName() << ")" << std::endl;
     if (! bundle.exists()) { std::cout << "  (not installed: skipped)" << std::endl; return; }
-    VST3PluginFormat fmt;
     OwnedArray<PluginDescription> types;
-    fmt.findAllTypesForFile (types, bundle.getFullPathName());
+    if (fmt.getName() == "LV2")
+    {
+        // LV2 plugins are named by address, not by file.
+        for (const auto& id : fmt.searchPathsForPlugins (fmt.getDefaultLocationsToSearch(), true, false))
+        {
+            OwnedArray<PluginDescription> found;
+            fmt.findAllTypesForFile (found, id);
+            while (! found.isEmpty())
+                if (auto* d = found.removeAndReturn (0); d->name == named) types.add (d); else delete d;
+        }
+    }
+    else
+    {
+        fmt.findAllTypesForFile (types, bundle.getFullPathName());
+        for (int i = types.size(); --i >= 0;)
+            if (named.isNotEmpty() && types[i]->name != named) types.remove (i);
+    }
     if (types.isEmpty()) { check (false, "the plugin is found in its bundle"); return; }
     const auto& desc = *types[0];
 
@@ -91,6 +111,11 @@ static void tryPlugin (ControlMapLibrary& lib, const File& bundle)
        it will not close; the test ends its process at the finish instead. */
     /* A VST3 preset inside the NKS file (SWAM's are): saved out as a
        .vstpreset, it gives the plugin the same state as the NKS file does. */
+    /* A CLAP state is the plugin's own, to be read: the sound it names is the one asked for. */
+    if (fmt.getName() == "CLAP" && desc.name == "Surge XT")
+        check (String::fromUTF8 ((const char*) first.getData() + 32, (int) jmin ((size_t) 400, first.getSize() - 32)).contains ("name=\"" + a.name + "\""),
+               "the plugin says it is playing " + a.name);
+    if (fmt.getName() == "VST3")
     {
         MemoryBlock file;
         a.file.loadFileAsData (file);
@@ -122,15 +147,31 @@ static int run()
     const auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("stagerig-presettest");
     dir.createDirectory();
     ControlMapLibrary lib (dir);
-    lib.startNksSearch (ControlMapLibrary::defaultNksFolders());
+    auto folders = ControlMapLibrary::defaultNksFolders();
+    // The libraries people share, where StageRig keeps them.
+    if (const auto own = File::getSpecialLocation (File::userHomeDirectory).getChildFile (".config/StageRig/Sounds"); own.isDirectory())
+        folders.add (own);
+    lib.startNksSearch (folders);
     check (lib.waitForNks (300000), "the NKS search finishes");
 
     const auto vst3 = File::getSpecialLocation (File::userHomeDirectory).getChildFile (".vst3/yabridge");
     for (const char* b : { "Super 8.vst3", "SWAM/Trumpets/SWAM Trumpet.vst3", "BBC Symphony Orchestra (64 Bit).vst3" })
         if (only.isEmpty() || String (b).containsIgnoreCase (only))
         {
-            tryPlugin (lib, vst3.getChildFile (b));
+            VST3PluginFormat fmt;
+            tryPlugin (lib, fmt, vst3.getChildFile (b));
         }
+    /* A sound library made for a plugin's VST3 version, in its CLAP and LV2
+       versions too: Surge XT keeps one form of its sound in all three. */
+    if (only.isEmpty() || String ("Surge XT").containsIgnoreCase (only))
+    {
+        VST3PluginFormat v;
+        tryPlugin (lib, v, File ("/usr/lib/vst3/Surge XT.vst3"), "Surge XT");
+        ClapPluginFormat c;
+        tryPlugin (lib, c, File ("/usr/lib/clap/Surge XT.clap"), "Surge XT");
+        LV2PluginFormat l;
+        tryPlugin (lib, l, File ("/usr/lib/lv2/Surge XT.lv2"), "Surge XT");
+    }
     dir.deleteRecursively();
     std::cout << "\nPresetTest: " << (failures == 0 ? String ("all checks passed") : String (failures) + " check(s) failed") << std::endl;
     std::_Exit (failures == 0 ? 0 : 1);     // the plugins left open, and Wine with them

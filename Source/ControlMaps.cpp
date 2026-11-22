@@ -206,7 +206,7 @@ int parseNoteName (const String& text)
     else if (t[i] == 'b' && t.length() > 2) { --pc; ++i; }
     const auto octaveText = t.substring (i).trim();
     if (octaveText.isEmpty() || ! octaveText.trimCharactersAtStart ("-").containsOnly ("0123456789")) return -1;
-    const int n = (octaveText.getIntValue() + 2) * 12 + pc;
+    const int n = (octaveText.getIntValue() + 1) * 12 + pc;
     return n >= 0 && n <= 127 ? n : -1;
 }
 
@@ -710,6 +710,26 @@ namespace
         return Result::ok();
     }
 
+    /** One part of a VST3 preset ("Comp": the sound itself), where it lies in the preset. */
+    bool vstPresetPart (const uint8* d, size_t n, const char* name, const uint8*& part, size_t& partSize)
+    {
+        if (n < 48 || std::memcmp (d, "VST3", 4) != 0) return false;
+        const auto listAt = le64 (d + 40);
+        if (listAt > n || n - listAt < 8 || std::memcmp (d + listAt, "List", 4) != 0) return false;
+        const auto count = le32 (d + listAt + 4);
+        for (uint32 i = 0; i < count && i < 64; ++i)
+        {
+            const auto at = listAt + 8 + (uint64) i * 20;
+            if (at + 20 > n) break;
+            const auto offset = le64 (d + at + 4), size = le64 (d + at + 12);
+            if (offset > n || size > n - offset || size == 0 || std::memcmp (d + at, name, 4) != 0) continue;
+            part = d + offset;
+            partSize = (size_t) size;
+            return true;
+        }
+        return false;
+    }
+
     /** JUCE's id (PluginDescription::uniqueId) for a class id written as 32 hex characters. */
     bool classIdHash (const char* hex32, int& out)
     {
@@ -800,8 +820,7 @@ Result vst3PresetState (const File& f, MemoryBlock& out)
 Result nksStateFor (const File& f, const MemoryBlock& current, MemoryBlock& out)
 {
     auto head = AudioProcessor::getXmlFromBinary (current.getData(), (int) current.getSize());
-    if (head == nullptr || ! head->hasTagName ("VST3PluginState"))
-        return Result::fail ("The maker's sounds load into the VST3 version of this plugin only.");
+    const bool vst3 = head != nullptr && head->hasTagName ("VST3PluginState");
     if (f.getSize() > 256 * 1024 * 1024) return Result::fail (f.getFileName() + " is too big to be an NKS preset.");
     MemoryBlock data;
     if (! f.loadFileAsData (data)) return Result::fail ("Could not read " + f.getFullPathName());
@@ -811,6 +830,51 @@ Result nksStateFor (const File& f, const MemoryBlock& current, MemoryBlock& out)
     if (pchk == chunks.end()) return Result::fail ("This NKS preset holds no sound.");
     const auto* d = static_cast<const uint8*> (data.getData()) + pchk->second.first;
     const auto n = pchk->second.second;
+
+    if (! vst3)
+    {
+        /* The plugin's CLAP or LV2 version. A plugin that keeps one form of
+           its sound in every version (Surge XT, and most made the same way)
+           takes the sound out of the file as it is; whether this is one is
+           read off the sound it has now, which must begin as the file's does.
+           Any other is left alone: a sound it cannot read could do anything. */
+        const auto wrongKind = Result::fail ("The maker's sounds load into the VST3 version of this plugin only.");
+        const uint8* sound = d;
+        size_t size = n;
+        if (n >= 48 && std::memcmp (d, "VST3", 4) == 0 && ! vstPresetPart (d, n, "Comp", sound, size)) return wrongKind;
+        // What JUCE's VST3 wrapper adds after the plugin's own state: not the plugin's.
+        static const char trailer[] = "JUCEPrivateData";
+        const size_t trailerSize = sizeof (trailer) - 1;
+        if (size >= trailerSize + 8 && std::memcmp (sound + size - trailerSize, trailer, trailerSize) == 0)
+            if (const auto own = le64 (sound + size - trailerSize - 8); own <= size - trailerSize - 8)
+                size -= trailerSize + 8 + (size_t) own;
+        if (size < 4) return wrongKind;
+
+        /* An LV2 plugin made with JUCE keeps its state as one line of text
+           inside the LV2 one: the same sound, written there. */
+        static const char lv2Mark[] = ":StateString> \"";
+        const auto* text = static_cast<const char*> (current.getData());
+        const auto* textEnd = text + current.getSize();
+        const auto* mark = std::search (text, textEnd, lv2Mark, lv2Mark + sizeof (lv2Mark) - 1);
+        if (mark != textEnd)
+        {
+            const auto* from = mark + sizeof (lv2Mark) - 1;
+            const auto* to = std::find (from, textEnd, '"');
+            MemoryBlock now;
+            if (to == textEnd || ! now.fromBase64Encoding (String::fromUTF8 (from, (int) (to - from)))
+                || now.getSize() < 4 || std::memcmp (now.getData(), sound, 4) != 0) return wrongKind;
+            out.reset();
+            out.append (text, (size_t) (from - text));
+            const auto written = MemoryBlock (sound, size).toBase64Encoding();
+            out.append (written.toRawUTF8(), written.getNumBytesAsUTF8());
+            out.append (to, (size_t) (textEnd - to));
+            return Result::ok();
+        }
+        if (current.getSize() < 4 || std::memcmp (current.getData(), sound, 4) != 0) return wrongKind;
+        out.reset();
+        out.append (sound, size);
+        return Result::ok();
+    }
 
     XmlElement state ("VST3PluginState");
     auto add = [&state] (const char* part, const void* bytes, size_t size)

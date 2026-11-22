@@ -12,7 +12,6 @@ using namespace juce;
 namespace
 {
     using namespace perf::theme;
-    const Colour gold      { 0xffe0b64a };
     const Colour vampCol   { 0xff8a6a2a };
 
     constexpr double kMaxPxPerSecond = 400.0;

@@ -195,6 +195,11 @@ static void raiseWindow (unsigned long windowId)
     }
 }
 
+void PluginView::bringToFront (const String& title)
+{
+    raiseWindow (findWindow (title));
+}
+
 //==============================================================================
 PluginView::Session PluginView::start (const String& title, String& error)
 {

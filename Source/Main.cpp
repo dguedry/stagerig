@@ -58,6 +58,10 @@ public:
            with no core. Treat it as the write error it is. */
         std::signal (SIGPIPE, SIG_IGN);
 
+        // StageRig's own colours for everything JUCE draws by itself (Theme.h).
+        if (auto* look = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
+            look->setColourScheme (perf::theme::colourScheme());
+
         // `StageRig --tempo song.mp3 ...` prints what the tempo detector hears in each file, then quits.
         if (commandLine.contains ("--tempo"))
         {
@@ -250,7 +254,7 @@ public:
     {
     public:
         MainWindow (const juce::String& name, perf::Engine& engine, juce::PropertiesFile& settings, const juce::File& initialSetup)
-            : DocumentWindow (perf::theme::windowTitle (name), juce::Colour (0xff1e1f24), DocumentWindow::allButtons), appSettings (settings)
+            : DocumentWindow (perf::theme::windowTitle (name), perf::theme::bgDark, DocumentWindow::allButtons), appSettings (settings)
         {
             setUsingNativeTitleBar (true);
             content = new perf::MainComponent (engine, settings, initialSetup);
@@ -417,6 +421,10 @@ namespace
         std::signal (SIGINT,  forwardToChild);
         std::signal (SIGHUP,  forwardToChild);
         std::signal (SIGPIPE, SIG_IGN);
+
+        // StageRig's own colours for everything JUCE draws by itself (Theme.h).
+        if (auto* look = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
+            look->setColourScheme (perf::theme::colourScheme());
         startLog();
 
         /* The page StageRig says it is alive on: a memory file, so it is shared

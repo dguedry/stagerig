@@ -29,7 +29,7 @@ struct LevelMeterPainter
 
         auto bar = [&] (juce::Rectangle<float> b, float v)
         {
-            g.setColour (juce::Colour (0xff1a1d24));
+            g.setColour (juce::Colour (0xff000712));
             g.fillRoundedRectangle (b, 2.0f);
             const float x = position (v);
             if (x <= 0.0f) return;
@@ -43,7 +43,7 @@ struct LevelMeterPainter
                 g.fillRect (s);
             };
             seg (0.0f, green, juce::Colour (0xff4fb86a));
-            seg (green, amber, juce::Colour (0xffd8a657));
+            seg (green, amber, juce::Colour (0xffcea04a));
             seg (amber, 1.0f, juce::Colour (0xffe04a4a));
         };
         const float gap = 2.0f;
@@ -52,7 +52,7 @@ struct LevelMeterPainter
         r.removeFromTop (gap);
         bar (r, level.right);
 
-        g.setColour (level.clipped ? juce::Colour (0xffff3b3b) : juce::Colour (0xff2a2e38));
+        g.setColour (level.clipped ? juce::Colour (0xffff3b3b) : juce::Colour (0xff1a3555));
         g.fillRoundedRectangle (clip, 2.0f);
     }
 };

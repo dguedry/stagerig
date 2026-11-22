@@ -152,8 +152,10 @@ std::vector<juce::StringArray> nksGroupsFor (std::vector<NksSound>& sounds);
     takes (AudioProcessor::setStateInformation). `current` is the plugin's
     own state now, whose form says how its maker reads a sound: Native
     Instruments' plugins take the preset file itself; a VST3 preset (the
-    maker's .vstpreset, inside) gives its two parts. Fails for a plugin not
-    loaded as VST3, as NKS sounds are made for VST plugins. */
+    maker's .vstpreset, inside) gives its two parts. A CLAP or LV2 version
+    takes the sound only when its own state begins as the file's does (Surge
+    XT, which keeps one form in every version); for any other it fails, as
+    NKS sounds are made for VST plugins. */
 juce::Result nksStateFor (const juce::File&, const juce::MemoryBlock& current, juce::MemoryBlock& out);
 
 /** The standard VST3 preset files (.vstpreset) made for this plugin: in the
@@ -244,7 +246,7 @@ private:
     std::thread nksThread;
 };
 
-/** "C3" -> 60, "F#-1" -> 6, "61" -> 61; -1 for neither. Middle C is C3, as everywhere in StageRig. */
+/** "C4" -> 60, "F#-1" -> 6, "61" -> 61; -1 for neither. Middle C is C4, as on the on-screen keyboard. */
 int parseNoteName (const juce::String&);
 
 } // namespace perf

@@ -10,7 +10,7 @@ namespace perf
 namespace
 {
     using namespace perf::theme;
-    const Colour bgCode    { 0xff15161c };
+    const Colour bgCode    { 0xff000712 };
 }
 
 //==============================================================================
@@ -712,7 +712,7 @@ private:
                                               .withTrimmedTop (b.header ? 8 : 5);
 
                     cellText (b, c, b.header ? textDim
-                                  : c == 0   ? Colours::white : Colour (0xffd7dbe2))
+                                  : c == 0   ? Colours::white : perf::theme::text.withAlpha (0.9f))
                         .draw (g, cellArea.toFloat());
                 }
                 return;
@@ -736,7 +736,7 @@ private:
         const auto base = fontFor (b.kind);
         const auto colour = isHeading (b.kind) ? Colours::white
                           : b.kind == Block::Kind::paragraph || b.kind == Block::Kind::bullet
-                            || b.kind == Block::Kind::numbered ? Colour (0xffd7dbe2)
+                            || b.kind == Block::Kind::numbered ? perf::theme::text.withAlpha (0.9f)
                           : textDim;
 
         AttributedString s;
@@ -911,7 +911,7 @@ private:
             if (selected) { g.setColour (Colours::white.withAlpha (0.10f)); g.fillRect (0, 0, w, h); }
             const auto text = items[row];
             const bool sub = text.startsWith ("    ");
-            g.setColour (sub ? textDim : Colour (0xffd7dbe2));
+            g.setColour (sub ? textDim : perf::theme::text.withAlpha (0.9f));
             g.setFont (FontOptions (sub ? 12.5f : 13.5f, sub ? Font::plain : Font::bold));
             g.drawFittedText (text.trim(), sub ? 22 : 10, 0, w - 26, h, Justification::centredLeft, 1);
         }

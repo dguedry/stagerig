@@ -57,7 +57,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#121318">
+<meta name="theme-color" content="#000712">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -65,36 +65,39 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 <title>StageRig</title>
 <style>
   /* The page's colours, by job. One look for "on" everywhere: the accent. */
-  :root { --bg:#121318; --panel:#1b1c22; --row:#24262e; --raise:#2c2f38; --line:#2a2d36; --border:#3a3e48;
-          --accent:#5aa9ff; --on-accent:#06121f; --dim:#8e95a2; --faint:#5a606c;
-          --ok:#2fbf71; --on-ok:#06180d; --warn:#e0a030; --on-warn:#1a1204; --danger:#c4363c; --note:#d8a657; }
+  /* StageRig's colours, from its wallpaper and colour guide, as the desktop uses them (Theme.h):
+     a stage nearly black, lit in blue and amber. Blue for what you work; amber for what is live now. */
+  :root { --bg:#000712; --panel:#001025; --row:#0d1c33; --raise:#00224b; --line:#10233d; --border:#1a3555;
+          --accent:#0087fc; --on-accent:#000712; --text:#faf4eb; --dim:#9aa9bc; --faint:#5d7391;
+          --amber:#f08a14; --on-amber:#000712; --gold:#cea04a;
+          --ok:#2fbf71; --on-ok:#06180d; --warn:#e0a030; --on-warn:#1a1204; --danger:#c4363c; --note:#cea04a; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  body { margin:0; background:var(--bg) radial-gradient(900px 380px at 50% -140px, #1c2644, transparent 70%) no-repeat; color:#fff; font:16px/1.4 system-ui,sans-serif;
+  body { margin:0; background:radial-gradient(700px 360px at 12% -140px, #0087fc3d, transparent 70%) no-repeat, radial-gradient(700px 360px at 88% -140px, #f08a1433, transparent 70%) no-repeat, var(--bg); color:#faf4eb; font:16px/1.4 system-ui,sans-serif;
          padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
-  header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:linear-gradient(#22242d, #191a20); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
+  header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:linear-gradient(#0d1c33, #001025); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
   header h1 { font-size:15px; margin:0; flex:1; min-width:0; color:var(--dim); font-weight:600; letter-spacing:.06em; }
   /* The title is the setup's name, and the way to its file: save it, open another. */
   #setupBtn { font:inherit; color:inherit; letter-spacing:inherit; background:none; border:0; padding:8px 0; max-width:100%;
               display:flex; align-items:baseline; gap:5px; text-align:left; }
   #setupBtn span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
-  #setupBtn::after { content:"\25BE"; color:var(--accent); flex:none; }
+  #setupBtn::after { content:"\25BE"; color:var(--amber); flex:none; }
   @media (max-width:480px) { header { gap:8px; padding:12px; } #tap i { display:none; } }
   .dlg { display:none; position:fixed; inset:0; z-index:5; background:rgba(0,0,0,.6); align-items:flex-start; justify-content:center; padding:60px 14px 14px; }
-  .dlg .box { background:var(--panel); border-radius:14px; width:100%; max-width:460px; max-height:calc(100vh - 80px); overflow:auto; padding:16px; scrollbar-color:#4a4f5c transparent; }
+  .dlg .box { background:var(--panel); border-radius:14px; width:100%; max-width:460px; max-height:calc(100vh - 80px); overflow:auto; padding:16px; scrollbar-color:#1a3555 transparent; }
   .dlg h2 { font-size:12px; color:var(--dim); letter-spacing:.08em; margin:0 0 4px; }
   .dlg .cur { font-size:19px; font-weight:700; margin:0 0 12px; overflow-wrap:anywhere; }
   .dlg .acts { display:flex; gap:8px; margin-bottom:16px; }
-  .dlg .acts button { flex:1; border:0; border-radius:10px; padding:14px 8px; font-size:16px; font-weight:700; background:var(--row); color:#fff; }
+  .dlg .acts button { flex:1; border:0; border-radius:10px; padding:14px 8px; font-size:16px; font-weight:700; background:var(--row); color:#faf4eb; }
   .dlg .acts button.go { background:var(--accent); color:var(--on-accent); }
   .dlg .acts button:disabled { opacity:.4; }
   .dlg .list { background:var(--row); border-radius:12px; overflow:hidden; }
   .dlg .list:empty { display:none; }
-  .dlg .file { display:flex; align-items:baseline; gap:10px; width:100%; text-align:left; border:0; border-top:1px solid var(--line); background:none; color:#fff;
+  .dlg .file { display:flex; align-items:baseline; gap:10px; width:100%; text-align:left; border:0; border-top:1px solid var(--line); background:none; color:#faf4eb;
                  padding:14px 14px; font-size:16px; }
   .dlg .list > .file:first-child, .dlg .ghead + .file { border-top:0; }
   .dlg .file b { flex:1; font-weight:500; overflow-wrap:anywhere; }
   .dlg .file i { font-style:normal; color:var(--dim); font-size:12px; white-space:nowrap; }
-  .dlg .file.on { background:#5aa9ff1f; box-shadow:inset 4px 0 0 var(--accent); }
+  .dlg .file.on { background:#0087fc1f; box-shadow:inset 4px 0 0 var(--accent); }
   .dlg .file.on b { color:var(--accent); font-weight:700; }
   .dlg .ghead { color:var(--dim); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:14px 14px 6px; background:var(--panel); }
   .dlg .list > .ghead:first-child { padding-top:4px; }
@@ -106,11 +109,11 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .dlg .note { color:var(--dim); font-size:13px; margin:10px 0 0; }
   .dlg .file { flex-wrap:wrap; }
   .dlg .file small { flex-basis:100%; color:var(--dim); font-size:12px; font-weight:400; margin-top:2px; }
-  .dlg .find { width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:#fff; margin-bottom:8px; }
+  .dlg .find { width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:#faf4eb; margin-bottom:8px; }
   .dlg .head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
   .dlg .head .cur { flex:1; margin:0; }
-  .dlg .head button { border:0; border-radius:10px; padding:11px 16px; font-size:15px; font-weight:700; background:var(--row); color:#fff; }
-  #panic { background:linear-gradient(#e2474e, #b92b32); box-shadow:0 2px 12px #c4363c66; color:#fff; border:0; border-radius:8px; padding:10px 16px; font-weight:800; font-size:14px; letter-spacing:.04em; }
+  .dlg .head button { border:0; border-radius:10px; padding:11px 16px; font-size:15px; font-weight:700; background:var(--row); color:#faf4eb; }
+  #panic { background:linear-gradient(#e2474e, #b92b32); box-shadow:0 2px 12px #c4363c66; color:#faf4eb; border:0; border-radius:8px; padding:10px 16px; font-weight:800; font-size:14px; letter-spacing:.04em; }
   .input { margin:14px 12px 22px; }
   /* Each keyboard has a colour of its own (--accent, set on its .input): its
      number, its program in play, its sliders and buttons all wear it, so the
@@ -127,7 +130,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   /* The plugin's interface, reachable from the header rather than from the slot
      rows further down: this is the one you want mid-set. Pushed to the right so
      it never crowds the program name, which is what the eye comes here for. */
-  .now .gui { margin-left:auto; flex:none; background:var(--row); color:#fff; border:0;
+  .now .gui { margin-left:auto; flex:none; background:var(--row); color:#faf4eb; border:0;
               border-radius:10px; padding:10px 16px; font-size:13px; font-weight:800;
               letter-spacing:.04em; align-self:center; }
   .now .gui:active { background:var(--accent); color:var(--on-accent); }
@@ -138,10 +141,10 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
      lit a moment, so a hot microphone is seen from the stand. */
   .meter { display:flex; align-items:center; gap:6px; margin-top:10px; }
   .meter .bars { flex:1; display:flex; flex-direction:column; gap:3px; }
-  .meter i { display:block; height:6px; background:#1a1d24; border-radius:3px; overflow:hidden; }
+  .meter i { display:block; height:6px; background:#000712; border-radius:3px; overflow:hidden; }
   .meter i span { display:block; height:100%; width:0; border-radius:3px;
                   background:linear-gradient(to right, #4fb86a 0 80%, var(--note) 80% 95%, #e04a4a 95%); background-size:100% 100%; }
-  .meter b { flex:none; width:10px; height:15px; border-radius:3px; background:#2a2e38; }
+  .meter b { flex:none; width:10px; height:15px; border-radius:3px; background:#1a3555; }
   .meter.clip b { background:#ff3b3b; }
 
   /* Choosing between the instruments of a split. A sheet, not a dropdown: this
@@ -153,7 +156,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
                  max-width:420px; display:flex; flex-direction:column; gap:8px; }
   .sheet .sheet-title { color:var(--dim); font-size:12px; font-weight:700;
                         letter-spacing:.08em; text-transform:uppercase; padding:4px 4px 6px; }
-  .sheet button { background:var(--row); color:#fff; border:0; border-radius:12px;
+  .sheet button { background:var(--row); color:#faf4eb; border:0; border-radius:12px;
                   padding:16px; font-size:16px; font-weight:700; text-align:left; }
   .sheet button.cancel { background:none; color:var(--dim); text-align:center; font-size:15px; }
   .sheet .part { display:flex; align-items:center; gap:8px; background:var(--row); border-radius:12px; padding:10px 12px; }
@@ -165,10 +168,10 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .sheet .part.muted .who { opacity:.45; }
   .loading { color:var(--note); font-size:14px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
-  button.p { background:var(--row); color:#fff; border:0; border-radius:10px; padding:14px 12px; text-align:left;
+  button.p { background:var(--row); color:#faf4eb; border:0; border-radius:10px; padding:14px 12px; text-align:left;
              font-size:15px; display:flex; gap:10px; align-items:baseline; min-height:56px; }
   button.p .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700; font-size:13px; }
-  button.p.on { background:var(--accent); background:linear-gradient(160deg, color-mix(in srgb, var(--accent) 78%, #fff), var(--accent));
+  button.p.on { background:var(--accent); background:linear-gradient(160deg, color-mix(in srgb, var(--accent) 78%, #faf4eb), var(--accent));
                 box-shadow:0 4px 18px color-mix(in srgb, var(--accent) 42%, transparent); color:var(--on-accent); font-weight:700; }
   button.p:active { transform:scale(.97); }
   button.p.on .n { color:var(--on-accent); }
@@ -177,13 +180,13 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   /* The instrument in play: its name, its sound, its buttons and its knobs in one card. */
   .kslot { margin-top:10px; background:var(--panel); border-radius:14px; padding:12px 16px 14px;
            border-top:2px solid var(--accent); border-top-color:color-mix(in srgb, var(--accent) 60%, transparent); }
-  .kname { color:#fff; font-size:16px; font-weight:800; margin:0 0 10px; }
+  .kname { color:#faf4eb; font-size:16px; font-weight:800; margin:0 0 10px; }
   /* A knob is its whole name over its slider, and as many side by side as the
      screen has room for: one row each was a name cut to a few letters beside
      a slider the width of a tablet. */
   .kgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:4px 22px; }
   .knob { display:grid; grid-template-columns:1fr auto; grid-template-areas:"n v" "s s"; align-items:end; gap:0 10px; padding:6px 0 2px; min-width:0; }
-  .knob .kn { grid-area:n; color:#fff; font-size:14px; font-weight:600; line-height:1.2; overflow-wrap:anywhere;
+  .knob .kn { grid-area:n; color:#faf4eb; font-size:14px; font-weight:600; line-height:1.2; overflow-wrap:anywhere;
               display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .knob .kv { grid-area:v; color:var(--accent); font-size:13px; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .knob input[type=range], .knob .ksw { grid-area:s; }
@@ -191,19 +194,20 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   /* The instrument's buttons: on or off, each big enough for a thumb, above the knobs. */
   .kbtns { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px; }
   .kbtns button { font:inherit; font-size:15px; font-weight:600; padding:12px 14px; min-width:96px; border-radius:10px;
-                  border:1px solid var(--border); background:var(--raise); color:#fff; }
+                  border:1px solid var(--border); background:var(--raise); color:#faf4eb; }
   .kbtns button.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
-  .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:6px 0; margin:3px 0; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#fff; width:100%; }
+  .knob .ksw { font:inherit; font-size:15px; font-weight:600; padding:6px 0; margin:3px 0; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#faf4eb; width:100%; }
   .knob .ksw.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   .kname { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .kinst { font:inherit; font-size:13px; text-transform:none; letter-spacing:0; padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#fff; }
+  .kinst { font:inherit; font-size:13px; text-transform:none; letter-spacing:0; padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#faf4eb; }
   .kinst.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   .kinst:disabled { opacity:.4; }
   .kinst.snd { border-radius:999px; padding:9px 16px; font-weight:800; color:var(--accent); border-color:var(--accent);
                background:var(--raise); background:color-mix(in srgb, var(--accent) 16%, var(--raise)); }
+  .kinst.snd { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .kinst.snd:active { background:var(--accent); color:var(--on-accent); }
   .kpage { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--dim); }
-  .kpage button { font:inherit; font-size:15px; padding:8px 16px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#fff; }
+  .kpage button { font:inherit; font-size:15px; padding:8px 16px; border-radius:8px; border:1px solid var(--border); background:var(--raise); color:#faf4eb; }
   .kpage button:disabled { opacity:.3; }
   /* A slider drawn for a thumb: a thick track filled to where it is (--p, kept
      by the script), and a thumb that can be found without looking twice. */
@@ -211,18 +215,18 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .knob input[type=range]::-webkit-slider-runnable-track { height:10px; border-radius:5px; background:linear-gradient(to right, var(--accent) var(--p), var(--raise) var(--p)); }
   .knob input[type=range]::-moz-range-track { height:10px; border-radius:5px; background:var(--raise); }
   .knob input[type=range]::-moz-range-progress { height:10px; border-radius:5px; background:var(--accent); }
-  .knob input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:24px; height:24px; margin-top:-7px; border-radius:50%; background:#fff; border:0;
-                                                   box-shadow:0 0 0 4px #5aa9ff55, 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
-  .knob input[type=range]::-moz-range-thumb { width:24px; height:24px; border-radius:50%; background:#fff; border:0;
-                                              box-shadow:0 0 0 4px #5aa9ff55, 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
+  .knob input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:24px; height:24px; margin-top:-7px; border-radius:50%; background:#faf4eb; border:0;
+                                                   box-shadow:0 0 0 4px #0087fc55, 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
+  .knob input[type=range]::-moz-range-thumb { width:24px; height:24px; border-radius:50%; background:#faf4eb; border:0;
+                                              box-shadow:0 0 0 4px #0087fc55, 0 2px 6px #0009; box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 6px #0009; }
   .knob input[type=range]:disabled { opacity:.5; }
   /* Tempo lives in the header beside PANIC: it is worth a glance and a tap, not
      a band across the top of the screen. */
   .hdr { display:flex; align-items:center; gap:8px; }
-  .hdr .bpm { font-size:15px; font-weight:800; color:var(--accent);
+  .hdr .bpm { font-size:15px; font-weight:800; color:var(--amber);
               font-variant-numeric:tabular-nums; white-space:nowrap; }
   .hdr .bpm i { font-size:10px; color:var(--dim); font-style:normal; font-weight:600; margin-left:2px; }
-  #tap { background:var(--row); color:#fff; border:0; border-radius:8px;
+  #tap { background:var(--row); color:#faf4eb; border:0; border-radius:8px;
          padding:9px 14px; font-size:13px; font-weight:800; letter-spacing:.04em; }
   #tap:active { background:var(--accent); color:var(--on-accent); }
 
@@ -231,7 +235,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .tabs { display:flex; margin:10px 12px 0; padding:4px; background:var(--panel); border-radius:12px; }
   .tabs button { flex:1; background:none; color:var(--dim); border:0; border-radius:9px;
                  padding:11px; font-size:14px; font-weight:800; letter-spacing:.04em; }
-  .tabs button.on { background:var(--raise); color:#fff; box-shadow:inset 0 -3px 0 var(--accent); }
+  .tabs button.on { background:var(--raise); color:#faf4eb; box-shadow:inset 0 -3px 0 var(--amber); }
   #controls { padding:8px 12px 24px; }
   /* Lists -- the controls, a plugin's sounds, the setup files -- are one panel
      per group with hairlines between rows, not a stack of separate boxes. */
@@ -255,38 +259,38 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
      where it is among its sections. Nothing moves while it plays: a button
      that shifts under a finger mid-song is the wrong one pressed. */
   .transport { background:var(--panel); border-radius:12px; padding:10px 12px; margin-bottom:10px;
-               border-left:6px solid #5b606b; }
+               border-left:6px solid #2a4a75; }
   .transport.playing  { border-left-color:var(--ok); }
   .transport.counting, .transport.vamping { border-left-color:var(--warn); }
   .transport .trow { display:flex; align-items:center; gap:12px; }
   .transport button { flex:none; border:0; border-radius:10px; padding:12px 18px; font-size:16px; font-weight:800;
-                      background:var(--row); color:#fff; }
+                      background:var(--row); color:#faf4eb; }
   .transport button.play { min-width:118px; padding:16px 18px; font-size:18px; background:var(--ok); color:var(--on-ok); }
-  .transport button.play.running { background:var(--danger); color:#fff; }
+  .transport button.play.running { background:var(--danger); color:#faf4eb; }
   .transport button.play:disabled { opacity:.4; }
   .transport button.vampgo { background:var(--warn); color:var(--on-warn); }
   .transport button.click { font-weight:700; color:var(--dim); }
-  .transport button.click.on { color:#fff; box-shadow:inset 0 0 0 2px var(--ok); }
+  .transport button.click.on { color:#faf4eb; box-shadow:inset 0 0 0 2px var(--ok); }
   .transport button.parts { font-weight:700; }
   .transport .tt { flex:1; min-width:0; font-variant-numeric:tabular-nums; }
   .transport .tstate { display:flex; align-items:baseline; gap:8px; white-space:nowrap; overflow:hidden; }
   .transport .tstate b { font-size:12px; letter-spacing:.1em; color:var(--dim); flex:none; }
   .transport.playing .tstate b { color:var(--ok); }
   .transport.counting .tstate b, .transport.vamping .tstate b { color:var(--warn); }
-  .transport .tsong { font-size:17px; font-weight:800; color:#fff; overflow:hidden; text-overflow:ellipsis; }
+  .transport .tsong { font-size:17px; font-weight:800; color:#faf4eb; overflow:hidden; text-overflow:ellipsis; }
   .transport .tpos { font-size:15px; color:var(--dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .transport .tpos em { font-style:normal; color:var(--warn); font-weight:700; }
   .tbar { position:relative; height:8px; background:var(--row); border-radius:4px; margin-top:10px; overflow:hidden; }
-  .tbar .fill { position:absolute; left:0; top:0; bottom:0; background:#5b606b; }
+  .tbar .fill { position:absolute; left:0; top:0; bottom:0; background:#2a4a75; }
   .transport.playing .tbar .fill { background:var(--ok); }
   .transport.vamping .tbar .fill { background:var(--warn); }
   .tbar .tick { position:absolute; top:0; bottom:0; width:2px; background:var(--panel); }
   .tbar .tick.next { background:var(--warn); width:3px; }
   .sections { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 6px; }
-  .sections button { background:var(--row); color:#fff; border:2px solid transparent; border-radius:10px;
+  .sections button { background:var(--row); color:#faf4eb; border:2px solid transparent; border-radius:10px;
                      padding:10px 14px; font-size:15px; font-weight:700; }
   .sections button.past { color:var(--dim); }
-  .sections button.cue { border-color:#fff; }
+  .sections button.cue { border-color:#faf4eb; }
   .sections button.on { background:var(--ok); color:var(--on-ok); }
   .sections button.on.vamp { background:var(--warn); color:var(--on-warn); }
   .sections button.queued { border-color:var(--warn); }
@@ -295,11 +299,11 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .setpick { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
   .setpick button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
                     padding:10px 18px; font-size:13px; font-weight:700; }
-  .setpick button.on { background:var(--accent); color:var(--on-accent); }
+  .setpick button.on { background:var(--amber); color:var(--on-amber); }
 
   .song { display:flex; align-items:baseline; gap:12px; background:var(--panel);
           border-radius:12px; padding:14px 16px; margin-bottom:8px; width:100%;
-          border:0; text-align:left; color:#fff; }
+          border:0; text-align:left; color:#faf4eb; }
   .song .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700;
              font-size:14px; min-width:24px; }
   /* Two lines for a long title before it is cut: on a phone one line holds four words. */
@@ -308,13 +312,13 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .song .bpm { color:var(--dim); font-size:13px; font-weight:700; }
 
   /* The one you are on. */
-  .song.on { background:var(--accent); background:linear-gradient(135deg, #86c1ff, #4c98f3); box-shadow:0 6px 26px #5aa9ff55; color:var(--on-accent); padding:18px 16px; }
+  .song.on { background:var(--amber); background:linear-gradient(135deg, #fbb04a, #f08a14); box-shadow:0 6px 26px #f08a1455; color:var(--on-amber); padding:18px 16px; }
   .song.on .n, .song.on .bpm { color:var(--on-accent); }
   .song.on .t { font-size:26px; font-weight:800; }
   .song.on .parts { color:var(--on-accent); }
   .find { width:100%; box-sizing:border-box; margin:0 0 12px; padding:14px 16px;
           font-size:16px; border-radius:12px; border:1px solid var(--border);
-          background:var(--panel); color:#fff; }
+          background:var(--panel); color:#faf4eb; }
   .find:focus { outline:none; border-color:var(--accent); }
   .findrow { display:flex; gap:8px; align-items:stretch; margin-bottom:12px; }
   .findrow .find { margin:0; flex:1; }
@@ -323,34 +327,34 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .findrow .editmode.on { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
   .setpick button.new { border:1px dashed var(--border); background:none; }
   .editbar { display:flex; gap:8px; margin-bottom:12px; }
-  .editbar button { flex:1; background:var(--row); color:#fff; border:0; border-radius:12px; padding:12px; font-size:15px; font-weight:700; }
+  .editbar button { flex:1; background:var(--row); color:#faf4eb; border:0; border-radius:12px; padding:12px; font-size:15px; font-weight:700; }
   .song .ctl { display:flex; gap:6px; flex:0 0 auto; align-self:center; }
-  .song .ctl span { padding:10px 14px; border-radius:10px; background:var(--raise); color:#d7dbe2; font-size:15px; font-weight:700; }
+  .song .ctl span { padding:10px 14px; border-radius:10px; background:var(--raise); color:#e9e4dc; font-size:15px; font-weight:700; }
   .song .ctl span.off { opacity:.3; }
-  .song.on .ctl span { background:var(--on-accent); color:#fff; }
+  .song.on .ctl span { background:var(--on-accent); color:#faf4eb; }
   .otherhead { color:var(--dim); font-size:11px; font-weight:800; letter-spacing:.1em;
                margin:18px 0 8px; }
   .parts { font-size:13px; color:var(--dim); margin-top:4px; }
   .parts b { font-weight:700; }
   .song.on .parts b { color:inherit !important; }
   .notes { font-size:14px; color:var(--note); margin-top:4px; font-style:italic; }
-  .notes .key { font-style:normal; font-weight:700; padding:3px 9px; border-radius:8px; background:#d8a65722;
-                border:1px solid #d8a65766; cursor:pointer; }
-  .song.on .notes .key { background:#06121f1a; border-color:#06121f66; }
+  .notes .key { font-style:normal; font-weight:700; padding:3px 9px; border-radius:8px; background:#cea04a22;
+                border:1px solid #cea04a66; cursor:pointer; }
+  .song.on .notes .key { background:#0007121a; border-color:#00071266; }
   .sheet .keys { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; }
   .sheet .scales { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin-top:6px; }
   .sheet .keys button, .sheet .scales button { padding:12px 6px; text-align:center; font-size:15px; }
   .sheet .keys button.none { grid-column: span 2; }
   .sheet .keys button.on, .sheet .scales button.on { background:var(--accent); color:var(--on-accent); }
-  .song .chart { margin-left:10px; padding:8px 14px; border-radius:10px; background:var(--raise); color:#d7dbe2;
+  .song .chart { margin-left:10px; padding:8px 14px; border-radius:10px; background:var(--raise); color:#e9e4dc;
                  font-size:14px; font-weight:600; flex:0 0 auto; }
-  .song.on .chart { background:var(--on-accent); color:#fff; }
+  .song.on .chart { background:var(--on-accent); color:#faf4eb; }
   .song.on .notes { color:var(--on-accent); }
   .songbody { flex:1; min-width:0; }
 
   /* Step buttons: big, far apart, hard to hit the wrong one. */
   .step { display:flex; gap:10px; margin-top:14px; }
-  .step button { flex:1; background:var(--row); color:#fff; border:0; border-radius:12px;
+  .step button { flex:1; background:var(--row); color:#faf4eb; border:0; border-radius:12px;
                  padding:20px; font-size:17px; font-weight:800; letter-spacing:.04em; }
   .step button:active { background:var(--accent); color:var(--on-accent); }
   .step button:disabled { opacity:.35; }
@@ -369,7 +373,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   #gate p { color:var(--dim); font-size:15px; margin:0 0 14px; }
   #gate .hint { font-size:13px; color:var(--note); margin-top:14px; min-height:18px; }
   #code { width:100%; font-size:34px; text-align:center; letter-spacing:.25em; text-transform:uppercase;
-          padding:14px; border-radius:12px; border:2px solid var(--border); background:var(--panel); color:#fff; }
+          padding:14px; border-radius:12px; border:2px solid var(--border); background:var(--panel); color:#faf4eb; }
   #code:focus { outline:none; border-color:var(--accent); }
   #gate button { margin-top:14px; width:100%; background:var(--accent); color:var(--on-accent); border:0;
                  border-radius:12px; padding:16px; font-size:17px; font-weight:700; }
@@ -591,12 +595,13 @@ function drawSounds() {
     const b = row(c.name === sndCtx.current ? "on" : "", c.name, c.detail, "");
     b.onclick = async () => {
       const note = document.getElementById("sndNote"); note.textContent = "Loading " + c.name + "...";
+      const input = sndCtx.input;
       try {
         await api("/api/sounds?input=" + sndCtx.input + "&program=" + sndCtx.program + "&slot=" + sndCtx.slot + "&index=" + idx + "&name=" + encodeURIComponent(c.name), { method: "POST" });
-        sndCtx.current = c.name; note.textContent = "";
-        host.querySelectorAll(".file.on").forEach(x => x.classList.remove("on")); b.classList.add("on");
-        const strip = document.querySelector('.knobs[data-input="' + sndCtx.input + '"]'); if (strip) strip.dataset.key = "";
-        loadPanel(sndCtx.input);
+        // Chosen: the list closes, and the instrument's button and knobs are redrawn for the new sound.
+        note.textContent = ""; snd.style.display = "none"; sndCtx = null;
+        const strip = document.querySelector('.knobs[data-input="' + input + '"]'); if (strip) strip.dataset.key = "";
+        loadPanel(input);
       } catch (e) { if (!e.gate) note.textContent = e.message; }
     };
   });
@@ -625,7 +630,7 @@ let editMode = false;        // the Set list tab in its editing dress: build and
 const filters = {};          // input index -> chosen group, "" for all
 /* A colour per keyboard, in the order the setup lists them: whose program,
    whose sliders, whose line in a song, known by colour before it is read. */
-const HUES = ["#5aa9ff", "#b78cff", "#35d0b5", "#ffb454", "#ff7aa8", "#9bd35a"];
+const HUES = ["#0087fc", "#f08a14", "#35d0b5", "#b78cff", "#ff7aa8", "#9bd35a"];
 const hue = i => HUES[(i >= 0 ? i : 0) % HUES.length];
 
 /* Which tab is showing. Remembered per device: someone building a set works in
@@ -1451,7 +1456,7 @@ async function loadPanel(i) {
   try { data = await api("/api/panel?input=" + i); } catch (e) { return; } finally { panelBusy[i] = false; }
   const knobs = data.knobs || [], instruments = data.instruments || [];
   const btns = data.buttons || [];
-  const key = JSON.stringify([data.slot, !!data.sounds, btns.map(b => b.name), instruments.map(s => s.name), data.page, data.pageCount, data.pageName, knobs.map(k => k.id + k.name)]);
+  const key = JSON.stringify([data.slot, !!data.sounds, data.sound || "", btns.map(b => b.name), instruments.map(s => s.name), data.page, data.pageCount, data.pageName, knobs.map(k => k.id + k.name)]);
   if (host.dataset.key !== key) {
     host.dataset.key = key;
     host.innerHTML = "";
@@ -1469,7 +1474,9 @@ async function loadPanel(i) {
       });
     } else title.textContent = data.instrument || "";
     if (data.sounds) {
-      const sb = document.createElement("button"); sb.className = "kinst snd"; sb.textContent = "\u266A Sounds\u2026";
+      const sb = document.createElement("button"); sb.className = "kinst snd";
+      // The button says which sound is on, so it shows without opening the list.
+      sb.textContent = "\u266A " + (data.sound || "Sounds\u2026");
       sb.title = "Choose one of this plugin's sounds";
       sb.onclick = () => openSounds(i, data.slot);
       title.appendChild(sb);
@@ -1619,6 +1626,9 @@ async function openPluginWindow(i, slot, effect, fallbackName, btn, restore, bus
   try {
     const r = await api("/api/pluginview?input=" + i + "&slot=" + slot + "&effect=" + effect + "&bus=" + bus, { method: "POST" });
     if (r.error) { show(r.error); return; }
+    /* This browser is on the computer itself: the plugin's real window has
+       just come up on this screen, above the browser. No tab to open. */
+    if (r.local) { show("Opened on this screen. Close its window when you are done.", 4000); return; }
     /* Through this same port: a stream on a port of its own would need its own
        hole in the firewall, which is precisely what left the tab loading
        forever the first time. */
@@ -1694,7 +1704,7 @@ if ('serviceWorker' in navigator)
 static const char* kManifest = R"JSON({
   "name": "StageRig", "short_name": "StageRig",
   "start_url": ".", "display": "standalone",
-  "background_color": "#121318", "theme_color": "#121318",
+  "background_color": "#000712", "theme_color": "#000712",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icon.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
@@ -1728,37 +1738,37 @@ static const char* kChartHtml = R"HTML(<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,user-scalable=yes,viewport-fit=cover">
-<meta name="theme-color" content="#15161c">
+<meta name="theme-color" content="#000712">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Chart</title>
 <style>
   :root { color-scheme: dark; }
-  html,body { margin:0; padding:0; background:#15161c; color:#d7dbe2;
+  html,body { margin:0; padding:0; background:#000712; color:#e9e4dc;
               font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
   #bar { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:10px; padding:8px 12px;
-         background:#1e1f24; border-bottom:1px solid #2b2d35; }
-  #bar a, #bar button { background:#2b2d35; color:#d7dbe2; border:0; border-radius:10px; padding:8px 14px;
+         background:#001025; border-bottom:1px solid #0d1c33; }
+  #bar a, #bar button { background:#0d1c33; color:#e9e4dc; border:0; border-radius:10px; padding:8px 14px;
                         font-size:15px; font-weight:600; text-decoration:none; }
-  #bar button.on { background:#4f9dff; color:#06121f; }
+  #bar button.on { background:#0087fc; color:#000712; }
   #title { flex:1; font-size:17px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #tabs { display:flex; gap:6px; padding:8px 12px; flex-wrap:wrap; }
   #tabs:empty { display:none; }
-  #tabs button { background:#26282f; color:#9aa0ab; border:0; border-radius:8px; padding:6px 12px; font-size:14px; }
-  #tabs button.on { background:#3a3d47; color:#fff; }
+  #tabs button { background:#0d1c33; color:#9aa9bc; border:0; border-radius:8px; padding:6px 12px; font-size:14px; }
+  #tabs button.on { background:#1a3555; color:#faf4eb; }
   #page { min-height:70vh; }
-  #page img { display:block; width:100%; height:auto; background:#fff; }
-  #page iframe { display:block; width:100%; height:calc(100vh - 60px); border:0; background:#fff; }
+  #page img { display:block; width:100%; height:auto; background:#faf4eb; }
+  #page iframe { display:block; width:100%; height:calc(100vh - 60px); border:0; background:#faf4eb; }
   #page pre { margin:0; padding:16px; font:15px/1.45 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap;
               background:#fbf8f1; color:#1b1b1b; min-height:70vh; }
   #page pre .c { color:#9b2d2d; font-weight:700; }
   #page pre .d { color:#6b5e3c; font-style:italic; }
-  #empty { padding:40px 20px; text-align:center; color:#9aa0ab; font-size:18px; }
+  #empty { padding:40px 20px; text-align:center; color:#9aa9bc; font-size:18px; }
   #nav { position:fixed; left:0; right:0; bottom:0; display:flex; justify-content:space-between; padding:10px 12px;
          pointer-events:none; }
-  #nav button { pointer-events:auto; background:#2b2d35cc; color:#fff; border:0; border-radius:12px; padding:12px 18px;
+  #nav button { pointer-events:auto; background:#0d1c33cc; color:#faf4eb; border:0; border-radius:12px; padding:12px 18px;
                 font-size:16px; font-weight:700; }
-  #nav span { align-self:center; background:#2b2d35cc; border-radius:10px; padding:6px 12px; font-size:14px; }
+  #nav span { align-self:center; background:#0d1c33cc; border-radius:10px; padding:6px 12px; font-size:14px; }
 </style></head>
 <body>
 <div id="bar">
@@ -1851,7 +1861,7 @@ async function showChart() {
     }
   } else if (c.kind === "pdf") {
     page.innerHTML = '<iframe src="' + withToken(c.url) + '"></iframe>'
-                   + '<div id="empty"><a style="color:#4f9dff" href="' + withToken(c.url) + '" target="_blank">Open the PDF</a></div>';
+                   + '<div id="empty"><a style="color:#0087fc" href="' + withToken(c.url) + '" target="_blank">Open the PDF</a></div>';
   } else if (c.kind === "image") {
     page.innerHTML = '<img src="' + withToken(c.url) + '" alt="' + esc(c.title) + '">';
   } else {
@@ -1926,7 +1936,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=0.2,maximum-scale=6,user-scalable=yes,viewport-fit=cover">
-<meta name="theme-color" content="#15161c">
+<meta name="theme-color" content="#000712">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1934,7 +1944,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 <title>Plugin</title>
 <style>
   :root { color-scheme: dark; }
-  html,body { margin:0; padding:0; background:#15161c; color:#d7dbe2;
+  html,body { margin:0; padding:0; background:#000712; color:#e9e4dc;
               font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
   /* Dynamic viewport height: 100vh is the height with the browser's chrome
      hidden, so on a tablet it puts the bottom of the plugin permanently under
@@ -1961,12 +1971,12 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
      scrolling or zooming first. */
   #screen { touch-action:none; overscroll-behavior:contain; }
   #msg { position:fixed; left:0; right:0; top:0; padding:10px 14px; font-size:14px;
-         background:#26282f; border-bottom:1px solid #2b2d35; }
+         background:#0d1c33; border-bottom:1px solid #0d1c33; }
   #bar { position:fixed; right:10px; bottom:10px; display:flex; gap:8px;
          bottom:calc(10px + env(safe-area-inset-bottom)); }
-  #bar button { background:#26282fdd; color:#d7dbe2; border:1px solid #3a3d47;
+  #bar button { background:#0d1c33dd; color:#e9e4dc; border:1px solid #1a3555;
                 border-radius:10px; padding:10px 14px; font-size:13px; font-weight:700; }
-  #bar button.on { background:#5aa9ff; color:#06121f; border-color:#5aa9ff; }
+  #bar button.on { background:#0087fc; color:#000712; border-color:#0087fc; }
 </style>
 </head><body>
 <div id="msg">Connecting to the plugin window on the computer…</div>
@@ -2333,6 +2343,17 @@ String RemoteServer::getHostAddress()
     return best;
 }
 
+/** True when a connection came from this computer rather than from a tablet:
+    its own loopback, or any address the computer itself answers to (a browser
+    here that was pointed at the address printed for the tablet). */
+static bool isThisComputer (const String& peer)
+{
+    if (peer.startsWith ("127.")) return true;
+    for (auto& ip : IPAddress::getAllAddresses())
+        if (! ip.isNull() && ip.toString() == peer) return true;
+    return false;
+}
+
 //==============================================================================
 bool RemoteServer::authorised (const String& request) const
 {
@@ -2630,6 +2651,7 @@ String RemoteServer::panelJson (int input) const
     }
     o->setProperty ("instruments", instruments);
     o->setProperty ("sounds", sd.isPlugin() && onSoundList != nullptr);     // Sounds... is offered for it
+    o->setProperty ("sound", sd.isPlugin() ? sd.soundName : String());      // the one it was given, shown on that button
     const bool hasPage = sd.isPlugin() && view.knobLevels != SurfaceView().knobLevels;
     o->setProperty ("page", hasPage ? view.page : -1);
     o->setProperty ("pageCount", hasPage ? view.pageCount : 0);
@@ -3446,6 +3468,19 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         else if (error->isNotEmpty() || title->isEmpty())
         {
             o->setProperty ("error", error->isNotEmpty() ? *error : String ("That instrument has no plugin window."));
+        }
+        else if (isThisComputer (sock.getHostName()))
+        {
+            /* The browser is on the computer itself, so there is nothing to
+               mirror: the real window is on the same screen. A mirror here
+               cannot work anyway -- its tab covers the window it is showing,
+               so the picture is of the browser and every click lands on the
+               browser. The window is open and kept above everything, which is
+               the whole job; say where it is and open no tab. */
+            for (int i = 0; i < 20 && PluginView::findWindow (*title) == 0; ++i)
+                Thread::sleep (100);
+            PluginView::bringToFront (*title);
+            o->setProperty ("local", true);
         }
         else
         {
