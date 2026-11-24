@@ -15,7 +15,7 @@ Summary:        Live-performance plugin host for keyboards and audio
 
 # StageRig itself is GPL-3.0-or-later; the bundled JUCE 8 is used under
 # AGPL-3.0-only. The other bundled code is listed with bundled() below.
-License:        GPL-3.0-or-later AND AGPL-3.0-only AND MIT AND ISC AND Apache-2.0 AND BSD-3-Clause AND Zlib AND IJG
+License:        GPL-3.0-or-later AND AGPL-3.0-only AND MIT AND ISC AND Apache-2.0 AND BSD-3-Clause AND Zlib AND IJG AND BSD-2-Clause AND BSL-1.0 AND WTFPL AND (Unlicense OR MIT-0)
 URL:            https://github.com/dguedry/stagerig
 Source0:        %{url}/releases/download/v%{version}/%{name}-%{version}.tar.xz
 
@@ -63,6 +63,20 @@ Provides:       bundled(libvorbis)
 Provides:       bundled(libjpeg)
 Provides:       bundled(libpng)
 Provides:       bundled(zlib)
+# The built-in sampler: sfizz is not packaged in Fedora, and carries these.
+Provides:       bundled(sfizz) = 1.2.3
+Provides:       bundled(abseil-cpp)
+Provides:       bundled(atomic_queue)
+Provides:       bundled(cephes)
+Provides:       bundled(dr_libs)
+Provides:       bundled(gulrak-filesystem)
+Provides:       bundled(hiir)
+Provides:       bundled(kiss_fft)
+Provides:       bundled(libaiff)
+Provides:       bundled(pugixml)
+Provides:       bundled(simde)
+Provides:       bundled(stb_vorbis)
+Provides:       bundled(wavpack)
 
 Requires:       hicolor-icon-theme
 Recommends:     pipewire-jack-audio-connection-kit
