@@ -1323,13 +1323,13 @@ function render(s) {
   setupTitle(s.setup);
   if (s.tempo) showTempo(s.tempo);
   const root = document.getElementById("inputs");
-  const made = JSON.stringify([s.inputs.map(inp => [inp.name, !!inp.track, !!inp.audio, inp.programs.map(p => [p.index, p.name, p.group || ""])]), filters]);
+  const made = JSON.stringify([s.inputs.map(inp => [inp.name, !!inp.track, !!inp.audio, inp.programs.map(p => [p.index, p.name, p.what || "", p.group || ""])]), filters]);
   if (made === progKey) {
     s.inputs.forEach((inp, i) => {
       const e = progEls[i];
       if (!e) return;
       e.num.textContent = String(inp.current).padStart(3, "0");
-      e.title.textContent = inp.currentName || (inp.audio ? "Audio passes straight through (no effects)" : "Empty program \u2014 nothing loaded");
+      e.title.textContent = inp.currentName || inp.currentWhat || (inp.audio ? "Audio passes straight through (no effects)" : "Empty program \u2014 nothing loaded");
       e.loading.style.display = inp.loading ? "" : "none";
       e.buttons.forEach((b, index) => b.classList.toggle("on", index === inp.current));
       loadSlots(i);
@@ -1365,7 +1365,7 @@ function render(s) {
     now.querySelector(".name").textContent = inp.name.toUpperCase();
     now.querySelector(".num").textContent = String(inp.current).padStart(3, "0");
     /* An audio input with nothing in the program is not empty: the signal goes straight through. */
-    now.querySelector(".title").textContent = inp.currentName || (inp.audio ? "Audio passes straight through (no effects)" : "Empty program — nothing loaded");
+    now.querySelector(".title").textContent = inp.currentName || inp.currentWhat || (inp.audio ? "Audio passes straight through (no effects)" : "Empty program — nothing loaded");
 
     /* Straight to the plugin's interface from the input's own header. This is
        the thing you reach for mid-set -- the slot rows below are further down
@@ -1427,7 +1427,7 @@ function render(s) {
       b.className = "p" + (p.index === inp.current ? " on" : "");
       b.innerHTML = '<span class="n"></span><span class="t"></span>';
       b.querySelector(".n").textContent = String(p.index).padStart(3, "0");
-      b.querySelector(".t").textContent = p.name || "Untitled";
+      b.querySelector(".t").textContent = p.name || p.what || "Untitled";
       progEls[i].buttons.set(p.index, b);
       b.onclick = async () => {
         try { await api("/api/select?input=" + i + "&program=" + p.index, { method: "POST" }); await refresh(true); show(""); }
@@ -1648,7 +1648,7 @@ async function openPluginWindow(i, slot, effect, fallbackName, btn, restore, bus
        slot brings that tab forward instead of opening another one. Browsers key
        window targets by name, so this costs nothing. */
     const state = lastState && lastState.inputs && lastState.inputs[i];
-    const label = state ? (state.currentName || ("Program " + state.current)) : fallbackName;
+    const label = state ? (state.currentName || state.currentWhat || ("Program " + state.current)) : fallbackName;
     const target = bus >= 0 ? "stagerig-output-" + bus + "-fx" + effect
                             : "stagerig-plugin-" + i + "-" + slot + (effect >= 0 ? "-fx" + effect : "");
 
@@ -1722,6 +1722,19 @@ static const char* kManifest = R"JSON({
 })JSON";
 
 /** The chosen look (Theme.h) as the tablet page's variables. */
+/** What to call a program nobody has named: the instruments in it, or its
+    effects when it has no instrument (an audio input's program). */
+static String whatIsIn (const ProgramDef& program)
+{
+    StringArray names;
+    for (const auto& slot : program.slots) names.add (slot.displayName());
+    if (names.isEmpty())
+        for (const auto& effect : program.effects) names.add (effect.displayName());
+    names.removeEmptyStrings();
+    names.removeDuplicates (false);      // two of the same instrument are still that instrument
+    return names.joinIntoString (" + ");
+}
+
 static String lookCss (PropertiesFile& settings)
 {
     const auto l = perf::theme::findLook (settings.getFile().getParentDirectory(), settings.getValue ("look"));
@@ -2450,6 +2463,7 @@ String RemoteServer::stateJson() const
         o->setProperty ("current", in.currentProgram);
         const auto& cur = in.programs[(size_t) in.currentProgram];
         o->setProperty ("currentName", cur.name);
+        if (cur.name.isEmpty() && ! cur.isEmpty()) o->setProperty ("currentWhat", whatIsIn (cur));
         bool loading = false;
         for (int s = 0; s < (int) cur.slots.size() && ! loading; ++s)
             loading = engine.isPluginLoading (i, in.currentProgram, s);
@@ -2466,6 +2480,7 @@ String RemoteServer::stateJson() const
             DynamicObject::Ptr pd (new DynamicObject());
             pd->setProperty ("index", p);
             pd->setProperty ("name", def.name);
+            if (def.name.isEmpty()) pd->setProperty ("what", whatIsIn (def));
             if (def.group.isNotEmpty()) pd->setProperty ("group", def.group);
             progs.add (var (pd.get()));
         }
