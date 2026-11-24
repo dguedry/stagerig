@@ -54,6 +54,7 @@ works inside, see the [README](../README.md).
 - [How long loading takes](#how-long-loading-takes)
 - [Plugin formats](#plugin-formats)
 - [Good free plugins to start with](#good-free-plugins-to-start-with)
+- [Free sampled instruments](#free-sampled-instruments)
 - [Windows plugins](#windows-plugins)
 - [When something goes wrong](#when-something-goes-wrong)
 - [Files StageRig uses](#files-stagerig-uses)
@@ -2091,6 +2092,9 @@ Instruments:
 - **AVL Drumkits** -- acoustic drums that sound like drums, and load fast.
 - The built-in **General MIDI player** covers the piano, the bass and
   everything else until you have better.
+- The built-in **sampler** plays recorded instruments -- a real grand piano
+  first of all -- with nothing to install but the recordings: see *Free
+  sampled instruments* below.
 
 Effects:
 
@@ -2106,11 +2110,81 @@ Effects:
 
 Not packaged, worth fetching from their own sites, all native Linux: **Vital**
 (free tier) and **Odin 2** (synths), **Dexed** (the DX7), u-he's free
-**Tyrell N6**, **Podolski** and **Zebralette**, **sfizz** with the
-**Salamander Grand Piano** (a real piano, in SFZ), **Neural Amp Modeler**
+**Tyrell N6**, **Podolski** and **Zebralette**, **Neural Amp Modeler**
 (amp captures), **Airwindows Consolidated** (hundreds of effects in one
 plugin), **Cardinal** (a modular). Windows-only plugins go through yabridge;
 see *Windows plugins*.
+
+## Free sampled instruments
+
+A sampled instrument is a set of recordings of a real one, note by note and
+loud to soft. StageRig plays them itself, two ways, and neither needs a
+plugin:
+
+| The files you have | What plays them | Where to put them |
+|---|---|---|
+| **SFZ**: a small `.sfz` file and a folder of recordings (WAV, FLAC or Ogg) | **Sampled instrument (built in)** | Each instrument's folder in `~/.config/StageRig/Instruments/` |
+| **SF2** or **SF3**: one soundfont file | **General MIDI player (built in)**, with that file as its soundfont | `~/.config/StageRig/Soundfonts/`, or the system's `/usr/share/sounds/sf2/` |
+
+Where a library comes both ways, take the SFZ: it keeps everything the
+maker recorded, and the sampler reads it from disk as you play, so it is
+ready in under a second and takes little memory. A soundfont is read whole
+into memory.
+
+**A grand piano: Salamander.** A Yamaha C5 recorded by Alexander Holm in
+sixteen loudnesses, free to use and to share with credit (Creative Commons
+Attribution 3.0). The FreePats project keeps it at
+<https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html> in several
+sizes:
+
+| Download | Size | For |
+|---|---|---|
+| SFZ, 48 kHz 24-bit, FLAC | 707 MiB | The sampler, at full quality, in the least disk space |
+| SFZ, 48 kHz 24-bit, WAV | 1.18 GiB | The sampler, at full quality |
+| SFZ, 44.1 kHz 16-bit, WAV | 394 MiB | The sampler, on a small disk |
+| SF2 | 296 MiB | The General MIDI player. Leaves out the pedal and key-release noises |
+
+To install an SFZ version:
+
+1. Download it and unpack it. You get one folder, with a `.sfz` file or two
+   and a folder of recordings inside.
+2. Move that folder, whole, into `~/.config/StageRig/Instruments/` (make the
+   `Instruments` folder if it is not there). Do not take the `.sfz` file out
+   of its folder: it finds its recordings beside it.
+3. In StageRig: **Add instrument ▸ Sampled instrument (built in)**, and pick
+   it. It is listed under the `.sfz` file's name; rename that file to change
+   the name (`Grand Piano.sfz`).
+
+No restart is needed: the menu looks again each time it opens. Where a
+library has two `.sfz` files (Salamander has a second, *Retuned*), each is
+listed as an instrument of its own, sharing the recordings.
+
+To use the SF2 version instead: put the `.sf2` file in
+`~/.config/StageRig/Soundfonts/`, add **General MIDI player (built in)**,
+and choose it under **Sound... ▸ Soundfont**.
+
+**More instruments.** Both of these list free ones by kind -- pianos, electric
+pianos, organs, guitars, basses, strings, brass, woodwinds, drums:
+
+- FreePats, <https://freepats.zenvoid.org/>: each instrument's page gives its
+  formats, sizes and licence.
+- SFZ Instruments, <https://sfzinstruments.github.io/>: a catalogue of SFZ
+  libraries, free and paid.
+
+Read each one's licence before you play it for money or pass it on; most
+free ones ask only to be credited. And play a new instrument through before
+the gig: SFZ is a loose standard, and a library made for one player now and
+then uses something another does not have -- a missing release sound, a note
+that does not respond. The row turns red, with the reason, if an instrument
+cannot be read at all.
+
+**On another computer.** A setup names the instrument, not the place it was.
+Install the same instrument there, in `Instruments`, and the setup finds it.
+Without it the row says the instrument is not on this computer and plays
+nothing; the rest of the program plays as usual.
+
+Sampled instruments belong on a fast disk (an SSD): the sampler reads each
+note's recording from it while the note sounds.
 
 ## Windows plugins
 
