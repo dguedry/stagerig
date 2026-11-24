@@ -248,12 +248,6 @@ var SlotDef::toVar() const
         if (! mix.isEmpty()) o->setProperty ("gmChannels", mix);
         if (gmSoundfont.isNotEmpty()) o->setProperty ("soundfont", gmSoundfont);
     }
-    else if (isSampler())
-    {
-        o->setProperty ("kind", "sampler");
-        o->setProperty ("instrument", samplerInstrument);
-        o->setProperty ("file", samplerFile);
-    }
     else if (isInput())
     {
         o->setProperty ("kind", "input");
@@ -331,12 +325,6 @@ SlotDef SlotDef::fromVar (const var& v)
                 c.pan     = juce::jlimit (-1, 127, prop<int> (cv, "pan", -1));
                 c.muted   = prop<bool> (cv, "muted", false);
             }
-    }
-    else if (kind == "sampler")
-    {
-        s.kind = Kind::sampler;
-        s.samplerInstrument = propStr (v, "instrument");
-        s.samplerFile = propStr (v, "file");
     }
     else if (kind == "input")
     {

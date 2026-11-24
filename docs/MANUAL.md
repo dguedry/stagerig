@@ -462,12 +462,14 @@ such pages: StageRig picks from the parameters the plugin shows, and
   grand piano sampled note by note, played by StageRig itself with no plugin
   to install. The menu lists the sampled instruments on this computer; pick
   one and it is added and plays. **Choose an SFZ file...** takes one from
-  anywhere. **Sound...** on its row changes the instrument. It reads the
+  anywhere. From there it is a plugin like any other: its controls are on
+  **Knobs**, a pedal can be mapped to one, the tablet shows them as sliders,
+  and **Sounds...** keeps a setting of them under a name. It reads the
   start of every recording into memory and the rest from disk as you play,
   so a piano of two gigabytes costs a small part of that, and is ready in
   under a second. A setup remembers the instrument by name: on another
   computer it is found wherever it is installed there, and if it is not,
-  the row says so and plays nothing.
+  its row shows **Reload** in red and says where to put it.
 
   Sampled instruments are in the SFZ format: a small `.sfz` file and a
   folder of recordings. Put each instrument's folder in
@@ -2163,6 +2165,18 @@ To use the SF2 version instead: put the `.sf2` file in
 `~/.config/StageRig/Soundfonts/`, add **General MIDI player (built in)**,
 and choose it under **Sound... ▸ Soundfont**.
 
+**Its controls.** Every sampled instrument has **Volume**, **Pan** and
+**Expression**. Many have more that their maker named -- reverb, release,
+the level of a second microphone -- and those appear by those names. All of
+them are on the instrument's **Knobs** pages, so the knobs of your keyboard
+turn them and its screens name them; a pedal or a fader is mapped to one in
+the Controls panel like any plugin's parameter; and the tablet's instrument
+panel has a slider for each. **Window** opens them as plain sliders on the
+computer. A control moved by its own MIDI controller from the keyboard
+moves the knob and the slider with it. Where each control stands is saved
+with the program. (Salamander has only the three; it is a piano and nothing
+else.)
+
 **More instruments.** Both of these list free ones by kind -- pianos, electric
 pianos, organs, guitars, basses, strings, brass, woodwinds, drums:
 
@@ -2175,13 +2189,13 @@ Read each one's licence before you play it for money or pass it on; most
 free ones ask only to be credited. And play a new instrument through before
 the gig: SFZ is a loose standard, and a library made for one player now and
 then uses something another does not have -- a missing release sound, a note
-that does not respond. The row turns red, with the reason, if an instrument
-cannot be read at all.
+that does not respond. The row shows **Reload** in red, with the reason, if
+an instrument cannot be read at all.
 
 **On another computer.** A setup names the instrument, not the place it was.
 Install the same instrument there, in `Instruments`, and the setup finds it.
-Without it the row says the instrument is not on this computer and plays
-nothing; the rest of the program plays as usual.
+Without it the row says the instrument is not on this computer and it does
+not play; the rest of the program plays as usual.
 
 Sampled instruments belong on a fast disk (an SSD): the sampler reads each
 note's recording from it while the note sounds.

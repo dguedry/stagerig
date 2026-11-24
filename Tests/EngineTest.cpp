@@ -11,6 +11,7 @@
 #include "MappingSuggestions.h"
 #include "ClapPluginFormat.h"
 #include "GmSynth.h"
+#include "SamplerPluginFormat.h"
 #include "MidiEditor.h"
 #include "StagePanel.h"
 #include "PanelParams.h"
@@ -241,19 +242,28 @@ static int probeSampler (const String& path)
     PropertiesFile settings (scratch.getChildFile ("test.settings"), opts);
     PluginHost host (settings);
     Engine engine (host, settings, /*startAudioDevice*/ false);
-    auto rss = [] { int kb = 0; for (const auto& l : StringArray::fromLines (File ("/proc/self/status").loadFileAsString())) if (l.startsWith ("VmRSS:")) kb = l.fromFirstOccurrenceOf (":", false, false).getIntValue(); return kb / 1024; };
     auto settle = [&engine] { pump (30); for (const auto t0 = Time::getMillisecondCounterHiRes(); engine.hasPendingLoads() && Time::getMillisecondCounterHiRes() - t0 < 180000.0;) pump (20); };
 
     const File sfz (path);
-    const int before = rss();
-    CHECK (engine.addSamplerSlot (0, 0));
+    String err;
     const auto t0 = Time::getMillisecondCounterHiRes();
-    engine.setSamplerInstrument (0, 0, 0, sfz.getFileNameWithoutExtension(), sfz);
+    CHECK (engine.addSlot (0, 0, SamplerPluginFormat::describe (sfz), err));
     settle();
     const auto readyMs = Time::getMillisecondCounterHiRes() - t0;
     CHECK (engine.isPluginAlive (0, 0, 0));
     if (! engine.isPluginAlive (0, 0, 0)) { std::printf ("     %s\n", engine.getPluginLoadError (0, 0, 0).toRawUTF8()); return 1; }
-    std::printf ("     %s: ready in %.0f ms, %d MB more memory\n", sfz.getFileName().toRawUTF8(), readyMs, rss() - before);
+    auto* plugin = engine.getPlugin (0, 0, 0);
+    /* It runs in its own process: that process's memory is what it costs. */
+    auto rss = [] { int kb = 0; for (DirectoryEntry e : RangedDirectoryIterator (File ("/proc"), false, "*", File::findDirectories))
+                        if (e.getFile().getChildFile ("comm").loadFileAsString().startsWith ("stagerig-plugin"))
+                            for (const auto& l : StringArray::fromLines (e.getFile().getChildFile ("status").loadFileAsString()))
+                                if (l.startsWith ("PPid:") && l.fromFirstOccurrenceOf (":", false, false).getIntValue() == (int) ::getpid())
+                                    for (const auto& m : StringArray::fromLines (e.getFile().getChildFile ("status").loadFileAsString()))
+                                        if (m.startsWith ("VmRSS:")) kb = m.fromFirstOccurrenceOf (":", false, false).getIntValue();
+                    return kb / 1024; };
+    const int before = 0;
+    std::printf ("     %s: ready in %.0f ms, its process holds %d MB\n", sfz.getFileName().toRawUTF8(), readyMs, rss());
+    std::printf ("     %d named control(s)%s\n", (int) plugin->getParameters().size(), plugin->getParameters().empty() ? "" : (": " + plugin->getParameters()[0].name + "...").toRawUTF8());
 
     /* Played at the speed of a real device, a block every block's length:
        the sampler reads the rest of each recording from disk while the start
@@ -301,7 +311,7 @@ static int probeSampler (const String& path)
     const int timed = 200;
     const float held = play (timed);
     const auto perBlockMs = cost / timed;
-    std::printf ("     eighty notes on the pedal: peak %.3f while played, %.4f held after; %.3f ms to render a block of %.2f ms (%.0f%% of one core), %d MB more memory\n",
+    std::printf ("     eighty notes on the pedal: peak %.3f while played, %.4f held after; %.3f ms to render a block of %.2f ms (%.0f%% of one core), its process holds %d MB\n",
                  peak, held, perBlockMs, blockMs, 100.0 * perBlockMs / blockMs, rss() - before);
     CHECK (peak > 0.01f);
     CHECK (held > 0.005f);                                       // the pedal holds them: the keys were let go
@@ -4542,10 +4552,12 @@ int main()
         }
         CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);    // the file's program change is not Upper's business
 
-        /* The built-in sampler: an SFZ instrument of one recorded tone. Nothing
-           chosen, it plays nothing; chosen, it is read and plays; one that is
-           not on this computer plays nothing and says why; and one named in a
-           setup is found by name where it is installed, whatever its path was. */
+        /* A sampled instrument: an SFZ file of one recorded tone, with one
+           control its maker named. It is a plugin in everything: it runs in
+           its own process and plays; its control is a parameter, moved from
+           here and from the keyboard; what the control was set to is kept and
+           comes back when it is started again; and an instrument that is not
+           on this computer says so. */
         {
             const auto dir = folder.getChildFile ("sampler-test");
             dir.createDirectory();
@@ -4560,16 +4572,20 @@ int main()
                 CHECK (w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples()));
             }
             const auto sfzFile = dir.getChildFile ("Test Tone.sfz");
-            CHECK (sfzFile.replaceWithText ("<region> sample=tone.wav pitch_keycenter=69 lokey=0 hikey=127 loop_mode=loop_continuous loop_start=0 loop_end=47999\n"));
+            CHECK (sfzFile.replaceWithText ("<control> label_cc20=Loudness set_cc20=127\n"
+                                            "<region> sample=tone.wav pitch_keycenter=69 lokey=0 hikey=127 loop_mode=loop_continuous loop_start=0 loop_end=47999 "
+                                            "amplitude_oncc20=100\n"));
+            const auto desc = SamplerPluginFormat::describe (sfzFile);
+            CHECK (desc.name == "Test Tone" && desc.pluginFormatName == "SFZ" && desc.isInstrument);
 
             const int sp = 41;
             engine.selectProgram (0, sp);
             settle();
-            CHECK (engine.addSamplerSlot (0, sp));
-            auto samplerDef = [&]() -> const SlotDef& { return engine.getSetup().inputs[0].programs[(size_t) sp].slots.back(); };
+            String samplerErr;
+            CHECK (engine.addSlot (0, sp, desc, samplerErr));
+            settle();
             const int ss = (int) engine.getSetup().inputs[0].programs[(size_t) sp].slots.size() - 1;
-            CHECK (samplerDef().isSampler() && samplerDef().displayName() == "Sampler");
-            CHECK (! engine.isPluginAlive (0, sp, ss));
+            CHECK (engine.isPluginAlive (0, sp, ss));
             auto played = [&]
             {
                 engine.injectMidi (0, MidiMessage::noteOn (1, 69, (uint8) 110));
@@ -4578,39 +4594,72 @@ int main()
                 levels (40);
                 return l;
             };
-            CHECK (played() < 1e-4f);
+            auto* sampler = engine.getPlugin (0, sp, ss);
+            CHECK (sampler != nullptr && sampler->isAlive());
+            if (sampler != nullptr && sampler->isAlive())
+            {
+                /* Its parameters are its named controls: the three every instrument
+                   answers to (volume, pan, expression) and the one its maker named. */
+                int volume = -1, expression = -1, loudness = -1;
+                for (const auto& prm : sampler->getParameters())
+                {
+                    if (prm.name == "Volume") volume = prm.index;
+                    if (prm.name == "Expression") expression = prm.index;
+                    if (prm.name == "Loudness") loudness = prm.index;
+                }
+                std::printf ("     sampled instrument: %d controls\n", (int) sampler->getParameters().size());
+                CHECK (volume >= 0 && expression >= 0 && loudness >= 0);
+                float v = -1.0f;
+                CHECK (sampler->fetchParameterValue (loudness, v) && std::abs (v - 1.0f) < 0.01f);     // set_cc20=127
+                const float loud = played();
+                std::printf ("     played: %.3f\n", loud);
+                CHECK (loud > 0.01f);
+                CHECK (levels (8)[0] < 1e-3f);                                   // the key let go
 
-            engine.setSamplerInstrument (0, sp, ss, "Test Tone", sfzFile);
+                // A control moved from here, as a knob or the tablet moves it.
+                CHECK (sampler->setParameterValue (volume, 0.0f));
+                levels (4);
+                const float quiet = played();
+                std::printf ("     its volume at nothing: %.5f\n", quiet);
+                CHECK (quiet < loud * 0.05f);
+                CHECK (sampler->setParameterValue (volume, 1.0f));
+                levels (4);
+
+                // And from the keyboard: the controller itself. The parameter follows.
+                engine.injectMidi (0, MidiMessage::controllerEvent (1, 11, 0));
+                levels (4); pump (200);
+                const float squeezed = played();
+                std::printf ("     expression pedal at nothing: %.5f\n", squeezed);
+                CHECK (squeezed < loud * 0.05f);
+                CHECK (sampler->fetchParameterValue (expression, v) && v < 0.05f);
+                engine.injectMidi (0, MidiMessage::controllerEvent (1, 11, 127));
+                levels (4); pump (200);
+                CHECK (sampler->fetchParameterValue (expression, v) && v > 0.95f);
+
+                // Kept with the program, and there when the instrument is started again.
+                CHECK (sampler->setParameterValue (volume, 0.0f));
+                levels (4);
+                engine.captureSetup (-1, true);
+                engine.reloadPlugin (0, sp, ss);
+                settle();
+                sampler = engine.getPlugin (0, sp, ss);
+                CHECK (sampler != nullptr && sampler->isAlive());
+                if (sampler != nullptr && sampler->isAlive())
+                {
+                    CHECK (sampler->fetchParameterValue (volume, v) && v < 0.1f);
+                    CHECK (played() < loud * 0.05f);
+                }
+            }
+
+            // Not on this computer: it does not start, and says where to put it.
+            auto elsewhere = desc;
+            elsewhere.name = "Not Here";
+            elsewhere.fileOrIdentifier = "/another/computer/Not Here.sfz";
+            CHECK (engine.addSlot (0, sp, elsewhere, samplerErr));
             settle();
-            CHECK (engine.isPluginAlive (0, sp, ss));
-            CHECK (samplerDef().displayName() == "Test Tone" && samplerDef().samplerFile == sfzFile.getFullPathName());
-            const float tone = played();
-            std::printf ("     sampler, one tone: %.3f\n", tone);
-            CHECK (tone > 0.01f);
-            const float after = levels (8)[0];
-            std::printf ("     after the key is let go: %.5f\n", after);
-            CHECK (after < 1e-3f);
-
-            // Saved and read again.
-            const auto back = SlotDef::fromVar (samplerDef().toVar());
-            CHECK (back.isSampler() && back.samplerInstrument == "Test Tone" && back.samplerFile == sfzFile.getFullPathName());
-
-            engine.setSamplerInstrument (0, sp, ss, "Not Here", File ("/nowhere/Not Here.sfz"));
-            settle();
-            CHECK (! engine.isPluginAlive (0, sp, ss));
-            CHECK (engine.getPluginLoadError (0, sp, ss).contains ("not on this computer"));
-            CHECK (played() < 1e-4f);
-
-            // By name: the path is another computer's, the instrument is in this one's Instruments folder.
-            const auto installed = engine.getSettingsFolder().getChildFile ("Instruments/Stagerig Test Tone");
-            installed.createDirectory();
-            CHECK (dir.getChildFile ("tone.wav").copyFileTo (installed.getChildFile ("tone.wav")));
-            CHECK (sfzFile.copyFileTo (installed.getChildFile ("Stagerig Test Tone.sfz")));
-            engine.setSamplerInstrument (0, sp, ss, "Stagerig Test Tone", File ("/another/computer/Stagerig Test Tone.sfz"));
-            settle();
-            CHECK (engine.isPluginAlive (0, sp, ss));
-            CHECK (played() > 0.01f);
-            installed.deleteRecursively();
+            CHECK (! engine.isPluginAlive (0, sp, ss + 1));
+            std::printf ("     an instrument that is not here: %s\n", engine.getPluginLoadError (0, sp, ss + 1).toRawUTF8());
+            CHECK (engine.getPluginLoadError (0, sp, ss + 1).contains ("not on this computer"));
             engine.selectProgram (0, programBefore);
             settle();
         }

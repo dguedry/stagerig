@@ -42,8 +42,8 @@ public:
     void showStatus (const juce::String&);
     /** A file chooser for one General MIDI player's own soundfont. */
     void chooseSlotSoundfont (int inputIndex, int program, int slot);
-    /** A file chooser for a sampler's SFZ instrument; slot -1 adds a sampler playing it. */
-    void chooseSamplerFile (int inputIndex, int program, int slot);
+    /** A file chooser for an SFZ file: the sampled instrument in it is added to the program. */
+    void chooseSamplerFile (int inputIndex, int program);
     /** Marks the setup as changed so the periodic autosave picks it up. */
     void markDirty()                        { dirty = true; }
     /** ARA-only plugins need an ARA host; they may show an empty editor and can hang. */

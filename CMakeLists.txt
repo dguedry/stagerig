@@ -85,6 +85,7 @@ target_sources(StageRig PRIVATE
     Source/SongPlayer.cpp
     Source/GmSynth.cpp
     Source/SfzSynth.cpp
+    Source/SamplerPluginFormat.cpp
     Source/MidiEditor.cpp
     Source/GmMixer.cpp
     Source/PatchDialog.cpp
@@ -151,6 +152,8 @@ target_sources(StageRigPluginHost PRIVATE
     Source/PluginHostProcess/PluginHostMain.cpp
     Source/FileHandleLimit.cpp
     Source/ClapPluginFormat.cpp
+    Source/SamplerPluginFormat.cpp
+    Source/SfzSynth.cpp
     Source/Ipc/Protocol.cpp)
 
 target_include_directories(StageRigPluginHost PRIVATE Source
@@ -167,6 +170,7 @@ target_compile_definitions(StageRigPluginHost PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
 target_link_libraries(StageRigPluginHost PRIVATE
+    sfizz::sfizz
     ClapHeaders
     StageRigAssets
     juce::juce_audio_basics
@@ -219,13 +223,12 @@ target_link_libraries(ModelTest PRIVATE
 add_test(NAME ModelTest COMMAND ModelTest)
 
 juce_add_console_app(RemoteTest PRODUCT_NAME "RemoteTest")
-target_sources(RemoteTest PRIVATE Tests/RemoteTest.cpp Source/Recorder.cpp Source/Stretch.cpp Source/MidiFx.cpp Source/RemoteServer.cpp Source/LowLatency.cpp Source/DeviceReservation.cpp Source/Charts.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp Source/PluginView.cpp Source/QrCode.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp Source/SongPlayer.cpp Source/GmSynth.cpp Source/SfzSynth.cpp Source/MidiEditor.cpp Source/GmMixer.cpp Source/MidiOuts.cpp Source/Midi2Inputs.cpp Source/PropertyExchange.cpp Source/ControlMaps.cpp Source/Surfaces.cpp)
+target_sources(RemoteTest PRIVATE Tests/RemoteTest.cpp Source/Recorder.cpp Source/Stretch.cpp Source/MidiFx.cpp Source/RemoteServer.cpp Source/LowLatency.cpp Source/DeviceReservation.cpp Source/Charts.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp Source/PluginView.cpp Source/QrCode.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp Source/SongPlayer.cpp Source/GmSynth.cpp Source/MidiEditor.cpp Source/GmMixer.cpp Source/MidiOuts.cpp Source/Midi2Inputs.cpp Source/PropertyExchange.cpp Source/ControlMaps.cpp Source/Surfaces.cpp)
 target_include_directories(RemoteTest PRIVATE Source)
 target_compile_definitions(RemoteTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_LV2=1 JUCE_PLUGINHOST_LADSPA=1 JUCE_PLUGINHOST_VST=0)
 target_link_libraries(RemoteTest PRIVATE
-    sfizz::sfizz
     ClapHeaders Ableton::Link
     StageRigAssets
     juce::juce_audio_basics juce::juce_audio_devices juce::juce_midi_ci juce::juce_audio_formats
@@ -236,7 +239,7 @@ target_link_libraries(RemoteTest PRIVATE
 add_test(NAME RemoteTest COMMAND RemoteTest)
 
 juce_add_console_app(EngineTest PRODUCT_NAME "EngineTest")
-target_sources(EngineTest PRIVATE Tests/EngineTest.cpp Source/Charts.cpp Source/TempoDetect.cpp Source/Recorder.cpp Source/Stretch.cpp Source/MidiFx.cpp Source/QrCode.cpp Source/LowLatency.cpp Source/DeviceReservation.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp Source/SongPlayer.cpp Source/GmSynth.cpp Source/SfzSynth.cpp Source/MidiEditor.cpp Source/GmMixer.cpp Source/MidiOuts.cpp Source/Midi2Inputs.cpp Source/PropertyExchange.cpp Source/ControlMaps.cpp Source/Surfaces.cpp)
+target_sources(EngineTest PRIVATE Tests/EngineTest.cpp Source/Charts.cpp Source/TempoDetect.cpp Source/Recorder.cpp Source/Stretch.cpp Source/MidiFx.cpp Source/QrCode.cpp Source/LowLatency.cpp Source/DeviceReservation.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp Source/SongPlayer.cpp Source/GmSynth.cpp Source/SfzSynth.cpp Source/SamplerPluginFormat.cpp Source/MidiEditor.cpp Source/GmMixer.cpp Source/MidiOuts.cpp Source/Midi2Inputs.cpp Source/PropertyExchange.cpp Source/ControlMaps.cpp Source/Surfaces.cpp)
 target_include_directories(EngineTest PRIVATE Source)
 target_compile_definitions(EngineTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1

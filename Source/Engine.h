@@ -9,7 +9,6 @@
 #include "MidiFx.h"
 #include <ableton/Link.hpp>
 #include "GmSynth.h"
-#include "SfzSynth.h"
 #include "Midi2Inputs.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -577,12 +576,6 @@ public:
     bool addGmSlot (int inputIndex, int program);
     /** The GM player's mixer for one channel: instrument, volume, pan, mute over the file's. */
     void setGmChannel (int inputIndex, int program, int slot, int channel, const SlotDef::GmChannel&);
-    /** The built-in sampler as a new instrument, with no instrument chosen yet. */
-    bool addSamplerSlot (int inputIndex, int program);
-    /** The SFZ instrument a sampler plays, by its listed name and its file. It is read at once; the one before plays until then. */
-    void setSamplerInstrument (int inputIndex, int program, int slot, const juce::String& name, const juce::File& file);
-    /** Where instruments and soundfonts of the player's own are looked for: the folder the settings are in. */
-    juce::File getSettingsFolder() const;
     /** The soundfont one General MIDI player reads; File() for the rig's usual one. It is read again at once. */
     void setGmSlotSoundfont (int inputIndex, int program, int slot, const juce::File&);
     /** Another input's sounds: the slot's notes go to that input's current program. */
@@ -785,7 +778,6 @@ private:
         int blockSize;
         bool bridged = false;    // Wine/yabridge plugin: limited concurrency (see takeJob)
         bool gm = false;         // the General MIDI player instead: reads the soundfont
-        bool sampler = false;    // the built-in sampler instead: reads the instrument (in `soundfont`)
         juce::File soundfont;
     };
     struct LoadResult
@@ -796,7 +788,6 @@ private:
         juce::String error;
         double sampleRate;
         int blockSize;
-        std::unique_ptr<SfzSynth> sfz;
     };
 
     // AudioIODeviceCallback
@@ -837,7 +828,6 @@ private:
     std::unique_ptr<EffectRuntime> buildEffect (int inputIndex, int program, int slotIndex, int effectIndex, const EffectDef&);
     void queueLoad (PluginNode&, const juce::PluginDescription&, const juce::MemoryBlock& state);
     void queueGmLoad (SlotRuntime&);
-    void queueSamplerLoad (SlotRuntime&);
     void loaderThreadFunc();
     void attachLoaded (LoadResult&);
     void unloadProgram (InputRuntime&, int program);

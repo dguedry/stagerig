@@ -80,6 +80,7 @@ namespace
 #include <dirent.h>
 #include <sys/types.h>
 #include "ClapPluginFormat.h"
+#include "SamplerPluginFormat.h"
 
 using namespace juce;
 using namespace perf;
@@ -102,6 +103,8 @@ public:
         addDefaultFormatsToManager (formatManager);
     // JUCE has no CLAP format; ours goes alongside its own.
     formatManager.addFormat (new ClapPluginFormat());
+    // Sampled instruments (SFZ), played by sfizz compiled in: each is hosted as a plugin.
+    formatManager.addFormat (new SamplerPluginFormat());
         control = std::thread ([this] { controlLoop(); });
     }
 

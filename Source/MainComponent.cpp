@@ -3,6 +3,8 @@
 #include "TimeText.h"
 #include "Theme.h"
 #include "GmSynth.h"
+#include "SfzSynth.h"
+#include "SamplerPluginFormat.h"
 #include "PatchDialog.h"
 #include "GmMixer.h"
 #include "Confirm.h"
@@ -1614,7 +1616,6 @@ public:
             inCh.onClick      = [this] { showListensToMenu(); };
             guiBtn.onClick    = [this, &e, &o] { if (external)    showExternalMenu();
                                                  else if (gm && alive) showGmSoundMenu();
-                                                 else if (sampler) showSamplerMenu();
                                                  else if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
                                                  else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
             removeBtn.onClick = [this, &e, &o]
@@ -1632,12 +1633,10 @@ public:
             enabled.setToggleState (def.enabled, dontSendNotification);
             external = def.isExternal();
             gm = def.isGm();
-            sampler = def.isSampler();
             inputSlot = def.isInput();
             PluginDescription forIcon = def.plugin;
             if (external)  { forIcon = {}; forIcon.name = def.midiOutName; forIcon.pluginFormatName = "MIDI"; }   // a badge with the port's initials
             if (gm)        { forIcon = {}; forIcon.name = "General MIDI"; forIcon.pluginFormatName = "GM"; }
-            if (sampler)   { forIcon = {}; forIcon.name = def.displayName(); forIcon.pluginFormatName = "SFZ"; }
             if (inputSlot) { forIcon = {}; forIcon.name = def.targetInputName; forIcon.pluginFormatName = "Keys"; }
             icon.setImage (panel.engine.getPluginHost().getIcons().get (forIcon, 48), RectanglePlacement::centred);
             icon.setAlpha (def.enabled ? 1.0f : 0.45f);
@@ -1658,14 +1657,6 @@ public:
                 name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
                 name.setTooltip (error.isNotEmpty() ? error : "The built-in General MIDI player: the standard 128 sounds and drum kits. Sound... picks the one this plays; "
                                                              "\"As the notes say\" lets the program changes in the notes choose, which is how a MIDI file's parts work (each part's sound is then set in the song's Backing track window).");
-            }
-            else if (sampler)
-            {
-                const bool chosen = def.samplerInstrument.isNotEmpty() || def.samplerFile.isNotEmpty();
-                name.setText ((chosen ? def.displayName() + "  [sampler]" : String ("Sampler: no instrument chosen yet"))
-                                  + (loading ? "   loading..." : String()), dontSendNotification);
-                name.setColour (Label::textColourId, ! chosen || loading ? textDim : (error.isNotEmpty() ? Colours::orangered : Colours::white));
-                name.setTooltip (error.isNotEmpty() ? error : "The built-in sampler: a sampled instrument (an SFZ file and its recordings), played with nothing to install. Sound... picks the instrument.");
             }
             else if (inputSlot)
             {
@@ -1711,14 +1702,6 @@ public:
                 guiBtn.setVisible (true);
                 guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
             }
-            else if (sampler)
-            {
-                guiBtn.setButtonText (loading ? "Loading" : "Sound...");
-                guiBtn.setTooltip ("Pick the sampled instrument this plays");
-                guiBtn.setEnabled (! loading);
-                guiBtn.setVisible (true);
-                guiBtn.setColour (TextButton::buttonColourId, loaded || loading || error.isEmpty() ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
-            }
             else if (inputSlot)
                 guiBtn.setVisible (false);
             knobsBtn.setVisible (def.isPlugin());
@@ -1728,6 +1711,12 @@ public:
                 guiBtn.setButtonText (loading ? "Loading" : loaded ? "Window" : "Reload");
                 guiBtn.setTooltip (loaded ? "Open the plugin's own window" : "The plugin stopped: load it again");
                 guiBtn.setEnabled (! loading);
+                // A sampled instrument its maker gave no controls has no window to open.
+                if (auto* running = panel.engine.getPlugin (inputIndex, program, index); loaded && running != nullptr && ! running->hasEditor())
+                {
+                    guiBtn.setEnabled (false);
+                    guiBtn.setTooltip ("This instrument has no window of its own");
+                }
                 guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
             }
             midiChain.rebuild (def.midiEffects, inputIndex, program);
@@ -1922,39 +1911,6 @@ public:
             });
         }
 
-        /** The sampled instruments on this computer, the one playing ticked, and a file of your own. */
-        void showSamplerMenu()
-        {
-            auto& e = panel.engine;
-            auto& o = panel.owner;
-            auto& p = panel;
-            const auto def = slotDef;
-            const auto found = SfzSynth::installedInstruments (e.getSettingsFolder());
-            PopupMenu m;
-            bool listed = false;
-            for (int i = 0; i < found.size(); ++i)
-            {
-                const bool now = found[i].name.equalsIgnoreCase (def.samplerInstrument);
-                m.addItem (1000 + i, found[i].name, true, now);
-                listed = listed || now;
-            }
-            if (found.isEmpty()) m.addItem (-1, "No sampled instruments installed yet", false);
-            if (def.samplerInstrument.isNotEmpty() && ! listed)
-                m.addItem (-1, def.samplerInstrument + (File (def.samplerFile).existsAsFile() ? String() : String ("  (not on this computer)")), false, true);
-            m.addSeparator();
-            m.addItem (1, "Choose an SFZ file...");
-            const int in = o.getSelectedInput(), prog = o.getEditedProgram(), slot = index;
-            m.showMenuAsync (PopupMenu::Options().withTargetComponent (&guiBtn), [&e, &o, &p, in, prog, slot, found] (int r)
-            {
-                if (r == 1) { o.chooseSamplerFile (in, prog, slot); return; }
-                if (r < 1000 || r - 1000 >= found.size()) return;
-                e.setSamplerInstrument (in, prog, slot, found[r - 1000].name, found[r - 1000].file);
-                o.showStatus ("Sampler: " + found[r - 1000].name);
-                o.markDirty();
-                p.refresh();          // last: it rebuilds the rows, this one included
-            });
-        }
-
         void showExternalMenu()
         {
             auto& e = panel.engine;
@@ -2006,7 +1962,7 @@ public:
 
         SlotsPanel& panel;
         int index;
-        bool alive = false, external = false, gm = false, sampler = false, inputSlot = false;
+        bool alive = false, external = false, gm = false, inputSlot = false;
         SlotDef slotDef;
         ImageComponent icon;
         ToggleButton enabled;
@@ -2218,12 +2174,13 @@ private:
         menu.addSubMenu ("MIDI device (hardware synth, module, lights)", external);
         menu.addItem (300000, GmSynth::isAvailable() ? String ("General MIDI player (built in)")
                                                      : "General MIDI player (built in)  -- " + GmSynth::unavailableReason (engine.getGmSoundfont()), GmSynth::isAvailable());
-        /* The built-in sampler, by the instrument it is to play: the ones on this computer, or a file. */
-        const auto sampled = SfzSynth::installedInstruments (engine.getSettingsFolder());
+        /* Sampled instruments: the ones on this computer, or an SFZ file from anywhere.
+           Each is added as a plugin is, and is one in everything that follows. */
+        const auto sampled = SfzSynth::installedInstruments (owner.getSettings().getFile().getParentDirectory());
         {
             PopupMenu sm;
             for (int i = 0; i < sampled.size(); ++i) sm.addItem (310000 + i, sampled[i].name);
-            if (sampled.isEmpty()) sm.addItem (-1, "None installed yet", false);
+            if (sampled.isEmpty()) sm.addItem (-1, "None installed yet  (see Free sampled instruments in the manual)", false);
             sm.addSeparator();
             sm.addItem (319999, "Choose an SFZ file...");
             menu.addSubMenu ("Sampled instrument (built in)", sm);
@@ -2233,13 +2190,14 @@ private:
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types, ports, sampled] (int result)
         {
             const int in = owner.getSelectedInput(), prog = owner.getEditedProgram();
-            if (result == 319999) { owner.chooseSamplerFile (in, prog, -1); return; }
+            if (result == 319999) { owner.chooseSamplerFile (in, prog); return; }
             if (result >= 310000 && result - 310000 < sampled.size())
             {
-                if (engine.addSamplerSlot (in, prog))
-                    engine.setSamplerInstrument (in, prog, (int) engine.getSetup().inputs[(size_t) in].programs[(size_t) prog].slots.size() - 1,
-                                                 sampled[result - 310000].name, sampled[result - 310000].file);
-                owner.showStatus ("Added " + sampled[result - 310000].name + ", played by the built-in sampler");
+                String error;
+                if (engine.addSlot (in, prog, SamplerPluginFormat::describe (sampled[result - 310000].file), error))
+                    owner.showStatus ("Added " + sampled[result - 310000].name + ", a sampled instrument");
+                else
+                    owner.showStatus (error);
                 owner.markDirty();
                 return;
             }
@@ -4874,23 +4832,20 @@ void MainComponent::chooseSlotSoundfont (int inputIndex, int program, int slot)
     });
 }
 
-void MainComponent::chooseSamplerFile (int inputIndex, int program, int slot)
+void MainComponent::chooseSamplerFile (int inputIndex, int program)
 {
     gmChooser = std::make_unique<FileChooser> ("A sampled instrument (SFZ file)",
                                                File::getSpecialLocation (File::userHomeDirectory), "*.sfz");
-    gmChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this, inputIndex, program, slot] (const FileChooser& fc)
+    gmChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this, inputIndex, program] (const FileChooser& fc)
     {
         const auto f = fc.getResult();
         if (f == File()) return;
-        int at = slot;
-        if (at < 0)
-        {
-            if (! engine.addSamplerSlot (inputIndex, program)) return;
-            at = (int) engine.getSetup().inputs[(size_t) inputIndex].programs[(size_t) program].slots.size() - 1;
-        }
-        engine.setSamplerInstrument (inputIndex, program, at, f.getFileNameWithoutExtension(), f);
+        String error;
+        if (engine.addSlot (inputIndex, program, SamplerPluginFormat::describe (f), error))
+            showStatus ("Added " + f.getFileNameWithoutExtension() + ", a sampled instrument");
+        else
+            showStatus (error);
         markDirty();
-        showStatus ("Sampler: " + f.getFileNameWithoutExtension());
     });
 }
 

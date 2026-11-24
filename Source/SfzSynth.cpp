@@ -1,6 +1,7 @@
 #include "SfzSynth.h"
 
 #include <sfizz.hpp>
+#include <sfizz_message.h>
 
 namespace perf
 {
@@ -68,6 +69,35 @@ std::unique_ptr<SfzSynth> SfzSynth::create (double sampleRate, int blockSize, co
     }
     s->scratch.setSize (2, s->maxBlock);
     return s;
+}
+
+std::vector<SfzSynth::Control> SfzSynth::controls() const
+{
+    std::vector<Control> found;
+    if (synth == nullptr) return found;
+    /* The values are asked for the way sfizz's own window asks: a message to
+       the engine, answered at once into `heard`. */
+    struct Heard { float value = 0.0f; };
+    Heard heard;
+    auto client = sfz::Sfizz::createClient (&heard);
+    sfz::Sfizz::setReceiveCallback (*client, [] (void* data, int, const char*, const char* sig, const sfizz_arg_t* args)
+    {
+        if (sig != nullptr && sig[0] == 'f' && args != nullptr) static_cast<Heard*> (data)->value = args[0].f;
+    });
+    for (const auto& [cc, label] : synth->getCCLabels())
+    {
+        if (label.empty()) continue;
+        heard.value = 0.0f;
+        synth->sendMessage (*client, 0, ("/cc" + std::to_string ((int) cc) + "/value").c_str(), "", nullptr);
+        found.push_back ({ (int) cc, String::fromUTF8 (label.c_str()), jlimit (0.0f, 1.0f, heard.value) });
+    }
+    std::sort (found.begin(), found.end(), [] (const Control& a, const Control& b) { return a.cc < b.cc; });
+    return found;
+}
+
+void SfzSynth::setControl (int cc, float value)
+{
+    if (synth != nullptr) synth->hdcc (0, cc, jlimit (0.0f, 1.0f, value));
 }
 
 void SfzSynth::silence()

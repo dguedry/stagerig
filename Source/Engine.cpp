@@ -96,10 +96,6 @@ struct Engine::SlotRuntime : public PluginNode
     bool isGm = false;
     std::unique_ptr<GmSynth> gm;                 // set by the loader, swapped under the lock
     juce::File gmSoundfont;                      // its own soundfont; File() for the rig's (message thread)
-    /** The built-in sampler: an SFZ instrument, played here like the GM player. */
-    bool isSampler = false;
-    std::unique_ptr<SfzSynth> sfz;               // set by the loader, swapped under the lock
-    juce::String samplerName, samplerFile;       // which instrument (message thread)
     std::atomic<int> gmProgram[16], gmVolume[16], gmPan[16];
     std::atomic<bool> gmMuted[16];
     std::atomic<bool> gmDirty { true };          // its mixer changed: tell the synth
@@ -110,7 +106,7 @@ struct Engine::SlotRuntime : public PluginNode
     /** Whether it takes notes: a running plugin, a running GM player, an
         external instrument, another input, or anything with a MIDI chain
         (whose sends and processors want them). */
-    bool playable() const { return external || isInputSlot || alive() || (isGm && gm != nullptr) || (isSampler && sfz != nullptr) || ! midiEffects.empty(); }
+    bool playable() const { return external || isInputSlot || alive() || (isGm && gm != nullptr) || ! midiEffects.empty(); }
 
     void applyDef (const SlotDef& d)
     {
@@ -3972,13 +3968,6 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
         slot->gmMidi.ensureSize (32768);
         queueGmLoad (*slot);
     }
-    else if (def.isSampler())
-    {
-        slot->isSampler = true;
-        slot->samplerName = def.samplerInstrument;
-        slot->samplerFile = def.samplerFile;
-        queueSamplerLoad (*slot);
-    }
     else if (def.isInput())
         slot->isInputSlot = true;      // nothing to start: the notes go to another input
     else
@@ -4022,48 +4011,6 @@ void Engine::queueLoad (PluginNode& node, const PluginDescription& desc, const M
     {
         std::lock_guard<std::mutex> l (loaderMutex);
         loadQueue.push_back ({ node.id, desc, state, sampleRate, blockSize, bridged });
-    }
-    loaderCv.notify_one();
-}
-
-File Engine::getSettingsFolder() const { return settings.getFile().getParentDirectory(); }
-
-void Engine::queueSamplerLoad (SlotRuntime& slot)
-{
-    slot.loadError.clear();
-    /* Nothing to read: it plays nothing, rather than the instrument before
-       under the new one's name. */
-    auto none = [this, &slot]
-    {
-        std::unique_ptr<SfzSynth> old;
-        const ScopedLock sl (lock);
-        old = std::move (slot.sfz);
-    };
-    if (slot.samplerName.isEmpty() && slot.samplerFile.isEmpty())
-    {
-        none();
-        slot.loadError = "No instrument chosen yet: Sound... picks one";
-        return;
-    }
-    const auto file = SfzSynth::find (getSettingsFolder(), slot.samplerName, slot.samplerFile);
-    if (file == File())
-    {
-        none();
-        slot.loadError = slot.samplerName + " is not on this computer (its .sfz file was not found)";
-        listeners.call ([&] (Listener& l) { l.statusMessage ("Sampler: " + slot.loadError); });
-        return;
-    }
-    slot.loading.store (true);
-    ++pendingLoads;
-    LoadJob job;
-    job.nodeId = slot.id;
-    job.sampleRate = sampleRate;
-    job.blockSize = blockSize;
-    job.sampler = true;
-    job.soundfont = file;
-    {
-        std::lock_guard<std::mutex> l (loaderMutex);
-        loadQueue.push_back (std::move (job));
     }
     loaderCv.notify_one();
 }
@@ -4134,21 +4081,6 @@ void Engine::loaderThreadFunc()
             if (loaderQuit.load()) return;
         }
 
-        if (job.sampler)
-        {
-            // The built-in sampler: an instrument read, not a process.
-            LoadResult result { job.nodeId, nullptr, nullptr, {}, job.sampleRate, job.blockSize, nullptr };
-            ++loadsInFlight;
-            result.sfz = SfzSynth::create (job.sampleRate, job.blockSize, job.soundfont, result.error);
-            {
-                std::lock_guard<std::mutex> l (loaderMutex);
-                loadResults.push_back (std::move (result));
-            }
-            --loadsInFlight;
-            postEvent ({ Event::pluginLoaded, 0, 0, 0, 0, 0 });
-            continue;
-        }
-
         if (job.gm)
         {
             // The General MIDI player: a soundfont read, not a process.
@@ -4214,26 +4146,6 @@ void Engine::attachLoaded (LoadResult& r)
     }
     auto* node = it->second;
     node->loading.store (false);
-
-    if (auto* slot = dynamic_cast<SlotRuntime*> (node); slot != nullptr && slot->isSampler)
-    {
-        if (r.sfz == nullptr)
-        {
-            node->loadError = r.error;
-            listeners.call ([&] (Listener& l) { l.statusMessage ("Sampler: " + r.error); });
-        }
-        else
-        {
-            std::unique_ptr<SfzSynth> old;      // let go of outside the lock: it holds samples
-            {
-                const ScopedLock sl (lock);
-                old = std::move (slot->sfz);
-                slot->sfz = std::move (r.sfz);
-            }
-        }
-        notifyContent (node->inputIndex.load(), node->program);
-        return;
-    }
 
     if (auto* slot = dynamic_cast<SlotRuntime*> (node); slot != nullptr && slot->isGm)
     {
@@ -4517,43 +4429,6 @@ bool Engine::addGmSlot (int inputIndex, int program)
     }
     notifyContent (inputIndex, program);
     return true;
-}
-
-bool Engine::addSamplerSlot (int inputIndex, int program)
-{
-    if (! validInput (inputIndex) || ! validProgram (program)) return false;
-    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
-    SlotDef sd;
-    sd.kind = SlotDef::Kind::sampler;
-    def.slots.push_back (sd);
-    const int slotIndex = (int) def.slots.size() - 1;
-    if (auto* rt = getLoaded (inputIndex, program))
-    {
-        auto slot = buildSlot (inputIndex, program, slotIndex, sd);
-        const ScopedLock sl (lock);
-        rt->slots.push_back (std::move (slot));
-    }
-    notifyContent (inputIndex, program);
-    return true;
-}
-
-void Engine::setSamplerInstrument (int inputIndex, int program, int slotIndex, const String& name, const File& f)
-{
-    if (! validInput (inputIndex) || ! validProgram (program)) return;
-    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
-    if (slotIndex < 0 || slotIndex >= (int) def.slots.size() || ! def.slots[(size_t) slotIndex].isSampler()) return;
-    auto& sd = def.slots[(size_t) slotIndex];
-    sd.samplerInstrument = name;
-    sd.samplerFile = f == File() ? String() : f.getFullPathName();
-    if (auto* rt = getLoaded (inputIndex, program))
-        if (slotIndex < (int) rt->slots.size())
-        {
-            auto& s = *rt->slots[(size_t) slotIndex];
-            s.samplerName = sd.samplerInstrument;
-            s.samplerFile = sd.samplerFile;
-            queueSamplerLoad (s);      // the one before plays until this one is read
-        }
-    notifyContent (inputIndex, program);
 }
 
 void Engine::setGmSlotSoundfont (int inputIndex, int program, int slotIndex, const File& f)
@@ -4915,7 +4790,6 @@ bool Engine::isPluginAlive (int inputIndex, int program, int slot, int effect) c
         auto* s = static_cast<SlotRuntime*> (node);
         if (s->external)    return midiOuts.isOpen (s->outPort.load());
         if (s->isGm)        return s->gm != nullptr;
-        if (s->isSampler)   return s->sfz != nullptr;
         if (s->isInputSlot) return validInput (s->targetInput.load());
     }
     if (node != nullptr && effect >= 0)
@@ -5163,11 +5037,6 @@ void Engine::reloadPlugin (int inputIndex, int program, int slot, int effect)
     if (node != nullptr && effect < 0 && static_cast<SlotRuntime*> (node)->isGm)
     {
         if (! node->loading.load()) queueGmLoad (*static_cast<SlotRuntime*> (node));
-        return;
-    }
-    if (node != nullptr && effect < 0 && static_cast<SlotRuntime*> (node)->isSampler)
-    {
-        if (! node->loading.load()) queueSamplerLoad (*static_cast<SlotRuntime*> (node));
         return;
     }
     if (node != nullptr && ((effect < 0 && (static_cast<SlotRuntime*> (node)->external || static_cast<SlotRuntime*> (node)->isInputSlot))
@@ -5883,7 +5752,6 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
             {
                 s->stereo.setSize (2, blockSize, false, false, true);
                 if (s->isGm && ! s->loading.load()) queueGmLoad (*s);     // a synth is made for one rate
-                if (s->isSampler && ! s->loading.load()) queueSamplerLoad (*s);
                 prep (*s);
                 for (auto* ch : { &s->midiEffects, &s->effects }) for (auto& e : *ch) prep (*e);
             }
@@ -6540,12 +6408,6 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const M
             prepareGmMidi (*slot, numSamples);
             stereo.clear();
             slot->gm->renderAdding (slot->gmMidi, stereo.getWritePointer (0), stereo.getWritePointer (1), numSamples, 1.0f, 1.0f);
-        }
-        else if (slot->isSampler)
-        {
-            if (slot->sfz == nullptr) continue;
-            stereo.clear();
-            slot->sfz->renderAdding (slot->midi, stereo.getWritePointer (0), stereo.getWritePointer (1), numSamples);
         }
         else if (slot->isInputSlot)
         {

@@ -3,6 +3,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>
 #include <memory>
+#include <vector>
 
 namespace sfz { class Sfizz; }
 
@@ -38,6 +39,19 @@ public:
 
     /** A synth at this rate with the instrument loaded, or null (and `error` set). */
     static std::unique_ptr<SfzSynth> create (double sampleRate, int blockSize, const juce::File& instrument, juce::String& error);
+
+    /** A control the instrument's maker named: a MIDI controller that
+        changes its sound (reverb, release, a microphone's level). */
+    struct Control
+    {
+        int cc = 0;
+        juce::String name;
+        float value = 0.0f;     // 0..1, as the instrument starts
+    };
+    /** The instrument's named controls, in controller order. Before it is played. */
+    std::vector<Control> controls() const;
+    /** Audio thread: a control moved, 0..1. */
+    void setControl (int cc, float value);
 
     /** Audio thread: every note and sound off, now. */
     void silence();

@@ -94,7 +94,7 @@ struct SlotDef
         synth, a module, a lighting controller -- played through a MIDI output
         port; the built-in General MIDI player; or another input's sounds
         (the notes go to that keyboard's current program). */
-    enum class Kind { plugin, external, gm, input, sampler };
+    enum class Kind { plugin, external, gm, input };
     Kind kind = Kind::plugin;
 
     juce::PluginDescription plugin;   // which plugin
@@ -165,13 +165,6 @@ struct SlotDef
         usual one (Options). A file that is not there falls back to that one. */
     juce::String gmSoundfont;
 
-    // The built-in sampler ------------------------------------------------------
-    /** The SFZ instrument it plays: its name, as listed (the file's name
-        without ".sfz"), and where the file was when it was chosen. The path
-        is used if it is there; on another computer the name finds the
-        instrument wherever it is installed. Both empty: none chosen yet. */
-    juce::String samplerInstrument, samplerFile;
-
     // An external instrument ----------------------------------------------------
     juce::String midiOutIdentifier, midiOutName;   // the port it plays through
     /** Patch recall: sent to the instrument when the program is selected,
@@ -187,7 +180,6 @@ struct SlotDef
     bool isPlugin() const             { return kind == Kind::plugin; }
     bool isGm() const                 { return kind == Kind::gm; }
     bool isInput() const              { return kind == Kind::input; }
-    bool isSampler() const            { return kind == Kind::sampler; }
     /** What to call it: the plugin's name, the port's, the player's, the keyboard's. */
     juce::String displayName() const
     {
@@ -195,7 +187,6 @@ struct SlotDef
         {
             case Kind::external: return midiOutName + " (MIDI)";
             case Kind::gm:       return "General MIDI player";
-            case Kind::sampler:  return samplerInstrument.isNotEmpty() ? samplerInstrument : juce::String ("Sampler");
             case Kind::input:    return targetProgram >= 0 ? targetInputName + ": " + targetProgramName : targetInputName + "'s sounds";
             case Kind::plugin:   break;
         }
