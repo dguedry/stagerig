@@ -225,6 +225,107 @@ static int probeNks (const String& wanted)
     return 0;
 }
 
+/** STAGERIG_TEST_SAMPLER=/path/Instrument.sfz: a real sampled instrument in
+    the built-in sampler, through the engine: how long it takes to be ready,
+    what it costs in memory, how long a block takes to render with many notes
+    held, and that nothing goes on sounding after the pedal and the keys are
+    let go. Run by hand, with an instrument of this computer's. */
+static int probeSampler (const String& path)
+{
+    const File scratch = File::getSpecialLocation (File::tempDirectory).getChildFile ("StageRigSamplerTest-" + String (Time::currentTimeMillis()));
+    scratch.createDirectory();
+    struct Cleanup { File d; ~Cleanup() { d.deleteRecursively(); } } cleanup { scratch };
+    PropertiesFile::Options opts;
+    opts.applicationName = "StageRigSamplerTest";
+    opts.filenameSuffix = "settings";
+    PropertiesFile settings (scratch.getChildFile ("test.settings"), opts);
+    PluginHost host (settings);
+    Engine engine (host, settings, /*startAudioDevice*/ false);
+    auto rss = [] { int kb = 0; for (const auto& l : StringArray::fromLines (File ("/proc/self/status").loadFileAsString())) if (l.startsWith ("VmRSS:")) kb = l.fromFirstOccurrenceOf (":", false, false).getIntValue(); return kb / 1024; };
+    auto settle = [&engine] { pump (30); for (const auto t0 = Time::getMillisecondCounterHiRes(); engine.hasPendingLoads() && Time::getMillisecondCounterHiRes() - t0 < 180000.0;) pump (20); };
+
+    const File sfz (path);
+    const int before = rss();
+    CHECK (engine.addSamplerSlot (0, 0));
+    const auto t0 = Time::getMillisecondCounterHiRes();
+    engine.setSamplerInstrument (0, 0, 0, sfz.getFileNameWithoutExtension(), sfz);
+    settle();
+    const auto readyMs = Time::getMillisecondCounterHiRes() - t0;
+    CHECK (engine.isPluginAlive (0, 0, 0));
+    if (! engine.isPluginAlive (0, 0, 0)) { std::printf ("     %s\n", engine.getPluginLoadError (0, 0, 0).toRawUTF8()); return 1; }
+    std::printf ("     %s: ready in %.0f ms, %d MB more memory\n", sfz.getFileName().toRawUTF8(), readyMs, rss() - before);
+
+    /* Played at the speed of a real device, a block every block's length:
+       the sampler reads the rest of each recording from disk while the start
+       of it plays, and a test that renders faster than time gives the disk no
+       time at all. `cost` is what the rendering itself took. */
+    const double blockMs = 1000.0 * kBlock / engine.getSampleRate();
+    double cost = 0.0;
+    auto play = [&] (int blocks)
+    {
+        float peak = 0.0f;
+        for (int b = 0; b < blocks; ++b)
+        {
+            const auto t = Time::getMillisecondCounterHiRes();
+            peak = jmax (peak, render (engine, 1));
+            const auto took = Time::getMillisecondCounterHiRes() - t;
+            cost += took;
+            if (took < blockMs) Thread::sleep ((int) (blockMs - took));
+        }
+        return peak;
+    };
+
+    // One note, as it is first hit: how soon it is heard, and that it rings on while held.
+    engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+    int blocksToSound = -1;
+    for (int b = 0; b < 20 && blocksToSound < 0; ++b) if (play (1) > 0.001f) blocksToSound = b;
+    std::printf ("     first note heard in block %d\n", blocksToSound);
+    CHECK (blocksToSound >= 0 && blocksToSound <= 2);
+    play (170);                                                  // two seconds held: far past what is kept in memory
+    const float ringing = play (4);
+    std::printf ("     still ringing after two seconds held: %.4f\n", ringing);
+    CHECK (ringing > 0.001f);
+    engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+    play (200);
+
+    // The pedal down, eighty notes up the keyboard, each key let go at once; the pedal holds them.
+    engine.injectMidi (0, MidiMessage::controllerEvent (1, 64, 127));
+    float peak = 0.0f;
+    for (int n = 24; n < 104; ++n)
+    {
+        engine.injectMidi (0, MidiMessage::noteOn (1, n, (uint8) (50 + (n * 7) % 70)));
+        peak = jmax (peak, play (4));
+        engine.injectMidi (0, MidiMessage::noteOff (1, n));
+    }
+    cost = 0.0;
+    const int timed = 200;
+    const float held = play (timed);
+    const auto perBlockMs = cost / timed;
+    std::printf ("     eighty notes on the pedal: peak %.3f while played, %.4f held after; %.3f ms to render a block of %.2f ms (%.0f%% of one core), %d MB more memory\n",
+                 peak, held, perBlockMs, blockMs, 100.0 * perBlockMs / blockMs, rss() - before);
+    CHECK (peak > 0.01f);
+    CHECK (held > 0.005f);                                       // the pedal holds them: the keys were let go
+    CHECK (perBlockMs < blockMs * 0.5);
+
+    // Pedal up, every key already up: it must fall silent, and soon.
+    engine.injectMidi (0, MidiMessage::controllerEvent (1, 64, 0));
+    double silentAfter = -1.0;
+    for (int b = 0; b < 1200 && silentAfter < 0.0; b += 10)
+        if (play (10) < 1e-4f) silentAfter = (b + 10) * blockMs / 1000.0;
+    std::printf ("     silent %.1f s after the pedal is lifted\n", silentAfter);
+    CHECK (silentAfter >= 0.0);
+
+    // Started again (a change of sample rate, a reload): it comes back.
+    engine.reloadPlugin (0, 0, 0);
+    settle();
+    engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+    CHECK (render (engine, 20) > 0.001f);
+    engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+    std::printf ("SAMPLER %s: %d failure(s)\n", sfz.getFileName().toRawUTF8(), failures);
+    std::fflush (stdout);
+    std::_Exit (failures == 0 ? 0 : 1);
+}
+
 /** STAGERIG_TEST_SOUNDS=<plugin name>: the maker's sounds through the engine,
     on a real plugin from this computer's plugin list, in its own process as
     on stage: two sounds chosen, each kept in the program under its name;
@@ -806,6 +907,8 @@ int main()
         return probeNks (String (n));
     if (const char* n = std::getenv ("STAGERIG_TEST_SOUNDS"); n != nullptr && *n != 0)
         return probeSounds (String (n));
+    if (const char* n = std::getenv ("STAGERIG_TEST_SAMPLER"); n != nullptr && *n != 0)
+        return probeSampler (String (n));
 
     // Own scratch folder: PluginHost keeps its crash list ("dead man's pedal") next to
     // the settings file, and a plain temp file would share /tmp with every other run,
@@ -4438,6 +4541,79 @@ int main()
             }
         }
         CHECK (engine.getSetup().inputs[0].currentProgram == programBefore);    // the file's program change is not Upper's business
+
+        /* The built-in sampler: an SFZ instrument of one recorded tone. Nothing
+           chosen, it plays nothing; chosen, it is read and plays; one that is
+           not on this computer plays nothing and says why; and one named in a
+           setup is found by name where it is installed, whatever its path was. */
+        {
+            const auto dir = folder.getChildFile ("sampler-test");
+            dir.createDirectory();
+            {
+                WavAudioFormat wav;
+                std::unique_ptr<OutputStream> os (dir.getChildFile ("tone.wav").createOutputStream().release());
+                std::unique_ptr<AudioFormatWriter> w (wav.createWriterFor (os.get(), 48000.0, 1, 16, {}, 0));
+                CHECK (w != nullptr);
+                os.release();
+                AudioBuffer<float> b (1, 48000);
+                for (int i = 0; i < b.getNumSamples(); ++i) b.setSample (0, i, 0.6f * (float) std::sin (MathConstants<double>::twoPi * 440.0 * i / 48000.0));
+                CHECK (w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples()));
+            }
+            const auto sfzFile = dir.getChildFile ("Test Tone.sfz");
+            CHECK (sfzFile.replaceWithText ("<region> sample=tone.wav pitch_keycenter=69 lokey=0 hikey=127 loop_mode=loop_continuous loop_start=0 loop_end=47999\n"));
+
+            const int sp = 41;
+            engine.selectProgram (0, sp);
+            settle();
+            CHECK (engine.addSamplerSlot (0, sp));
+            auto samplerDef = [&]() -> const SlotDef& { return engine.getSetup().inputs[0].programs[(size_t) sp].slots.back(); };
+            const int ss = (int) engine.getSetup().inputs[0].programs[(size_t) sp].slots.size() - 1;
+            CHECK (samplerDef().isSampler() && samplerDef().displayName() == "Sampler");
+            CHECK (! engine.isPluginAlive (0, sp, ss));
+            auto played = [&]
+            {
+                engine.injectMidi (0, MidiMessage::noteOn (1, 69, (uint8) 110));
+                const float l = levels (12)[0];
+                engine.injectMidi (0, MidiMessage::noteOff (1, 69));
+                levels (40);
+                return l;
+            };
+            CHECK (played() < 1e-4f);
+
+            engine.setSamplerInstrument (0, sp, ss, "Test Tone", sfzFile);
+            settle();
+            CHECK (engine.isPluginAlive (0, sp, ss));
+            CHECK (samplerDef().displayName() == "Test Tone" && samplerDef().samplerFile == sfzFile.getFullPathName());
+            const float tone = played();
+            std::printf ("     sampler, one tone: %.3f\n", tone);
+            CHECK (tone > 0.01f);
+            const float after = levels (8)[0];
+            std::printf ("     after the key is let go: %.5f\n", after);
+            CHECK (after < 1e-3f);
+
+            // Saved and read again.
+            const auto back = SlotDef::fromVar (samplerDef().toVar());
+            CHECK (back.isSampler() && back.samplerInstrument == "Test Tone" && back.samplerFile == sfzFile.getFullPathName());
+
+            engine.setSamplerInstrument (0, sp, ss, "Not Here", File ("/nowhere/Not Here.sfz"));
+            settle();
+            CHECK (! engine.isPluginAlive (0, sp, ss));
+            CHECK (engine.getPluginLoadError (0, sp, ss).contains ("not on this computer"));
+            CHECK (played() < 1e-4f);
+
+            // By name: the path is another computer's, the instrument is in this one's Instruments folder.
+            const auto installed = engine.getSettingsFolder().getChildFile ("Instruments/Stagerig Test Tone");
+            installed.createDirectory();
+            CHECK (dir.getChildFile ("tone.wav").copyFileTo (installed.getChildFile ("tone.wav")));
+            CHECK (sfzFile.copyFileTo (installed.getChildFile ("Stagerig Test Tone.sfz")));
+            engine.setSamplerInstrument (0, sp, ss, "Stagerig Test Tone", File ("/another/computer/Stagerig Test Tone.sfz"));
+            settle();
+            CHECK (engine.isPluginAlive (0, sp, ss));
+            CHECK (played() > 0.01f);
+            installed.deleteRecursively();
+            engine.selectProgram (0, programBefore);
+            settle();
+        }
 
         /* The part to Upper's sounds instead -- an instrument that hands the
            notes to that keyboard's program -- and the GM player stops

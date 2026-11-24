@@ -7,3 +7,6 @@
 [submodule "external/link"]
 	path = external/link
 	url = https://github.com/Ableton/link
+[submodule "external/sfizz"]
+	path = external/sfizz
+	url = https://github.com/sfztools/sfizz

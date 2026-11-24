@@ -2665,7 +2665,7 @@ String RemoteServer::panelJson (int input) const
     slot = jlimit (0, (int) prog.slots.size() - 1, slot);
     const auto& sd = prog.slots[(size_t) slot];
     const auto view = hub->viewFor (input);
-    auto slotName = [] (const SlotDef& s) { return s.kind == SlotDef::Kind::plugin ? s.plugin.name : s.kind == SlotDef::Kind::gm ? String ("General MIDI")
+    auto slotName = [] (const SlotDef& s) { return s.kind == SlotDef::Kind::plugin ? s.plugin.name : s.kind == SlotDef::Kind::gm ? String ("General MIDI") : s.kind == SlotDef::Kind::sampler ? s.displayName()
                                                  : s.kind == SlotDef::Kind::external ? String ("MIDI device") : s.targetInputName; };
     o->setProperty ("slot", slot);
     o->setProperty ("instrument", slotName (sd));

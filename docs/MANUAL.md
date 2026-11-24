@@ -457,6 +457,22 @@ such pages: StageRig picks from the parameters the plugin shows, and
   another a drum kit from a different soundfont. Each different soundfont
   in use takes its own memory. Open the setup on a computer that lacks the
   file and the player uses the usual one, and says so.
+- **Sampled instrument (built in)** -- a recorded instrument, such as a
+  grand piano sampled note by note, played by StageRig itself with no plugin
+  to install. The menu lists the sampled instruments on this computer; pick
+  one and it is added and plays. **Choose an SFZ file...** takes one from
+  anywhere. **Sound...** on its row changes the instrument. It reads the
+  start of every recording into memory and the rest from disk as you play,
+  so a piano of two gigabytes costs a small part of that, and is ready in
+  under a second. A setup remembers the instrument by name: on another
+  computer it is found wherever it is installed there, and if it is not,
+  the row says so and plays nothing.
+
+  Sampled instruments are in the SFZ format: a small `.sfz` file and a
+  folder of recordings. Put each instrument's folder in
+  `~/.config/StageRig/Instruments/` (or `/usr/share/stagerig/instruments/`
+  for every user of the computer) and it appears in the menu under the
+  `.sfz` file's name. Keep sampled instruments on a fast disk (an SSD).
 - **Another keyboard's program** -- the notes go to one of that input's
   programs by name (*Upper: Big Strings*), kept loaded and playing beside
   whatever Upper itself is on; or to **whatever that keyboard is playing**.
@@ -2244,6 +2260,7 @@ problem, include the log and say what you were doing and when.
 | `~/.config/StageRig/mapping-templates.json` | Your saved per-plugin mapping templates. |
 | `~/.config/StageRig/Knob layouts/` | Your knob layouts, one `*.stagerig-controls` file each: import and export them from an instrument's **Knobs** button. |
 | `~/.config/StageRig/icons/` | Cached plugin icons. |
+| `~/.config/StageRig/Instruments/` | Sampled instruments for the built-in sampler: a folder each, with its `.sfz` file and recordings. |
 | `~/.config/StageRig/Looks/` | Colours of your own, if you want them: see below. |
 | `~/.config/StageRig/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |
 | your `*.stagerig.json` | Your setup. Keep it wherever you like. |

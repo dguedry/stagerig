@@ -570,6 +570,7 @@ private:
         {
             case SlotDef::Kind::plugin:   return sd.plugin.name;
             case SlotDef::Kind::gm:       return "General MIDI";
+            case SlotDef::Kind::sampler:  return sd.displayName();
             case SlotDef::Kind::external: return "MIDI device";
             case SlotDef::Kind::input:    return sd.targetInputName;
         }
