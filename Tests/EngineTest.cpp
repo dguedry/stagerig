@@ -262,6 +262,15 @@ static int probeSounds (const String& wanted)
                     for (const auto& d : list.getTypes())
                         if (d.name.equalsIgnoreCase (wanted) && (! found || d.pluginFormatName == wantedFormat)) { desc = d; found = true; }
                 }
+    // STAGERIG_TEST_SOUNDS_BUNDLE=/path/Plugin.vst3: a plugin not in the list yet, straight from its file.
+    if (const char* bundle = std::getenv ("STAGERIG_TEST_SOUNDS_BUNDLE"))
+        for (auto* f : host.getFormatManager().getFormats())
+            if (f->getName() == wantedFormat)
+            {
+                OwnedArray<PluginDescription> types;
+                f->findAllTypesForFile (types, bundle);
+                if (! types.isEmpty()) { desc = *types[0]; found = true; }
+            }
     if (! found) { std::printf ("SKIP: no plugin called %s in StageRig's plugin list\n", wanted.toRawUTF8()); return 77; }
     std::printf ("     %s (%s)\n", desc.name.toRawUTF8(), desc.pluginFormatName.toRawUTF8());
     const auto sounds = library.soundsFor (desc);
@@ -321,8 +330,37 @@ static int probeSounds (const String& wanted)
     /* The sounds kept on this computer for this plugin (Sounds/<plugin> (<format>)): each
        chosen, heard; then the plugin started afresh from what the program kept, heard again. */
     {
-        const auto keptFolder = File::getSpecialLocation (File::userApplicationDataDirectory)
+        auto keptFolder = File::getSpecialLocation (File::userApplicationDataDirectory)
                                     .getChildFile ("StageRig/Sounds").getChildFile (File::createLegalFileName (desc.name + " (" + desc.pluginFormatName + ")"));
+        /* STAGERIG_TEST_SOUNDS_SFZ=a.sfz;b.sf2: for a sampler made with JUCE that keeps the
+           instrument's path in its state as "sfzPath" (DSK SFz player): a sound made for each
+           file, from the state the plugin gave, as if kept. */
+        if (const char* list = std::getenv ("STAGERIG_TEST_SOUNDS_SFZ"))
+        {
+            keptFolder = scratch.getChildFile ("kept");
+            keptFolder.createDirectory();
+            int n = 0;
+            for (const auto& path : StringArray::fromTokens (list, ";", ""))
+            {
+                auto outer = AudioProcessor::getXmlFromBinary (before.getData(), (int) before.getSize());
+                auto* comp = outer != nullptr ? outer->getChildByName ("IComponent") : nullptr;
+                MemoryBlock inner;
+                if (comp != nullptr) inner.fromBase64Encoding (comp->getAllSubText());
+                auto tree = AudioProcessor::getXmlFromBinary (inner.getData(), (int) inner.getSize());
+                CHECK (tree != nullptr);
+                if (tree == nullptr) break;
+                std::printf ("     its state: <%s> with %d attributes%s\n", tree->getTagName().toRawUTF8(), tree->getNumAttributes(),
+                             tree->hasAttribute ("sfzPath") ? (", sfzPath \"" + tree->getStringAttribute ("sfzPath") + "\"").toRawUTF8() : "");
+                tree->setAttribute ("sfzPath", path);
+                MemoryBlock made;
+                AudioProcessor::copyXmlToBinary (*tree, made);
+                comp->deleteAllTextElements();
+                comp->addTextElement (made.toBase64Encoding());
+                MemoryBlock state;
+                AudioProcessor::copyXmlToBinary (*outer, state);
+                CHECK (keptFolder.getChildFile (String (++n) + " " + File (path).getFileNameWithoutExtension() + ".stagerig-sound").replaceWithData (state.getData(), state.getSize()));
+            }
+        }
         auto files = keptFolder.findChildFiles (File::findFiles, false, "*.stagerig-sound");
         files.sort();
         for (int i = 0; i < jmin (3, files.size()); ++i)
