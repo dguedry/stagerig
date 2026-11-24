@@ -645,6 +645,10 @@ public:
     juce::String setPluginProgram (int inputIndex, int program, int slot, int effect, int index, const juce::String& soundName);
     /** The plugin's state now, into the program under that name (`otherwise` if it cannot be read). */
     void keepPluginState (int inputIndex, int program, int slot, int effect, const juce::String& soundName, const juce::MemoryBlock& otherwise = {});
+    /** Exchanges an instrument's plugin for another in place (the sampler's
+        instrument for a different one): its level, effects and place in the
+        program stay, its own settings start afresh. Returns what went wrong, or nothing. */
+    juce::String replaceSlotPlugin (int inputIndex, int program, int slot, const juce::PluginDescription&);
     /** Restarts a plugin that failed or crashed, from its saved definition and state. */
     void reloadPlugin (int inputIndex, int program, int slot, int effect = -1);
 

@@ -5031,6 +5031,20 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
     return node->loadError;
 }
 
+String Engine::replaceSlotPlugin (int inputIndex, int program, int slot, const PluginDescription& desc)
+{
+    auto* def = defFor (inputIndex, program);
+    if (def == nullptr || slot < 0 || slot >= (int) def->slots.size() || ! def->slots[(size_t) slot].isPlugin()) return "That instrument is not there.";
+    if (auto* node = getNode (inputIndex, program, slot, -1); node != nullptr && node->loading.load()) return "It is still loading: try again in a moment.";
+    auto& sd = def->slots[(size_t) slot];
+    sd.plugin = desc;
+    sd.state.reset();          // the old one's settings mean nothing to the new
+    sd.soundName.clear();
+    reloadPlugin (inputIndex, program, slot);
+    notifyContent (inputIndex, program);
+    return {};
+}
+
 void Engine::reloadPlugin (int inputIndex, int program, int slot, int effect)
 {
     auto* node = getNode (inputIndex, program, slot, effect);

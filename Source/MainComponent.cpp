@@ -1822,22 +1822,7 @@ public:
         /** An external instrument's port, patch recall and audio return. */
         /** The General MIDI player's sound on the channels this slot takes
             notes from: one name when they agree, as a keyboard's do. */
-        static String gmSoundName (const SlotDef& def)
-        {
-            int program = -2;
-            bool drums = true;
-            for (int c = 1; c <= 16; ++c)
-            {
-                if (! def.hears (c)) continue;
-                const int p = def.gmChannels[(size_t) c - 1].program;
-                if (c != 10) drums = false;
-                if (program == -2) program = p;
-                else if (program != p) return "mixed sounds";
-            }
-            if (program == -2) return "no channel";
-            if (program < 0)   return "as the notes say";
-            return drums ? gmKitName (program) : String (GmSynth::programName (program));
-        }
+        static String gmSoundName (const SlotDef& def) { return gmSlotSoundName (def); }
 
         /** Sound...: the General MIDI instrument for the channels this slot hears
             (a kit for channel 10), or back to the program changes in the notes. */
@@ -3444,16 +3429,40 @@ std::vector<SoundChoice> MainComponent::soundChoicesFor (int input, int program,
     const auto& inputs = engine.getSetup().inputs;
     if (controlMaps == nullptr || input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return all;
     const auto& slots = inputs[(size_t) input].programs[(size_t) program].slots;
-    if (slot < 0 || slot >= (int) slots.size() || ! slots[(size_t) slot].isPlugin()) return all;
-    auto* plugin = engine.getPlugin (input, program, slot);
-    if (plugin == nullptr || ! plugin->isAlive()) return all;
+    if (slot < 0 || slot >= (int) slots.size()) return all;
+    if (slots[(size_t) slot].isGm())
+    {
+        // The General MIDI player: its 128 instruments by family, the kits when it plays channel 10.
+        const auto& def = slots[(size_t) slot];
+        all.push_back ({ SoundChoice::From::gm, "As the notes say", "Program changes choose, as a MIDI file's do", {}, -1, {} });
+        bool pitched = false;
+        for (int c = 1; c <= 16; ++c) pitched = pitched || (c != 10 && def.hears (c));
+        if (pitched)
+            for (int p = 0; p < 128; ++p)
+                all.push_back ({ SoundChoice::From::gm, GmSynth::programName (p), {}, {}, p, { gmFamilyName (p) } });
+        if (def.hears (10))
+            for (int k : gmKitPrograms())
+                all.push_back ({ SoundChoice::From::gm, gmKitName (k), {}, {}, 1000 + k, { "Drum kits" } });
+        return all;
+    }
+    if (! slots[(size_t) slot].isPlugin()) return all;
     const auto desc = slots[(size_t) slot].plugin;
+    /* The built-in sampler: the other sampled instruments on this computer.
+       Listed even while it is not running: an instrument that is missing is
+       exchanged for one that is here. */
+    std::vector<SoundChoice> instruments;
+    if (desc.pluginFormatName == "SFZ")
+        for (const auto& i : SfzSynth::installedInstruments (getSettings().getFile().getParentDirectory()))
+            instruments.push_back ({ SoundChoice::From::instrument, i.name, {}, i.file, -1, { "Sampled instruments" } });
+    auto* plugin = engine.getPlugin (input, program, slot);
+    if (plugin == nullptr || ! plugin->isAlive()) return instruments;
+    all = std::move (instruments);
     const auto folder = keptSoundsFolder (*controlMaps, desc);
     // Yours first, then the plugin's own, then its maker's.
     auto kept = folder.findChildFiles (File::findFiles, false, "*.stagerig-sound");
     kept.sort();
-    for (const auto& f : kept)
-        all.push_back ({ SoundChoice::From::kept, f.getFileNameWithoutExtension(), {}, f, -1, { "Kept by you" } });
+    for (size_t i = 0; i < (size_t) kept.size(); ++i)
+        all.insert (all.begin() + (std::ptrdiff_t) i, { SoundChoice::From::kept, kept[(int) i].getFileNameWithoutExtension(), {}, kept[(int) i], -1, { "Kept by you" } });
     const auto programs = plugin->getProgramNames();
     for (int i = 0; i < programs.size(); ++i)
         if (programs[i].isNotEmpty())
@@ -3493,12 +3502,31 @@ String MainComponent::giveSound (int input, int program, int slot, const SoundCh
     const auto& inputs = engine.getSetup().inputs;
     if (input < 0 || input >= (int) inputs.size() || program < 0 || program >= InputDef::numPrograms) return "That program is not there.";
     const auto& slots = inputs[(size_t) input].programs[(size_t) program].slots;
-    if (slot < 0 || slot >= (int) slots.size() || ! slots[(size_t) slot].isPlugin()) return "That instrument is not there.";
-    const auto pluginName = slots[(size_t) slot].plugin.name;
+    if (slot < 0 || slot >= (int) slots.size() || ! (slots[(size_t) slot].isPlugin() || slots[(size_t) slot].isGm())) return "That instrument is not there.";
+    const auto pluginName = slots[(size_t) slot].isGm() ? String ("General MIDI player") : slots[(size_t) slot].plugin.name;
+    if (slots[(size_t) slot].isGm() != (s.from == SoundChoice::From::gm)) return "That sound is not one of " + pluginName + "'s.";
     auto& e = engine;
     String problem;
     switch (s.from)
     {
+        case SoundChoice::From::gm:
+        {
+            // An instrument is for every channel but 10, a kit for channel 10, "as the notes say" for all of them.
+            const auto def = slots[(size_t) slot];
+            const bool kit = s.program >= 1000;
+            for (int c = 1; c <= 16; ++c)
+            {
+                if (! def.hears (c)) continue;
+                if (s.program >= 0 && kit != (c == 10)) continue;
+                auto gc = def.gmChannels[(size_t) c - 1];
+                gc.program = kit ? s.program - 1000 : s.program;
+                e.setGmChannel (input, program, slot, c, gc);
+            }
+            break;
+        }
+        case SoundChoice::From::instrument:
+            problem = e.replaceSlotPlugin (input, program, slot, SamplerPluginFormat::describe (s.file));
+            break;
         case SoundChoice::From::before:
             problem = before.isEmpty() ? String ("There is no sound from before to go back to.")
                                        : e.setPluginState (input, program, slot, -1, before, beforeName);
@@ -3548,6 +3576,9 @@ void MainComponent::showSoundsFor (int slot)
     const auto desc = def.plugin;
     const auto folder = keptSoundsFolder (*controlMaps, desc);
     auto all = soundChoicesFor (input, program, slot);
+    /* Another sampled instrument is a different plugin, with its own kept
+       sounds: this window stays with the one it was opened for. */
+    all.erase (std::remove_if (all.begin(), all.end(), [] (const SoundChoice& c) { return c.from == SoundChoice::From::instrument; }), all.end());
 
     // The sound it has now, to go back to.
     MemoryBlock before;
@@ -4510,9 +4541,13 @@ bool MainComponent::startRemote()
             if (input < 0 || input >= (int) inputs.size()) return var (o.get());
             const int program = inputs[(size_t) input].currentProgram;
             const auto& slots = inputs[(size_t) input].programs[(size_t) program].slots;
-            if (slot < 0 || slot >= (int) slots.size() || ! slots[(size_t) slot].isPlugin()) return var (o.get());
-            o->setProperty ("plugin", slots[(size_t) slot].plugin.name);
-            o->setProperty ("current", slots[(size_t) slot].soundName);
+            if (slot < 0 || slot >= (int) slots.size() || ! (slots[(size_t) slot].isPlugin() || slots[(size_t) slot].isGm())) return var (o.get());
+            const auto& sd = slots[(size_t) slot];
+            const auto gmNow = gmSlotSoundName (sd);
+            o->setProperty ("plugin", sd.isGm() ? String ("General MIDI player") : sd.plugin.name);
+            // What it plays now: a sampler with no kept sound chosen is playing its instrument.
+            o->setProperty ("current", sd.isGm() ? gmNow.substring (0, 1).toUpperCase() + gmNow.substring (1)
+                                                 : sd.soundName.isNotEmpty() ? sd.soundName : sd.plugin.name);
             o->setProperty ("program", program);
             Array<var> list;
             for (const auto& c : soundChoicesFor (input, program, slot))

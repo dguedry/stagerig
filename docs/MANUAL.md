@@ -1524,6 +1524,15 @@ group to go into it, or type to search them all; tap a sound and the
 instrument plays it at once: the list closes and the button shows its name. The program keeps it. An instrument chosen inside a plugin's own window (a Kontakt
 instrument not in the list) is still chosen there, through **GUI**.
 
+The same button is there for the two built-in players. On a **General MIDI
+player** it lists the 128 General MIDI instruments by family (Piano, Organ,
+Strings...), the drum kits when the player takes channel 10, and *As the
+notes say*, which hands the choice back to the program changes in the notes.
+On a **sampled instrument** it lists the sampled instruments on the
+computer: tap one and it takes the place of the one playing, keeping the
+row's level, effects and place in the program. Its controls are the new
+instrument's.
+
 The page changes only what changed: picking a program or a song relights
 the button and rewrites the name where they stand, and nothing else on the
 page moves.

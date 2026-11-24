@@ -24,6 +24,35 @@ String gmKitName (int p)
     return "Kit " + String (p + 1);
 }
 
+String gmFamilyName (int program) { return familyNames[jlimit (0, 15, program / 8)]; }
+
+std::vector<int> gmKitPrograms()
+{
+    std::vector<int> all;
+    for (auto& k : kits) all.push_back (k.program);
+    return all;
+}
+
+String gmSlotSoundName (const SlotDef& def)
+{
+    /* The instrument channels speak for it; the kit on channel 10 only when
+       that is all it plays (a player on every channel is named by its
+       instrument, not called mixed because the drums have a kit). */
+    int program = -2;
+    bool drums = true;
+    for (int c = 1; c <= 16; ++c) if (c != 10 && def.hears (c)) drums = false;
+    for (int c = 1; c <= 16; ++c)
+    {
+        if (! def.hears (c) || (c == 10) != drums) continue;
+        const int p = def.gmChannels[(size_t) c - 1].program;
+        if (program == -2) program = p;
+        else if (program != p) return "mixed sounds";
+    }
+    if (program == -2) return "no channel";
+    if (program < 0)   return "as the notes say";
+    return drums ? gmKitName (program) : String (GmSynth::programName (program));
+}
+
 void addGmInstrumentsToMenu (PopupMenu& menu, int idBase, int selected)
 {
     for (int f = 0; f < 16; ++f)

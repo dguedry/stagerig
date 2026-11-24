@@ -4660,6 +4660,24 @@ int main()
             CHECK (! engine.isPluginAlive (0, sp, ss + 1));
             std::printf ("     an instrument that is not here: %s\n", engine.getPluginLoadError (0, sp, ss + 1).toRawUTF8());
             CHECK (engine.getPluginLoadError (0, sp, ss + 1).contains ("not on this computer"));
+
+            /* Exchanged for one that is here, in place (Sounds, on the tablet):
+               it starts, with that instrument's controls, and the row keeps its level. */
+            const auto plainFile = dir.getChildFile ("Plain Tone.sfz");
+            CHECK (plainFile.replaceWithText ("<region> sample=tone.wav pitch_keycenter=69 lokey=0 hikey=127\n"));
+            engine.setSlotGainDb (0, sp, ss + 1, -6.0f);
+            CHECK (engine.replaceSlotPlugin (0, sp, ss + 1, SamplerPluginFormat::describe (plainFile)).isEmpty());
+            settle();
+            {
+                const auto& now = engine.getSetup().inputs[0].programs[(size_t) sp].slots[(size_t) ss + 1];
+                CHECK (now.plugin.name == "Plain Tone" && std::abs (now.gainDb + 6.0f) < 0.01f);
+                CHECK (engine.isPluginAlive (0, sp, ss + 1));
+                bool named = false;
+                if (auto* other = engine.getPlugin (0, sp, ss + 1))
+                    for (const auto& prm : other->getParameters()) named = named || prm.name == "Loudness";
+                CHECK (! named);
+                CHECK (engine.replaceSlotPlugin (0, sp, ss + 5, desc).isNotEmpty());      // no such row
+            }
             engine.selectProgram (0, programBefore);
             settle();
         }

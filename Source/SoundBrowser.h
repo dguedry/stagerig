@@ -11,7 +11,9 @@ namespace perf
 /** One sound a plugin can be given, wherever it comes from. */
 struct SoundChoice
 {
-    enum class From { before, kept, program, vst3Preset, nks };
+    enum class From { before, kept, program, vst3Preset, nks,
+                      gm,             // the General MIDI player's: `program` is the instrument, 1000 + a kit, or -1 for what the notes say
+                      instrument };   // the built-in sampler's: another sampled instrument, `file` its .sfz
     From from = From::nks;
     juce::String name;
     juce::String detail;         // the second line: where it comes from, its bank and kind

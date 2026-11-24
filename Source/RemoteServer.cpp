@@ -1485,7 +1485,7 @@ async function loadPanel(i) {
       const sb = document.createElement("button"); sb.className = "kinst snd";
       // The button says which sound is on, so it shows without opening the list.
       sb.textContent = "\u266A " + (data.sound || "Sounds\u2026");
-      sb.title = "Choose one of this plugin's sounds";
+      sb.title = "Choose one of this instrument's sounds";
       sb.onclick = () => openSounds(i, data.slot);
       title.appendChild(sb);
     }
@@ -2694,8 +2694,10 @@ String RemoteServer::panelJson (int input) const
         instruments.add (var (so.get()));
     }
     o->setProperty ("instruments", instruments);
-    o->setProperty ("sounds", sd.isPlugin() && onSoundList != nullptr);     // Sounds... is offered for it
-    o->setProperty ("sound", sd.isPlugin() ? sd.soundName : String());      // the one it was given, shown on that button
+    o->setProperty ("sounds", (sd.isPlugin() || sd.isGm()) && onSoundList != nullptr);     // Sounds... is offered for it
+    const auto gmNow = sd.isGm() ? gmSlotSoundName (sd) : String();
+    o->setProperty ("sound", sd.isGm() ? gmNow.substring (0, 1).toUpperCase() + gmNow.substring (1)
+                                       : sd.isPlugin() ? sd.soundName : String());         // the one it was given, shown on that button
     const bool hasPage = sd.isPlugin() && view.knobLevels != SurfaceView().knobLevels;
     o->setProperty ("page", hasPage ? view.page : -1);
     o->setProperty ("pageCount", hasPage ? view.pageCount : 0);
