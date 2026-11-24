@@ -58,6 +58,7 @@ target_sources(StageRig PRIVATE
     Source/Ipc/Protocol.cpp
     Source/RemotePlugin.cpp
     Source/LowLatency.cpp
+    Source/FileHandleLimit.cpp
     Source/DeviceReservation.cpp
     Source/HelpWindow.cpp
     Source/SongsPanel.cpp
@@ -135,6 +136,7 @@ juce_add_gui_app(StageRigPluginHost
 
 target_sources(StageRigPluginHost PRIVATE
     Source/PluginHostProcess/PluginHostMain.cpp
+    Source/FileHandleLimit.cpp
     Source/ClapPluginFormat.cpp
     Source/Ipc/Protocol.cpp)
 
