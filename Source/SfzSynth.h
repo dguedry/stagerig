@@ -27,12 +27,41 @@ public:
     /** An instrument found on this computer. */
     struct Instrument
     {
-        juce::String name;      // as it is listed and as a setup names it: the file's name without ".sfz"
+        juce::String name;      // as a setup names it: the file's name without ".sfz"
         juce::File file;
+        juce::String category;  // what kind of sound it is, from its name: "Pianos & Keys" (categoryOf)
+        juce::String family;    // its name without the playing style: "Baroque Alto Recorder"
+        juce::String style;     // the playing style, or empty: "Staccato" (splitStyle)
+        juce::String library;   // the library it is part of: the folder it was found in
     };
-    /** Every SFZ instrument on this computer, by name: the system's folders
-        and the "Instruments" folder beside the settings, a few folders deep. */
+    /** Every SFZ instrument on this computer, by name: the system's folders,
+        the "Instruments" folder beside the settings and the sample libraries
+        chosen in StageRig (libraries()), a few folders deep. A file reached
+        twice (a library linked into Instruments and chosen as well) is listed once. */
     static juce::Array<Instrument> installedInstruments (const juce::File& settingsFolder);
+
+    /** The kinds of sound instruments are sorted into, in the order menus list them. */
+    static juce::StringArray categories();
+    /** The kind of sound a name is, read from the instrument words in it
+        ("Grand Piano, Steinway B" is Pianos & Keys, "Conga" Drums &
+        Percussion). The same rule for every library: no list per library,
+        and its folders are not read, since libraries name them as they like.
+        "Other" when no word is known. */
+    static juce::String categoryOf (const juce::String& name);
+    /** "Baroque Alto Recorder - Staccato" is the Baroque Alto Recorder played
+        staccato. The part after the last " - " is a playing style only when
+        every word of it is one (Staccato, Sustain, Soft Mallet...): "TX81Z -
+        FM Piano" is a sound of its own, and stays whole. */
+    static void splitStyle (const juce::String& name, juce::String& family, juce::String& style);
+    /** Of a family's files, the one to start with: no style, else Normal or Sustain, a keyswitch last. */
+    static int styleRank (const juce::String& style);
+
+    /** The sample libraries chosen in StageRig (Options): folders anywhere,
+        read where they are. Kept one a line in "Sample libraries.txt" beside
+        the settings, which the plugin host reads too. */
+    static juce::Array<juce::File> libraries (const juce::File& settingsFolder);
+    static bool addLibrary (const juce::File& settingsFolder, const juce::File& folder);
+    static void removeLibrary (const juce::File& settingsFolder, const juce::File& folder);
     /** The file a setup means by a name and a path: the path if it is there,
         else the installed instrument of that name. None: File(). */
     static juce::File find (const juce::File& settingsFolder, const juce::String& name, const juce::String& path);

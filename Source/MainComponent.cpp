@@ -779,6 +779,38 @@ static Array<MidiDeviceInfo> midiOutputPorts() { return Engine::midiOutputDevice
 
 /** Fills a menu with ports as items idBase + index. The current port, if
     unplugged, is shown ticked and greyed; with none at all the menu says why. */
+/** How many playing styles an instrument has: the files of its family, in its library. */
+static int sampledStyles (const Array<SfzSynth::Instrument>& all, const SfzSynth::Instrument& one)
+{
+    int n = 0;
+    for (const auto& i : all) if (i.family == one.family && i.library == one.library) ++n;
+    return n;
+}
+
+/** The sampled instruments, by kind of sound: one entry an instrument,
+    which plays its first style (the list is sorted so that comes first).
+    Each id is idBase + its index in `all`. */
+static PopupMenu sampledInstrumentsMenu (const Array<SfzSynth::Instrument>& all, int idBase)
+{
+    PopupMenu m;
+    for (const auto& category : SfzSynth::categories())
+    {
+        PopupMenu sub;
+        for (int i = 0; i < all.size(); ++i)
+        {
+            const auto& in = all.getReference (i);
+            if (in.category != category) continue;
+            if (i > 0 && all.getReference (i - 1).family == in.family && all.getReference (i - 1).library == in.library) continue;
+            // Two libraries with a "Grand Piano" each: say whose.
+            bool twin = false;
+            for (const auto& o : all) twin = twin || (o.family == in.family && o.library != in.library);
+            sub.addItem (idBase + i, in.family + (twin ? "  (" + in.library + ")" : String()));
+        }
+        if (sub.getNumItems() > 0) m.addSubMenu (category, sub);
+    }
+    return m;
+}
+
 static void addPortItems (PopupMenu& m, const Array<MidiDeviceInfo>& ports, int idBase, const String& currentId = {}, const String& currentName = {})
 {
     bool currentListed = currentId.isEmpty();
@@ -2163,10 +2195,10 @@ private:
            Each is added as a plugin is, and is one in everything that follows. */
         const auto sampled = SfzSynth::installedInstruments (owner.getSettings().getFile().getParentDirectory());
         {
-            PopupMenu sm;
-            for (int i = 0; i < sampled.size(); ++i) sm.addItem (310000 + i, sampled[i].name);
-            if (sampled.isEmpty()) sm.addItem (-1, "None installed yet  (see Free sampled instruments in the manual)", false);
+            PopupMenu sm = sampledInstrumentsMenu (sampled, 310000);
+            if (sampled.isEmpty()) sm.addItem (-1, "None yet: add a sample library  (see Free sampled instruments in the manual)", false);
             sm.addSeparator();
+            sm.addItem (319998, "Add a sample library  (a folder you downloaded)...");
             sm.addItem (319999, "Choose an SFZ file...");
             menu.addSubMenu ("Sampled instrument (built in)", sm);
         }
@@ -2176,11 +2208,14 @@ private:
         {
             const int in = owner.getSelectedInput(), prog = owner.getEditedProgram();
             if (result == 319999) { owner.chooseSamplerFile (in, prog); return; }
+            if (result == 319998) { owner.chooseSampleLibrary(); return; }
             if (result >= 310000 && result - 310000 < sampled.size())
             {
                 String error;
-                if (engine.addSlot (in, prog, SamplerPluginFormat::describe (sampled[result - 310000].file), error))
-                    owner.showStatus ("Added " + sampled[result - 310000].name + ", a sampled instrument");
+                const auto& chosen = sampled.getReference (result - 310000);
+                if (engine.addSlot (in, prog, SamplerPluginFormat::describe (chosen.file), error))
+                    owner.showStatus ("Added " + chosen.family + (chosen.style.isNotEmpty() ? " (" + chosen.style + ")" : String())
+                                      + ", a sampled instrument" + (sampledStyles (sampled, chosen) > 1 ? ". Its other playing styles are in its Sounds list." : String()));
                 else
                     owner.showStatus (error);
                 owner.markDirty();
@@ -2961,6 +2996,25 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
             m.addItem (7, "General MIDI sounds (soundfont file)..." + (sf != File() ? "  (" + sf.getFileName() + ")" : String ("  (none found)")));
         }
         {
+            /* Sample libraries: folders of SFZ instruments, read where they are. */
+            const auto folder = settings.getFile().getParentDirectory();
+            const auto libs = SfzSynth::libraries (folder);
+            const auto found = SfzSynth::installedInstruments (folder);
+            PopupMenu lm;
+            lm.addItem (5000, "Add a folder...");
+            if (! libs.isEmpty()) lm.addSeparator();
+            for (int i = 0; i < libs.size(); ++i)
+            {
+                int n = 0;
+                for (const auto& f : found) if (f.file.isAChildOf (libs[i])) ++n;
+                PopupMenu one;
+                one.addItem (5100 + i, "Remove from StageRig  (the folder stays where it is)");
+                lm.addSubMenu (libs[i].getFileName() + "  (" + String (n) + (n == 1 ? " instrument" : " instruments")
+                               + (libs[i].isDirectory() ? String() : String (", not found")) + ")", one);
+            }
+            m.addSubMenu ("Sample libraries" + (libs.isEmpty() ? String() : "  (" + String (libs.size()) + ")"), lm);
+        }
+        {
             /* MIDI clock to hardware: tick a device and it keeps time with the
                rig -- a drum machine, a synth's arpeggiator, a delay pedal. */
             PopupMenu clock;
@@ -2998,6 +3052,18 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         {
             const auto& s = engine.getSetup();
             if (r == 8) { toggleRecording(); return; }
+            if (r == 5000) { chooseSampleLibrary(); return; }
+            if (r >= 5100 && r < 5200)
+            {
+                const auto folder = settings.getFile().getParentDirectory();
+                const auto libs = SfzSynth::libraries (folder);
+                if (r - 5100 < libs.size())
+                {
+                    SfzSynth::removeLibrary (folder, libs[r - 5100]);
+                    showStatus (libs[r - 5100].getFileName() + " is off the list. Programs that use its instruments keep them while the folder is there.");
+                }
+                return;
+            }
             if (r >= 200)
             {
                 const auto looks = perf::theme::allLooks (settings.getFile().getParentDirectory());
@@ -3452,8 +3518,23 @@ std::vector<SoundChoice> MainComponent::soundChoicesFor (int input, int program,
        exchanged for one that is here. */
     std::vector<SoundChoice> instruments;
     if (desc.pluginFormatName == "SFZ")
-        for (const auto& i : SfzSynth::installedInstruments (getSettings().getFile().getParentDirectory()))
-            instruments.push_back ({ SoundChoice::From::instrument, i.name, {}, i.file, -1, { "Sampled instruments" } });
+    {
+        /* By kind of sound; an instrument with several playing styles is a
+           group of its own inside that, so its styles sit together. */
+        auto found = SfzSynth::installedInstruments (getSettings().getFile().getParentDirectory());
+        const auto order = SfzSynth::categories();
+        std::stable_sort (found.begin(), found.end(), [&order] (const SfzSynth::Instrument& a, const SfzSynth::Instrument& b)
+                          { return order.indexOf (a.category) < order.indexOf (b.category); });
+        for (const auto& i : found)
+        {
+            StringArray group { i.category };
+            if (sampledStyles (found, i) > 1) group.add (i.family);
+            // Whose it is, only where two libraries have one of that name.
+            bool twin = false;
+            for (const auto& o : found) twin = twin || (o.family == i.family && o.library != i.library);
+            instruments.push_back ({ SoundChoice::From::instrument, i.name, twin ? i.library : String(), i.file, -1, group });
+        }
+    }
     auto* plugin = engine.getPlugin (input, program, slot);
     if (plugin == nullptr || ! plugin->isAlive()) return instruments;
     all = std::move (instruments);
@@ -3555,7 +3636,8 @@ String MainComponent::giveSound (int input, int program, int slot, const SoundCh
     if (problem.isNotEmpty()) { showStatus (pluginName + ": " + problem); return problem; }
     markDirty();
     if (surfaceHub != nullptr) surfaceHub->soundChanged();
-    showStatus (pluginName + ": " + (s.from == SoundChoice::From::before ? String ("the sound before") : s.name));
+    showStatus (s.from == SoundChoice::From::instrument ? "Now playing " + s.name + ", a sampled instrument"
+                                                        : pluginName + ": " + (s.from == SoundChoice::From::before ? String ("the sound before") : s.name));
     if (slotsPanel != nullptr) slotsPanel->refresh();
     return {};
 }
@@ -3576,9 +3658,6 @@ void MainComponent::showSoundsFor (int slot)
     const auto desc = def.plugin;
     const auto folder = keptSoundsFolder (*controlMaps, desc);
     auto all = soundChoicesFor (input, program, slot);
-    /* Another sampled instrument is a different plugin, with its own kept
-       sounds: this window stays with the one it was opened for. */
-    all.erase (std::remove_if (all.begin(), all.end(), [] (const SoundChoice& c) { return c.from == SoundChoice::From::instrument; }), all.end());
 
     // The sound it has now, to go back to.
     MemoryBlock before;
@@ -3588,9 +3667,20 @@ void MainComponent::showSoundsFor (int slot)
     auto sp = Component::SafePointer<MainComponent> (this);
 
     SoundBrowser::Callbacks cb;
-    cb.choose = [sp, input, program, slot, before, beforeName] (const SoundChoice& s)
+    cb.choose = [sp, input, program, slot, before, beforeName, title] (const SoundChoice& s)
     {
-        if (sp != nullptr) sp->giveSound (input, program, slot, s, before, beforeName);
+        if (sp == nullptr) return;
+        const auto problem = sp->giveSound (input, program, slot, s, before, beforeName);
+        /* Another sampled instrument is another plugin, with its own kept
+           sounds: this window was the old one's, so it closes. Sounds...
+           opens the new one's. */
+        if (s.from == SoundChoice::From::instrument && problem.isEmpty())
+            MessageManager::callAsync ([name = theme::windowTitle (title)]
+            {
+                for (int i = TopLevelWindow::getNumTopLevelWindows(); --i >= 0;)
+                    if (auto* dw = dynamic_cast<DialogWindow*> (TopLevelWindow::getTopLevelWindow (i)); dw != nullptr && dw->getName() == name)
+                        dw->exitModalState (0);
+            });
     };
     cb.keep = [sp, input, program, slot, folder, pluginName] (const String& name) -> std::optional<SoundChoice>
     {
@@ -4864,6 +4954,23 @@ void MainComponent::chooseSlotSoundfont (int inputIndex, int program, int slot)
         engine.setGmSlotSoundfont (inputIndex, program, slot, f);
         markDirty();
         showStatus ("This General MIDI player now plays " + f.getFileNameWithoutExtension());
+    });
+}
+
+void MainComponent::chooseSampleLibrary()
+{
+    gmChooser = std::make_unique<FileChooser> ("A sample library: the folder you downloaded and unpacked",
+                                               File::getSpecialLocation (File::userHomeDirectory).getChildFile ("Downloads"));
+    gmChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectDirectories, [this] (const FileChooser& fc)
+    {
+        const auto dir = fc.getResult();
+        if (dir == File() || ! dir.isDirectory()) return;
+        const auto settingsFolder = settings.getFile().getParentDirectory();
+        if (! SfzSynth::addLibrary (settingsFolder, dir)) { showStatus ("Could not write the list of sample libraries beside the settings."); return; }
+        int n = 0;
+        for (const auto& f : SfzSynth::installedInstruments (settingsFolder)) if (f.file.isAChildOf (dir)) ++n;
+        showStatus (n > 0 ? dir.getFileName() + ": " + String (n) + " instruments, under Add instrument > Sampled instrument, sorted by kind of sound"
+                          : "No SFZ instruments were found in " + dir.getFileName() + ". Choose the folder the library unpacked into.");
     });
 }
 

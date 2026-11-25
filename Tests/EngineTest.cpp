@@ -12,6 +12,7 @@
 #include "ClapPluginFormat.h"
 #include "GmSynth.h"
 #include "SamplerPluginFormat.h"
+#include "SfzSynth.h"
 #include "MidiEditor.h"
 #include "StagePanel.h"
 #include "PanelParams.h"
@@ -4648,6 +4649,63 @@ int main()
                 {
                     CHECK (sampler->fetchParameterValue (volume, v) && v < 0.1f);
                     CHECK (played() < loud * 0.05f);
+                }
+            }
+
+            /* Sorting by kind of sound: one rule for every library, from the
+               instrument words in a name; VCSL files its pianos under Zithers. */
+            {
+                const std::pair<const char*, const char*> kinds[] = {
+                    { "Grand Piano, Steinway B", "Pianos & Keys" }, { "SalamanderGrandPianoV3", "Pianos & Keys" },
+                    { "Harpsichord, Flemish", "Pianos & Keys" }, { "Pipe Organ", "Organs" }, { "Bass Drum 1", "Drums & Percussion" },
+                    { "Baroque Bass Recorder", "Woodwinds" }, { "Fretless Bass", "Bass" }, { "Bass Guitar", "Bass" },
+                    { "Acoustic Guitar", "Guitars" }, { "Concert Harp", "Strings" }, { "Tenor Saxophone", "Woodwinds" },
+                    { "French Horn", "Brass" }, { "English Horn", "Woodwinds" }, { "Marimba", "Mallets & Bells" },
+                    { "Steel Drum", "Mallets & Bells" }, { "Cowbells", "Drums & Percussion" }, { "Legacy Toms", "Drums & Percussion" },
+                    { "Snare Drum, Modern 1", "Drums & Percussion" }, { "TX81Z", "Synths" }, { "Atomic Bomb", "Other" },
+                    { "Custom Sound", "Other" } };
+                for (const auto& k : kinds)
+                {
+                    const bool right = SfzSynth::categoryOf (k.first) == k.second;
+                    if (! right) std::printf ("     %s: %s, not %s\n", k.first, SfzSynth::categoryOf (k.first).toRawUTF8(), k.second);
+                    CHECK (right);
+                }
+                String family, style;
+                SfzSynth::splitStyle ("Baroque Alto Recorder - Staccato", family, style);
+                CHECK (family == "Baroque Alto Recorder" && style == "Staccato");
+                SfzSynth::splitStyle ("Balafon - Hard Mallet", family, style);
+                CHECK (family == "Balafon" && style == "Hard Mallet");
+                SfzSynth::splitStyle ("TX81Z - FM Piano", family, style);              // a sound of its own
+                CHECK (family == "TX81Z - FM Piano" && style.isEmpty());
+                SfzSynth::splitStyle ("Renaissance Organ - 4'+8'", family, style);    // its stops
+                CHECK (family == "Renaissance Organ" && style == "4'+8'");
+                SfzSynth::splitStyle ("Marimba", family, style);
+                CHECK (family == "Marimba" && style.isEmpty());
+
+                /* A library chosen in StageRig, read where it is: its instruments
+                   are found, sorted, their styles together with the plain one first. */
+                const auto settingsDir = dir.getChildFile ("settings");     // a settings folder of the test's own
+                CHECK (settingsDir.createDirectory());
+                {
+                    const auto lib = dir.getChildFile ("My Library");
+                    const auto sub = lib.getChildFile ("Keys").getChildFile ("Recorders");
+                    CHECK (sub.createDirectory());
+                    for (const char* n : { "Alto Recorder - Staccato", "Alto Recorder - Keyswitch", "Alto Recorder - Sustain", "Alto Recorder" })
+                        CHECK (sub.getChildFile (String (n) + ".sfz").replaceWithText ("<region> sample=../../../tone.wav\n"));
+                    CHECK (SfzSynth::addLibrary (settingsDir, lib));
+                    CHECK (SfzSynth::libraries (settingsDir).contains (lib));
+                    const auto all = SfzSynth::installedInstruments (settingsDir);
+                    StringArray order;
+                    for (const auto& i : all)
+                        if (i.file.isAChildOf (lib))
+                        {
+                            CHECK (i.category == "Woodwinds" && i.family == "Alto Recorder" && i.library == "My Library");
+                            order.add (i.style);
+                        }
+                    std::printf ("     a chosen library: %s\n", order.joinIntoString (", ").toRawUTF8());
+                    CHECK (order.size() == 4 && order[0].isEmpty() && order[3] == "Keyswitch");
+                    SfzSynth::removeLibrary (settingsDir, lib);
+                    CHECK (! SfzSynth::libraries (settingsDir).contains (lib));
                 }
             }
 

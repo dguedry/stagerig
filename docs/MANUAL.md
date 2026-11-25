@@ -460,9 +460,11 @@ such pages: StageRig picks from the parameters the plugin shows, and
   file and the player uses the usual one, and says so.
 - **Sampled instrument (built in)** -- a recorded instrument, such as a
   grand piano sampled note by note, played by StageRig itself with no plugin
-  to install. The menu lists the sampled instruments on this computer; pick
-  one and it is added and plays. **Choose an SFZ file...** takes one from
-  anywhere. From there it is a plugin like any other: its controls are on
+  to install. The menu lists the sampled instruments on this computer by
+  kind of sound -- Pianos & Keys, Organs, Strings, Woodwinds, Drums &
+  Percussion and so on; pick one and it is added and plays. **Add a sample
+  library...** adds a folder of them you downloaded, and **Choose an SFZ
+  file...** takes a single one from anywhere. From there it is a plugin like any other: its controls are on
   **Knobs**, a pedal can be mapped to one, the tablet shows them as sliders,
   and **Sounds...** keeps a setting of them under a name. It reads the
   start of every recording into memory and the rest from disk as you play,
@@ -472,10 +474,9 @@ such pages: StageRig picks from the parameters the plugin shows, and
   its row shows **Reload** in red and says where to put it.
 
   Sampled instruments are in the SFZ format: a small `.sfz` file and a
-  folder of recordings. Put each instrument's folder in
-  `~/.config/StageRig/Instruments/` (or `/usr/share/stagerig/instruments/`
-  for every user of the computer) and it appears in the menu under the
-  `.sfz` file's name. Keep sampled instruments on a fast disk (an SSD).
+  folder of recordings. See *Free sampled instruments* for where to get
+  them, how to add them and how they are sorted. Keep them on a fast disk
+  (an SSD).
 - **Another keyboard's program** -- the notes go to one of that input's
   programs by name (*Upper: Big Strings*), kept loaded and playing beside
   whatever Upper itself is on; or to **whatever that keyboard is playing**.
@@ -1529,9 +1530,11 @@ player** it lists the 128 General MIDI instruments by family (Piano, Organ,
 Strings...), the drum kits when the player takes channel 10, and *As the
 notes say*, which hands the choice back to the program changes in the notes.
 On a **sampled instrument** it lists the sampled instruments on the
-computer: tap one and it takes the place of the one playing, keeping the
-row's level, effects and place in the program. Its controls are the new
-instrument's.
+computer, by kind of sound, the one playing opened on: tap one and it takes
+the place of the one playing, keeping the row's level, effects and place in
+the program. Its controls are the new instrument's. An instrument recorded
+in several playing styles (*Staccato*, *Sustain*, *Vibrato*) is a group of
+its own, its styles inside. **Sounds...** on the computer lists the same.
 
 The page changes only what changed: picking a program or a song relights
 the button and rewrites the name where they stand, and nothing else on the
@@ -2134,7 +2137,7 @@ plugin:
 
 | The files you have | What plays them | Where to put them |
 |---|---|---|
-| **SFZ**: a small `.sfz` file and a folder of recordings (WAV, FLAC or Ogg) | **Sampled instrument (built in)** | Each instrument's folder in `~/.config/StageRig/Instruments/` |
+| **SFZ**: a small `.sfz` file and a folder of recordings (WAV, FLAC or Ogg) | **Sampled instrument (built in)** | Anywhere: add the folder in **Options ▸ Sample libraries** |
 | **SF2** or **SF3**: one soundfont file | **General MIDI player (built in)**, with that file as its soundfont | `~/.config/StageRig/Soundfonts/`, or the system's `/usr/share/sounds/sf2/` |
 
 Where a library comes both ways, take the SFZ: it keeps everything the
@@ -2155,20 +2158,44 @@ sizes:
 | SFZ, 44.1 kHz 16-bit, WAV | 394 MiB | The sampler, on a small disk |
 | SF2 | 296 MiB | The General MIDI player. Leaves out the pedal and key-release noises |
 
-To install an SFZ version:
+**A whole orchestra's worth: VCSL.** The Versilian Community Sample Library
+has about a hundred instruments -- grand and upright pianos, harpsichords,
+organs, harps, recorders, saxophones, marimba, vibraphone, bells, drums and
+percussion -- free for anything, with no credit asked (Creative Commons
+Zero). It is at <https://github.com/sgossner/VCSL> (6 GB unpacked).
 
-1. Download it and unpack it. You get one folder, with a `.sfz` file or two
-   and a folder of recordings inside.
-2. Move that folder, whole, into `~/.config/StageRig/Instruments/` (make the
-   `Instruments` folder if it is not there). Do not take the `.sfz` file out
-   of its folder: it finds its recordings beside it.
-3. In StageRig: **Add instrument ▸ Sampled instrument (built in)**, and pick
-   it. It is listed under the `.sfz` file's name; rename that file to change
-   the name (`Grand Piano.sfz`).
+To add a library -- either of these, or any other in SFZ:
 
-No restart is needed: the menu looks again each time it opens. Where a
-library has two `.sfz` files (Salamander has a second, *Retuned*), each is
-listed as an instrument of its own, sharing the recordings.
+1. Download it and unpack it. Leave it as it unpacked: each `.sfz` file
+   finds its recordings in the folders beside it.
+2. In StageRig: **Options ▸ Sample libraries ▸ Add a folder...**, and choose
+   the folder it unpacked into. Nothing is copied: StageRig reads it where it
+   is, so keep it there.
+3. **Add instrument ▸ Sampled instrument (built in)**: its instruments are
+   in the menu, sorted by kind of sound.
+
+No restart is needed: the menu looks again each time it opens. **Options ▸
+Sample libraries** lists each library with how many instruments were found
+in it; **Remove from StageRig** takes one off the list and leaves the folder
+alone. (A library's folder can also go in `~/.config/StageRig/Instruments/`,
+or `/usr/share/stagerig/instruments/` for every user of the computer.)
+
+**How they are sorted.** Libraries arrange their folders as their makers
+like -- VCSL by a museum's system, its grand pianos under *Zithers* -- so
+StageRig does not go by them. It reads each instrument's name and files it
+by the first instrument word in it: *Grand Piano, Steinway B* under Pianos &
+Keys, *Tenor Saxophone* under Woodwinds, *Conga* under Drums & Percussion.
+The same rule for every library, so one you download next year is sorted
+too. A name with no instrument word StageRig knows goes under **Other**;
+rename its `.sfz` file (*Clav.sfz* to *Clavinet.sfz*) to move it.
+
+An instrument recorded several ways comes as several files --
+*Baroque Alto Recorder - Staccato*, *- Sustain*, *- Keyswitch*. The menu
+lists it once, and picking it starts the plain one; its other styles are in
+its **Sounds...** list, together. A *keyswitch* file holds all the styles at
+once, chosen by the lowest keys, and is listed last. Where a library has two
+versions of one instrument (Salamander has a second, *Retuned*), each is
+listed on its own, sharing the recordings.
 
 To use the SF2 version instead: put the `.sf2` file in
 `~/.config/StageRig/Soundfonts/`, add **General MIDI player (built in)**,
@@ -2358,6 +2385,7 @@ problem, include the log and say what you were doing and when.
 | `~/.config/StageRig/Knob layouts/` | Your knob layouts, one `*.stagerig-controls` file each: import and export them from an instrument's **Knobs** button. |
 | `~/.config/StageRig/icons/` | Cached plugin icons. |
 | `~/.config/StageRig/Instruments/` | Sampled instruments for the built-in sampler: a folder each, with its `.sfz` file and recordings. |
+| `~/.config/StageRig/Sample libraries.txt` | The sample library folders added in **Options ▸ Sample libraries**, one a line. |
 | `~/.config/StageRig/Looks/` | Colours of your own, if you want them: see below. |
 | `~/.config/StageRig/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |
 | your `*.stagerig.json` | Your setup. Keep it wherever you like. |
