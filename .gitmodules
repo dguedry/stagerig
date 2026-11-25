@@ -9,4 +9,4 @@
 	url = https://github.com/Ableton/link
 [submodule "external/sfizz"]
 	path = external/sfizz
-	url = https://github.com/sfztools/sfizz
+	url = https://github.com/dguedry/sfizz
