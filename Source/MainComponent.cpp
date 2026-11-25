@@ -3005,8 +3005,9 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
             if (! libs.isEmpty()) lm.addSeparator();
             for (int i = 0; i < libs.size(); ++i)
             {
-                int n = 0;
-                for (const auto& f : found) if (f.file.isAChildOf (libs[i])) ++n;
+                StringArray families;      // instruments, not files: a recorder in four styles is one
+                for (const auto& f : found) if (f.file.isAChildOf (libs[i])) families.addIfNotAlreadyThere (f.category + "/" + f.family);
+                const int n = families.size();
                 PopupMenu one;
                 one.addItem (5100 + i, "Remove from StageRig  (the folder stays where it is)");
                 lm.addSubMenu (libs[i].getFileName() + "  (" + String (n) + (n == 1 ? " instrument" : " instruments")
@@ -4967,10 +4968,32 @@ void MainComponent::chooseSampleLibrary()
         if (dir == File() || ! dir.isDirectory()) return;
         const auto settingsFolder = settings.getFile().getParentDirectory();
         if (! SfzSynth::addLibrary (settingsFolder, dir)) { showStatus ("Could not write the list of sample libraries beside the settings."); return; }
-        int n = 0;
-        for (const auto& f : SfzSynth::installedInstruments (settingsFolder)) if (f.file.isAChildOf (dir)) ++n;
-        showStatus (n > 0 ? dir.getFileName() + ": " + String (n) + " instruments, under Add instrument > Sampled instrument, sorted by kind of sound"
-                          : "No SFZ instruments were found in " + dir.getFileName() + ". Choose the folder the library unpacked into.");
+        /* Said in a box, not the status line: it is the moment the player
+           needs to know whether it worked and where to find what was added. */
+        StringArray families, kinds;
+        std::map<String, int> perKind;
+        for (const auto& f : SfzSynth::installedInstruments (settingsFolder))
+            if (f.file.isAChildOf (dir) && ! families.contains (f.category + "/" + f.family))
+            {
+                families.add (f.category + "/" + f.family);
+                ++perKind[f.category];
+            }
+        for (const auto& k : SfzSynth::categories())
+            if (perKind.count (k) != 0) kinds.add ("    " + k + "  (" + String (perKind[k]) + ")");
+        if (families.isEmpty())
+        {
+            SfzSynth::removeLibrary (settingsFolder, dir);
+            AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "No instruments in that folder",
+                "StageRig found no SFZ instruments in " + dir.getFileName() + ", so it was not added.\n\n"
+                "Choose the folder the library unpacked into: the one with the .sfz files in it, or above them.", "OK");
+            return;
+        }
+        showStatus ("Added the sample library " + dir.getFileName());
+        AlertWindow::showMessageBoxAsync (MessageBoxIconType::InfoIcon, "Sample library added",
+            dir.getFileName() + ": " + String (families.size()) + (families.size() == 1 ? " instrument" : " instruments") + ", ready to play.\n\n"
+            "Find them under Add instrument > Sampled instrument (built in), sorted by kind of sound:\n\n"
+            + kinds.joinIntoString ("\n") + "\n\n"
+            "Leave the folder where it is: StageRig plays the instruments from there.", "OK");
     });
 }
 

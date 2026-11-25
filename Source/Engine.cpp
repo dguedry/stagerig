@@ -4171,6 +4171,8 @@ void Engine::attachLoaded (LoadResult& r)
     if (r.plugin == nullptr)
     {
         node->loadError = r.error;
+        // Into the log too: the red row's reason is otherwise only in its tooltip.
+        std::fprintf (stderr, "[plugin] did not load: %s\n", r.error.toRawUTF8());
         /* A restart after a crash that did not load -- Wine still going down
            with the hosts it took along -- is tried again in a few seconds,
            within the same limit as the restarts themselves; it was tried
