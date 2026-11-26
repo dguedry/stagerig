@@ -13,7 +13,7 @@ with every knob, drawbar and menu live under your finger. Pull a drawbar on the
 tablet and the organ on stage moves.
 
 <p align="center">
-  <img src="docs/images/stagerig.png" alt="StageRig: songs and a wedding set list with tempos, two keyboards (the upper one with a pad controller added), a program list grouped by kind, and a Piano &amp; Pad program: a built-in sampled grand piano with a Windows synth pad layered from C3 up, 9 dB down" width="900">
+  <img src="docs/images/stagerig.png" alt="StageRig: songs and a wedding set list with tempos, two keyboards (the upper one with a pad controller added), a program list grouped by kind, and a Piano &amp; Pad program: Kontakt 8 (a Windows plugin) playing a grand piano, with a Windows synth pad layered from C3 up, 9 dB down" width="900">
 </p>
 
 StageRig exists because the live hosts keyboard players rely on -- MainStage,
