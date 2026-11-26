@@ -42,7 +42,9 @@ public:
     void showStatus (const juce::String&);
     /** A file chooser for one General MIDI player's own soundfont. */
     void chooseSlotSoundfont (int inputIndex, int program, int slot);
-    /** A file chooser for an SFZ file: the sampled instrument in it is added to the program. */
+    /** A sample library's folder chosen (its .dslibrary files unpacked, `unpacked` of them): added, and said in a box. */
+    void sampleLibraryChosen (const juce::File& dir, int unpacked);
+    /** A file chooser for an SFZ file or a Decent Sampler preset: the sampled instrument in it is added to the program. */
     void chooseSamplerFile (int inputIndex, int program);
     /** Marks the setup as changed so the periodic autosave picks it up. */
     void markDirty()                        { dirty = true; }

@@ -175,7 +175,7 @@ PluginDescription SamplerPluginFormat::describe (const File& sfzFile)
 
 void SamplerPluginFormat::findAllTypesForFile (OwnedArray<PluginDescription>& results, const String& fileOrIdentifier)
 {
-    if (const File f (fileOrIdentifier); File::isAbsolutePath (fileOrIdentifier) && f.hasFileExtension ("sfz") && f.existsAsFile())
+    if (const File f (fileOrIdentifier); File::isAbsolutePath (fileOrIdentifier) && f.hasFileExtension ("sfz;dspreset") && f.existsAsFile())
         results.add (new PluginDescription (describe (f)));
 }
 

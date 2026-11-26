@@ -473,9 +473,10 @@ such pages: StageRig picks from the parameters the plugin shows, and
   computer it is found wherever it is installed there, and if it is not,
   its row shows **Reload** in red and says where to put it.
 
-  Sampled instruments are in the SFZ format: a small `.sfz` file and a
-  folder of recordings. See *Free sampled instruments* for where to get
-  them, how to add them and how they are sorted. Keep them on a fast disk
+  Sampled instruments come as SFZ (a small `.sfz` file and a folder of
+  recordings) or as Decent Sampler instruments (a `.dspreset` file and its
+  recordings). See *Free sampled instruments* for where to get them, how to
+  add them and how they are sorted. Keep them on a fast disk
   (an SSD).
 - **Another keyboard's program** -- the notes go to one of that input's
   programs by name (*Upper: Big Strings*), kept loaded and playing beside
@@ -2137,7 +2138,8 @@ plugin:
 
 | The files you have | What plays them | Where to put them |
 |---|---|---|
-| **SFZ**: a small `.sfz` file and a folder of recordings (WAV, FLAC or Ogg) | **Sampled instrument (built in)** | Anywhere: add the folder in **Options ▸ Sample libraries** |
+| **SFZ**: a small `.sfz` file and a folder of recordings (WAV, FLAC, AIFF or Ogg) | **Sampled instrument (built in)** | Anywhere: add the folder in **Options ▸ Sample libraries** |
+| **Decent Sampler**: a `.dspreset` file and its recordings, or one packed `.dslibrary` file | **Sampled instrument (built in)** | The same: add the folder |
 | **SF2** or **SF3**: one soundfont file | **General MIDI player (built in)**, with that file as its soundfont | `~/.config/StageRig/Soundfonts/`, or the system's `/usr/share/sounds/sf2/` |
 
 Where a library comes both ways, take the SFZ: it keeps everything the
@@ -2164,10 +2166,13 @@ organs, harps, recorders, saxophones, marimba, vibraphone, bells, drums and
 percussion -- free for anything, with no credit asked (Creative Commons
 Zero). It is at <https://github.com/sgossner/VCSL> (6 GB unpacked).
 
-To add a library -- either of these, or any other in SFZ:
+To add a library -- either of these, or any other in SFZ or Decent Sampler:
 
-1. Download it and unpack it. Leave it as it unpacked: each `.sfz` file
-   finds its recordings in the folders beside it.
+1. Download it and unpack it. Leave it as it unpacked: each `.sfz` or
+   `.dspreset` file finds its recordings in the folders beside it. (A
+   Decent Sampler library that comes as one `.dslibrary` file can stay
+   packed: StageRig unpacks it into a folder beside it when you add the
+   folder it is in.)
 2. In StageRig: **Options ▸ Sample libraries ▸ Add a folder...**, and choose
    the folder it unpacked into. Nothing is copied: StageRig reads it where it
    is, so keep it there.
@@ -2196,6 +2201,28 @@ its **Sounds...** list, together. A *keyswitch* file holds all the styles at
 once, chosen by the lowest keys, and is listed last. Where a library has two
 versions of one instrument (Salamander has a second, *Retuned*), each is
 listed on its own, sharing the recordings.
+
+**Decent Sampler instruments.** Decent Sampler is a free sampler many small
+makers publish for; Pianobook (<https://www.pianobook.co.uk/>, a free
+account) has hundreds of free instruments in it, many of them pianos,
+keys, pads and textures recorded by musicians. StageRig plays them itself,
+with nothing else to install: add the library's folder as above, and its
+instruments are in the same menu, sorted the same way. A library that comes
+both as SFZ and as Decent Sampler is listed once, as SFZ.
+
+What carries over: the recordings and where they sit on the keys and
+loudnesses, volumes, tuning, the attack and release, round robins, release
+and pedal noises, and loops. The instrument's knobs start where its maker
+set them, and the ones that change the sound's envelope or a volume --
+*Release*, *Attack*, a *Room mic* -- are its controls in StageRig, on its
+Knobs pages and the tablet like any other. What does not: its own screen,
+its reverb and other effects (use StageRig's), buttons that switch parts of
+it on and off (it plays as it starts), and background noise that plays with
+no key down. An instrument made only of synthesizer sounds, with no
+recordings, is not listed. One that needs the paid version of Decent Sampler
+may be missing a part. For an instrument's own screen and effects, the
+Decent Sampler plugin itself runs on Linux too (free, from
+<https://www.decentsamples.com/>, VST3): add it as a plugin instrument.
 
 To use the SF2 version instead: put the `.sf2` file in
 `~/.config/StageRig/Soundfonts/`, add **General MIDI player (built in)**,

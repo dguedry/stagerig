@@ -18,8 +18,9 @@ namespace perf
     be mapped to one, the tablet shows them as sliders, and a sound of it
     can be kept.
 
-    A description's fileOrIdentifier is the .sfz file's path; its name is the
-    file's name without ".sfz". On another computer the path is not there,
+    A description's fileOrIdentifier is the .sfz file's path (or a Decent
+    Sampler preset's, DecentSampler.h); its name is the file's name without
+    its extension. On another computer the path is not there,
     and the name finds the instrument where it is installed.
 
     Only the plugin host process has this format in its list. StageRig itself
@@ -37,7 +38,7 @@ public:
     static juce::File settingsFolder();
 
     void findAllTypesForFile (juce::OwnedArray<juce::PluginDescription>&, const juce::String& fileOrIdentifier) override;
-    bool fileMightContainThisPluginType (const juce::String& f) override    { return f.endsWithIgnoreCase (".sfz"); }
+    bool fileMightContainThisPluginType (const juce::String& f) override    { return f.endsWithIgnoreCase (".sfz") || f.endsWithIgnoreCase (".dspreset"); }
     juce::String getNameOfPluginFromIdentifier (const juce::String& f) override { return juce::File (f).getFileNameWithoutExtension(); }
     bool pluginNeedsRescanning (const juce::PluginDescription&) override     { return false; }
     bool doesPluginStillExist (const juce::PluginDescription&) override;

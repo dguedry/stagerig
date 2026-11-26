@@ -19,6 +19,12 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/sfizz/external/abseil-cpp/CM
     message(FATAL_ERROR "sfizz is not checked out: run  git submodule update --init --recursive")
 endif()
 add_subdirectory(external/sfizz EXCLUDE_FROM_ALL)
+# libaiff (sfizz's AIFF reader) byte-swaps the sample rate into a long double
+# through uint16_t pointers; optimised under strict aliasing, the writes are
+# dropped and every AIFF file reads as 0 Hz, so plays silent.
+if(TARGET aiff)
+    target_compile_options(aiff PRIVATE -fno-strict-aliasing)
+endif()
 
 juce_add_gui_app(StageRig
     PRODUCT_NAME "StageRig"
@@ -85,6 +91,7 @@ target_sources(StageRig PRIVATE
     Source/SongPlayer.cpp
     Source/GmSynth.cpp
     Source/SfzSynth.cpp
+    Source/DecentSampler.cpp
     Source/SamplerPluginFormat.cpp
     Source/MidiEditor.cpp
     Source/GmMixer.cpp
@@ -154,6 +161,7 @@ target_sources(StageRigPluginHost PRIVATE
     Source/ClapPluginFormat.cpp
     Source/SamplerPluginFormat.cpp
     Source/SfzSynth.cpp
+    Source/DecentSampler.cpp
     Source/Ipc/Protocol.cpp)
 
 target_include_directories(StageRigPluginHost PRIVATE Source
@@ -239,7 +247,7 @@ target_link_libraries(RemoteTest PRIVATE
 add_test(NAME RemoteTest COMMAND RemoteTest)
 
 juce_add_console_app(EngineTest PRODUCT_NAME "EngineTest")
-target_sources(EngineTest PRIVATE Tests/EngineTest.cpp Source/Charts.cpp Source/TempoDetect.cpp Source/Recorder.cpp Source/Stretch.cpp Source/MidiFx.cpp Source/QrCode.cpp Source/LowLatency.cpp Source/DeviceReservation.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp Source/SongPlayer.cpp Source/GmSynth.cpp Source/SfzSynth.cpp Source/SamplerPluginFormat.cpp Source/MidiEditor.cpp Source/GmMixer.cpp Source/MidiOuts.cpp Source/Midi2Inputs.cpp Source/PropertyExchange.cpp Source/ControlMaps.cpp Source/Surfaces.cpp)
+target_sources(EngineTest PRIVATE Tests/EngineTest.cpp Source/Charts.cpp Source/TempoDetect.cpp Source/Recorder.cpp Source/Stretch.cpp Source/MidiFx.cpp Source/QrCode.cpp Source/LowLatency.cpp Source/DeviceReservation.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp Source/SongPlayer.cpp Source/GmSynth.cpp Source/SfzSynth.cpp Source/DecentSampler.cpp Source/SamplerPluginFormat.cpp Source/MidiEditor.cpp Source/GmMixer.cpp Source/MidiOuts.cpp Source/Midi2Inputs.cpp Source/PropertyExchange.cpp Source/ControlMaps.cpp Source/Surfaces.cpp)
 target_include_directories(EngineTest PRIVATE Source)
 target_compile_definitions(EngineTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1

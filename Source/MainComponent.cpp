@@ -4,6 +4,7 @@
 #include "Theme.h"
 #include "GmSynth.h"
 #include "SfzSynth.h"
+#include "DecentSampler.h"
 #include "SamplerPluginFormat.h"
 #include "PatchDialog.h"
 #include "GmMixer.h"
@@ -2199,7 +2200,7 @@ private:
             if (sampled.isEmpty()) sm.addItem (-1, "None yet: add a sample library  (see Free sampled instruments in the manual)", false);
             sm.addSeparator();
             sm.addItem (319998, "Add a sample library  (a folder you downloaded)...");
-            sm.addItem (319999, "Choose an SFZ file...");
+            sm.addItem (319999, "Choose an instrument file  (SFZ or Decent Sampler)...");
             menu.addSubMenu ("Sampled instrument (built in)", sm);
         }
         menu.addSubMenu ("Another keyboard's program", others);
@@ -4966,6 +4967,22 @@ void MainComponent::chooseSampleLibrary()
     {
         const auto dir = fc.getResult();
         if (dir == File() || ! dir.isDirectory()) return;
+        /* Decent Sampler libraries often come packed, as .dslibrary files:
+           unpacked beside themselves first, off the message thread (a
+           library can be gigabytes), then the folder is added. */
+        showStatus ("Looking for instruments in " + dir.getFileName() + "...");
+        Component::SafePointer<MainComponent> safe (this);
+        Thread::launch ([safe, dir]
+        {
+            const int unpacked = DecentSampler::unpackLibraries (dir).size();
+            MessageManager::callAsync ([safe, dir, unpacked] { if (safe != nullptr) safe->sampleLibraryChosen (dir, unpacked); });
+        });
+    });
+}
+
+void MainComponent::sampleLibraryChosen (const File& dir, int unpacked)
+{
+    {
         const auto settingsFolder = settings.getFile().getParentDirectory();
         if (! SfzSynth::addLibrary (settingsFolder, dir)) { showStatus ("Could not write the list of sample libraries beside the settings."); return; }
         /* Said in a box, not the status line: it is the moment the player
@@ -4984,8 +5001,8 @@ void MainComponent::chooseSampleLibrary()
         {
             SfzSynth::removeLibrary (settingsFolder, dir);
             AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "No instruments in that folder",
-                "StageRig found no SFZ instruments in " + dir.getFileName() + ", so it was not added.\n\n"
-                "Choose the folder the library unpacked into: the one with the .sfz files in it, or above them.", "OK");
+                "StageRig found no instruments (SFZ or Decent Sampler) in " + dir.getFileName() + ", so it was not added.\n\n"
+                "Choose the folder the library unpacked into: the one with the .sfz or .dspreset files in it, or above them.", "OK");
             return;
         }
         showStatus ("Added the sample library " + dir.getFileName());
@@ -4993,14 +5010,15 @@ void MainComponent::chooseSampleLibrary()
             dir.getFileName() + ": " + String (families.size()) + (families.size() == 1 ? " instrument" : " instruments") + ", ready to play.\n\n"
             "Find them under Add instrument > Sampled instrument (built in), sorted by kind of sound:\n\n"
             + kinds.joinIntoString ("\n") + "\n\n"
-            "Leave the folder where it is: StageRig plays the instruments from there.", "OK");
-    });
+            + (unpacked > 0 ? String ("Its packed Decent Sampler files (.dslibrary) were unpacked into folders beside them.\n\n") : String())
+            + "Leave the folder where it is: StageRig plays the instruments from there.", "OK");
+    }
 }
 
 void MainComponent::chooseSamplerFile (int inputIndex, int program)
 {
-    gmChooser = std::make_unique<FileChooser> ("A sampled instrument (SFZ file)",
-                                               File::getSpecialLocation (File::userHomeDirectory), "*.sfz");
+    gmChooser = std::make_unique<FileChooser> ("A sampled instrument (an SFZ file or a Decent Sampler preset)",
+                                               File::getSpecialLocation (File::userHomeDirectory), "*.sfz;*.dspreset");
     gmChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this, inputIndex, program] (const FileChooser& fc)
     {
         const auto f = fc.getResult();

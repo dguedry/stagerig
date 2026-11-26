@@ -1,4 +1,5 @@
 #include "SfzSynth.h"
+#include "DecentSampler.h"
 
 #include <filesystem>
 #include <sfizz.hpp>
@@ -170,8 +171,18 @@ Array<SfzSynth::Instrument> SfzSynth::installedInstruments (const File& settings
         // A few folders deep, not the whole tree: an instrument's samples sit in folders below its .sfz.
         std::function<void (const File&, int, const String&)> look = [&] (const File& d, int depth, const String& library)
         {
-            for (const auto& f : d.findChildFiles (File::findFiles, false, "*.sfz"))
+            /* SFZ files and Decent Sampler presets. A library that comes in
+               both lists each instrument once, as its SFZ file. */
+            auto files = d.findChildFiles (File::findFiles, false, "*.sfz;*.dspreset");
+            std::stable_sort (files.begin(), files.end(), [] (const File& a, const File& b)
+                              { return a.hasFileExtension ("sfz") && ! b.hasFileExtension ("sfz"); });
+            StringArray here;
+            for (const auto& f : files)
             {
+                if (here.contains (f.getFileNameWithoutExtension(), true)) continue;
+                // A preset that is all synthesizer or drawing (no samples) is not one to offer.
+                if (f.hasFileExtension ("dspreset") && ! f.loadFileAsString().contains ("<sample")) continue;
+                here.add (f.getFileNameWithoutExtension());
                 const auto real = canonical (f);
                 if (seen.contains (real)) continue;
                 seen.add (real);
@@ -218,7 +229,15 @@ std::unique_ptr<SfzSynth> SfzSynth::create (double sampleRate, int blockSize, co
     s->synth->setSampleRate ((float) sampleRate);
     s->synth->setSamplesPerBlock (s->maxBlock);
     s->synth->setNumVoices (128);          // a piano with the pedal down wants more than the 64 it starts with
-    if (! s->synth->loadSfzFile (instrument.getFullPathName().toStdString()))
+    if (instrument.hasFileExtension ("dspreset"))
+    {
+        /* A Decent Sampler preset, as the SFZ that plays the same; its
+           samples are found from the preset's own folder. */
+        const auto sfz = DecentSampler::toSfz (instrument, error);
+        if (sfz.isEmpty()) return nullptr;
+        s->synth->loadSfzString (instrument.getFullPathName().toStdString(), sfz.toStdString());
+    }
+    else if (! s->synth->loadSfzFile (instrument.getFullPathName().toStdString()))
     {
         error = instrument.getFileName() + " could not be read as an SFZ instrument";
         return nullptr;

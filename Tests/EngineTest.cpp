@@ -13,6 +13,7 @@
 #include "GmSynth.h"
 #include "SamplerPluginFormat.h"
 #include "SfzSynth.h"
+#include "DecentSampler.h"
 #include "MidiEditor.h"
 #include "StagePanel.h"
 #include "PanelParams.h"
@@ -4736,6 +4737,128 @@ int main()
                 CHECK (! named);
                 CHECK (engine.replaceSlotPlugin (0, sp, ss + 5, desc).isNotEmpty());      // no such row
             }
+
+            /* A Decent Sampler instrument: played as the SFZ it is turned
+               into. Its knobs that move the envelope or a volume are its
+               controls, where its maker set them; one that is only drawing
+               is not offered, and a library packed as .dslibrary is unpacked. */
+            {
+                const auto ds = dir.getChildFile ("Decent Tone.dspreset");
+                CHECK (ds.replaceWithText (R"(<?xml version="1.0" encoding="UTF-8"?>
+<DecentSampler>
+  <ui><tab>
+    <labeled-knob label="Release" minValue="0" maxValue="10" value="2"><binding type="amp" level="instrument" position="0" parameter="ENV_RELEASE"/></labeled-knob>
+    <labeled-knob label="Room Mic" minValue="0" maxValue="1" value="0.5"><binding type="amp" level="tag" identifier="room" parameter="AMP_VOLUME"/></labeled-knob>
+    <labeled-knob label="Tone" minValue="0" maxValue="1" value="1"><binding type="effect" level="instrument" position="0" parameter="FX_FILTER_FREQUENCY"/></labeled-knob>
+  </tab></ui>
+  <groups attack="0" release="0.4" volume="-3dB">
+    <group tags="close"><sample path="tone.wav" rootNote="69" loNote="0" hiNote="127" loopEnabled="true" loopStart="0" loopEnd="47999"/></group>
+    <group tags="room" groupTuning="12"><sample path="tone.wav" rootNote="69" loNote="0" hiNote="127" volume="0.5"/></group>
+    <group enabled="false"><sample path="tone.wav" rootNote="69"/></group>
+    <group><sample path="tone.wav" rootNote="69" trigger="continuous"/></group>
+  </groups>
+  <effects><effect type="lowpass" frequency="22000"/></effects>
+</DecentSampler>)"));
+                String dsErr;
+                const auto sfz = DecentSampler::toSfz (ds, dsErr);
+                CHECK (dsErr.isEmpty());
+                CHECK (sfz.contains ("label_cc102=Release") && sfz.contains ("label_cc103=Room Mic") && ! sfz.contains ("label_cc104"));     // Tone moves an effect: not a control
+                CHECK (sfz.contains ("ampeg_release=0 ") && sfz.contains ("ampeg_release_oncc102=10"));
+                CHECK (sfz.contains ("amplitude_oncc103=100") && sfz.contains ("transpose=12"));
+                int regions = 0;
+                for (const auto& l : StringArray::fromLines (sfz)) regions += l.startsWith ("sample=") ? 1 : 0;
+                CHECK (regions == 2);       // not the group switched off, nor the background sound
+                std::printf ("     a Decent Sampler instrument: %d regions\n", regions);
+
+                const int dsAt = (int) engine.getSetup().inputs[0].programs[(size_t) sp].slots.size();
+                CHECK (engine.addSlot (0, sp, SamplerPluginFormat::describe (ds), samplerErr));
+                settle();
+                CHECK (engine.isPluginAlive (0, sp, dsAt));
+                if (auto* p = engine.getPlugin (0, sp, dsAt); p != nullptr && p->isAlive())
+                {
+                    int release = -1, room = -1;
+                    for (const auto& prm : p->getParameters())
+                    {
+                        if (prm.name == "Release") release = prm.index;
+                        if (prm.name == "Room Mic") room = prm.index;
+                    }
+                    CHECK (release >= 0 && room >= 0);
+                    float v = -1.0f;
+                    CHECK (p->fetchParameterValue (release, v) && std::abs (v - 0.2f) < 0.01f);     // 2 of 10 seconds
+                    CHECK (p->fetchParameterValue (room, v) && std::abs (v - 0.5f) < 0.01f);
+                    for (int i = 0; i < dsAt; ++i) engine.setSlotEnabled (0, sp, i, false);
+                    levels (8);
+                    const float heard = played();
+                    std::printf ("     played: %.3f\n", heard);
+                    CHECK (heard > 0.01f);
+                    for (int i = 0; i < dsAt; ++i) engine.setSlotEnabled (0, sp, i, true);
+                }
+
+                /* AIFF samples play (sfizz's reader read every AIFF as 0 Hz,
+                   so silent, until built without strict aliasing). */
+                {
+                    const auto aif = dir.getChildFile ("tone.aif");
+                    {
+                        AiffAudioFormat format;
+                        std::unique_ptr<OutputStream> os (aif.createOutputStream().release());
+                        std::unique_ptr<AudioFormatWriter> w (format.createWriterFor (os.get(), 48000.0, 1, 16, {}, 0));
+                        CHECK (w != nullptr);
+                        os.release();
+                        AudioBuffer<float> b (1, 24000);
+                        for (int i = 0; i < b.getNumSamples(); ++i) b.setSample (0, i, 0.6f * (float) std::sin (MathConstants<double>::twoPi * 440.0 * i / 48000.0));
+                        CHECK (w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples()));
+                    }
+                    const auto aifSfz = dir.getChildFile ("Aiff Tone.sfz");
+                    CHECK (aifSfz.replaceWithText ("<region> sample=tone.aif pitch_keycenter=69\n"));
+                    String aifErr;
+                    auto synth = SfzSynth::create (48000.0, 512, aifSfz, aifErr);
+                    CHECK (synth != nullptr);
+                    float peak = 0.0f;
+                    if (synth != nullptr)
+                    {
+                        AudioBuffer<float> out (2, 512);
+                        out.clear();
+                        MidiBuffer on;
+                        on.addEvent (MidiMessage::noteOn (1, 69, (uint8) 110), 0);
+                        synth->renderAdding (on, out.getWritePointer (0), out.getWritePointer (1), 512);
+                        for (int i = 0; i < 8; ++i)
+                        {
+                            peak = jmax (peak, out.getMagnitude (0, 512));
+                            out.clear();
+                            synth->renderAdding ({}, out.getWritePointer (0), out.getWritePointer (1), 512);
+                        }
+                    }
+                    std::printf ("     an AIFF sample: %.3f\n", peak);
+                    CHECK (peak > 0.01f);
+                }
+
+                const auto settingsDir = dir.getChildFile ("settings");
+                CHECK (settingsDir.createDirectory());
+                const auto lib = dir.getChildFile ("DS Library");
+                CHECK (lib.getChildFile ("Felt Keys").createDirectory());
+                CHECK (dir.getChildFile ("tone.wav").copyFileTo (lib.getChildFile ("Felt Keys/tone.wav")));
+                CHECK (ds.copyFileTo (lib.getChildFile ("Felt Keys/Felt Piano.dspreset")));
+                CHECK (lib.getChildFile ("Felt Keys/Felt Piano.sfz").replaceWithText ("<region> sample=tone.wav\n"));     // the same, as SFZ
+                CHECK (lib.getChildFile ("Felt Keys/Drawing.dspreset").replaceWithText ("<DecentSampler><ui/><groups/></DecentSampler>"));
+                {
+                    // Packed: a .dslibrary is a zip of the library's folder.
+                    ZipFile::Builder zip;
+                    zip.addFile (dir.getChildFile ("tone.wav"), 0, "Packed Bells/tone.wav");
+                    zip.addFile (ds, 0, "Packed Bells/Tubular Bells.dspreset");
+                    FileOutputStream os (lib.getChildFile ("Packed Bells.dslibrary"));
+                    CHECK (os.openedOk() && zip.writeToStream (os, nullptr));
+                }
+                CHECK (DecentSampler::unpackLibraries (lib).size() == 1);
+                CHECK (DecentSampler::unpackLibraries (lib).isEmpty());          // once
+                CHECK (SfzSynth::addLibrary (settingsDir, lib));
+                StringArray found;
+                for (const auto& i : SfzSynth::installedInstruments (settingsDir))
+                    if (i.file.isAChildOf (lib)) found.add (i.file.getFileName());
+                std::printf ("     a Decent Sampler library: %s\n", found.joinIntoString (", ").toRawUTF8());
+                CHECK (found.size() == 2 && found.contains ("Felt Piano.sfz") && found.contains ("Tubular Bells.dspreset"));
+                SfzSynth::removeLibrary (settingsDir, lib);
+            }
+
             engine.selectProgram (0, programBefore);
             settle();
         }

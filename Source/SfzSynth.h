@@ -27,14 +27,14 @@ public:
     /** An instrument found on this computer. */
     struct Instrument
     {
-        juce::String name;      // as a setup names it: the file's name without ".sfz"
+        juce::String name;      // as a setup names it: the file's name without ".sfz" (or ".dspreset")
         juce::File file;
         juce::String category;  // what kind of sound it is, from its name: "Pianos & Keys" (categoryOf)
         juce::String family;    // its name without the playing style: "Baroque Alto Recorder"
         juce::String style;     // the playing style, or empty: "Staccato" (splitStyle)
         juce::String library;   // the library it is part of: the folder it was found in
     };
-    /** Every SFZ instrument on this computer, by name: the system's folders,
+    /** Every SFZ instrument (and Decent Sampler preset) on this computer, by name: the system's folders,
         the "Instruments" folder beside the settings and the sample libraries
         chosen in StageRig (libraries()), a few folders deep. A file reached
         twice (a library linked into Instruments and chosen as well) is listed once. */
