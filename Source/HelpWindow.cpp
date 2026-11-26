@@ -1,4 +1,5 @@
 #include "HelpWindow.h"
+#include "ExecutablePath.h"
 #include "Theme.h"
 #include "BinaryData.h"
 
@@ -837,7 +838,7 @@ public:
         // Images live beside the manual in the source tree. In an installed
         // build they may not be there, and the manual still reads fine without
         // them, so a missing image is simply skipped.
-        File imageDir (File::getSpecialLocation (File::currentExecutableFile));
+        File imageDir (perf::executableFile());
         for (int i = 0; i < 6 && imageDir.exists(); ++i)
         {
             if (imageDir.getChildFile ("docs/images").isDirectory())

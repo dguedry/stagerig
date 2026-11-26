@@ -1,4 +1,5 @@
 #include "RemotePlugin.h"
+#include "ExecutablePath.h"
 #include "Ipc/ProcWork.h"
 #include <spawn.h>
 #include <sys/socket.h>
@@ -83,7 +84,7 @@ File RemotePlugin::findHostExecutable()
     if (env.isNotEmpty() && File (env).existsAsFile())
         return File (env);
 
-    const auto exe = File::getSpecialLocation (File::currentExecutableFile);
+    const auto exe = executableFile();
     const auto dir = exe.getParentDirectory();
     const String name ("stagerig-plugin-host");
 

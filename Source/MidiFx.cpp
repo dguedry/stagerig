@@ -1,4 +1,5 @@
 #include "MidiFx.h"
+#include "ExecutablePath.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -1067,7 +1068,7 @@ bool MidiFx::importPhrase (const File& file, EffectDef& def, String& error)
 
 File MidiFx::phraseLibraryFolder()
 {
-    const File exe = File::getSpecialLocation (File::currentExecutableFile);
+    const File exe = executableFile();
     std::vector<File> candidates;
     candidates.push_back (exe.getParentDirectory().getParentDirectory().getChildFile ("share/stagerig/phrases"));   // bin/../share
     candidates.push_back (File ("/usr/local/share/stagerig/phrases"));
