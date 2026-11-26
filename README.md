@@ -18,9 +18,9 @@ tablet and the organ on stage moves.
 
 StageRig exists because the live hosts keyboard players rely on -- MainStage,
 Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
-**CLAP**, **LV2** and **LADSPA** plugins natively, and Windows VST3s and CLAPs
+**CLAP**, **LV2** and **LADSPA** plugins natively, Windows VST3s and CLAPs
 bridged with [yabridge](https://github.com/robbert-vdh/yabridge) work like any
-other plugin.
+other plugin, and it plays sampled instruments itself.
 
 - **MIDI inputs and audio inputs, side by side.** An input is a keyboard (a
   MIDI device and channel) or an audio source (one or two of the interface's
@@ -33,6 +33,19 @@ other plugin.
   velocity range, velocity curve, transpose, gain and pan, and the MIDI
   channels each instrument takes notes from, so one program can sort a
   multi-channel keyboard or a MIDI file into its parts.
+- **Sampled instruments, built in.** Nothing to install: StageRig plays
+  these formats itself, and a library is added from the `.zip` it was
+  downloaded as.
+
+  | Format | Files | Played by |
+  |---|---|---|
+  | **SFZ** | a `.sfz` file and its recordings (WAV, FLAC, AIFF, Ogg) | the built-in sampler ([sfizz](https://github.com/sfztools/sfizz)), read from disk as you play |
+  | **Decent Sampler** | a `.dspreset` file and its recordings, or a packed `.dslibrary` | the built-in sampler, turned into SFZ as it loads, its envelope and volume knobs kept |
+  | **SoundFont** | one `.sf2` or `.sf3` file | the built-in General MIDI player (FluidSynth) |
+
+  Instruments are sorted by kind of sound -- pianos, organs, strings,
+  woodwinds -- from their names, the same way for every library, and an
+  instrument recorded in several playing styles is listed once.
 - **MIDI devices too.** An instrument can be a hardware synth or a lighting
   controller on a MIDI port -- with patch recall when the program is
   selected, and a synth's audio back through the interface into the
@@ -402,6 +415,7 @@ tree, then via `$STAGERIG_PLUGIN_HOST`.
 - `Source/PluginScanner.*` – app-owned background scan; `Source/PluginManagerComponent.h` – the Plugins window.
 - `Source/MappingSuggestions.*` – per-plugin mapping templates and name-based CC suggestions.
 - `Source/PluginIcons.*` – plugin icons: Windows PE icon resources, VST3 snapshots, generated badges.
+- `Source/SfzSynth.*`, `Source/SamplerPluginFormat.*` – the built-in sampler (sfizz) and its instrument list; `Source/DecentSampler.*` – Decent Sampler presets as SFZ.
 - `Source/Engine.*` – audio/MIDI engine: device management, program loading and switching, MIDI routing, mappings, learn.
 - `Source/RemotePlugin.*` – host-side proxy for one plugin process (spawn, control channel, real-time block exchange).
 - `Source/Ipc/Protocol.*` – shared-memory layout and framing shared by both executables.
