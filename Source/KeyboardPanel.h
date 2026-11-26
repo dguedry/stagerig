@@ -377,7 +377,10 @@ public:
 
         auto controls = r.removeFromLeft (300);
         r.removeFromLeft (10);
-        keyboard.setBounds (r);
+        // Wider than all its keys (C1 to C8): the keys end there, and the panel shows past them, not a white strip.
+        // (Measured from the first key: JUCE's total width starts wherever the keys are scrolled to.)
+        const auto allKeys = keyboard.getKeyStartPosition (keyboard.getRangeEnd()) - keyboard.getKeyStartPosition (keyboard.getRangeStart()) + keyboard.getKeyWidth();
+        keyboard.setBounds (r.withWidth (juce::jmin (r.getWidth(), (int) std::ceil (allKeys))));
 
         auto row = controls.removeFromTop (24);
         velocityLabel.setBounds (row.removeFromLeft (52)); row.removeFromLeft (4);
