@@ -252,6 +252,61 @@ jobs:
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "StageRig $TAG" --generate-notes
           gh release upload "$TAG" pkgs/* --repo "$GITHUB_REPOSITORY" --clobber
 
+  # Arch Linux: packaging/arch/PKGBUILD, set to this release and checked in
+  # an Arch container (built, installed, its libraries found), then pushed to
+  # the AUR as stagerig-bin. The push needs the AUR_SSH_KEY secret (a private
+  # key whose public half is on the AUR account); without it the check still
+  # runs and the push is skipped.
+  aur:
+    name: Arch package (AUR)
+    needs: [auto-tag, release]
+    if: always() && needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Tools
+        run: pacman -Syu --noconfirm --needed base-devel git openssh pacman-contrib
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.auto-tag.outputs.sha || github.sha }}
+      - name: Set the version and checksums
+        env:
+          TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs.auto-tag.outputs.version) }}
+        run: |
+          useradd -m builder
+          mkdir /pkg && cp packaging/arch/PKGBUILD /pkg/ && chown -R builder /pkg
+          cd /pkg
+          sed -i "s/^pkgver=.*/pkgver=${TAG#v}/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          sudo -u builder updpkgsums
+          sudo -u builder makepkg --printsrcinfo > .SRCINFO
+          cat PKGBUILD .SRCINFO
+      - name: Build, install and check
+        run: |
+          cd /pkg
+          sudo -u builder makepkg -f --nodeps
+          # Its dependencies from the Arch repositories; novnc is from the AUR, so left out here
+          pacman -S --noconfirm --needed $(source PKGBUILD; printf '%s\n' "${depends[@]}" | grep -vx novnc)
+          pacman -U --noconfirm --nodeps --nodeps stagerig-bin-*.pkg.tar.zst
+          if ldd /usr/bin/StageRig /usr/bin/stagerig-plugin-host | grep "not found"; then exit 1; fi
+      - name: Push to the AUR
+        env:
+          KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "::notice::The AUR_SSH_KEY secret is not set; the AUR was not updated"; exit 0; fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519,rsa aur.archlinux.org > ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
+          git clone ssh://aur@aur.archlinux.org/stagerig-bin.git /aur
+          cp /pkg/PKGBUILD /pkg/.SRCINFO /aur/
+          cd /aur
+          git config user.name "StageRig releases"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then echo "The AUR has this version already"; exit 0; fi
+          git commit -m "Update to $(sed -n 's/^pkgver=//p' PKGBUILD)"
+          git push origin HEAD:master
+
   # The apt and dnf repositories on GitHub Pages, made again after every release
   # from the last ten releases' packages, so `apt upgrade` and `dnf upgrade`
   # bring StageRig up to date. Signed with the STAGERIG_REPO_SIGNING_KEY secret

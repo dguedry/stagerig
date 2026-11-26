@@ -174,11 +174,17 @@ sudo apt update && sudo apt install stagerig
 # Fedora
 sudo curl -fsSL -o /etc/yum.repos.d/stagerig.repo https://dguedry.github.io/stagerig/stagerig.repo
 sudo dnf install stagerig
+
+# Arch Linux, Manjaro, EndeavourOS (from the AUR, with an AUR helper such as yay)
+yay -S stagerig-bin
+sudo pacman -S pipewire-jack      # low-latency audio, if you don't have it yet
 ```
 
 The repository is signed: apt checks it against the key saved above, and dnf
 asks you to accept the same key the first time. It holds the last ten
 releases.
+On Arch, `stagerig-bin` is updated with each release and arrives with your
+AUR helper's updates (`yay`). It installs the same build as the `.deb`.
 
 Verified on Ubuntu 24.04, Linux Mint 22.3 (Cinnamon) and Fedora 43, with native
 LV2/VST3 plugins and Windows plugins bridged through
@@ -205,6 +211,10 @@ AVL Drumkits, Dragonfly Reverb, LSP, x42, Calf, Guitarix, ZamAudio:
 ```sh
 sudo apt install surge-xt setbfree zynaddsubfx-lv2 avldrums.lv2 dragonfly-reverb \
                  lsp-plugins-lv2 x42-plugins calf-plugins guitarix-lv2 zam-plugins
+
+# Arch Linux
+sudo pacman -S surge-xt setbfree dexed zynaddsubfx avldrums.lv2 dragonfly-reverb \
+               lsp-plugins-lv2 x42-plugins-lv2 calf guitarix zam-plugins-lv2
 ```
 
 The manual's *Good free plugins to start with* says what each is for, gives
@@ -227,6 +237,8 @@ hand.
 Requirements (Ubuntu 24.04 names): `build-essential cmake ninja-build
 libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev libxinerama-dev
 libxcursor-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev ladspa-sdk`.
+On Arch: `base-devel cmake ninja alsa-lib jack2 libx11 libxrandr libxinerama
+libxcursor freetype2 fontconfig mesa ladspa` (or `pipewire-jack` for `jack2`).
 
 ```sh
 git clone --recurse-submodules https://github.com/dguedry/stagerig.git
