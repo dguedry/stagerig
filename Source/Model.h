@@ -381,6 +381,11 @@ struct InputDef
 
     juce::String midiDeviceIdentifier;
     juce::String midiDeviceName;      // used to re-find a device if identifiers change
+    /** Other MIDI devices that count as part of this keyboard: a pad box, a
+        knob box, a footswitch. Everything they send arrives here as if the
+        keyboard had sent it, on its channel, so mappings, Learn, the knobs and
+        the pedals work from them. Known by name, like the keyboard. */
+    juce::StringArray extraDeviceNames;
     int channel = 0;                  // 0 = omni
     bool respondToProgramChange = true;
     /** A keyboard that speaks MIDI 2.0 is heard as MIDI 2.0, its controllers

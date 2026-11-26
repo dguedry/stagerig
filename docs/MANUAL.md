@@ -231,6 +231,16 @@ Each keyboard input has, below the list:
   *(disconnected)* -- even when another keyboard has since taken its place in
   the system -- and the input reconnects when it returns. To play another
   keyboard on that input, choose it in the list.
+- **Add a controller...** -- other MIDI devices that belong with this
+  keyboard: a pad or knob box (an Akai LPD8, a Korg nanoKONTROL), a MIDI
+  footswitch. Tick each in the list. What they send arrives as if the
+  keyboard had sent it, moved to the keyboard's channel whatever channel the
+  box is set to, so everything that listens to the keyboard listens to them
+  too: **Learn MIDI** in the mappings, the knobs taught in the Controls
+  panel, the pedal jobs (next song, next program, tap tempo), and Program
+  Change. A pad box's pads play notes like keys. The button then names them
+  (**Also: LPD8**); one that is not plugged in is marked *unplugged* and
+  joins in again when it is. Untick it in the same list to take it off.
 - **Channel** -- **All channels** takes everything the device sends, or pick
   one. Two inputs can share one physical keyboard by taking different
   channels, which is how a single controller drives both a left-hand and a
@@ -2309,6 +2319,7 @@ switching the plugin off; scan again once the install has finished.
 | *Audio: X stopped playing. StageRig is reopening it.* | The sound stopped with the device still connected. | Usually nothing: *back* follows. If it repeats, see *No sound at all* below. |
 | *Audio: the input X keeps stopping the sound, so StageRig plays on without it.* | That input device is stuck and was holding up the output. | Check it, then press **Reopen audio** in **Audio...**. A reboot clears a stuck device. |
 | The keyboard is silent after plugging it in | The input is set to another device, often one shown as *(disconnected)*, or to the wrong channel. | Check the input's **MIDI device** and **Channel**. A keyboard can have several ports: play on the one for its keys (on a Studiologic SL, *SL CTRL*). **Options ▸ Rescan MIDI devices** is only a fallback. |
+| A pad box, knob box or footswitch does nothing, and Learn MIDI does not hear it | StageRig listens only to the devices your inputs are on: a second device is not heard until it belongs to one. | Select the keyboard's input and press **Add a controller...** under its MIDI device, then tick the device. Its knobs can then be learned like the keyboard's own. |
 | No sound at all, even from **Test** in **Audio...** | The computer's volume for that output is down, or the sound system has stalled: a stuck input on the same device holds the output too. | Raise **Computer volume** in **Audio...**. If that is not it, press **Reopen audio**; if still silent, choose another input (or none) for StageRig. A reboot clears a stuck device. |
 | A keyboard with its own USB audio keeps disconnecting every few seconds | Its digital (IEC958) output was chosen, which some keyboards cannot play. | Choose its analog output instead (for example *SL Analog Stereo*), in **Audio...** and in the system's sound settings. |
 | Program changes from the keyboard do nothing | They arrive on a channel the input is not watching, or **Respond to Program Change** is off. | Set **Arrive on** to *Any channel*; tick **Respond to Program Change**. |

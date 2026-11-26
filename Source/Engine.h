@@ -276,6 +276,10 @@ public:
     void setInputMidiDevice (int inputIndex, const juce::MidiDeviceInfo&);
     void setInputProgramChangeChannel (int inputIndex, int channel);
     void setInputChannel (int inputIndex, int channel);
+    /** The keyboard's extra controllers, by device name: see InputDef::extraDeviceNames. */
+    void setInputExtraDevices (int inputIndex, const juce::StringArray& names);
+    /** Which of them are plugged in and heard now. */
+    juce::StringArray getInputExtraDevicesHeard (int inputIndex) const;
     void setInputRespondToProgramChange (int inputIndex, bool);
     /** The input's keyboard has been told to send SurfaceControls::autoKnobCC.. for
         its untaught knobs (MIDI-CI): those controllers turn the knobs. Not saved. */

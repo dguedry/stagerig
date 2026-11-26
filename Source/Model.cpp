@@ -482,6 +482,12 @@ var InputDef::toVar() const
     if (output != 0) o->setProperty ("output", output);
     o->setProperty ("midiDeviceIdentifier", midiDeviceIdentifier);
     o->setProperty ("midiDeviceName", midiDeviceName);
+    if (! extraDeviceNames.isEmpty())
+    {
+        Array<var> extras;
+        for (const auto& n : extraDeviceNames) extras.add (n);
+        o->setProperty ("alsoListensTo", extras);
+    }
     o->setProperty ("channel", channel);
     o->setProperty ("respondToProgramChange", respondToProgramChange);
     if (midi1Only) o->setProperty ("midi1Only", true);
@@ -541,6 +547,9 @@ InputDef InputDef::fromVar (const var& v)
     in.output                 = jmax (0, prop<int> (v, "output", 0));
     in.midiDeviceIdentifier   = propStr (v, "midiDeviceIdentifier");
     in.midiDeviceName         = propStr (v, "midiDeviceName");
+    if (auto* extras = obj (v) != nullptr ? obj (v)->getProperty ("alsoListensTo").getArray() : nullptr)
+        for (const auto& e : *extras)
+            if (e.toString().isNotEmpty()) in.extraDeviceNames.addIfNotAlreadyThere (e.toString());
     in.channel                = prop<int>  (v, "channel", 0);
     in.respondToProgramChange = prop<bool> (v, "respondToProgramChange", true);
     in.midi1Only              = prop<bool> (v, "midi1Only", false);

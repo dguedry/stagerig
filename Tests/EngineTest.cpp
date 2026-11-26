@@ -1611,6 +1611,48 @@ int main()
         else std::printf ("     no virtual MIDI devices here; twins skipped\n");
         t1.reset(); t2.reset();
 
+        /* A keyboard's extra controller (a pad box, a footswitch): what it
+           sends arrives on the keyboard's input, on the keyboard's channel,
+           whatever channel the box sends on; taken off, it is not heard. */
+        {
+            auto pads = MidiOutput::createNewDevice ("StageRig Test Pads");
+            // Longer than the others: a port just enabled can take a while to deliver its first messages.
+            auto waitLong = [] (std::function<bool()> done) { for (int i = 0; i < 200 && ! done(); ++i) MessageManager::getInstance()->runDispatchLoopUntil (50); return done(); };
+            if (pads != nullptr && waitFor ([&] { return idsOf ("StageRig Test Pads").size() == 1; }))
+            {
+                engine.setInputMidiDevice (0, MidiDeviceInfo());
+                engine.setInputChannel (0, 3);
+                engine.setInputExtraDevices (0, { "StageRig Test Pads" });
+                CHECK (engine.getSetup().inputs[0].extraDeviceNames == StringArray { "StageRig Test Pads" });
+                CHECK (waitFor ([&] { return engine.getInputExtraDevicesHeard (0).contains ("StageRig Test Pads"); }));
+                // Channel 10 from the box, held with the sustain pedal: heard on the keyboard's channel 3.
+                CHECK (waitLong ([&] { pads->sendMessageNow (MidiMessage::noteOn (10, 60, (uint8) 100));
+                                      pads->sendMessageNow (MidiMessage::controllerEvent (10, 64, 127));
+                                      render (engine, 1); return engine.isHoldingNotes (0); }));
+                std::printf ("     an extra controller on channel 10, heard on the keyboard's channel 3\n");
+                pads->sendMessageNow (MidiMessage::controllerEvent (10, 64, 0));
+                pads->sendMessageNow (MidiMessage::noteOff (10, 60));
+                CHECK (waitLong ([&] { render (engine, 1); return ! engine.isHoldingNotes (0); }));
+
+                // Saved with the input.
+                CHECK (InputDef::fromVar (engine.getSetup().inputs[0].toVar()).extraDeviceNames == StringArray { "StageRig Test Pads" });
+
+                engine.setInputExtraDevices (0, {});
+                CHECK (engine.getInputExtraDevicesHeard (0).isEmpty());
+                for (int k = 0; k < 20; ++k)
+                {
+                    pads->sendMessageNow (MidiMessage::noteOn (10, 62, (uint8) 100));
+                    pads->sendMessageNow (MidiMessage::controllerEvent (10, 64, 127));
+                    render (engine, 1);
+                }
+                CHECK (! engine.isHoldingNotes (0));
+                pads->sendMessageNow (MidiMessage::controllerEvent (10, 64, 0));
+                pads->sendMessageNow (MidiMessage::noteOff (10, 62));
+                engine.setInputChannel (0, 0);
+            }
+            else std::printf ("     no virtual MIDI devices here; extra controllers skipped\n");
+        }
+
         auto held = MidiOutput::createNewDevice ("StageRig Held Keys");
         String idH;
         if (held != nullptr && waitFor ([&] { idH = idsOf ("StageRig Held Keys")[0]; return idH.isNotEmpty(); }))

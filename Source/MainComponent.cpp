@@ -162,6 +162,12 @@ public:
             owner.showStatus ("Play a key on the keyboard for this input...");
         };
 
+        addAndMakeVisible (extrasBtn);
+        extrasBtn.setTooltip ("Other MIDI devices that belong with this keyboard: a pad or knob box (an Akai LPD8), a footswitch. "
+                              "What they send arrives as if this keyboard sent it, on its channel, so MIDI learn, mappings, "
+                              "the knobs and the pedal jobs work from them.");
+        extrasBtn.onClick = [this] { showExtrasMenu(); };
+
         addAndMakeVisible (pcChannelBox);
         // Ids: 1 = same as notes, 2 = any, 3.. = channel 1..16
         pcChannelBox.addItem ("Same as notes", 1);
@@ -274,6 +280,15 @@ public:
         for (auto* c : std::initializer_list<Component*> { &deviceLabel, &deviceBox, &channelLabel, &channelBox, &pcToggle, &pcChannelLabel, &pcChannelBox })
             c->setVisible (! def.isTrack());
         findBtn.setVisible (! def.isTrack());
+        extrasBtn.setVisible (! def.isTrack());
+        {
+            // The controllers, the ones not plugged in marked so.
+            const auto heard = engine.getInputExtraDevicesHeard (sel);
+            StringArray shownNames;
+            for (const auto& n : def.extraDeviceNames) shownNames.add (heard.contains (n) ? n : n + " (unplugged)");
+            extrasBtn.setButtonText (shownNames.isEmpty() ? String ("Add a controller...")
+                                                          : "Also: " + shownNames.joinIntoString (", "));
+        }
         deviceLabel.setText (def.isAudio() ? "Control MIDI device (program changes, pedals)" : "MIDI device", dontSendNotification);
         if (def.isAudio())
         {
@@ -337,7 +352,7 @@ public:
            It was 150, so the last row was being clipped, which is why the PC
            channel selector looked squeezed. */
         const bool audio = audioBox.isVisible();
-        auto editor = r.removeFromBottom ((audio ? 262 : 216) + (findBtn.isVisible() ? 25 : 0));
+        auto editor = r.removeFromBottom ((audio ? 262 : 216) + (findBtn.isVisible() ? 25 : 0) + (extrasBtn.isVisible() ? 25 : 0));
         auto buttons = r.removeFromBottom (26);
         r.removeFromBottom (4);
         list.setBounds (r);
@@ -358,6 +373,7 @@ public:
         deviceBox.setBounds (editor.removeFromTop (24));
         // Under the list, not beside it: beside, it left the list too narrow to read a device's name.
         if (findBtn.isVisible()) { editor.removeFromTop (3); findBtn.setBounds (editor.removeFromTop (22)); }
+        if (extrasBtn.isVisible()) { editor.removeFromTop (3); extrasBtn.setBounds (editor.removeFromTop (22)); }
         editor.removeFromTop (6);
         auto chRow = editor.removeFromTop (24);
         channelLabel.setBounds (chRow.removeFromLeft (56));
@@ -525,6 +541,44 @@ private:
     };
     std::unique_ptr<KeyFinder> finder;
     TextButton findBtn { "Find it: play a key..." };
+    TextButton extrasBtn;
+
+    /* The devices that could be this keyboard's controllers, each ticked if it
+       is one; a choice ticks or unticks it. Ones saved but not plugged in stay
+       listed, so they can be taken off. */
+    void showExtrasMenu()
+    {
+        const int sel = selectedInput();
+        if (sel < 0 || sel >= (int) engine.getSetup().inputs.size()) return;
+        const auto& def = engine.getSetup().inputs[(size_t) sel];
+        StringArray names;
+        for (const auto& d : MidiInput::getAvailableDevices())
+            if (d.name != def.midiDeviceName && ! d.name.containsIgnoreCase ("Midi Through") && ! d.name.startsWith ("StageRig"))
+                names.addIfNotAlreadyThere (d.name);
+        for (const auto& n : def.extraDeviceNames) names.addIfNotAlreadyThere (n);
+        PopupMenu m;
+        m.addSectionHeader ("Also listen to these, as part of " + def.name);
+        if (names.isEmpty())
+            m.addItem (-1, "No other MIDI device is plugged in", false);
+        for (int i = 0; i < names.size(); ++i)
+        {
+            const bool plugged = engine.getInputExtraDevicesHeard (sel).contains (names[i]) || ! def.extraDeviceNames.contains (names[i]);
+            m.addItem (i + 1, names[i] + (plugged ? String() : String ("  (unplugged)")), true, def.extraDeviceNames.contains (names[i]));
+        }
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (&extrasBtn), [this, sel, names] (int r)
+        {
+            if (r <= 0 || r > names.size() || sel >= (int) engine.getSetup().inputs.size()) return;
+            auto now = engine.getSetup().inputs[(size_t) sel].extraDeviceNames;
+            const auto& name = names[r - 1];
+            if (now.contains (name)) now.removeString (name); else now.add (name);
+            engine.setInputExtraDevices (sel, now);
+            owner.markDirty();
+            owner.showStatus (now.contains (name) ? name + " now counts as part of " + engine.getSetup().inputs[(size_t) sel].name
+                                                     + ": what it sends arrives there, on its channel."
+                                                  : name + " is no longer part of " + engine.getSetup().inputs[(size_t) sel].name + ".");
+            refreshEditor();
+        });
+    }
 
     void stopFinding (const String& say)
     {

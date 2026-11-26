@@ -282,6 +282,7 @@ struct Engine::ProgramRuntime
 struct Engine::InputRuntime
 {
     String deviceIdentifier;                  // guarded by Engine::lock
+    StringArray extraIdentifiers;             // its extra controllers' ports (InputDef::extraDeviceNames), guarded by Engine::lock
     /* Its device went away or was reconnected: whatever it was holding will
        never be let go by it, so the audio thread lets go of it all. */
     std::atomic<bool> deviceLost { false };
@@ -2126,6 +2127,26 @@ void Engine::setInputMidiDevice (int inputIndex, const MidiDeviceInfo& info)
     openMidiDevices();
 }
 
+void Engine::setInputExtraDevices (int inputIndex, const StringArray& names)
+{
+    if (! validInput (inputIndex)) return;
+    auto& def = setup.inputs[(size_t) inputIndex];
+    def.extraDeviceNames.clear();
+    for (const auto& n : names)
+        if (n.isNotEmpty() && n != def.midiDeviceName) def.extraDeviceNames.addIfNotAlreadyThere (n);
+    openMidiDevices();
+}
+
+StringArray Engine::getInputExtraDevicesHeard (int inputIndex) const
+{
+    StringArray names;
+    if (! validInput (inputIndex)) return names;
+    const ScopedLock sl (lock);
+    for (const auto& d : MidiInput::getAvailableDevices())
+        if (runtimes[(size_t) inputIndex]->extraIdentifiers.contains (d.identifier)) names.addIfNotAlreadyThere (d.name);
+    return names;
+}
+
 void Engine::setInputChannel (int inputIndex, int channel)
 {
     if (! validInput (inputIndex)) return;
@@ -2571,6 +2592,22 @@ void Engine::openMidiDevices (const StringArray& reconnected)
     }
     heardAsMidi2 = heard;
 
+    /* Each keyboard's extra controllers (a pad box, a footswitch): every port
+       of that name, heard as MIDI 1.0. Not a port an input is on as MIDI 2.0:
+       that one's MIDI 1.0 side stays closed, or its notes would come twice. */
+    StringArray extraWanted;
+    for (int i = 0; i < n; ++i)
+    {
+        StringArray ids;
+        for (const auto& name : setup.inputs[(size_t) i].extraDeviceNames)
+            for (auto& d : available)
+                if (d.name == name && d.identifier != chosen[(size_t) i] && ! heard.contains (d.identifier))
+                    ids.addIfNotAlreadyThere (d.identifier);
+        extraWanted.addArray (ids);
+        const ScopedLock sl (lock);
+        runtimes[(size_t) i]->extraIdentifiers = ids;
+    }
+
     /* Opened as the device it is now. A port number that was open for another
        device (one gone, this one arrived under its number before the list's
        change was heard of), or for one no longer there, holds a dead
@@ -2584,7 +2621,7 @@ void Engine::openMidiDevices (const StringArray& reconnected)
     }
     for (auto& d : available)
     {
-        const bool on = wanted.contains (d.identifier) && ! heard.contains (d.identifier);
+        const bool on = (wanted.contains (d.identifier) && ! heard.contains (d.identifier)) || extraWanted.contains (d.identifier);
         deviceManager.setMidiInputDeviceEnabled (d.identifier, on);
         if (on) midiOpenedAs[d.identifier] = d.name; else midiOpenedAs.erase (d.identifier);
     }
@@ -5550,11 +5587,28 @@ void Engine::receiveMidi (const String& id, const MidiMessage& m, int64 exact)
 
     const ScopedLock sl (lock);
     for (int i = 0; i < (int) runtimes.size(); ++i)
-        if (runtimes[(size_t) i]->deviceIdentifier == id)
+    {
+        auto& in = *runtimes[(size_t) i];
+        if (in.deviceIdentifier == id)
         {
             recorder.writeMidi (i, m);
-            routeMidi (*runtimes[(size_t) i], i, m, exact);
+            routeMidi (in, i, m, exact);
         }
+        else if (in.extraIdentifiers.contains (id))
+        {
+            /* One of the keyboard's extra controllers: as if the keyboard sent
+               it, so on its channel -- whatever channel the box was set to. A
+               program change goes to the channel the input takes them on. */
+            MidiMessage c (m);
+            const int notes = in.channel.load(), pc = in.programChangeChannel.load();
+            const int to = ! m.isProgramChange() ? notes
+                         : pc == InputDef::pcChannelSameAsNotes ? notes
+                         : pc == InputDef::pcChannelAny ? 0 : pc;
+            if (to >= 1 && to <= 16) c.setChannel (to);
+            recorder.writeMidi (i, c);
+            routeMidi (in, i, c, -1);
+        }
+    }
 }
 
 void Engine::injectMidi (int inputIndex, const MidiMessage& m)

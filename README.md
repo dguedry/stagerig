@@ -46,6 +46,9 @@ other plugin, and it plays sampled instruments itself.
   Instruments are sorted by kind of sound -- pianos, organs, strings,
   woodwinds -- from their names, the same way for every library, and an
   instrument recorded in several playing styles is listed once.
+- **Separate pad boxes, knob boxes and footswitches** count as part of a
+  keyboard: an Akai LPD8's knobs or a MIDI footswitch are learned, mapped
+  and used exactly like the keyboard's own.
 - **MIDI devices too.** An instrument can be a hardware synth or a lighting
   controller on a MIDI port -- with patch recall when the program is
   selected, and a synth's audio back through the interface into the
