@@ -33,6 +33,10 @@ other plugin, and it plays sampled instruments itself.
   velocity range, velocity curve, transpose, gain and pan, and the MIDI
   channels each instrument takes notes from, so one program can sort a
   multi-channel keyboard or a MIDI file into its parts.
+- **Program changes never cut a note.** Keys you are holding and the sustain
+  pedal keep sounding on the program you left while the new one plays, and
+  then ring out over a release tail you set (4 seconds unless you change it),
+  so a pad held over the change carries on. On by default; Options can turn it off.
 - **Sampled instruments, built in.** Nothing to install: StageRig plays
   these formats itself, and a library is added from the `.zip` it was
   downloaded as.
