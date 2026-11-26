@@ -1,17 +1,19 @@
 #!/bin/bash
-# Builds StageRig's apt and dnf repositories from release packages.
+# Builds StageRig's apt, dnf and pacman repositories from release packages.
 #
 #   scripts/build-package-repo <packages-dir> <site-dir> <base-url>
 #
-# <packages-dir> holds .deb and .x86_64.rpm files (any number of versions).
-# <site-dir> is written fresh: apt/, rpm/, key.gpg, key.asc, stagerig.repo,
-# index.html. <base-url> is where the site is served, e.g.
+# <packages-dir> holds .deb and .x86_64.rpm files (any number of versions),
+# and the Arch .pkg.tar.zst files (StageRig, novnc, websockify) if there are any.
+# <site-dir> is written fresh: apt/, rpm/, arch/, key.gpg, key.asc,
+# stagerig.repo, index.html. <base-url> is where the site is served, e.g.
 # https://dguedry.github.io/stagerig
 #
 # Signs with the one secret key in gpg's keyring (GNUPGHOME). The release
 # workflow imports it from the STAGERIG_REPO_SIGNING_KEY secret.
 #
-# Needs apt-ftparchive (apt-utils), createrepo_c and gpg.
+# Needs apt-ftparchive (apt-utils), createrepo_c and gpg; for the Arch packages,
+# repo-add, or docker to run it in an Arch container.
 set -euo pipefail
 
 PKGS="$1"; SITE="$2"; BASE="${3%/}"
@@ -22,6 +24,7 @@ mkdir -p "$SITE/apt/pool/main" "$SITE/apt/dists/stable/main/binary-amd64" "$SITE
 shopt -s nullglob
 debs=("$PKGS"/*.deb)
 rpms=("$PKGS"/*.x86_64.rpm)
+pkgs=("$PKGS"/*.pkg.tar.zst)
 [ ${#debs[@]} -gt 0 ] || { echo "no .deb in $PKGS"; exit 1; }
 [ ${#rpms[@]} -gt 0 ] || { echo "no .rpm in $PKGS"; exit 1; }
 cp "${debs[@]}" "$SITE/apt/pool/main/"
@@ -52,7 +55,30 @@ sign() { gpg --batch --yes "$@"; }
 createrepo_c --quiet "$SITE/rpm"
 sign --armor --detach-sign -o "$SITE/rpm/repodata/repomd.xml.asc" "$SITE/rpm/repodata/repomd.xml"
 
+# pacman: every package and the database signed (pacman's default SigLevel
+# needs both). Added oldest first, so the newest of each package is the one listed.
+if [ ${#pkgs[@]} -gt 0 ]; then
+  mkdir -p "$SITE/arch"
+  cp "${pkgs[@]}" "$SITE/arch/"
+  (
+    cd "$SITE/arch"
+    for p in *.pkg.tar.zst; do sign --detach-sign -o "$p.sig" "$p"; done
+    mapfile -t ordered < <(ls *.pkg.tar.zst | sort -V)
+    if command -v repo-add >/dev/null; then
+      repo-add -q stagerig.db.tar.gz "${ordered[@]}"
+    else
+      docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/r -w /r archlinux:latest repo-add -q stagerig.db.tar.gz "${ordered[@]}"
+    fi
+    # Pages serves no symlinks: the names pacman asks for, as files
+    rm -f stagerig.db stagerig.files stagerig.db.tar.gz.old stagerig.files.tar.gz.old
+    cp stagerig.db.tar.gz stagerig.db
+    cp stagerig.files.tar.gz stagerig.files
+    for f in stagerig.db stagerig.files stagerig.db.tar.gz stagerig.files.tar.gz; do sign --detach-sign -o "$f.sig" "$f"; done
+  )
+fi
+
 gpg --export > "$SITE/key.gpg"
+FPR=$(gpg --with-colons --list-keys | awk -F: '/^fpr/{print $10; exit}')
 gpg --armor --export > "$SITE/key.asc"
 
 cat > "$SITE/stagerig.repo" <<EOF
@@ -81,8 +107,13 @@ sudo apt update &amp;&amp; sudo apt install stagerig</pre>
 <h2>Fedora</h2>
 <pre>sudo curl -fsSL -o /etc/yum.repos.d/stagerig.repo $BASE/stagerig.repo
 sudo dnf install stagerig</pre>
+<h2>Arch Linux, Manjaro, EndeavourOS</h2>
+<pre>curl -fsSL $BASE/key.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key $FPR
+printf '\\n[stagerig]\\nServer = $BASE/arch\\n' | sudo tee -a /etc/pacman.conf
+sudo pacman -Syu stagerig</pre>
 <p><a href="https://github.com/dguedry/stagerig">Source and documentation</a></p>
 </body></html>
 EOF
 
-echo "built $SITE: ${#debs[@]} .deb, ${#rpms[@]} .rpm"
+echo "built $SITE: ${#debs[@]} .deb, ${#rpms[@]} .rpm, ${#pkgs[@]} Arch packages"

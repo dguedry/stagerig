@@ -33,15 +33,21 @@ Build notes for packagers:
 The `package-repo` job in `.github/workflows/packages.yml` publishes a signed
 apt and dnf repository to GitHub Pages after every release, at
 <https://dguedry.github.io/stagerig/>. It is rebuilt each time from the last
-ten releases' `.deb` and `.rpm` by `scripts/build-package-repo`, which can be
-run by hand to check a change (it needs `apt-ftparchive`, `createrepo_c` and
-`gpg`). Running the workflow by hand on `main` publishes again without a
+ten releases' `.deb`, `.rpm` and Arch packages by `scripts/build-package-repo`,
+which can be run by hand to check a change (it needs `apt-ftparchive`,
+`createrepo_c`, `gpg`, and `repo-add` or docker). Running the workflow by hand on `main` publishes again without a
 release.
 
 - apt: one suite, `stable`, component `main`, `amd64`; `InRelease` and
   `Release.gpg` are signed.
 - dnf: `repomd.xml` is signed (`repo_gpgcheck=1`) and carries every package's
   checksum; the packages themselves are not signed (`gpgcheck=0`).
+- pacman: `arch/`, repository `stagerig`. Every package and the database
+  carry a detached signature, so pacman's default `SigLevel` accepts them once
+  the key is locally signed (`pacman-key --lsign-key`). The `arch` job builds
+  `packaging/arch/PKGBUILD` (the release's `.deb`, repackaged) in an Arch
+  container, with noVNC and websockify from their AUR recipes, since Arch's
+  own repositories lack them, and attaches all three to the release.
 - The key is used for nothing else: RSA 4096, no expiry, fingerprint
   `0584 CCE9 4394 5336 4971  66DD E374 5FD7 E8DE B0F3`. Its private half is
   the `STAGERIG_REPO_SIGNING_KEY` repository secret (armored, no passphrase);

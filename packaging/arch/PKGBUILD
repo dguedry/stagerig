@@ -2,23 +2,23 @@
 #
 # StageRig for Arch Linux, from the release's .deb (built on Ubuntu 24.04; it
 # needs only libraries with stable sonames and glibc 2.38).
-# The release workflow sets pkgver and the checksum and publishes this to the
-# AUR as stagerig-bin; edit it here, not in the AUR.
+# The release workflow sets pkgver and the checksums, builds it in an Arch
+# container with noVNC and websockify (from their AUR recipes), and puts all
+# three in StageRig's signed pacman repository beside the apt and dnf ones.
 
-pkgname=stagerig-bin
+pkgname=stagerig
 pkgver=0.1.103
 pkgrel=1
 pkgdesc='Live-performance plugin host for keyboards and audio'
 arch=('x86_64')
 url='https://stagerig.org'
 license=('GPL-3.0-or-later AND AGPL-3.0-only AND MIT AND ISC AND Apache-2.0 AND BSD-3-Clause AND Zlib AND IJG AND BSD-2-Clause AND BSL-1.0 AND WTFPL AND (Unlicense OR MIT-0)')
-provides=('stagerig')
-conflicts=('stagerig')
 options=('!strip' '!debug')
 depends=(
   'alsa-lib' 'fontconfig' 'freetype2' 'glibc' 'libgcc' 'libstdc++'
   'libx11' 'libxext' 'libxrandr' 'libxinerama' 'libxcursor' 'libglvnd' 'hicolor-icon-theme'
   # What the .deb recommends, so the tablet, charts and General MIDI work out of the box
+  # (novnc and its websockify are built into StageRig's repository; they are not in Arch's)
   'x11vnc' 'novnc' 'xdotool' 'poppler' 'fluidsynth' 'soundfont-fluid'
 )
 optdepends=(

@@ -175,22 +175,24 @@ sudo apt update && sudo apt install stagerig
 sudo curl -fsSL -o /etc/yum.repos.d/stagerig.repo https://dguedry.github.io/stagerig/stagerig.repo
 sudo dnf install stagerig
 
-# Arch Linux, Manjaro, EndeavourOS (from the AUR, with an AUR helper such as yay)
-yay -S stagerig-bin
-sudo pacman -S pipewire-jack      # low-latency audio, if you don't have it yet
+# Arch Linux, Manjaro, EndeavourOS
+curl -fsSL https://dguedry.github.io/stagerig/key.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key 0584CCE943945336497166DDE3745FD7E8DEB0F3
+printf '\n[stagerig]\nServer = https://dguedry.github.io/stagerig/arch\n' | sudo tee -a /etc/pacman.conf
+sudo pacman -Syu stagerig pipewire-jack
 ```
 
-The repository is signed: apt checks it against the key saved above, and dnf
-asks you to accept the same key the first time. It holds the last ten
-releases.
-On Arch, `stagerig-bin` is updated with each release and arrives with your
-AUR helper's updates (`yay`). It installs the same build as the `.deb`.
+The repository is signed: apt checks it against the key saved above, dnf
+asks you to accept the same key the first time, and pacman checks every
+package against the key it was given. It holds the last ten releases. On Arch it
+also carries noVNC and websockify, which the tablet uses and Arch's own
+repositories don't have.
 
 Verified on Ubuntu 24.04, Linux Mint 22.3 (Cinnamon) and Fedora 43, with native
 LV2/VST3 plugins and Windows plugins bridged through
 [vstenv](https://github.com/dguedry/vstenv).
 
-**Without the repository:** each release's `.deb` and `.rpm` are on the
+**Without the repository:** each release's `.deb`, `.rpm` and Arch `.pkg.tar.zst` are on the
 **[releases page](https://github.com/dguedry/stagerig/releases/latest)**.
 Installed this way, StageRig does not update by itself.
 

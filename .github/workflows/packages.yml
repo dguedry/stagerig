@@ -252,69 +252,61 @@ jobs:
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "StageRig $TAG" --generate-notes
           gh release upload "$TAG" pkgs/* --repo "$GITHUB_REPOSITORY" --clobber
 
-  # Arch Linux: packaging/arch/PKGBUILD, set to this release and checked in
-  # an Arch container (built, installed, its libraries found), then pushed to
-  # the AUR as stagerig-bin. The push needs the AUR_SSH_KEY secret (a private
-  # key whose public half is on the AUR account); without it the check still
-  # runs and the push is skipped.
-  aur:
-    name: Arch package (AUR)
+  # Arch Linux: packaging/arch/PKGBUILD, set to this release, built in an Arch
+  # container with noVNC and websockify (the tablet's plugin windows; they are
+  # only in the AUR, so they are built here from its recipes), installed, its
+  # libraries checked, and attached to the release. package-repo puts them in
+  # the signed pacman repository beside the apt and dnf ones.
+  arch:
+    name: Arch Linux package
     needs: [auto-tag, release]
     if: always() && needs.release.result == 'success'
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
       - name: Tools
-        run: pacman -Syu --noconfirm --needed base-devel git openssh pacman-contrib
+        run: pacman -Syu --noconfirm --needed base-devel git pacman-contrib github-cli
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.auto-tag.outputs.sha || github.sha }}
-      - name: Set the version and checksums
+      - name: Build
         env:
           TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs.auto-tag.outputs.version) }}
         run: |
           useradd -m builder
-          mkdir /pkg && cp packaging/arch/PKGBUILD /pkg/ && chown -R builder /pkg
-          cd /pkg
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          mkdir -p /pkg/stagerig /out
+          cp packaging/arch/PKGBUILD /pkg/stagerig/
+          for p in websockify novnc; do git clone --depth 1 "https://aur.archlinux.org/$p.git" "/pkg/$p"; done
+          chown -R builder /pkg /out
+          cd /pkg/stagerig
           sed -i "s/^pkgver=.*/pkgver=${TAG#v}/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
           sudo -u builder updpkgsums
-          sudo -u builder makepkg --printsrcinfo > .SRCINFO
-          cat PKGBUILD .SRCINFO
-      - name: Build, install and check
+          # websockify first: novnc needs it installed to build
+          for p in websockify novnc stagerig; do
+            (cd "/pkg/$p" && sudo -u builder PKGDEST=/out makepkg -si --noconfirm)
+          done
+          rm -f /out/*-debug-*.pkg.tar.zst
+          ls -la /out
+      - name: Check
         run: |
-          cd /pkg
-          sudo -u builder makepkg -f --nodeps
-          # Its dependencies from the Arch repositories; novnc is from the AUR, so left out here
-          pacman -S --noconfirm --needed $(source PKGBUILD; printf '%s\n' "${depends[@]}" | grep -vx novnc)
-          pacman -U --noconfirm --nodeps --nodeps stagerig-bin-*.pkg.tar.zst
           if ldd /usr/bin/StageRig /usr/bin/stagerig-plugin-host | grep "not found"; then exit 1; fi
-      - name: Push to the AUR
+          test -f /usr/share/webapps/novnc/vnc.html
+          command -v websockify x11vnc
+      - name: Attach to the release
         env:
-          KEY: ${{ secrets.AUR_SSH_KEY }}
-        run: |
-          if [ -z "$KEY" ]; then echo "::notice::The AUR_SSH_KEY secret is not set; the AUR was not updated"; exit 0; fi
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
-          ssh-keyscan -t ed25519,rsa aur.archlinux.org > ~/.ssh/known_hosts 2>/dev/null
-          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
-          git clone ssh://aur@aur.archlinux.org/stagerig-bin.git /aur
-          cp /pkg/PKGBUILD /pkg/.SRCINFO /aur/
-          cd /aur
-          git config user.name "StageRig releases"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add PKGBUILD .SRCINFO
-          if git diff --cached --quiet; then echo "The AUR has this version already"; exit 0; fi
-          git commit -m "Update to $(sed -n 's/^pkgver=//p' PKGBUILD)"
-          git push origin HEAD:master
+          GH_TOKEN: '${{ github.token }}'
+          TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs.auto-tag.outputs.version) }}
+        run: gh release upload "$TAG" /out/*.pkg.tar.zst --repo "$GITHUB_REPOSITORY" --clobber
 
-  # The apt and dnf repositories on GitHub Pages, made again after every release
-  # from the last ten releases' packages, so `apt upgrade` and `dnf upgrade`
-  # bring StageRig up to date. Signed with the STAGERIG_REPO_SIGNING_KEY secret
+  # The apt, dnf and pacman repositories on GitHub Pages, made again after every
+  # release from the last ten releases' packages, so `apt upgrade`, `dnf upgrade`
+  # and `pacman -Syu` bring StageRig up to date. Signed with the STAGERIG_REPO_SIGNING_KEY secret
   # (an armored private key with no passphrase, used for nothing else).
   # Run the workflow by hand on main to publish again without a release.
   package-repo:
-    name: Publish the apt and dnf repositories
-    needs: [release]
+    name: Publish the apt, dnf and pacman repositories
+    needs: [release, arch]
     if: |
       always() && github.ref == 'refs/heads/main'
       && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
@@ -339,7 +331,7 @@ jobs:
         run: |
           mkdir pkgs
           for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 10 --json tagName -q '.[].tagName'); do
-            gh release download "$tag" --repo "$GITHUB_REPOSITORY" -p '*.deb' -p '*.x86_64.rpm' -D pkgs --skip-existing || true
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" -p '*.deb' -p '*.x86_64.rpm' -p '*.pkg.tar.zst' -D pkgs --skip-existing || true
           done
           ls -la pkgs
       - name: Signing key
