@@ -2168,14 +2168,15 @@ Zero). It is at <https://github.com/sgossner/VCSL> (6 GB unpacked).
 
 To add a library -- either of these, or any other in SFZ or Decent Sampler:
 
-1. Download it and unpack it. Leave it as it unpacked: each `.sfz` or
-   `.dspreset` file finds its recordings in the folders beside it. (A
-   Decent Sampler library that comes as one `.dslibrary` file can stay
-   packed: StageRig unpacks it into a folder beside it when you add the
-   folder it is in.)
-2. In StageRig: **Options ▸ Sample libraries ▸ Add a folder...**, and choose
-   the folder it unpacked into. Nothing is copied: StageRig reads it where it
-   is, so keep it there.
+1. Download it. Most libraries come as one `.zip` file.
+2. In StageRig: **Options ▸ Sample libraries ▸ Add a .zip file you
+   downloaded...**, and choose it. StageRig unpacks it into a folder beside
+   it (in Downloads, say) and adds that folder; once the instrument plays,
+   the `.zip` can be deleted. Unpacked it yourself already? **Add a
+   folder...** instead, and choose the folder it unpacked into. Either way
+   nothing is copied: StageRig plays the instruments from that folder, so
+   leave it where it is. (A Decent Sampler library that comes as one
+   `.dslibrary` file is unpacked the same way.)
 3. **Add instrument ▸ Sampled instrument (built in)**: its instruments are
    in the menu, sorted by kind of sound.
 
