@@ -13,7 +13,7 @@ with every knob, drawbar and menu live under your finger. Pull a drawbar on the
 tablet and the organ on stage moves.
 
 <p align="center">
-  <img src="docs/images/stagerig.png" alt="StageRig: songs and a set list with tempos and chart markers, two keyboards and an audio input with its level meter, a program list grouped by kind, a SWAM Alto Sax with its key and velocity ranges, and the on-screen keyboard with pitch and mod wheels" width="900">
+  <img src="docs/images/stagerig.png" alt="StageRig: songs and a set list with tempos, two keyboards, a program list grouped by kind, a Brass Sect program layering a Windows organ plugin (HaNonB70), with big-band and phrase MIDI effects, over a built-in sampled violin, the Controls panel and the on-screen keyboard" width="900">
 </p>
 
 StageRig exists because the live hosts keyboard players rely on -- MainStage,
@@ -46,6 +46,9 @@ other plugin, and it plays sampled instruments itself.
   Instruments are sorted by kind of sound -- pianos, organs, strings,
   woodwinds -- from their names, the same way for every library, and an
   instrument recorded in several playing styles is listed once.
+
+  ![Add instrument, Sampled instrument (built in): the kinds of sound, the strings among them, and the choices to add a library from its .zip, from a folder, or one instrument file](docs/images/sampled-instruments.png)
+
 - **Separate pad boxes, knob boxes and footswitches** count as part of a
   keyboard: an Akai LPD8's knobs or a MIDI footswitch are learned, mapped
   and used exactly like the keyboard's own.
@@ -249,11 +252,11 @@ plugins, select an input and give it a MIDI device, click a program, press
 in letters a foot high, and under it the page of knobs the keyboard's own knobs
 are on.
 
-![Perform: three inputs' programs in large type, and under each the knobs page the keyboard is on -- a Hammond's drawbars, a SWAM violin's expression and vibrato](docs/images/perform-view.png)
+![Perform: two keyboards' programs in large type, Brass Sect and B3, and under them the drawbars page the upper keyboard's knobs are on](docs/images/perform-view.png)
 
 With the editing panes shown, **Stage** keeps the performance view above them.
 
-![The Stage view above the editing panes: songs and the set list, inputs, programs, an instrument with its MIDI effects, and the Controls panel](docs/images/stage-view.png)
+![The Stage view above the editing panes: Brass Sect and Salamander Grand in large type with the drawbar knobs, then songs and the set list, inputs, programs, an instrument with its MIDI effects, and the Controls panel](docs/images/stage-view.png)
 
 An instrument's **Knobs** window is what the keyboard's eight knobs turn on it,
 in pages; the layout is the plugin's, so it is the same in every program.
