@@ -42,8 +42,8 @@ public:
     void showStatus (const juce::String&);
     /** A file chooser for one General MIDI player's own soundfont. */
     void chooseSlotSoundfont (int inputIndex, int program, int slot);
-    /** A sample library's folder chosen (its .dslibrary files unpacked, `unpacked` of them): added, and said in a box. */
-    void sampleLibraryChosen (const juce::File& dir, int unpacked);
+    /** A sample library's folder chosen (unpacked from somewhere, says `how`): added, and said in a box. */
+    void sampleLibraryChosen (const juce::File& dir, const juce::String& how);
     /** A file chooser for an SFZ file or a Decent Sampler preset: the sampled instrument in it is added to the program. */
     void chooseSamplerFile (int inputIndex, int program);
     /** Marks the setup as changed so the periodic autosave picks it up. */
@@ -64,6 +64,8 @@ public:
     /** Every sound StageRig can find for the plugin there: yours, its own programs, VST3 presets, the maker's. */
     /** Options > Sample libraries > Add a folder: a folder of SFZ instruments, read where it is. */
     void chooseSampleLibrary();
+    /** The same, from the .zip file it was downloaded as: unpacked beside it, then added. */
+    void chooseSampleZip();
     std::vector<struct SoundChoice> soundChoicesFor (int input, int program, int slot);
     /** Gives the plugin there that sound, and keeps it with the program. Says what went wrong, or nothing. */
     juce::String giveSound (int input, int program, int slot, const struct SoundChoice&, const juce::MemoryBlock& before, const juce::String& beforeName);

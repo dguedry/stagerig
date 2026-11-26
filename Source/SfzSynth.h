@@ -62,6 +62,11 @@ public:
     static juce::Array<juce::File> libraries (const juce::File& settingsFolder);
     static bool addLibrary (const juce::File& settingsFolder, const juce::File& folder);
     static void removeLibrary (const juce::File& settingsFolder, const juce::File& folder);
+    /** A library as it was downloaded, a .zip (or .dslibrary), unpacked beside
+        itself: into the one folder the zip holds, or a folder of the zip's
+        name. Unpacked already: that folder, left as it is. None (`error`
+        set): File(). Slow for a big library: not on the message thread. */
+    static juce::File unpackDownload (const juce::File& zipFile, juce::String& error);
     /** The file a setup means by a name and a path: the path if it is there,
         else the installed instrument of that name. None: File(). */
     static juce::File find (const juce::File& settingsFolder, const juce::String& name, const juce::String& path);

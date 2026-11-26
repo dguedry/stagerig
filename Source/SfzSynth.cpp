@@ -151,6 +151,35 @@ void SfzSynth::removeLibrary (const File& settingsFolder, const File& folder)
     settingsFolder.getChildFile ("Sample libraries.txt").replaceWithText (lines.isEmpty() ? String() : lines.joinIntoString ("\n") + "\n");
 }
 
+File SfzSynth::unpackDownload (const File& zipFile, String& error)
+{
+    ZipFile zip (zipFile);
+    if (zip.getNumEntries() == 0)
+    {
+        error = zipFile.getFileName() + " could not be opened as a .zip file. Has it finished downloading?";
+        return {};
+    }
+    // One folder at the top (most libraries): unpacked as that folder. Loose files: into a folder of the zip's name.
+    String top;
+    for (int i = 0; i < zip.getNumEntries(); ++i)
+    {
+        const auto name = zip.getEntry (i)->filename.replaceCharacter ('\\', '/');
+        const auto first = name.upToFirstOccurrenceOf ("/", false, false);
+        if (! name.containsChar ('/') || (top.isNotEmpty() && first != top)) { top.clear(); break; }
+        top = first;
+    }
+    const auto parent = zipFile.getParentDirectory();
+    const auto into = top.isNotEmpty() ? parent.getChildFile (top) : parent.getChildFile (zipFile.getFileNameWithoutExtension());
+    if (into.isDirectory()) return into;
+    const auto r = zip.uncompressTo (top.isNotEmpty() ? parent : into, false);
+    if (r.failed())
+    {
+        error = "Could not unpack " + zipFile.getFileName() + ": " + r.getErrorMessage() + " (is the disk full?)";
+        return {};
+    }
+    return into;
+}
+
 Array<SfzSynth::Instrument> SfzSynth::installedInstruments (const File& settingsFolder)
 {
     Array<Instrument> found;

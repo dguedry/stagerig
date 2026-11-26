@@ -2199,6 +2199,7 @@ private:
             PopupMenu sm = sampledInstrumentsMenu (sampled, 310000);
             if (sampled.isEmpty()) sm.addItem (-1, "None yet: add a sample library  (see Free sampled instruments in the manual)", false);
             sm.addSeparator();
+            sm.addItem (319997, "Add a sample library  (a .zip file you downloaded)...");
             sm.addItem (319998, "Add a sample library  (a folder you downloaded)...");
             sm.addItem (319999, "Choose an instrument file  (SFZ or Decent Sampler)...");
             menu.addSubMenu ("Sampled instrument (built in)", sm);
@@ -2210,6 +2211,7 @@ private:
             const int in = owner.getSelectedInput(), prog = owner.getEditedProgram();
             if (result == 319999) { owner.chooseSamplerFile (in, prog); return; }
             if (result == 319998) { owner.chooseSampleLibrary(); return; }
+            if (result == 319997) { owner.chooseSampleZip(); return; }
             if (result >= 310000 && result - 310000 < sampled.size())
             {
                 String error;
@@ -3002,6 +3004,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
             const auto libs = SfzSynth::libraries (folder);
             const auto found = SfzSynth::installedInstruments (folder);
             PopupMenu lm;
+            lm.addItem (5001, "Add a .zip file you downloaded...");
             lm.addItem (5000, "Add a folder...");
             if (! libs.isEmpty()) lm.addSeparator();
             for (int i = 0; i < libs.size(); ++i)
@@ -3055,6 +3058,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
             const auto& s = engine.getSetup();
             if (r == 8) { toggleRecording(); return; }
             if (r == 5000) { chooseSampleLibrary(); return; }
+            if (r == 5001) { chooseSampleZip(); return; }
             if (r >= 5100 && r < 5200)
             {
                 const auto folder = settings.getFile().getParentDirectory();
@@ -4975,12 +4979,44 @@ void MainComponent::chooseSampleLibrary()
         Thread::launch ([safe, dir]
         {
             const int unpacked = DecentSampler::unpackLibraries (dir).size();
-            MessageManager::callAsync ([safe, dir, unpacked] { if (safe != nullptr) safe->sampleLibraryChosen (dir, unpacked); });
+            const String how = unpacked > 0 ? "Its packed Decent Sampler files (.dslibrary) were unpacked into folders beside them." : "";
+            MessageManager::callAsync ([safe, dir, how] { if (safe != nullptr) safe->sampleLibraryChosen (dir, how); });
         });
     });
 }
 
-void MainComponent::sampleLibraryChosen (const File& dir, int unpacked)
+void MainComponent::chooseSampleZip()
+{
+    gmChooser = std::make_unique<FileChooser> ("A sample library you downloaded (a .zip file)",
+                                               File::getSpecialLocation (File::userHomeDirectory).getChildFile ("Downloads"), "*.zip;*.dslibrary");
+    gmChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this] (const FileChooser& fc)
+    {
+        const auto zip = fc.getResult();
+        if (! zip.existsAsFile()) return;
+        showStatus ("Unpacking " + zip.getFileName() + "...");
+        Component::SafePointer<MainComponent> safe (this);
+        Thread::launch ([safe, zip]
+        {
+            String error;
+            const auto dir = SfzSynth::unpackDownload (zip, error);
+            if (dir != File()) DecentSampler::unpackLibraries (dir);
+            MessageManager::callAsync ([safe, zip, dir, error]
+            {
+                if (safe == nullptr) return;
+                if (dir == File())
+                {
+                    safe->showStatus (error);
+                    AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Could not add the sample library", error, "OK");
+                    return;
+                }
+                safe->sampleLibraryChosen (dir, "It was unpacked into " + dir.getParentDirectory().getFileName() + "/" + dir.getFileName()
+                                                + ". Once it plays, " + zip.getFileName() + " can be deleted.");
+            });
+        });
+    });
+}
+
+void MainComponent::sampleLibraryChosen (const File& dir, const String& how)
 {
     {
         const auto settingsFolder = settings.getFile().getParentDirectory();
@@ -5010,7 +5046,7 @@ void MainComponent::sampleLibraryChosen (const File& dir, int unpacked)
             dir.getFileName() + ": " + String (families.size()) + (families.size() == 1 ? " instrument" : " instruments") + ", ready to play.\n\n"
             "Find them under Add instrument > Sampled instrument (built in), sorted by kind of sound:\n\n"
             + kinds.joinIntoString ("\n") + "\n\n"
-            + (unpacked > 0 ? String ("Its packed Decent Sampler files (.dslibrary) were unpacked into folders beside them.\n\n") : String())
+            + (how.isNotEmpty() ? how + "\n\n" : String())
             + "Leave the folder where it is: StageRig plays the instruments from there.", "OK");
     }
 }

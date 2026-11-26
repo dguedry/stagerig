@@ -24,6 +24,15 @@ namespace
         return {};
     }
 
+    /* "true", "1", "yes": makers write it every way. Empty when not said. */
+    String yesNo (const String& v)
+    {
+        const auto t = v.trim().toLowerCase();
+        if (t == "true" || t == "1" || t == "yes" || t == "on") return "true";
+        if (t == "false" || t == "0" || t == "no" || t == "off") return "false";
+        return {};
+    }
+
     /* "0.5" is a gain, "-3dB" decibels; either way a gain. */
     double gainOf (const String& v)
     {
@@ -193,6 +202,7 @@ String DecentSampler::toSfz (const File& preset, String& error)
         for (auto* t : tags->getChildWithTagNameIterator ("tag"))
             tagGain[t->getStringAttribute ("name")] = gainOf (t->getStringAttribute ("volume"));
 
+    std::map<int, std::pair<double, double>> curves;     // a knob's controller: where its volume starts and ends
     String out;
     out << "// Made by StageRig from " << preset.getFileName() << ", a Decent Sampler instrument\n";
     if (! knobs.empty())
@@ -262,13 +272,20 @@ String DecentSampler::toSfz (const File& preset, String& error)
             double gain = gains[0] * gains[1] * gains[2] * tagged;
             if (liveVolume != nullptr)
             {
-                // The knob's straight line, kept within sfizz's 0-100%: its top is the gain, its bottom a part of it.
+                /* In sfizz a controller multiplies the amplitude (the gain is
+                   the knob's travel, 0 to 1): the knob's top is the region's
+                   gain, and a knob that does not reach 0 goes by a curve. */
                 const double top = jmax (liveVolume->base, liveVolume->base + liveVolume->range);
                 if (top > 0.0)
                 {
                     gain *= top;
-                    region << " amplitude=" << number (liveVolume->base / top * 100.0)
-                           << " amplitude_oncc" << liveVolume->cc << "=" << number (liveVolume->range / top * 100.0);
+                    region << " amplitude_oncc" << liveVolume->cc << "=100";
+                    const double from = liveVolume->base / top, to = (liveVolume->base + liveVolume->range) / top;
+                    if (std::abs (from) > 1.0e-6 || std::abs (to - 1.0) > 1.0e-6)
+                    {
+                        curves[liveVolume->cc] = { from, to };
+                        region << " amplitude_curvecc" << liveVolume->cc << "=" << liveVolume->cc;
+                    }
                 }
                 else gain = 0.0;
             }
@@ -318,7 +335,7 @@ String DecentSampler::toSfz (const File& preset, String& error)
             // The part of the file, and its loop.
             if (s->hasAttribute ("start")) region << " offset=" << s->getStringAttribute ("start").trim();
             if (s->hasAttribute ("end")) region << " end=" << s->getStringAttribute ("end").trim();
-            const auto loop = inherited ({ s, group }, "loopEnabled").toLowerCase();
+            const auto loop = yesNo (inherited ({ s, group }, "loopEnabled"));
             if (loop == "true")
             {
                 region << " loop_mode=loop_continuous";
@@ -331,7 +348,7 @@ String DecentSampler::toSfz (const File& preset, String& error)
             else if (loop == "false") region << " loop_mode=no_loop";
 
             // The envelope, or none: the sample plays to its end.
-            if (inherited (levels, "ampEnvEnabled").toLowerCase() == "false")
+            if (yesNo (inherited (levels, "ampEnvEnabled")) == "false")
             {
                 if (loop != "true") region << " loop_mode=one_shot";
             }
@@ -354,6 +371,9 @@ String DecentSampler::toSfz (const File& preset, String& error)
         error = preset.getFileName() + " has no samples StageRig can play";
         return {};
     }
+    // Numbered by the controller, past the built-in curves (0-6).
+    for (const auto& [cc, range] : curves)
+        out << "<curve>curve_index=" << cc << " v000=" << number (range.first) << " v127=" << number (range.second) << "\n";
     return out;
 }
 

@@ -4749,10 +4749,11 @@ int main()
   <ui><tab>
     <labeled-knob label="Release" minValue="0" maxValue="10" value="2"><binding type="amp" level="instrument" position="0" parameter="ENV_RELEASE"/></labeled-knob>
     <labeled-knob label="Room Mic" minValue="0" maxValue="1" value="0.5"><binding type="amp" level="tag" identifier="room" parameter="AMP_VOLUME"/></labeled-knob>
+    <labeled-knob label="Body" minValue="0" maxValue="1" value="1"><binding type="amp" level="group" position="0" parameter="AMP_VOLUME" translationOutputMin="0.25" translationOutputMax="1"/></labeled-knob>
     <labeled-knob label="Tone" minValue="0" maxValue="1" value="1"><binding type="effect" level="instrument" position="0" parameter="FX_FILTER_FREQUENCY"/></labeled-knob>
   </tab></ui>
   <groups attack="0" release="0.4" volume="-3dB">
-    <group tags="close"><sample path="tone.wav" rootNote="69" loNote="0" hiNote="127" loopEnabled="true" loopStart="0" loopEnd="47999"/></group>
+    <group tags="close"><sample path="tone.wav" rootNote="69" loNote="0" hiNote="127" loopEnabled="1" loopStart="0" loopEnd="47999"/></group>
     <group tags="room" groupTuning="12"><sample path="tone.wav" rootNote="69" loNote="0" hiNote="127" volume="0.5"/></group>
     <group enabled="false"><sample path="tone.wav" rootNote="69"/></group>
     <group><sample path="tone.wav" rootNote="69" trigger="continuous"/></group>
@@ -4762,9 +4763,13 @@ int main()
                 String dsErr;
                 const auto sfz = DecentSampler::toSfz (ds, dsErr);
                 CHECK (dsErr.isEmpty());
-                CHECK (sfz.contains ("label_cc102=Release") && sfz.contains ("label_cc103=Room Mic") && ! sfz.contains ("label_cc104"));     // Tone moves an effect: not a control
+                CHECK (sfz.contains ("label_cc102=Release") && sfz.contains ("label_cc103=Room Mic") && sfz.contains ("label_cc104=Body")
+                       && ! sfz.contains ("label_cc105"));     // Tone moves an effect: not a control
+                // A volume knob multiplies the gain; one that stops short of nothing goes by a curve.
+                CHECK (! sfz.contains ("amplitude=0") && sfz.contains ("amplitude_curvecc104=104") && sfz.contains ("<curve>curve_index=104 v000=0.25 v127=1"));
                 CHECK (sfz.contains ("ampeg_release=0 ") && sfz.contains ("ampeg_release_oncc102=10"));
-                CHECK (sfz.contains ("amplitude_oncc103=100") && sfz.contains ("transpose=12"));
+                CHECK (sfz.contains ("amplitude_oncc103=100") && sfz.contains ("amplitude_oncc104=100") && sfz.contains ("transpose=12"));
+                CHECK (sfz.contains ("loop_mode=loop_continuous loop_start=0 loop_end=47999"));     // "1" is as good as "true"
                 int regions = 0;
                 for (const auto& l : StringArray::fromLines (sfz)) regions += l.startsWith ("sample=") ? 1 : 0;
                 CHECK (regions == 2);       // not the group switched off, nor the background sound
@@ -4857,6 +4862,25 @@ int main()
                 std::printf ("     a Decent Sampler library: %s\n", found.joinIntoString (", ").toRawUTF8());
                 CHECK (found.size() == 2 && found.contains ("Felt Piano.sfz") && found.contains ("Tubular Bells.dspreset"));
                 SfzSynth::removeLibrary (settingsDir, lib);
+
+                // As downloaded: a .zip of one folder, unpacked beside itself as that folder, once.
+                {
+                    const auto zipFile = dir.getChildFile ("Violin_Library-1.1.zip");
+                    {
+                        ZipFile::Builder zip;
+                        zip.addFile (dir.getChildFile ("tone.wav"), 0, "Violin [Decent Sampler]/Violin.dsbundle/Samples/tone.wav");
+                        zip.addFile (ds, 0, "Violin [Decent Sampler]/Violin.dsbundle/Violin.dspreset");
+                        FileOutputStream os (zipFile);
+                        CHECK (os.openedOk() && zip.writeToStream (os, nullptr));
+                    }
+                    String zipErr;
+                    const auto unpacked = SfzSynth::unpackDownload (zipFile, zipErr);
+                    CHECK (unpacked == dir.getChildFile ("Violin [Decent Sampler]") && unpacked.isDirectory());
+                    CHECK (unpacked.getChildFile ("Violin.dsbundle/Violin.dspreset").existsAsFile());
+                    CHECK (SfzSynth::unpackDownload (zipFile, zipErr) == unpacked);
+                    CHECK (dir.getChildFile ("notazip.zip").replaceWithText ("partial download"));
+                    CHECK (SfzSynth::unpackDownload (dir.getChildFile ("notazip.zip"), zipErr) == File() && zipErr.contains ("finished downloading"));
+                }
             }
 
             engine.selectProgram (0, programBefore);
