@@ -13,7 +13,7 @@ with every knob, drawbar and menu live under your finger. Pull a drawbar on the
 tablet and the organ on stage moves.
 
 <p align="center">
-  <img src="docs/images/stagerig.png" alt="StageRig: songs and a set list with tempos, two keyboards, a program list grouped by kind, a Brass Sect program layering a Windows organ plugin (HaNonB70), with big-band and phrase MIDI effects, over a built-in sampled violin, the Controls panel and the on-screen keyboard" width="900">
+  <img src="docs/images/stagerig.png" alt="StageRig: songs and a wedding set list with tempos, two keyboards (the upper one with a pad controller added), a program list grouped by kind, and a Piano &amp; Pad program: a built-in sampled grand piano with a Windows synth pad layered from C3 up, 9 dB down" width="900">
 </p>
 
 StageRig exists because the live hosts keyboard players rely on -- MainStage,
@@ -252,11 +252,11 @@ plugins, select an input and give it a MIDI device, click a program, press
 in letters a foot high, and under it the page of knobs the keyboard's own knobs
 are on.
 
-![Perform: two keyboards' programs in large type, Brass Sect and B3, and under them the drawbars page the upper keyboard's knobs are on](docs/images/perform-view.png)
+![Perform: Horn Section and B3 Organ in large type, and under them the B3's drawbars, the page the lower keyboard's knobs are on](docs/images/perform-view.png)
 
 With the editing panes shown, **Stage** keeps the performance view above them.
 
-![The Stage view above the editing panes: Brass Sect and Salamander Grand in large type with the drawbar knobs, then songs and the set list, inputs, programs, an instrument with its MIDI effects, and the Controls panel](docs/images/stage-view.png)
+![The Stage view above the editing panes: Horn Section and B3 Organ in large type with the B3's drawbar knobs, then songs and the set list, inputs, the organ programs and the Controls panel](docs/images/stage-view.png)
 
 An instrument's **Knobs** window is what the keyboard's eight knobs turn on it,
 in pages; the layout is the plugin's, so it is the same in every program.
