@@ -286,12 +286,12 @@ chorus puts Upper on its strings by itself.
 **Tablet** in the toolbar starts a small web app on your network, for picking
 programs from a music stand instead of the laptop.
 
-![The tablet set list: the song you are on in large type with what each keyboard plays, the rest of the running order, and a search](docs/images/tablet-setlist.png)
+![The tablet set list for a Saturday wedding: September highlighted with its key, Horn Section on the upper keyboard and B3 Organ on the lower, the rest of the running order, and a search](docs/images/tablet-setlist.png)
 
 The Programs tab is the same page's other half -- every program on every
 keyboard, grouped, with a GUI button per input:
 
-![The tablet showing the programs of both keyboards, grouped by kind, with the Hammond's buttons and drawbars under the program in play](docs/images/tablet-app.png)
+![The tablet showing the programs of both keyboards, grouped by kind: Piano & Pad on the upper with the pad's filter, chorus and envelope knobs, and B3 Organ on the lower with the Hammond's buttons](docs/images/tablet-app.png)
 
 ![The Tablet control dialog](docs/images/tablet-control.png)
 
