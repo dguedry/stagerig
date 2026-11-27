@@ -87,12 +87,12 @@ Recommends:     xdotool
 Recommends:     poppler-utils
 Recommends:     fluidsynth-libs
 Recommends:     fluid-soundfont-gm
-Recommends:     lv2-calf-plugins
-Recommends:     lsp-plugins-lv2
-Recommends:     setBfree
-Recommends:     zynaddsubfx
-Recommends:     guitarix
-Recommends:     zam-plugins
+Suggests:       lv2-calf-plugins
+Suggests:       lsp-plugins-lv2
+Suggests:       setBfree
+Suggests:       zynaddsubfx
+Suggests:       guitarix
+Suggests:       zam-plugins
 
 %description
 StageRig hosts instruments and effects for playing live, for keyboards and

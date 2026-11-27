@@ -54,7 +54,9 @@ other plugin, and it plays sampled instruments itself.
   To start with, [StageRig Sounds](https://github.com/dguedry/stagerig-sounds)
   has 44 free instruments in six packs -- pianos, electric pianos, bass,
   guitar, drums, an orchestra, organs and mallets -- each one tested in
-  StageRig, and free to gig and record with.
+  StageRig, and free to gig and record with. They are a separate install
+  (`sudo apt install stagerig-sounds`, or dnf, or pacman, from the same
+  repository as StageRig), so StageRig itself stays small.
 - **Ready sounds.** A whole program in a file -- instruments, splits and
   layers, effects, levels, knob mappings -- opened into any program from
   **+ Add instrument ▸ Ready sound**, sorted by kind. StageRig Sounds comes
@@ -193,8 +195,7 @@ sudo dnf install stagerig
 curl -fsSL https://dguedry.github.io/stagerig/key.asc | sudo pacman-key --add -
 sudo pacman-key --lsign-key 0584CCE943945336497166DDE3745FD7E8DEB0F3
 printf '\n[stagerig]\nServer = https://dguedry.github.io/stagerig/arch\n' | sudo tee -a /etc/pacman.conf
-sudo pacman -Syu stagerig pipewire-jack surge-xt setbfree dexed zynaddsubfx avldrums.lv2 \
-     dragonfly-reverb lsp-plugins-lv2 x42-plugins-lv2 calf guitarix zam-plugins-lv2
+sudo pacman -Syu stagerig pipewire-jack
 ```
 
 The repository is signed: apt checks it against the key saved above, dnf
@@ -221,15 +222,28 @@ gh release download --repo dguedry/stagerig --pattern '*.rpm'
 sudo dnf install ./stagerig-*.x86_64.rpm
 ```
 
-StageRig comes with a set of free plugins good enough to gig with -- Surge XT,
-setBfree, ZynAddSubFX, AVL Drumkits, Dragonfly Reverb, LSP, x42, Calf,
-Guitarix, ZamAudio. The `.deb` and `.rpm` recommend them, so apt and dnf
-install them with StageRig unless told not to; on Arch the install line above
-names them. Installed without them, or want them back:
+StageRig ships no plugins but the General MIDI player. For sounds to play
+straight away, add **StageRig Sounds** from the same repository: 44 sampled
+instruments, 43 ready sounds made from them, and the reverbs they play
+through. Installing it downloads the instruments (about 3.2 GB) and checks
+them; on Debian, Ubuntu and Fedora it also brings the free plugins below.
+
+```sh
+sudo apt install stagerig-sounds      # or: sudo dnf install stagerig-sounds
+                                      # or: sudo pacman -S stagerig-sounds
+```
+
+The free plugins, good enough to gig with -- Surge XT, setBfree, ZynAddSubFX,
+AVL Drumkits, Dragonfly Reverb, LSP, x42, Calf, Guitarix, ZamAudio -- one by
+one:
 
 ```sh
 sudo apt install surge-xt setbfree zynaddsubfx-lv2 avldrums.lv2 dragonfly-reverb \
                  lsp-plugins-lv2 x42-plugins calf-plugins guitarix-lv2 zam-plugins
+
+# Arch Linux
+sudo pacman -S surge-xt setbfree dexed zynaddsubfx avldrums.lv2 dragonfly-reverb \
+               lsp-plugins-lv2 x42-plugins-lv2 calf guitarix zam-plugins-lv2
 ```
 
 The manual's *Good free plugins to start with* says what each is for, gives

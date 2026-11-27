@@ -323,7 +323,7 @@ set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 set(CPACK_RPM_PACKAGE_URL "${CPACK_PACKAGE_HOMEPAGE_URL}")
 set(CPACK_RPM_PACKAGE_REQUIRES "libX11, libXext, libXrandr, libXinerama, libXcursor, mesa-libGL")
-set(CPACK_RPM_PACKAGE_SUGGESTS "pipewire-jack-audio-connection-kit, calf")
+set(CPACK_RPM_PACKAGE_SUGGESTS "pipewire-jack-audio-connection-kit, lv2-calf-plugins")
 # the icon and applications dirs belong to the filesystem/hicolor packages
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "/usr/share/applications" "/usr/share/icons" "/usr/share/icons/hicolor"

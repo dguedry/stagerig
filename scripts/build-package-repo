@@ -3,7 +3,8 @@
 #
 #   scripts/build-package-repo <packages-dir> <site-dir> <base-url>
 #
-# <packages-dir> holds .deb and .x86_64.rpm files (any number of versions),
+# <packages-dir> holds .deb and .x86_64.rpm files (any number of versions,
+# and StageRig Sounds' _all.deb and .noarch.rpm),
 # and the Arch .pkg.tar.zst files (StageRig, novnc, websockify) if there are any.
 # <site-dir> is written fresh: apt/, rpm/, arch/, key.gpg, key.asc,
 # stagerig.repo, index.html. <base-url> is where the site is served, e.g.
@@ -23,10 +24,12 @@ mkdir -p "$SITE/apt/pool/main" "$SITE/apt/dists/stable/main/binary-amd64" "$SITE
 
 shopt -s nullglob
 debs=("$PKGS"/*.deb)
-rpms=("$PKGS"/*.x86_64.rpm)
+rpms=("$PKGS"/*.x86_64.rpm "$PKGS"/*.noarch.rpm)
 pkgs=("$PKGS"/*.pkg.tar.zst)
 [ ${#debs[@]} -gt 0 ] || { echo "no .deb in $PKGS"; exit 1; }
 [ ${#rpms[@]} -gt 0 ] || { echo "no .rpm in $PKGS"; exit 1; }
+# The sounds' package alone is not a repository of StageRig
+ls "$PKGS"/stagerig_*.deb >/dev/null 2>&1 || { echo "no StageRig .deb in $PKGS"; exit 1; }
 cp "${debs[@]}" "$SITE/apt/pool/main/"
 cp "${rpms[@]}" "$SITE/rpm/"
 

@@ -2259,7 +2259,7 @@ private:
             }
             for (const auto& k : SfzSynth::categories())
                 if (byKind.count (k) != 0) ready.addSubMenu (k, byKind[k]);
-            if (sounds.isEmpty()) ready.addItem (-1, "None yet: StageRig Sounds has free ones  (see Free sampled instruments in the manual)", false);
+            if (sounds.isEmpty()) ready.addItem (-1, "None yet: install the stagerig-sounds package  (see Free sampled instruments in the manual)", false);
             ready.addSeparator();
             ready.addItem (339999, "Open a sound file...");
             const auto& inputs = engine.getSetup().inputs;

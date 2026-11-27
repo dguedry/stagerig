@@ -301,8 +301,9 @@ jobs:
 
   # The apt, dnf and pacman repositories on GitHub Pages, made again after every
   # release from the last ten releases' packages, so `apt upgrade`, `dnf upgrade`
-  # and `pacman -Syu` bring StageRig up to date. Signed with the STAGERIG_REPO_SIGNING_KEY secret
-  # (an armored private key with no passphrase, used for nothing else).
+  # and `pacman -Syu` bring StageRig up to date, with StageRig Sounds' package
+  # beside it. Signed with the STAGERIG_REPO_SIGNING_KEY secret (an armored
+  # private key with no passphrase, used for nothing else).
   # Run the workflow by hand on main to publish again without a release.
   package-repo:
     name: Publish the apt, dnf and pacman repositories
@@ -333,6 +334,11 @@ jobs:
           for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 10 --json tagName -q '.[].tagName'); do
             gh release download "$tag" --repo "$GITHUB_REPOSITORY" -p '*.deb' -p '*.x86_64.rpm' -p '*.pkg.tar.zst' -D pkgs --skip-existing || true
           done
+          # StageRig Sounds: its small package (it downloads the packs, which
+          # stay on that repository's releases), from its latest release
+          gh release download --repo dguedry/stagerig-sounds \
+            -p 'stagerig-sounds_*_all.deb' -p 'stagerig-sounds-*.noarch.rpm' -p 'stagerig-sounds-*-any.pkg.tar.zst' \
+            -D pkgs --skip-existing || echo "no StageRig Sounds packages: published without them"
           ls -la pkgs
       - name: Signing key
         env:

@@ -47,6 +47,7 @@ Recommends:
  poppler-utils,
  libfluidsynth3,
  fluid-soundfont-gm,
+Suggests:
  surge-xt,
  setbfree,
  zynaddsubfx-lv2,

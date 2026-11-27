@@ -363,7 +363,7 @@ missing says what: an instrument is kept, and plays once its plugin is
 installed; an effect is left out. A sound made with a plugin you do not have
 (another player's Kontakt instrument) cannot be made to play without it. The
 reverbs in StageRig Sounds' ready sounds are Dragonfly's, and Calf's where a
-Linux has no Dragonfly (Fedora): both come with StageRig's packages.
+Linux has no Dragonfly (Fedora): the `stagerig-sounds` package brings them.
 
 ### Grouping programs
 
@@ -2126,12 +2126,13 @@ naming the same setting. That is normal and not a sign of a lost setting.
 
 ## Good free plugins to start with
 
-Linux has free plugins good enough to gig with, and the distributions package
-them. StageRig's `.deb` and `.rpm` recommend these, so apt and dnf install them
-with it unless told not to; on Arch, the install line in the README names
-them. Installed StageRig without them? One line gets them; press **Scan LV2**
-(and **Scan VST3**, **Scan CLAP** where a plugin ships them) afterwards to
-add them by hand (ready sounds find theirs without a scan):
+StageRig installs no plugins of its own beyond the General MIDI player, but
+Linux has free ones good enough to gig with, and the distributions package
+them. The `stagerig-sounds` package (see
+[Free sampled instruments](#free-sampled-instruments)) brings most of them on
+Debian, Ubuntu and Fedora. Or one line gets a working rig's worth; press
+**Scan LV2** (and **Scan VST3**, **Scan CLAP** where a plugin ships them)
+afterwards (ready sounds find theirs without a scan):
 
 ```sh
 # Debian / Ubuntu / Mint
@@ -2200,16 +2201,30 @@ chosen and tested for playing live: pianos (a grand, an upright, a
 honky-tonk), electric pianos (Rhodes, Wurlitzer, CP-80, Pianet, FM), bass,
 guitar, alto sax, two drum kits on the General MIDI keys, an orchestra
 (strings, brass, woodwinds, harp, timpani), and organs, harpsichord, mallets,
-harmonica and accordion. Each pack is one `.zip`, added the usual way (below),
-from <https://github.com/dguedry/stagerig-sounds>. Or install all of them
-(3.5 GB) with one line in a terminal:
+harmonica and accordion. Each pack also has finished programs made from its
+instruments -- 43 in all, under **+ Add instrument ▸ Ready sound**: see
+[Ready sounds](#ready-sounds). They are not part of StageRig; add them from
+the same repository StageRig came from:
+
+    sudo apt install stagerig-sounds        # Debian, Ubuntu, Mint
+    sudo dnf install stagerig-sounds        # Fedora
+    sudo pacman -S stagerig-sounds          # Arch
+
+That downloads the six packs (3.5 GB on disk) into
+`/usr/share/stagerig/instruments`, where StageRig finds them with nothing to
+add, checks each one, and brings the reverbs the ready sounds play through
+(and, on Debian, Ubuntu and Fedora, the free plugins in
+[Good free plugins to start with](#good-free-plugins-to-start-with)). If the
+download stops -- no network, a full disk -- `sudo stagerig-sounds` tries again;
+removing the package removes the packs. Updates come with the system's.
+
+Without the package, each pack is one `.zip` from
+<https://github.com/dguedry/stagerig-sounds>, added the usual way (below), or
+all of them, just for you, into `~/.local/share/sounds/sfz`:
 
     curl -fsSL https://github.com/dguedry/stagerig-sounds/releases/latest/download/install.sh | sh
 
-That puts them in `~/.local/share/sounds/sfz`, where StageRig finds them with
-nothing to add. Each pack also has finished programs made from its
-instruments -- 43 in all, under **+ Add instrument ▸ Ready sound**: see
-[Ready sounds](#ready-sounds). They come from Salamander, FreePats, Karoryfer, Versilian
+They come from Salamander, FreePats, Karoryfer, Versilian
 and others under CC0 and CC BY licences, free to use in your music; each
 pack's `CREDITS.txt` names who made what.
 
