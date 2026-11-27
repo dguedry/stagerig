@@ -55,6 +55,7 @@ works inside, see the [README](../README.md).
 - [Plugin formats](#plugin-formats)
 - [Good free plugins to start with](#good-free-plugins-to-start-with)
 - [Free sampled instruments](#free-sampled-instruments)
+- [Free sounds from the big makers](#free-sounds-from-the-big-makers)
 - [Windows plugins](#windows-plugins)
 - [When something goes wrong](#when-something-goes-wrong)
 - [Files StageRig uses](#files-stagerig-uses)
@@ -2106,6 +2107,9 @@ sudo apt install surge-xt setbfree zynaddsubfx-lv2 avldrums.lv2 \
                  guitarix-lv2 zam-plugins
 # Fedora
 sudo dnf install setBfree zynaddsubfx lsp-plugins-lv2 lv2-calf-plugins guitarix zam-plugins
+# Arch Linux
+sudo pacman -S surge-xt setbfree dexed zynaddsubfx avldrums.lv2 dragonfly-reverb \
+               lsp-plugins-lv2 x42-plugins-lv2 calf guitarix zam-plugins-lv2
 ```
 
 Instruments:
@@ -2134,7 +2138,8 @@ Effects:
 - **ZamAudio** -- ZamComp, ZamEQ2, ZamTube: simple and good.
 
 Not packaged, worth fetching from their own sites, all native Linux: **Vital**
-(free tier) and **Odin 2** (synths), **Dexed** (the DX7), u-he's free
+(free tier), **Odin 2** and **OB-Xf** (synths; OB-Xf is the Oberheim
+OB-X, kept up by the Surge team), **Dexed** (the DX7), u-he's free
 **Tyrell N6**, **Podolski** and **Zebralette**, **Neural Amp Modeler**
 (amp captures), **Airwindows Consolidated** (hundreds of effects in one
 plugin), **Cardinal** (a modular). Windows-only plugins go through yabridge;
@@ -2273,6 +2278,51 @@ not play; the rest of the program plays as usual.
 
 Sampled instruments belong on a fast disk (an SSD): the sampler reads each
 note's recording from it while the note sounds.
+
+## Free sounds from the big makers
+
+Several of the big sample-library makers give away real libraries -- an
+orchestra, pianos, organs, a whole synth -- for a free account. They run on
+Windows, so on Linux they go through
+[VST Environment](https://github.com/dguedry/vstenv): install it, add the
+maker's app there, sign in, download, and the plugin appears in StageRig's
+**Plugins** window like any other. Each one is yours to keep, with no time
+limit; checked in November 2026.
+
+| Free library | Maker | Good for | Installs with |
+|---|---|---|---|
+| **Berlin Free Orchestra** -- 34 instruments from the Berlin series: strings, brass, woodwinds, percussion | Orchestral Tools | Orchestral pads and lines, strings under a piano | SINE Player |
+| **SINEfactory** -- add any one title and every one is yours: Ratio (grand piano), Roads (electric piano), Clutch (tonewheel organ), Crucible (church organ), Spindle (felt piano), Helix (strings), Rotary (big-band horns), Crux (electric basses) and more | Orchestral Tools | Keys, organ, horns | SINE Player |
+| **Layers** -- a full orchestra playing chords from one key | Orchestral Tools | Big endings, swells | SINE Player |
+| **BBC Symphony Orchestra Discover** -- 34 instruments, about 240 MB | Spitfire Audio | Orchestral layers on a small computer | Spitfire Audio app |
+| **Spitfire Symphony Orchestra Discover** -- 44 instruments | Spitfire Audio | Orchestral layers | Kontakt Player (Native Access) |
+| **Komplete Start** -- Kontakt Factory Selection 2, Analog Dreams, Massive X Player, Guitar Rig 7 Player and more, 2 to 17 GB | Native Instruments | Pads, synths, choir, guitar amps | Native Access |
+| **The Free Orchestra** | ProjectSAM | Cinematic orchestra | Native Access (Kontakt Player) |
+| **Analog Lab Play** -- 100 sounds from Arturia's V Collection, a grand, a B-3 and vintage synth keys among them | Arturia | One plugin with a little of everything | Arturia Software Center |
+| **SampleTank 4 CS** -- 50 instruments, about 4 GB | IK Multimedia | Bread-and-butter keys, bass, drums, pads | IK Product Manager |
+| **HALion Sonic** with Steinberg's free libraries, among them Taped Vibes (a Wurlitzer) | Steinberg | Electric piano, pianos | Steinberg Download Assistant |
+
+How each maker's app does in VST Environment is in its
+[compatibility table](https://github.com/dguedry/vstenv#what-works). SINE
+Player works, but its sign-in fields do not show what you type: type
+carefully, it is there. The Spitfire Audio app opens and browses, but
+signing in and installing through it are not confirmed yet.
+
+Three things to know before you start:
+
+- **Kontakt Player or full Kontakt.** The free Kontakt Player plays only
+  libraries made for it, the ones that install through Native Access (all
+  of those above). Any other Kontakt library -- most free ones found on the
+  web, Pianobook's Kontakt versions among them -- runs for 15 minutes and
+  then stops, unless you own the full Kontakt. Where a free library also
+  comes as **Decent Sampler** or **SFZ**, take that: StageRig plays it with
+  nothing else to install (see *Free sampled instruments*).
+- **Spitfire LABS is gone.** Spitfire stopped LABS on 31 October 2026: it
+  can no longer be installed or downloaded again. Its sounds moved to
+  Splice INSTRUMENT, which has not been tried in VST Environment yet.
+- **Not for StageRig:** Muse Sounds play only inside MuseScore, and
+  Pianoteq's free trial silences some notes and stops after 20 minutes.
+  Pianoteq bought outright is a fine native Linux piano.
 
 ## Windows plugins
 
