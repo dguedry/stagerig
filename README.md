@@ -57,6 +57,18 @@ other plugin, and it plays sampled instruments itself.
   StageRig, and free to gig and record with. They are a separate install
   (`sudo apt install stagerig-sounds`, or dnf, or pacman, from the same
   repository as StageRig), so StageRig itself stays small.
+
+  **More free sounds.** [FreePats](https://freepats.zenvoid.org/) and
+  [SFZ Instruments](https://sfzinstruments.github.io/) list free SFZ
+  libraries by kind of sound, and [Pianobook](https://www.pianobook.co.uk/)
+  has hundreds of free Decent Sampler instruments; StageRig plays all of
+  them itself. Many of the big makers give away a library too (Spitfire's
+  BBC Symphony Orchestra Discover, Native Instruments' Komplete Start),
+  played through their Windows plugins via
+  [vstenv](#windows-plugins-via-yabridge-and-vstenv). The manual's
+  [Free sampled instruments](docs/MANUAL.md#free-sampled-instruments) and
+  [Free sounds from the big makers](docs/MANUAL.md#free-sounds-from-the-big-makers)
+  say how to add each, and what to check in its licence.
 - **Ready sounds.** A whole program in a file -- instruments, splits and
   layers, effects, levels, knob mappings -- opened into any program from
   **+ Add instrument ▸ Ready sound**, sorted by kind. StageRig Sounds comes
