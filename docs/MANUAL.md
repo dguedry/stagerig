@@ -2162,6 +2162,22 @@ maker recorded, and the sampler reads it from disk as you play, so it is
 ready in under a second and takes little memory. A soundfont is read whole
 into memory.
 
+**The quickest start: StageRig Sounds.** 44 free instruments in six packs,
+chosen and tested for playing live: pianos (a grand, an upright, a
+honky-tonk), electric pianos (Rhodes, Wurlitzer, CP-80, Pianet, FM), bass,
+guitar, alto sax, two drum kits on the General MIDI keys, an orchestra
+(strings, brass, woodwinds, harp, timpani), and organs, harpsichord, mallets,
+harmonica and accordion. Each pack is one `.zip`, added the usual way (below),
+from <https://github.com/dguedry/stagerig-sounds>. Or install all of them
+(3.5 GB) with one line in a terminal:
+
+    curl -fsSL https://github.com/dguedry/stagerig-sounds/releases/latest/download/install.sh | sh
+
+That puts them in `~/.local/share/sounds/sfz`, where StageRig finds them with
+nothing to add. They come from Salamander, FreePats, Karoryfer, Versilian
+and others under CC0 and CC BY licences, free to use in your music; each
+pack's `CREDITS.txt` names who made what.
+
 **A grand piano: Salamander.** A Yamaha C5 recorded by Alexander Holm in
 sixteen loudnesses, free to use and to share with credit (Creative Commons
 Attribution 3.0). The FreePats project keeps it at

@@ -51,6 +51,11 @@ other plugin, and it plays sampled instruments itself.
   woodwinds -- from their names, the same way for every library, and an
   instrument recorded in several playing styles is listed once.
 
+  To start with, [StageRig Sounds](https://github.com/dguedry/stagerig-sounds)
+  has 44 free instruments in six packs -- pianos, electric pianos, bass,
+  guitar, drums, an orchestra, organs and mallets -- each one tested in
+  StageRig, and free to gig and record with.
+
   ![Add instrument, Sampled instrument (built in): the kinds of sound, the strings among them, and the choices to add a library from its .zip, from a folder, or one instrument file](docs/images/sampled-instruments.png)
 
 - **Separate pad boxes, knob boxes and footswitches** count as part of a
