@@ -4,6 +4,7 @@
 #include "Theme.h"
 #include "GmSynth.h"
 #include "SfzSynth.h"
+#include "SoundFiles.h"
 #include "DecentSampler.h"
 #include "SamplerPluginFormat.h"
 #include "PatchDialog.h"
@@ -2241,7 +2242,35 @@ private:
         }
         if (others.getNumItems() == 0) others.addItem (199999, "No other keyboard", false);
 
+        /* Ready sounds: a whole program -- instruments, effects, levels -- from
+           a file, StageRig Sounds' or the player's own. Opening one replaces
+           the program, so it comes first: for an empty program it is the
+           quickest way to a sound. */
+        const auto settingsFolder = owner.getSettings().getFile().getParentDirectory();
+        const auto sounds = SoundFiles::installed (settingsFolder, engine.getPluginHost());
+        PopupMenu ready;
+        {
+            std::map<String, PopupMenu> byKind;
+            for (int i = 0; i < sounds.size(); ++i)
+            {
+                const auto& snd = sounds.getReference (i);
+                byKind[snd.kind].addItem (330000 + i, snd.needs.isEmpty() ? snd.name : snd.name + "  -- needs " + snd.needs.joinIntoString (", "),
+                                          snd.needs.isEmpty());
+            }
+            for (const auto& k : SfzSynth::categories())
+                if (byKind.count (k) != 0) ready.addSubMenu (k, byKind[k]);
+            if (sounds.isEmpty()) ready.addItem (-1, "None yet: StageRig Sounds has free ones  (see Free sampled instruments in the manual)", false);
+            ready.addSeparator();
+            ready.addItem (339999, "Open a sound file...");
+            const auto& inputs = engine.getSetup().inputs;
+            const int in = owner.getSelectedInput(), prog = owner.getEditedProgram();
+            const bool hasSomething = in >= 0 && in < (int) inputs.size() && ! inputs[(size_t) in].programs[(size_t) prog].isEmpty();
+            ready.addItem (339998, "Save this program as a sound...", hasSomething);
+        }
+
         PopupMenu menu;
+        menu.addSubMenu ("Ready sound", ready);
+        menu.addSeparator();
         menu.addSubMenu ("Plugin instrument", plugins);
         menu.addSubMenu ("MIDI device (hardware synth, module, lights)", external);
         menu.addItem (300000, GmSynth::isAvailable() ? String ("General MIDI player (built in)")
@@ -2260,9 +2289,12 @@ private:
         }
         menu.addSubMenu ("Another keyboard's program", others);
 
-        menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types, ports, sampled] (int result)
+        menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types, ports, sampled, sounds] (int result)
         {
             const int in = owner.getSelectedInput(), prog = owner.getEditedProgram();
+            if (result == 339999) { owner.chooseSoundFile (in, prog); return; }
+            if (result == 339998) { owner.saveProgramAsSound (in, prog); return; }
+            if (result >= 330000 && result - 330000 < sounds.size()) { owner.openSound (in, prog, sounds.getReference (result - 330000).file); return; }
             if (result == 319999) { owner.chooseSamplerFile (in, prog); return; }
             if (result == 319998) { owner.chooseSampleLibrary(); return; }
             if (result == 319997) { owner.chooseSampleZip(); return; }
@@ -3500,7 +3532,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         bool anyDevice = false;
         for (const auto& in : inputs) if (in.midiDeviceIdentifier.isNotEmpty() || in.isAudio()) anyDevice = true;
         if (! anyDevice && self->engine.getPluginHost().getKnownPlugins().getTypes().isEmpty())
-            self->showStatus ("Start here: Audio... picks your interface, Plugins... scans for sounds, then choose each keyboard's MIDI device under INPUTS.");
+            self->showStatus ("Start here: Audio... picks your interface; choose each keyboard's MIDI device under INPUTS; then + Add instrument... > Ready sound gives a program a finished sound.");
     });
 }
 
@@ -5103,6 +5135,83 @@ void MainComponent::sampleLibraryChosen (const File& dir, const String& how)
             + (how.isNotEmpty() ? how + "\n\n" : String())
             + "Leave the folder where it is: StageRig plays the instruments from there.", "OK");
     }
+}
+
+void MainComponent::openSound (int inputIndex, int program, const File& file)
+{
+    const auto settingsFolder = settings.getFile().getParentDirectory();
+    ProgramDef def;
+    StringArray left;
+    String error;
+    if (! SoundFiles::read (file, settingsFolder, engine.getPluginHost(), def, left, error))
+    {
+        showStatus (error);
+        return;
+    }
+    auto put = [this, inputIndex, program, def, left]
+    {
+        engine.replaceProgram (inputIndex, program, def);
+        programsPanel->refresh();       // its name and group in the boxes below the list
+        markDirty();
+        if (left.isEmpty())
+            showStatus ("Program " + String (program).paddedLeft ('0', 3) + " is now " + def.name + ". Change anything: it is your program now.");
+        else
+            AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, def.name + ": not everything is on this computer",
+                                              "These parts of the sound did not come with it:\n\n    " + left.joinIntoString ("\n    ")
+                                                  + "\n\nInstall what is missing (the manual's Good free plugins to start with has the commands), "
+                                                    "then open the sound again.", "OK");
+    };
+    const auto& inputs = engine.getSetup().inputs;
+    if (inputIndex < 0 || inputIndex >= (int) inputs.size()) return;
+    const auto& now = inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (now.isEmpty()) { put(); return; }
+    confirm ("Replace this program", "Replace program " + String (program).paddedLeft ('0', 3) + (now.name.isNotEmpty() ? " " + now.name : String())
+                 + " with " + def.name + "?\n\nIts instruments, effects and mappings go. There is no undo.", "Replace", put);
+}
+
+void MainComponent::chooseSoundFile (int inputIndex, int program)
+{
+    gmChooser = std::make_unique<FileChooser> ("A StageRig sound", File::getSpecialLocation (File::userHomeDirectory),
+                                               String ("*") + SoundFiles::extension);
+    gmChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this, inputIndex, program] (const FileChooser& fc)
+    {
+        if (const auto f = fc.getResult(); f.existsAsFile()) openSound (inputIndex, program, f);
+    });
+}
+
+void MainComponent::saveProgramAsSound (int inputIndex, int program)
+{
+    const auto& inputs = engine.getSetup().inputs;
+    if (inputIndex < 0 || inputIndex >= (int) inputs.size()) return;
+    const auto current = inputs[(size_t) inputIndex].programs[(size_t) program].name;
+    auto* w = new AlertWindow ("Save as a sound", "Its name, as the Ready sound menu will list it. It is kept in My sounds, beside the settings, "
+                                                  "and can be opened into any program.", MessageBoxIconType::NoIcon);
+    w->addTextEditor ("name", current.isNotEmpty() ? current : String ("My sound"));
+    w->addButton ("Save", 1, KeyPress (KeyPress::returnKey));
+    w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+    w->enterModalState (true, ModalCallbackFunction::create ([this, w, inputIndex, program] (int r)
+    {
+        std::unique_ptr<AlertWindow> owned (w);
+        const auto name = w->getTextEditorContents ("name").trim();
+        if (r != 1 || name.isEmpty()) return;
+        const auto folder = SoundFiles::mySoundsFolder (settings.getFile().getParentDirectory());
+        const auto file = folder.getChildFile (File::createLegalFileName (name) + SoundFiles::extension);
+        auto save = [this, inputIndex, program, name, file]
+        {
+            auto def = engine.captureProgram (inputIndex, program);
+            def.name = name;
+            const auto kind = SfzSynth::categories().contains (def.group) ? def.group : SfzSynth::categoryOf (name);
+            String error;
+            if (SoundFiles::write (file, def, kind, {}, error))
+                showStatus ("Saved " + name + " as a sound, under Ready sound > " + kind + ".");
+            else
+                showStatus (error);
+        };
+        if (file.existsAsFile())
+            confirm ("Replace the saved sound", "There is a sound called " + name + " already. Replace it with this program?", "Replace", save);
+        else
+            save();
+    }), false);
 }
 
 void MainComponent::chooseSamplerFile (int inputIndex, int program)

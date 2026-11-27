@@ -3931,6 +3931,31 @@ void Engine::copyProgram (int inputIndex, int from, int to)
     notifyContent (inputIndex, to);
 }
 
+ProgramDef Engine::captureProgram (int inputIndex, int program)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return {};
+    if (auto* rt = getLoaded (inputIndex, program))
+        captureProgramState (inputIndex, *rt);
+    return setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+}
+
+void Engine::replaceProgram (int inputIndex, int program, const ProgramDef& def)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    clearProgram (inputIndex, program);
+    auto& in = setup.inputs[(size_t) inputIndex];
+    in.programs[(size_t) program] = def;
+    if (getLoaded (inputIndex, program) != nullptr)
+    {
+        unloadProgram (*runtimes[(size_t) inputIndex], program);
+        auto* prog = ensureProgramLoaded (inputIndex, program);
+        const ScopedLock sl (lock);
+        if (in.currentProgram == program)
+            runtimes[(size_t) inputIndex]->active = prog;
+    }
+    notifyContent (inputIndex, program);
+}
+
 void Engine::clearProgram (int inputIndex, int program)
 {
     if (! validInput (inputIndex) || ! validProgram (program)) return;

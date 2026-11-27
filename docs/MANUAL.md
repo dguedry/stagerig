@@ -15,6 +15,7 @@ works inside, see the [README](../README.md).
 - [Inputs: keyboards, and audio](#inputs-keyboards-and-audio)
   - [Audio inputs](#audio-inputs)
 - [Programs: your sounds](#programs-your-sounds)
+  - [Ready sounds](#ready-sounds)
   - [Grouping programs](#grouping-programs)
 - [Instruments inside a program](#instruments-inside-a-program)
   - [Routing by channel](#routing-by-channel)
@@ -127,8 +128,9 @@ words onto these.
    cannot take the scan down with it. No plugins yet? See
    [Good free plugins to start with](#good-free-plugins-to-start-with).
 4. Select **Upper** on the left, choose its **MIDI device** and **Channel**.
-5. Click program **000** in the middle list, name it, and press
-   **+ Add instrument... ▸ Plugin instrument**.
+5. Click program **000** in the middle list and press **+ Add instrument...
+   ▸ Ready sound** for a finished sound (see [Ready sounds](#ready-sounds)),
+   or **▸ Plugin instrument** to build one yourself; name the program.
 6. Play. Press **Save As...** when the setup is worth keeping.
 
 **Help** in the toolbar opens this manual inside StageRig, so the answer to
@@ -333,6 +335,35 @@ percussive sounds, or a switch you want to land exactly on the beat.
 
 **Tail** (in the toolbar) is how long the outgoing program keeps sounding after
 that -- after you let go with the option on, after the change with it off.
+
+### Ready sounds
+
+A ready sound is a whole program in a file: its instruments, their splits
+and layers and levels, its effects, its knob mappings. **+ Add instrument...
+▸ Ready sound** lists the ones on this computer by kind of sound (Pianos &
+Keys, Strings, Organs...); choose one and it becomes the program you are on,
+named after it. A program with something in it is replaced, so StageRig asks
+first. From there it is an ordinary program: change anything.
+
+[StageRig Sounds](#free-sampled-instruments) comes with 43, made from its
+instruments and all set to one loudness, so changing from one to the next
+does not jump in level -- *Concert Grand*, *String Section* (violins, violas,
+cellos and basses across the keyboard), *Rhodes with Bass Split*, *Brass
+Section*, *Church Organ*. A few use instruments from two packs; until both are
+installed, the menu says what the sound needs.
+
+**Save this program as a sound...** (in the same menu) keeps the program you
+are on as one of your own, in `My sounds` beside the settings, listed under
+its kind from then on. **Open a sound file...** opens one from anywhere -- a
+sound another player gave you, say.
+
+A sound keeps each plugin's settings as they were when it was saved, so it
+plays only where its plugins are installed. Opening one that needs something
+missing says what: an instrument is kept, and plays once its plugin is
+installed; an effect is left out. A sound made with a plugin you do not have
+(another player's Kontakt instrument) cannot be made to play without it. The
+reverbs in StageRig Sounds' ready sounds are Dragonfly's, and Calf's where a
+Linux has no Dragonfly (Fedora): both come with StageRig's packages.
 
 ### Grouping programs
 
@@ -2095,10 +2126,12 @@ naming the same setting. That is normal and not a sign of a lost setting.
 
 ## Good free plugins to start with
 
-StageRig installs no plugins of its own beyond the General MIDI player, but
-Linux has free ones good enough to gig with, and the distributions package
-them. One line gets a working rig's worth; press **Scan LV2** (and **Scan
-VST3**, **Scan CLAP** where a plugin ships them) afterwards:
+Linux has free plugins good enough to gig with, and the distributions package
+them. StageRig's `.deb` and `.rpm` recommend these, so apt and dnf install them
+with it unless told not to; on Arch, the install line in the README names
+them. Installed StageRig without them? One line gets them; press **Scan LV2**
+(and **Scan VST3**, **Scan CLAP** where a plugin ships them) afterwards to
+add them by hand (ready sounds find theirs without a scan):
 
 ```sh
 # Debian / Ubuntu / Mint
@@ -2174,7 +2207,9 @@ from <https://github.com/dguedry/stagerig-sounds>. Or install all of them
     curl -fsSL https://github.com/dguedry/stagerig-sounds/releases/latest/download/install.sh | sh
 
 That puts them in `~/.local/share/sounds/sfz`, where StageRig finds them with
-nothing to add. They come from Salamander, FreePats, Karoryfer, Versilian
+nothing to add. Each pack also has finished programs made from its
+instruments -- 43 in all, under **+ Add instrument ▸ Ready sound**: see
+[Ready sounds](#ready-sounds). They come from Salamander, FreePats, Karoryfer, Versilian
 and others under CC0 and CC BY licences, free to use in your music; each
 pack's `CREDITS.txt` names who made what.
 
@@ -2490,6 +2525,7 @@ problem, include the log and say what you were doing and when.
 | `~/.config/StageRig/Knob layouts/` | Your knob layouts, one `*.stagerig-controls` file each: import and export them from an instrument's **Knobs** button. |
 | `~/.config/StageRig/icons/` | Cached plugin icons. |
 | `~/.config/StageRig/Instruments/` | Sampled instruments for the built-in sampler: a folder each, with its `.sfz` file and recordings. |
+| `~/.config/StageRig/My sounds/` | Ready sounds you saved, one `.stagerig-sound` file each. |
 | `~/.config/StageRig/Sample libraries.txt` | The sample library folders added in **Options ▸ Sample libraries**, one a line. |
 | `~/.config/StageRig/Looks/` | Colours of your own, if you want them: see below. |
 | `~/.config/StageRig/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |

@@ -12,6 +12,7 @@
 #include "ClapPluginFormat.h"
 #include "GmSynth.h"
 #include "SamplerPluginFormat.h"
+#include "SoundFiles.h"
 #include "SfzSynth.h"
 #include "DecentSampler.h"
 #include "MidiEditor.h"
@@ -226,6 +227,91 @@ static int probeNks (const String& wanted)
         }
     }
     return 0;
+}
+
+/** STAGERIG_TEST_LEVELS=/folder: every ready sound in it opened into a
+    program and played the same way -- a chord (the kick, snare and hi-hat
+    for drums) held for a second and a half, in time -- and how loud it is:
+    "LEVEL <dB> <file>", its loudest 0.4 s, so sounds can be set to one
+    loudness. What did not come with a sound is said as "LEFT". Run by
+    hand, on this computer's plugins. */
+static int probeLevels (const String& path)
+{
+    const File scratch = File::getSpecialLocation (File::tempDirectory).getChildFile ("StageRigLevelsTest-" + String (Time::currentTimeMillis()));
+    scratch.createDirectory();
+    struct Cleanup { File d; ~Cleanup() { d.deleteRecursively(); } } cleanup { scratch };
+    PropertiesFile::Options opts;
+    opts.applicationName = "StageRigLevelsTest";
+    opts.filenameSuffix = "settings";
+    PropertiesFile settings (scratch.getChildFile ("test.settings"), opts);
+    PluginHost host (settings);
+    Engine engine (host, settings, /*startAudioDevice*/ false);
+    auto settle = [&engine] { pump (30); for (const auto t0 = Time::getMillisecondCounterHiRes(); engine.hasPendingLoads() && Time::getMillisecondCounterHiRes() - t0 < 180000.0;) pump (20); };
+    const double blockMs = 1000.0 * kBlock / engine.getSampleRate();
+    AudioBuffer<float> buf (2, kBlock);
+    /* In time, as a device would: the sampler streams from disk. The level
+       is the loudest 0.4 s (a meter's "momentary"): fair to a held organ
+       and to a drum hit that dies away alike. */
+    auto play = [&] (int blocks)
+    {
+        std::vector<double> powers;
+        for (int b = 0; b < blocks; ++b)
+        {
+            const auto t = Time::getMillisecondCounterHiRes();
+            buf.clear();
+            engine.renderBlockForTesting (buf.getArrayOfWritePointers(), 2, kBlock);
+            double pw = 0.0;
+            for (int c = 0; c < 2; ++c) pw += std::pow ((double) buf.getRMSLevel (c, 0, kBlock), 2.0) / 2.0;
+            powers.push_back (pw);
+            const auto took = Time::getMillisecondCounterHiRes() - t;
+            if (took < blockMs) Thread::sleep ((int) (blockMs - took));
+        }
+        const int window = jmax (1, (int) std::lround (400.0 / blockMs));
+        double best = 0.0, sum = 0.0;
+        for (int b = 0; b < (int) powers.size(); ++b)
+        {
+            sum += powers[(size_t) b];
+            if (b >= window) sum -= powers[(size_t) (b - window)];
+            if (b >= window - 1 || b == (int) powers.size() - 1) best = jmax (best, sum / jmin (window, b + 1));
+        }
+        return best;
+    };
+
+    Array<File> files;
+    for (const auto& f : File (path).findChildFiles (File::findFiles, true, String ("*") + SoundFiles::extension)) files.add (f);
+    files.sort();
+    int program = 0;
+    for (const auto& f : files)
+    {
+        ProgramDef def;
+        StringArray left;
+        String err;
+        if (! SoundFiles::read (f, scratch, host, def, left, err)) { std::printf ("ERROR %s: %s\n", f.getFullPathName().toRawUTF8(), err.toRawUTF8()); continue; }
+        for (const auto& l : left) std::printf ("LEFT %s: %s\n", f.getFileName().toRawUTF8(), l.toRawUTF8());
+        const int p = program++ % 128;
+        engine.replaceProgram (0, p, def);
+        engine.selectProgram (0, p);
+        settle();
+        bool alive = true;
+        for (int s = 0; s < (int) def.slots.size(); ++s)
+            if (! engine.isPluginAlive (0, p, s))
+            {
+                alive = false;
+                std::printf ("ERROR %s: slot %d: %s\n", f.getFileName().toRawUTF8(), s, engine.getPluginLoadError (0, p, s).toRawUTF8());
+            }
+        if (! alive) continue;
+        play (20);
+        const bool drums = f.getFileNameWithoutExtension().containsIgnoreCase ("drum");
+        const std::vector<int> notes = drums ? std::vector<int> { 36, 38, 42 } : std::vector<int> { 48, 60, 64, 67 };
+        for (int n : notes) engine.injectMidi (0, MidiMessage::noteOn (1, n, (uint8) 90));
+        const double power = play (128);                               // about a second and a half
+        for (int n : notes) engine.injectMidi (0, MidiMessage::noteOff (1, n));
+        play (120);
+        engine.clearProgram (0, p);
+        std::printf ("LEVEL %.1f %s\n", power > 0.0 ? 10.0 * std::log10 (power) : -200.0, f.getFullPathName().toRawUTF8());
+        std::fflush (stdout);
+    }
+    std::_Exit (0);
 }
 
 /** STAGERIG_TEST_SAMPLER=/path/Instrument.sfz: a real sampled instrument in
@@ -919,6 +1005,8 @@ int main()
         return probeNks (String (n));
     if (const char* n = std::getenv ("STAGERIG_TEST_SOUNDS"); n != nullptr && *n != 0)
         return probeSounds (String (n));
+    if (const char* n = std::getenv ("STAGERIG_TEST_LEVELS"); n != nullptr && *n != 0)
+        return probeLevels (String (n));
     if (const char* n = std::getenv ("STAGERIG_TEST_SAMPLER"); n != nullptr && *n != 0)
         return probeSampler (String (n));
 
@@ -4923,6 +5011,87 @@ int main()
                     CHECK (dir.getChildFile ("notazip.zip").replaceWithText ("partial download"));
                     CHECK (SfzSynth::unpackDownload (dir.getChildFile ("notazip.zip"), zipErr) == File() && zipErr.contains ("finished downloading"));
                 }
+            }
+
+            /* A ready sound: a program in a file of its own, opened into
+               another program. Its sampled instrument travels with it (written
+               relative to the file, so the pack can move); an effect missing
+               here takes its first stand-in that is here, one with none is left
+               out with its mappings, and the mappings after it still point
+               at the same effect. */
+            {
+                const auto settingsDir = dir.getChildFile ("settings");
+                const auto pack = dir.getChildFile ("Sound Pack"), moved = dir.getChildFile ("Moved Pack");
+                pack.deleteRecursively();
+                moved.deleteRecursively();
+                CHECK (pack.getChildFile ("Felt").createDirectory());
+                const auto inst = pack.getChildFile ("Felt/Felt Piano.sfz");
+                CHECK (inst.replaceWithText ("<region> sample=../../tone.wav pitch_keycenter=69 lokey=0 hikey=127 loop_mode=loop_continuous loop_start=0 loop_end=47999\n"));
+                ProgramDef p;
+                p.name = "Felt Room";
+                SlotDef s;
+                s.plugin = SamplerPluginFormat::describe (inst);
+                s.gainDb = -3.0f;
+                p.slots.push_back (s);
+                EffectDef gone, wanted;
+                gone.plugin.name = "Missing Delay";   gone.plugin.pluginFormatName = "LV2";   gone.plugin.fileOrIdentifier = "urn:nowhere:delay";
+                wanted.plugin.name = "Missing Reverb"; wanted.plugin.pluginFormatName = "LV2"; wanted.plugin.fileOrIdentifier = "urn:nowhere:reverb";
+                p.effects = { gone, wanted };
+                MappingDef onGone, onWanted;
+                onGone.slot = -1;   onGone.effect = 0;   onGone.number = 91;
+                onWanted.slot = -1; onWanted.effect = 1; onWanted.number = 93;
+                p.mappings = { onGone, onWanted };
+                const auto file = pack.getChildFile (String ("Felt Room") + SoundFiles::extension);
+                String soundErr;
+                CHECK (SoundFiles::write (file, p, "Pianos & Keys", "A felt piano in a room", soundErr));
+                CHECK (file.loadFileAsString().contains ("file=\\\"Felt/Felt Piano.sfz\\\""));   // relative to the sound
+                {
+                    // The reverb's stand-in: here, one that is on this computer (the test's instrument stands in for a plugin).
+                    auto v = JSON::parse (file.loadFileAsString());
+                    EffectDef standIn;
+                    standIn.plugin = SamplerPluginFormat::describe (inst);
+                    Array<var> alts { standIn.toVar() };
+                    v.getProperty ("program", var()).getProperty ("effects", var()).getArray()->getReference (1).getDynamicObject()->setProperty ("orElse", alts);
+                    CHECK (file.replaceWithText (JSON::toString (v)));
+                }
+
+                // The pack moved: it still finds its instrument.
+                CHECK (pack.moveFileTo (moved));
+                const auto movedFile = moved.getChildFile (file.getFileName());
+                CHECK (SfzSynth::addLibrary (settingsDir, moved));
+                const auto found = SoundFiles::installed (settingsDir, engine.getPluginHost());
+                int at = -1;
+                for (int i = 0; i < found.size(); ++i) if (found[i].file == movedFile) at = i;
+                CHECK (at >= 0 && found[at].name == "Felt Room" && found[at].kind == "Pianos & Keys" && found[at].needs.isEmpty()
+                       && found[at].library == "Moved Pack");
+
+                ProgramDef opened;
+                StringArray left;
+                CHECK (SoundFiles::read (movedFile, settingsDir, engine.getPluginHost(), opened, left, soundErr));
+                std::printf ("     a ready sound: %d effect(s), left out: %s\n", (int) opened.effects.size(), left.joinIntoString ("; ").toRawUTF8());
+                CHECK (opened.name == "Felt Room" && opened.slots.size() == 1 && std::abs (opened.slots[0].gainDb + 3.0f) < 0.001f);
+                CHECK (File (opened.slots[0].plugin.fileOrIdentifier) == moved.getChildFile ("Felt/Felt Piano.sfz"));
+                CHECK (opened.effects.size() == 1 && opened.effects[0].plugin.name == "Felt Piano");        // the stand-in
+                CHECK (left.size() == 1 && left[0].startsWith ("Missing Delay"));
+                CHECK (opened.mappings.size() == 1 && opened.mappings[0].number == 93 && opened.mappings[0].effect == 0);
+
+                // Opened into a program, it plays; saved back out of it, it is the same program.
+                opened.effects.clear();
+                opened.mappings.clear();
+                const int rp = 43;
+                engine.selectProgram (0, rp);
+                settle();
+                engine.replaceProgram (0, rp, opened);
+                settle();
+                CHECK (engine.getSetup().inputs[0].programs[(size_t) rp].name == "Felt Room");
+                CHECK (engine.isPluginAlive (0, rp, 0));
+                const float sound = played();
+                std::printf ("     the ready sound played: %.3f\n", sound);
+                CHECK (sound > 0.01f);
+                const auto again = engine.captureProgram (0, rp);
+                CHECK (again.slots.size() == 1 && again.slots[0].plugin.fileOrIdentifier == opened.slots[0].plugin.fileOrIdentifier);
+                SfzSynth::removeLibrary (settingsDir, moved);
+                engine.clearProgram (0, rp);
             }
 
             engine.selectProgram (0, programBefore);

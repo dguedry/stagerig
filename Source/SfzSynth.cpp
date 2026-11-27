@@ -180,21 +180,24 @@ File SfzSynth::unpackDownload (const File& zipFile, String& error)
     return into;
 }
 
-Array<SfzSynth::Instrument> SfzSynth::installedInstruments (const File& settingsFolder)
+std::vector<SfzSynth::Root> SfzSynth::searchRoots (const File& settingsFolder)
 {
-    Array<Instrument> found;
-    Array<File> seen;
     const auto home = File::getSpecialLocation (File::userHomeDirectory);
     /* Shared folders hold several libraries, one a folder; a chosen library is one itself. */
-    struct Root { File dir; bool isLibrary; };
     std::vector<Root> roots;
     for (const auto& d : { File ("/usr/share/stagerig/instruments"), File ("/usr/local/share/stagerig/instruments"),
                            File ("/usr/share/sounds/sfz"), home.getChildFile (".local/share/sounds/sfz"),
                            settingsFolder != File() ? settingsFolder.getChildFile ("Instruments") : File() })
         roots.push_back ({ d, false });
     for (const auto& d : libraries (settingsFolder)) roots.push_back ({ d, true });
+    return roots;
+}
 
-    for (const auto& root : roots)
+Array<SfzSynth::Instrument> SfzSynth::installedInstruments (const File& settingsFolder)
+{
+    Array<Instrument> found;
+    Array<File> seen;
+    for (const auto& root : searchRoots (settingsFolder))
     {
         if (! root.dir.isDirectory()) continue;
         // A few folders deep, not the whole tree: an instrument's samples sit in folders below its .sfz.

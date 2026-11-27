@@ -60,6 +60,11 @@ public:
         read where they are. Kept one a line in "Sample libraries.txt" beside
         the settings, which the plugin host reads too. */
     static juce::Array<juce::File> libraries (const juce::File& settingsFolder);
+    /** Where instruments are looked for: the shared folders, which hold a
+        library a folder (isLibrary false), then each chosen library. Ready
+        sounds (SoundFiles.h) are looked for in the same places. */
+    struct Root { juce::File dir; bool isLibrary; };
+    static std::vector<Root> searchRoots (const juce::File& settingsFolder);
     static bool addLibrary (const juce::File& settingsFolder, const juce::File& folder);
     static void removeLibrary (const juce::File& settingsFolder, const juce::File& folder);
     /** A library as it was downloaded, a .zip (or .dslibrary), unpacked beside

@@ -46,6 +46,11 @@ public:
     void sampleLibraryChosen (const juce::File& dir, const juce::String& how);
     /** A file chooser for an SFZ file or a Decent Sampler preset: the sampled instrument in it is added to the program. */
     void chooseSamplerFile (int inputIndex, int program);
+    /** Ready sounds (SoundFiles.h): one opened into a program, replacing it
+        (asked first unless it is empty); a file chosen; the program saved as one. */
+    void openSound (int inputIndex, int program, const juce::File&);
+    void chooseSoundFile (int inputIndex, int program);
+    void saveProgramAsSound (int inputIndex, int program);
     /** Marks the setup as changed so the periodic autosave picks it up. */
     void markDirty()                        { dirty = true; }
     /** ARA-only plugins need an ARA host; they may show an empty editor and can hang. */

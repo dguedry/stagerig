@@ -549,6 +549,10 @@ public:
     bool isHoldingNotes (int inputIndex) const;
     void copyProgram (int inputIndex, int from, int to);
     void clearProgram (int inputIndex, int program);
+    /** The program as it sounds now, its plugins' state pulled in: to save it as a sound. */
+    ProgramDef captureProgram (int inputIndex, int program);
+    /** Puts `def` in place of the program, rebuilt at once if it is loaded: a sound opened. */
+    void replaceProgram (int inputIndex, int program, const ProgramDef& def);
 
     //==============================================================================
     // Slots (instruments)
