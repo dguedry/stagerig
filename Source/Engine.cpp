@@ -5518,6 +5518,20 @@ void Engine::handleAsyncUpdate()
 //==============================================================================
 void Engine::timerCallback() { housekeeping(); }
 
+/** The memory the system can still give without swapping, in MB: Linux's
+    MemAvailable. -1 where it cannot be told (then preloading is not held back). */
+static int availableMemoryMB()
+{
+   #if JUCE_LINUX
+    StringArray lines;
+    File ("/proc/meminfo").readLines (lines);
+    for (const auto& l : lines)
+        if (l.startsWith ("MemAvailable:"))
+            return (int) (l.fromFirstOccurrenceOf (":", false, false).trim().getLargeIntValue() / 1024);
+   #endif
+    return -1;
+}
+
 void Engine::housekeeping()
 {
     if (auto* l = liveness) l->heartbeatMs.store (livenessNowMs(), std::memory_order_relaxed);
@@ -5569,6 +5583,19 @@ void Engine::housekeeping()
 
         if (setup.preloadAllPrograms)
         {
+            /* Held back while memory is short: a set bigger than the computer
+               would otherwise push it into swap mid-show. What is loaded
+               stays; the rest loads when chosen, as with Free up memory. */
+            if (i == 0)
+            {
+                const int mb = availableMemoryMB();
+                const bool short_ = mb >= 0 && mb < preloadReserveMB;
+                if (short_ && ! preloadHeldForMemory)
+                    listeners.call ([] (Listener& l) { l.statusMessage ("Memory is low, so the programs not loaded yet will load when you choose them. "
+                                                                        "Close other programs, or tick Options > Free up memory."); });
+                preloadHeldForMemory = short_;
+            }
+            if (preloadHeldForMemory) continue;
             // Keep the loader pool fed (about two programs per worker in flight), a few
             // programs per tick so the message thread stays responsive.
             int started = 0;
@@ -6801,8 +6828,12 @@ std::vector<Engine::CheckItem> Engine::showCheck() const
     if (pluginsOk > 0) add (CheckItem::good, String (pluginsOk) + (pluginsOk == 1 ? " plugin" : " plugins") + " running");
     if (loadingNow > 0) add (CheckItem::warning, String (loadingNow) + (loadingNow == 1 ? " plugin is" : " plugins are") + " still loading. Check again in a moment.");
     if (notLoaded > 0 && ! setup.preloadAllPrograms)
-        add (CheckItem::warning, String (notLoaded) + (notLoaded == 1 ? " plugin loads" : " plugins load") + " only when its program is first chosen, "
-                                 "which can take seconds on stage. Turn on Options > Preload all programs.");
+        add (CheckItem::warning, String (notLoaded) + (notLoaded == 1 ? " plugin loads" : " plugins load") + " only when its program is chosen, "
+                                 "which can take seconds on stage. Untick Options > Free up memory to keep every program loaded.");
+    else if (notLoaded > 0 && preloadHeldForMemory)
+        add (CheckItem::warning, String (notLoaded) + (notLoaded == 1 ? " plugin is" : " plugins are") + " not loaded because memory is low: "
+                                 "each loads when its program is chosen, which can take seconds on stage. Close other programs, "
+                                 "or use fewer or lighter plugins.");
 
     // The songs about to be played: the set if one is chosen, else all of them.
     std::vector<int> songs;

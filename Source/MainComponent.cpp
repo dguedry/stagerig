@@ -3076,7 +3076,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         m.addItem (13, "Pedals and buttons  (the Controls panel, Everywhere)");
         m.addItem (3, "Rescan MIDI devices");
         m.addSectionHeader ("Playing");
-        m.addItem (1, "Preload all programs  (instant changes; uses more memory)", true, setup.preloadAllPrograms);
+        m.addItem (1, "Free up memory: unload a program's plugins after changing away  (changing back waits for them to load)", true, ! setup.preloadAllPrograms);
         m.addItem (2, "Let held notes ring through a program change", true, setup.holdAcrossChange);
         m.addSectionHeader ("Sound and sync");
         m.addItem (5, "Outputs & master effects...");

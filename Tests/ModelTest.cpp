@@ -20,7 +20,7 @@ int main()
     Setup s = Setup::makeDefault();
     // References into s.inputs are held while a third input is added below: room for it first.
     s.inputs.reserve (4);
-    s.preloadAllPrograms = true;
+    s.preloadAllPrograms = false;      // Free up memory: not the default, so it must round-trip
     s.releaseTailSeconds = 2.5;
     s.holdAcrossChange = false;
 
@@ -147,7 +147,18 @@ int main()
     CHECK (r.wasOk());
     if (r.failed()) std::printf ("  %s\n", r.getErrorMessage().toRawUTF8());
 
-    CHECK (loaded.preloadAllPrograms == true);
+    CHECK (loaded.preloadAllPrograms == false);
+    {
+        // Preloading is the default, for a new setup and for one saved before
+        // "unloadAfterChange", whose "preloadAllPrograms": false was only the old default.
+        CHECK (Setup::makeDefault().preloadAllPrograms);
+        auto* old = new juce::DynamicObject();
+        old->setProperty ("format", "stagerig-setup");
+        old->setProperty ("preloadAllPrograms", false);
+        CHECK (Setup::fromVar (juce::var (old)).preloadAllPrograms);
+        auto again = Setup::fromVar (Setup::makeDefault().toVar());
+        CHECK (again.preloadAllPrograms);
+    }
     CHECK (std::abs (loaded.releaseTailSeconds - 2.5) < 1e-9);
     CHECK (loaded.holdAcrossChange == false);
     CHECK (loaded.outputs.size() == 2 && loaded.outputs[1].name == "Monitors" && loaded.outputs[1].left == 2 && loaded.outputs[1].right == 3);

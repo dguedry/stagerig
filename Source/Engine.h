@@ -1044,6 +1044,10 @@ private:
     void resetPluginPositions();                  // audio thread, under lock
 
     int loaderThreadCount = 4;                    // settings "parallelLoads"
+    /** Preloading starts no more loads while the system has less than this free
+        (housekeeping); preloadHeldForMemory says it is holding back. */
+    static constexpr int preloadReserveMB = 1536;
+    bool preloadHeldForMemory = false;
     std::vector<std::thread> loaderThreads;
     std::mutex loaderMutex;
     std::condition_variable loaderCv;

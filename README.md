@@ -181,8 +181,9 @@ has the full table (*If you know Ableton Live*).
 A program change leaves what you are holding to the previous program: keys
 down and the sustain pedal keep sounding there until you let go, and then a
 configurable release tail lets it ring out, so a pad held under the change or a
-pedal down over the bar line is never cut. With **Preload all programs (instant changes; uses more memory)** on,
-every used program stays loaded and changes are instant (at the cost of RAM).
+pedal down over the bar line is never cut. Every used program is loaded at
+start and stays loaded, so changes are instant; on a computer short of memory,
+**Free up memory** unloads a program once you change away from it.
 
 ## Install
 
@@ -534,8 +535,8 @@ StageRig is meant to be played live, so it goes for the smallest safe block:
   `/etc/security/limits.d/`. The Audio dialog reports whether realtime
   scheduling is available.
 * Plugins load in parallel (half the machine's threads, 4 to 12, by default; `parallelLoads` in
-  `~/.config/StageRig/StageRig.settings` changes it), so *Preload all
-  programs* fills a setup quickly. Wine-bridged plugins load in parallel too
+  `~/.config/StageRig/StageRig.settings` changes it), so preloading
+  fills a setup quickly. Wine-bridged plugins load in parallel too
   (`parallelBridgedLoads`, default the same); two Kontakts starting together on
   a cold prefix both come up in the time one takes. If a machine stalls on
   concurrent Wine start-ups, `bridgedColdStartSolo=1` starts the first bridged

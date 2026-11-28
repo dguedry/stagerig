@@ -646,7 +646,12 @@ struct Setup
     int looperCC = 0;
     int looperClearCC = 0;
 
-    bool preloadAllPrograms = false;  // keep every used program's plugins resident
+    /** Every used program's plugins loaded at start and kept (instant changes),
+        unless the player chose to free up memory: then a program loads when
+        chosen and is unloaded once it is changed away from. Saved as
+        "unloadAfterChange"; a setup from before that is preloaded, as its
+        old "preloadAllPrograms": false was only ever the default. */
+    bool preloadAllPrograms = true;
     double releaseTailSeconds = 4.0;  // how long the outgoing program keeps sounding
     bool holdAcrossChange = true;     // a program change leaves held notes and the pedal to the player
 

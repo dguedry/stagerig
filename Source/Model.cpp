@@ -845,7 +845,8 @@ var Setup::toVar() const
     auto* o = new DynamicObject();
     o->setProperty ("format", "stagerig-setup");
     o->setProperty ("version", formatVersion);
-    o->setProperty ("preloadAllPrograms", preloadAllPrograms);
+    o->setProperty ("unloadAfterChange", ! preloadAllPrograms);
+    o->setProperty ("preloadAllPrograms", preloadAllPrograms);     // for StageRig 0.1.106 and older
     o->setProperty ("releaseTailSeconds", releaseTailSeconds);
     o->setProperty ("holdAcrossChange", holdAcrossChange);
     o->setProperty ("tempoBpm", tempoBpm);
@@ -903,7 +904,7 @@ Setup Setup::fromVar (const var& v)
 {
     Setup s;
     s.loadedFormatVersion = prop<int> (v, "version", 1);
-    s.preloadAllPrograms = prop<bool> (v, "preloadAllPrograms", false);
+    s.preloadAllPrograms = ! prop<bool> (v, "unloadAfterChange", false);
     s.releaseTailSeconds = prop<double> (v, "releaseTailSeconds", 4.0);
     s.holdAcrossChange = prop<bool> (v, "holdAcrossChange", true);
     s.tempoBpm           = prop<double> (v, "tempoBpm", 120.0);   // absent in older setups

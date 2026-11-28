@@ -159,7 +159,7 @@ changes. **Open...** opens a setup file.
 **Options** holds the things set once, in five groups. *Keyboards and
 pedals*: **Your keyboards...** (what is connected and how StageRig talks to
 each), **Pedals and buttons** (the Controls panel's Everywhere tab, below
-the instruments) and **Rescan MIDI devices**. *Playing*: **Preload all programs** and **Let
+the instruments) and **Rescan MIDI devices**. *Playing*: **Free up memory** and **Let
 held notes ring through a program change**. *Sound and sync*: **Outputs &
 master effects...**, **General MIDI sounds...**, **Send MIDI clock to** and
 **Ableton Link**. *The show*: **Pre-show check...**, **Print the program
@@ -320,11 +320,16 @@ something in it.
   **Clear** the old one.
 - **Clear** empties a program, and asks first.
 
-**Options ▸ Preload all programs (instant changes; uses more memory)** loads
-every non-empty program at start and keeps it loaded, so program changes are
-instant. Without it, a program loads when you select it, which takes as long
-as the plugin needs (Kontakt is several seconds). Preloading costs RAM: each
-plugin instance is a full copy.
+Every program with something in it is loaded at start and kept loaded, so
+program changes are instant. That costs memory: each plugin is a full copy.
+If the computer runs short -- less than about 1.5 GB left -- StageRig stops
+loading more and says so; what is loaded stays, and the rest loads when you
+choose it.
+
+**Options ▸ Free up memory: unload a program's plugins after changing away**
+(off by default) is for a computer that cannot hold the whole set. A program
+then loads when you choose it, which takes as long as its plugins need
+(Kontakt is several seconds), and is unloaded once you change to another.
 
 **Options ▸ Let held notes ring through a program change** (on by default)
 means a program change leaves whatever you are holding to the previous
@@ -2016,7 +2021,7 @@ fixed, amber for what to look at, and green for what is fine:
 Fix the red ones, press **Check again**, and play. Then the rest of the
 checklist:
 
-- Turn on **Options ▸ Preload all programs** and give StageRig time to load
+- Leave **Options ▸ Free up memory** off and give StageRig time to load
   everything before the first song. The status bar stops showing loading
   activity when it is done.
 - Check that the status bar shows the buffer size you expect and no *late*

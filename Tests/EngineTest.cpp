@@ -246,6 +246,7 @@ static int probeLevels (const String& path)
     PropertiesFile settings (scratch.getChildFile ("test.settings"), opts);
     PluginHost host (settings);
     Engine engine (host, settings, /*startAudioDevice*/ false);
+    engine.setPreloadAllPrograms (false);   // Free up memory, as these checks were written for; preloading has its own
     auto settle = [&engine] { pump (30); for (const auto t0 = Time::getMillisecondCounterHiRes(); engine.hasPendingLoads() && Time::getMillisecondCounterHiRes() - t0 < 180000.0;) pump (20); };
     const double blockMs = 1000.0 * kBlock / engine.getSampleRate();
     AudioBuffer<float> buf (2, kBlock);
@@ -330,6 +331,7 @@ static int probeSampler (const String& path)
     PropertiesFile settings (scratch.getChildFile ("test.settings"), opts);
     PluginHost host (settings);
     Engine engine (host, settings, /*startAudioDevice*/ false);
+    engine.setPreloadAllPrograms (false);   // Free up memory, as these checks were written for; preloading has its own
     auto settle = [&engine] { pump (30); for (const auto t0 = Time::getMillisecondCounterHiRes(); engine.hasPendingLoads() && Time::getMillisecondCounterHiRes() - t0 < 180000.0;) pump (20); };
 
     const File sfz (path);
@@ -476,6 +478,7 @@ static int probeSounds (const String& wanted)
     std::printf ("     %d NKS sounds, %d VST3 presets\n", (int) sounds.size(), (int) vst3PresetFilesFor (desc).size());
 
     Engine engine (host, settings, /*startAudioDevice*/ false);
+    engine.setPreloadAllPrograms (false);   // Free up memory, as these checks were written for; preloading has its own
     auto settle = [&engine] { const auto t0 = Time::getMillisecondCounterHiRes(); pump (30);
                               while (engine.hasPendingLoads() && Time::getMillisecondCounterHiRes() - t0 < 180000.0) pump (50); };
     String err;
@@ -1057,6 +1060,7 @@ int main()
 
     // --- engine ------------------------------------------------------------------
     Engine engine (host, settings, /*startAudioDevice*/ false);
+    engine.setPreloadAllPrograms (false);   // Free up memory, as these checks were written for; preloading has its own
     TestListener listener;
     engine.addListener (&listener);
     engine.setReleaseTailSeconds (0.1);
