@@ -2134,8 +2134,8 @@ naming the same setting. That is normal and not a sign of a lost setting.
 StageRig installs no plugins of its own beyond the General MIDI player, but
 Linux has free ones good enough to gig with, and the distributions package
 them. The `stagerig-sounds` package (see
-[Free sampled instruments](#free-sampled-instruments)) brings most of them on
-Debian, Ubuntu and Fedora. Or one line gets a working rig's worth; press
+[Free sampled instruments](#free-sampled-instruments)) brings most of them
+(all of them on Arch). Or one line gets a working rig's worth; press
 **Scan LV2** (and **Scan VST3**, **Scan CLAP** where a plugin ships them)
 afterwards (ready sounds find theirs without a scan):
 
@@ -2218,7 +2218,7 @@ the same repository StageRig came from:
 That downloads the six packs (3.5 GB on disk) into
 `/usr/share/stagerig/instruments`, where StageRig finds them with nothing to
 add, checks each one, and brings the reverbs the ready sounds play through
-(and, on Debian, Ubuntu and Fedora, the free plugins in
+(and the free plugins in
 [Good free plugins to start with](#good-free-plugins-to-start-with)). If the
 download stops -- no network, a full disk -- `sudo stagerig-sounds` tries again;
 removing the package removes the packs. Updates come with the system's.

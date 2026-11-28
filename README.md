@@ -239,7 +239,7 @@ StageRig ships no plugins but the General MIDI player. For sounds to play
 straight away, add **StageRig Sounds** from the same repository: 44 sampled
 instruments, 43 ready sounds made from them, and the reverbs they play
 through. Installing it downloads the instruments (about 3.2 GB) and checks
-them; on Debian, Ubuntu and Fedora it also brings the free plugins below.
+them, and brings the free plugins below.
 
 ```sh
 sudo apt install stagerig-sounds      # or: sudo dnf install stagerig-sounds
