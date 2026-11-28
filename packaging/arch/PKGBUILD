@@ -25,6 +25,7 @@ optdepends=(
   'pipewire-jack: low-latency audio through PipeWire (recommended)'
   'jack2: low-latency audio through JACK instead'
   'surge-xt: synthesizer'
+  'ob-xf-lv2: Oberheim OB-X synthesizer'
   'setbfree: tonewheel organ with Leslie'
   'dexed: DX7 FM synthesizer'
   'zynaddsubfx: synthesizer'

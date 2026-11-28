@@ -2147,7 +2147,7 @@ sudo apt install surge-xt setbfree zynaddsubfx-lv2 avldrums.lv2 \
 # Fedora
 sudo dnf install setBfree zynaddsubfx lsp-plugins-lv2 lv2-calf-plugins guitarix zam-plugins
 # Arch Linux
-sudo pacman -S surge-xt setbfree dexed zynaddsubfx avldrums.lv2 dragonfly-reverb \
+sudo pacman -S surge-xt ob-xf-lv2 setbfree dexed zynaddsubfx avldrums.lv2 dragonfly-reverb \
                lsp-plugins-lv2 x42-plugins-lv2 calf guitarix zam-plugins-lv2
 ```
 
@@ -2155,6 +2155,11 @@ Instruments:
 
 - **Surge XT** -- a serious synth: pads, leads, basses, keys, with its own
   effects. The first thing to install. (Fedora: from the Surge site.)
+- **OB-Xf** -- the Oberheim OB-X, OB-Xa and OB-8: the big brassy polysynth
+  of the early 80s (Prince's *1999*, Van Halen's *Jump*). Packaged on Arch;
+  elsewhere, its Linux download at
+  <https://github.com/surge-synthesizer/OB-Xf/releases>. Kept up by the Surge
+  team.
 - **setBfree** -- a tonewheel organ with a Leslie, and a convincing one.
 - **ZynAddSubFX** -- pads, strings, bells, choirs; thousands of presets.
 - **AVL Drumkits** -- acoustic drums that sound like drums, and load fast.
@@ -2177,8 +2182,8 @@ Effects:
 - **ZamAudio** -- ZamComp, ZamEQ2, ZamTube: simple and good.
 
 Not packaged, worth fetching from their own sites, all native Linux: **Vital**
-(free tier), **Odin 2** and **OB-Xf** (synths; OB-Xf is the Oberheim
-OB-X, kept up by the Surge team), **Dexed** (the DX7), u-he's free
+(free tier), **Odin 2** (a synth), **OB-Xf** (above; packaged
+only on Arch), **Dexed** (the DX7), u-he's free
 **Tyrell N6**, **Podolski** and **Zebralette**, **Neural Amp Modeler**
 (amp captures), **Airwindows Consolidated** (hundreds of effects in one
 plugin), **Cardinal** (a modular). Windows-only plugins go through yabridge;

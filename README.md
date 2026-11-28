@@ -246,16 +246,17 @@ sudo apt install stagerig-sounds      # or: sudo dnf install stagerig-sounds
                                       # or: sudo pacman -S stagerig-sounds
 ```
 
-The free plugins, good enough to gig with -- Surge XT, setBfree, ZynAddSubFX,
-AVL Drumkits, Dragonfly Reverb, LSP, x42, Calf, Guitarix, ZamAudio -- one by
-one:
+The free plugins, good enough to gig with -- Surge XT, OB-Xf, setBfree,
+ZynAddSubFX, AVL Drumkits, Dragonfly Reverb, LSP, x42, Calf, Guitarix,
+ZamAudio -- one by one (OB-Xf is packaged only on Arch: elsewhere, its
+[Linux download](https://github.com/surge-synthesizer/OB-Xf/releases)):
 
 ```sh
 sudo apt install surge-xt setbfree zynaddsubfx-lv2 avldrums.lv2 dragonfly-reverb \
                  lsp-plugins-lv2 x42-plugins calf-plugins guitarix-lv2 zam-plugins
 
 # Arch Linux
-sudo pacman -S surge-xt setbfree dexed zynaddsubfx avldrums.lv2 dragonfly-reverb \
+sudo pacman -S surge-xt ob-xf-lv2 setbfree dexed zynaddsubfx avldrums.lv2 dragonfly-reverb \
                lsp-plugins-lv2 x42-plugins-lv2 calf guitarix zam-plugins-lv2
 ```
 
